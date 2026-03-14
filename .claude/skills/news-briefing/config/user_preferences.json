@@ -1,0 +1,63 @@
+{
+  "user_id": "arjun_singh",
+  "delivery_time": "07:00",
+  "timezone": "America/Los_Angeles",
+  "enabled": true,
+  "categories": {
+    "world_highlights": {
+      "enabled": true,
+      "priority": 1,
+      "topics": [
+        "major world events",
+        "geopolitical developments",
+        "breaking international news"
+      ]
+    },
+    "technology": {
+      "enabled": true,
+      "priority": 2,
+      "topics": [
+        "AI and machine learning breakthroughs",
+        "startup funding and tech IPOs",
+        "new product launches from major tech companies",
+        "cybersecurity threats and developments"
+      ]
+    },
+    "economy_finance": {
+      "enabled": true,
+      "priority": 3,
+      "topics": [
+        "stock market trends and notable movements",
+        "cryptocurrency and blockchain developments",
+        "Federal Reserve and monetary policy",
+        "promising investment opportunities"
+      ]
+    },
+    "culture": {
+      "enabled": true,
+      "priority": 4,
+      "topics": [
+        "entertainment news and celebrity updates",
+        "film and television releases",
+        "music industry developments",
+        "arts and cultural events"
+      ]
+    },
+    "custom_tracking": {
+      "enabled": true,
+      "priority": 5,
+      "topics": [
+        "Claude AI and Anthropic developments",
+        "WhatsApp Business API updates",
+        "North Dakota state banking system"
+      ]
+    }
+  },
+  "preferences": {
+    "max_articles_per_category": 5,
+    "include_source_links": true,
+    "summary_style": "concise",
+    "exclude_sources": ["tabloid sites"],
+    "language": "en"
+  }
+}

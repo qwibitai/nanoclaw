@@ -1,0 +1,59 @@
+name: news-briefing
+version: 1.0.0
+description: Intelligent daily news briefing system with AI agent swarms
+license: MIT
+
+category: productivity
+tags:
+  - news
+  - research
+  - automation
+  - agents
+  - whatsapp
+
+requires:
+  nanoclaw: ">=0.1.0"
+  skills:
+    - add-file-sending
+  tools:
+    - WebSearch
+    - agent-browser
+    - Task
+    - schedule_task
+    - send_message
+
+commands:
+  generate:
+    description: Generate and send news briefing immediately
+    usage: /news-briefing generate
+
+  schedule:
+    description: Schedule daily automated briefings
+    usage: /news-briefing schedule [HH:MM]
+    args:
+      - name: time
+        description: Delivery time in HH:MM format (default 07:00)
+        required: false
+        default: "07:00"
+
+  topics:
+    description: Manage news topics
+    usage: /news-briefing topics <list|add|remove>
+
+  config:
+    description: View or edit configuration
+    usage: /news-briefing config [show|edit]
+
+  status:
+    description: Show system status and last briefing
+    usage: /news-briefing status
+
+  clear-memory:
+    description: Clear seen articles memory
+    usage: /news-briefing clear-memory
+
+performance:
+  execution_time: 60-70 seconds
+  cost_per_briefing: ~$0.42 USD
+  articles_per_briefing: 15-20
+  pdf_size: 150-250 KB

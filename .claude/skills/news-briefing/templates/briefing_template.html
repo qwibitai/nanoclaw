@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily News Briefing - {{date}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #fff;
+            padding: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 40px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .header .date {
+            font-size: 18px;
+            opacity: 0.95;
+        }
+
+        .summary-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            border-radius: 5px;
+        }
+
+        .summary-box h2 {
+            font-size: 20px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .summary-stats {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-icon {
+            font-size: 20px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+
+        .section-header {
+            background: #f8f9fa;
+            padding: 15px 25px;
+            border-left: 5px solid;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .section-header.world { border-color: #3b82f6; }
+        .section-header.tech { border-color: #8b5cf6; }
+        .section-header.finance { border-color: #10b981; }
+        .section-header.custom { border-color: #f59e0b; }
+
+        .section-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .section-subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .article {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            transition: all 0.2s;
+            page-break-inside: avoid;
+        }
+
+        .article:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .article-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            gap: 15px;
+        }
+
+        .article-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            flex: 1;
+            line-height: 1.4;
+        }
+
+        .relevance-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .article-meta {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .article-meta span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .article-summary {
+            color: #4b5563;
+            margin-bottom: 12px;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .article-impact {
+            background: #fef3c7;
+            border-left: 3px solid #f59e0b;
+            padding: 10px 15px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #78350f;
+        }
+
+        .article-impact strong {
+            color: #92400e;
+        }
+
+        .article-link {
+            font-size: 13px;
+            color: #667eea;
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .article-link:hover {
+            text-decoration: underline;
+        }
+
+        .trends-box {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            page-break-inside: avoid;
+        }
+
+        .trends-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1e40af;
+            margin-bottom: 10px;
+        }
+
+        .trends-list {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .trends-list li {
+            padding: 8px 0 8px 25px;
+            position: relative;
+            color: #1e3a8a;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .trends-list li:before {
+            content: "▸";
+            position: absolute;
+            left: 8px;
+            color: #3b82f6;
+            font-weight: bold;
+        }
+
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .footer-logo {
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        @media print {
+            body {
+                padding: 20px;
+            }
+
+            .article {
+                page-break-inside: avoid;
+            }
+
+            .section {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📰 Daily News Briefing</h1>
+        <div class="date">{{date}}</div>
+    </div>
+
+    <div class="summary-box">
+        <h2>📊 Today's Overview</h2>
+        <div class="summary-stats">
+            <div class="stat">
+                <span class="stat-icon">📑</span>
+                <span><span class="stat-value">{{total_categories}}</span> Categories</span>
+            </div>
+            <div class="stat">
+                <span class="stat-icon">📄</span>
+                <span><span class="stat-value">{{total_articles}}</span> Articles</span>
+            </div>
+            <div class="stat">
+                <span class="stat-icon">🌐</span>
+                <span><span class="stat-value">{{total_sources}}</span> Sources</span>
+            </div>
+        </div>
+    </div>
+
+    {{sections}}
+
+    <div class="footer">
+        <div class="footer-logo">🤖 Generated by AI News Briefing System</div>
+        <div>Compiled on {{generated_at}}</div>
+    </div>
+</body>
+</html>
