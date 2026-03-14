@@ -1,0 +1,27 @@
+skill: channel-media
+version: 1.1.0
+description: "Universal media support for all channels — lazy download, send/receive images/docs/audio/video via MCP tools"
+core_version: 1.2.1
+adds:
+  - src/media.ts
+  - src/media.test.ts
+modifies:
+  - src/types.ts
+  - src/config.ts
+  - src/db.ts
+  - src/ipc.ts
+  - src/index.ts
+  - src/router.ts
+  - src/container-runner.ts
+  - container/Dockerfile
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/ipc-auth.test.ts
+  - src/container-runner.test.ts
+  - src/formatting.test.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - MAX_MEDIA_SIZE
+conflicts: []
+depends: []
+test: "npx vitest run src/media.test.ts src/formatting.test.ts"
