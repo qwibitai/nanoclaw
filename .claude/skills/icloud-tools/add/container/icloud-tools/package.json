@@ -1,0 +1,27 @@
+{
+  "name": "icloud-tools",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "iCloud MCP server for NanoClaw agents",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "tsdav": "^2.1.8",
+    "imapflow": "^1.0.171",
+    "nodemailer": "^6.10.1",
+    "ical.js": "^2.1.0",
+    "marked": "^15.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  }
+}
