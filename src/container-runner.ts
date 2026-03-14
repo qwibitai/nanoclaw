@@ -121,7 +121,10 @@ function buildVolumeMounts(
     group.folder,
     '.claude',
   );
+  // .claude/ is mounted into the container as /home/node/.claude — Claude Code creates
+  // subdirectories here at runtime, so the directory itself must be writable by the node user
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -166,9 +169,13 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  // All IPC subdirs must be writable by the container's node user (uid 1000)
+  // so the agent can write task/message IPC files via the MCP server
+  for (const subdir of ['messages', 'tasks', 'input']) {
+    const dir = path.join(groupIpcDir, subdir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o777);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',

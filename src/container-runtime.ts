@@ -103,11 +103,22 @@ export function ensureContainerRuntimeRunning(): void {
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(
+    // Kill containers named nanoclaw-* (started by the orchestrator)
+    // AND any container using the nanoclaw-agent image (started by agents via TeamCreate/Bash)
+    const byName = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
-    const orphans = output.trim().split('\n').filter(Boolean);
+    const byImage = execSync(
+      `${CONTAINER_RUNTIME_BIN} ps --filter ancestor=nanoclaw-agent:latest --format '{{.Names}}'`,
+      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+    );
+    const orphans = [
+      ...new Set([
+        ...byName.trim().split('\n').filter(Boolean),
+        ...byImage.trim().split('\n').filter(Boolean),
+      ]),
+    ];
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
