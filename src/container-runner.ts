@@ -208,7 +208,10 @@ function buildVolumeMounts(
   );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-  } else if (fs.existsSync(agentRunnerSrc) && fs.existsSync(groupAgentRunnerDir)) {
+  } else if (
+    fs.existsSync(agentRunnerSrc) &&
+    fs.existsSync(groupAgentRunnerDir)
+  ) {
     // Always overwrite framework file so MCP server updates propagate
     const ipcSrc = path.join(agentRunnerSrc, 'ipc-mcp-stdio.ts');
     const ipcDst = path.join(groupAgentRunnerDir, 'ipc-mcp-stdio.ts');

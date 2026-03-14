@@ -67,6 +67,25 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+/**
+ * Build a trigger RegExp from a group's trigger string (e.g. "@Otabot").
+ * Falls back to the global TRIGGER_PATTERN if trigger is empty.
+ */
+export function buildTriggerPattern(trigger: string): RegExp {
+  if (!trigger) return TRIGGER_PATTERN;
+  const name = trigger.startsWith('@') ? trigger.slice(1) : trigger;
+  return new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
+}
+
+/**
+ * Extract the assistant name from a group's trigger string (e.g. "@Otabot" → "Otabot").
+ * Falls back to the global ASSISTANT_NAME if trigger is empty.
+ */
+export function assistantNameFromTrigger(trigger: string): string {
+  if (!trigger) return ASSISTANT_NAME;
+  return trigger.startsWith('@') ? trigger.slice(1) : trigger;
+}
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

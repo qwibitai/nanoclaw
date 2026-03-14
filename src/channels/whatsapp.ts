@@ -36,8 +36,13 @@ function extractMessageText(msg: proto.IMessage | null | undefined): string {
   if (!msg) return '';
   const n = normalizeMessageContent(msg);
   if (!n) return '';
-  return n.conversation || n.extendedTextMessage?.text ||
-         n.imageMessage?.caption || n.videoMessage?.caption || '';
+  return (
+    n.conversation ||
+    n.extendedTextMessage?.text ||
+    n.imageMessage?.caption ||
+    n.videoMessage?.caption ||
+    ''
+  );
 }
 
 export interface WhatsAppChannelOpts {
@@ -237,7 +242,10 @@ export class WhatsAppChannel implements Channel {
                   logger.info({ chatJid, filename }, 'Image attachment saved');
                 }
               } catch (err) {
-                logger.warn({ err, chatJid }, 'Failed to download image attachment');
+                logger.warn(
+                  { err, chatJid },
+                  'Failed to download image attachment',
+                );
               }
             }
 
@@ -267,7 +275,8 @@ export class WhatsAppChannel implements Channel {
             let quoted_sender_name: string | undefined;
 
             if (contextInfo?.quotedMessage) {
-              quoted_content = extractMessageText(contextInfo.quotedMessage) || undefined;
+              quoted_content =
+                extractMessageText(contextInfo.quotedMessage) || undefined;
               if (quoted_content) {
                 const jid = contextInfo.participant || '';
                 quoted_sender_name = jid.split('@')[0] || undefined;
@@ -327,11 +336,17 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  async sendImage(jid: string, imageUrl: string, caption?: string): Promise<void> {
+  async sendImage(
+    jid: string,
+    imageUrl: string,
+    caption?: string,
+  ): Promise<void> {
     if (!this.sock) throw new Error('WhatsApp not connected');
     const response = await fetch(imageUrl);
     if (!response.ok) {
-      throw new Error(`Failed to download image (${response.status}): ${imageUrl}`);
+      throw new Error(
+        `Failed to download image (${response.status}): ${imageUrl}`,
+      );
     }
     const buffer = Buffer.from(await response.arrayBuffer());
     await this.sock.sendMessage(jid, {
