@@ -45,6 +45,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { interceptAdminCommand, isAdminCommand } from './admin.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -164,10 +165,47 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // Admin command filtering: remove registered admin commands so they
+  // never reach the container agent. For main groups, intercept and
+  // execute (e.g. /capabilities). For non-main groups, just filter
+  // silently — the immediate rejection ("main channel only") is sent
+  // by startMessageLoop when the message first arrives; we don't
+  // re-reject here to avoid duplicate messages when backlog drains.
+  const nonAdminMessages: typeof missedMessages = [];
+  for (const msg of missedMessages) {
+    if (isAdminCommand(msg.content)) {
+      if (isMainGroup) {
+        await interceptAdminCommand(
+          msg.content,
+          chatJid,
+          group,
+          registeredGroups,
+          (text) => channel.sendMessage(chatJid, text),
+        );
+      }
+      // Non-main: silently filter (rejection already sent by startMessageLoop)
+    } else {
+      nonAdminMessages.push(msg);
+    }
+  }
+
+  // Admin-only batch: advance cursor past everything and return.
+  // For mixed batches, DON'T advance cursor here — let the normal flow
+  // handle it. This preserves non-admin messages in the backlog for
+  // trigger-required groups, and keeps previousCursor correct for
+  // error rollback. Admin commands will be re-filtered on subsequent
+  // polls until the cursor naturally advances past them.
+  if (nonAdminMessages.length === 0) {
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    return true;
+  }
+
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
+    const hasTrigger = nonAdminMessages.some(
       (m) =>
         TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
@@ -175,10 +213,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(nonAdminMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  // Advance cursor past the entire batch (including any filtered admin
+  // commands) so nothing is re-processed. Save the old cursor so we
+  // can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
@@ -387,41 +426,113 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
+          // Check if any messages contain admin commands. We only
+          // intercept them here when an active container can accept the
+          // remaining non-admin messages via pipe. If no container is
+          // active, we fall through to enqueue and let processGroupMessages
+          // handle interception — this avoids double-execution of admin
+          // commands when the pipe path fails.
+          const hasAdminMessages = groupMessages.some((m) =>
+            isAdminCommand(m.content),
+          );
+
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+          // Filter to non-admin messages for trigger check regardless
+          // of pipe path — admin commands never count as triggers.
+          const regularMessages = hasAdminMessages
+            ? groupMessages.filter((m) => !isAdminCommand(m.content))
+            : groupMessages;
+
+          // Admin-only batch: intercept all admin commands and advance
+          // cursor. Nothing to pipe or enqueue.
+          if (hasAdminMessages && regularMessages.length === 0) {
+            for (const msg of groupMessages) {
+              if (isAdminCommand(msg.content)) {
+                await interceptAdminCommand(
+                  msg.content,
+                  chatJid,
+                  group,
+                  registeredGroups,
+                  (text) => channel.sendMessage(chatJid, text),
+                );
+              }
+            }
+            lastAgentTimestamp[chatJid] =
+              groupMessages[groupMessages.length - 1].timestamp;
+            saveState();
+            continue;
+          }
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
+            const hasTrigger = regularMessages.some(
               (m) =>
                 TRIGGER_PATTERN.test(m.content.trim()) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
-            if (!hasTrigger) continue;
+            if (!hasTrigger) {
+              // Still intercept admin commands so group channels get the
+              // "main channel only" rejection message instead of silently
+              // dropping them.
+              if (hasAdminMessages) {
+                for (const msg of groupMessages) {
+                  if (isAdminCommand(msg.content)) {
+                    await interceptAdminCommand(
+                      msg.content,
+                      chatJid,
+                      group,
+                      registeredGroups,
+                      (text) => channel.sendMessage(chatJid, text),
+                    );
+                  }
+                }
+              }
+              continue;
+            }
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
+          // Filter out admin commands from the reload to prevent them
+          // from leaking to the container agent.
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
-          );
+          ).filter((m) => !isAdminCommand(m.content));
           const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+            allPending.length > 0 ? allPending : regularMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Active container accepted the pipe. Now intercept admin
+            // commands — safe because the non-admin messages are already
+            // delivered to the container.
+            if (hasAdminMessages) {
+              for (const msg of groupMessages) {
+                if (isAdminCommand(msg.content)) {
+                  await interceptAdminCommand(
+                    msg.content,
+                    chatJid,
+                    group,
+                    registeredGroups,
+                    (text) => channel.sendMessage(chatJid, text),
+                  );
+                }
+              }
+            }
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
             lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+              groupMessages[groupMessages.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
             channel
@@ -430,7 +541,26 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container — enqueue for a new one.
+            // For non-main groups, intercept admin commands here so they
+            // get the "main channel only" rejection immediately.
+            // processGroupMessages silently filters non-main admin
+            // commands, so no duplicate rejection occurs.
+            // Main-group admin commands are left for processGroupMessages
+            // to execute (it's the single handler for main-group admin).
+            if (hasAdminMessages && !isMainGroup) {
+              for (const msg of groupMessages) {
+                if (isAdminCommand(msg.content)) {
+                  await interceptAdminCommand(
+                    msg.content,
+                    chatJid,
+                    group,
+                    registeredGroups,
+                    (text) => channel.sendMessage(chatJid, text),
+                  );
+                }
+              }
+            }
             queue.enqueueMessageCheck(chatJid);
           }
         }
