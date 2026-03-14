@@ -540,6 +540,25 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Dedup guard: suppress identical messages sent within 10 seconds on the
+  // same JID.  Both the scheduler path and the IPC-watcher path can emit the
+  // same text (the container's final result marker triggers both), so we key
+  // on `${jid}::${text}` and drop any repeat that arrives within the window.
+  const DEDUP_WINDOW_MS = 10_000;
+  const recentlySent = new Map<string, number>();
+  function isDuplicate(jid: string, text: string): boolean {
+    const key = `${jid}::${text}`;
+    const now = Date.now();
+    const last = recentlySent.get(key);
+    if (last !== undefined && now - last < DEDUP_WINDOW_MS) return true;
+    recentlySent.set(key, now);
+    // Evict stale entries to prevent unbounded growth
+    for (const [k, ts] of recentlySent) {
+      if (now - ts >= DEDUP_WINDOW_MS) recentlySent.delete(k);
+    }
+    return false;
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -554,13 +573,14 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text && !isDuplicate(jid, text)) await channel.sendMessage(jid, text);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (isDuplicate(jid, text)) return Promise.resolve();
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
