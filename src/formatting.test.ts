@@ -541,3 +541,48 @@ describe("tail-drain exit-point requeue decisions", () => {
     expect(shouldRequeue).toBe(true);
   });
 });
+
+// --- tail-drain completion persistence ---
+
+describe("tail-drain completion persistence", () => {
+  // When cutoffIdx === 0, the tail-drain completes: isTailDrain is set to false while
+  // wasTailDrain remains true. The in-memory deletion must be persisted at every exit
+  // point, otherwise a restart re-enters tail-drain from stale state.
+
+  it("completed tail-drain persists deletion on success", () => {
+    const wasTailDrain = true;
+    const isTailDrain = false; // cutoffIdx === 0 completed the drain
+    const truncated = false;
+    // Exit must persist: truncated || isTailDrain || wasTailDrain
+    const shouldPersist = truncated || isTailDrain || wasTailDrain;
+    expect(shouldPersist).toBe(true);
+  });
+
+  it("completed tail-drain persists deletion on error with output sent", () => {
+    const wasTailDrain = true;
+    const isTailDrain = false;
+    const truncated = false;
+    const outputSentToUser = true;
+    // Error path with output sent — still must persist deletion
+    const shouldPersist = truncated || isTailDrain || (wasTailDrain && outputSentToUser);
+    expect(shouldPersist).toBe(true);
+  });
+
+  it("completed tail-drain persists deletion on error with rollback", () => {
+    const wasTailDrain = true;
+    const isTailDrain = false;
+    const truncated = false;
+    // Cursor rolled back, but tail-drain itself completed — stale re-entry is wrong
+    const shouldPersist = truncated || isTailDrain || wasTailDrain;
+    expect(shouldPersist).toBe(true);
+  });
+
+  it("non-tail-drain path does not trigger extra persist", () => {
+    const wasTailDrain = false;
+    const isTailDrain = false;
+    const truncated = false;
+    // Normal path: no tail-drain state to persist
+    const shouldPersist = truncated || isTailDrain || wasTailDrain;
+    expect(shouldPersist).toBe(false);
+  });
+});

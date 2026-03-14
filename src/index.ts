@@ -352,6 +352,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       } else if (isTailDrain) {
         savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
+      } else if (wasTailDrain) {
+        savePendingTailDrain();
       }
       return true;
     }
@@ -360,6 +362,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff!);
+      savePendingTailDrain();
+    } else if (wasTailDrain) {
       savePendingTailDrain();
     }
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
@@ -374,6 +378,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   } else if (isTailDrain) {
     savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
+  } else if (wasTailDrain) {
+    savePendingTailDrain();
   }
   return true;
 }
