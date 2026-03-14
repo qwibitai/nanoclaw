@@ -576,6 +576,7 @@ function recoverPendingMessages(): void {
   // Phase 1: Enqueue groups with pending tail-drain entries from the DB.
   // After a crash, the entry may survive even though no messages remain
   // at the cutoff — processGroupMessages will clear it (line 205).
+  const phase1Enqueued = new Set<string>();
   let removedStale = false;
   for (const chatJid of pendingTailDrain.keys()) {
     if (registeredGroups[chatJid]) {
@@ -584,6 +585,7 @@ function recoverPendingMessages(): void {
         "Recovery: resuming pending tail-drain",
       );
       queue.enqueueMessageCheck(chatJid);
+      phase1Enqueued.add(chatJid);
     } else {
       pendingTailDrain.delete(chatJid);
       removedStale = true;
@@ -592,7 +594,11 @@ function recoverPendingMessages(): void {
   if (removedStale) savePendingTailDrain();
 
   // Phase 2: Enqueue groups with unprocessed messages at the cursor.
+  // Skip groups already enqueued in Phase 1 — a second enqueue while
+  // the first run is active sets pendingMessages=true, which defeats
+  // retry backoff if the run fails.
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if (phase1Enqueued.has(chatJid)) continue;
     const recoverCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
     const pending = getMessagesSince(
       chatJid,

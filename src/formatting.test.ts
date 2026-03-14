@@ -747,29 +747,70 @@ describe("stale pendingTailDrain recovery at startup", () => {
     expect(saveCalled).toBe(false);
   });
 
-  it("double enqueue from both phases is safe (idempotent)", () => {
-    // Models Phase 1 + Phase 2 overlap: a group with both a tail-drain
-    // entry and pending messages gets enqueued twice, which is safe
-    // because enqueueMessageCheck just sets pendingMessages = true.
+  it("phase 2 skips groups already enqueued in phase 1", () => {
+    // Models the fix: Phase 1 enqueues a group with a tail-drain entry,
+    // Phase 2 skips it even though it also has pending messages.
     const chatJid = "group1@g.us";
-    const state = { active: false, pendingMessages: false };
+    const phase1Enqueued = new Set<string>();
     const enqueueCount = { value: 0 };
 
-    // Simulate enqueueMessageCheck idempotency
-    function enqueueMessageCheck() {
-      if (state.active) {
-        state.pendingMessages = true;
-      }
+    // Phase 1 enqueues and tracks
+    enqueueCount.value++;
+    phase1Enqueued.add(chatJid);
+
+    // Phase 2 checks phase1Enqueued before enqueueing
+    const hasPendingMessages = true;
+    if (!phase1Enqueued.has(chatJid) && hasPendingMessages) {
       enqueueCount.value++;
     }
 
-    // Phase 1 enqueues
-    enqueueMessageCheck();
-    // Phase 2 also enqueues (messages exist)
-    enqueueMessageCheck();
+    // Only one enqueue — Phase 2 was skipped
+    expect(enqueueCount.value).toBe(1);
+    expect(phase1Enqueued.has(chatJid)).toBe(true);
+  });
 
-    // Both calls succeed without error — idempotent
-    expect(enqueueCount.value).toBe(2);
+  it("double enqueue defeats backoff when first run is active", () => {
+    // Models the regression: Phase 1 enqueue triggers runForGroup (active=true),
+    // then Phase 2 enqueue sets pendingMessages=true. If the run fails,
+    // drainGroup sees pendingMessages and immediately re-runs, bypassing backoff.
+    const state = { active: false, pendingMessages: false };
+
+    function enqueueMessageCheck() {
+      if (state.active) {
+        state.pendingMessages = true;
+      } else {
+        state.active = true; // runForGroup starts
+      }
+    }
+
+    // Phase 1: starts the run
+    enqueueMessageCheck();
+    expect(state.active).toBe(true);
+    expect(state.pendingMessages).toBe(false);
+
+    // Phase 2: enqueues while active — sets pendingMessages
+    enqueueMessageCheck();
+    expect(state.pendingMessages).toBe(true);
+    // This is the bug: drainGroup will immediately re-run instead of backing off
+  });
+
+  it("phase 2 still enqueues groups not in phase 1", () => {
+    // Groups without tail-drain entries are only recovered in Phase 2.
+    const phase1Enqueued = new Set<string>();
+    const phase2Only = "group2@g.us";
+    const enqueued: string[] = [];
+
+    // Phase 1 enqueues a different group
+    phase1Enqueued.add("group1@g.us");
+    enqueued.push("group1@g.us");
+
+    // Phase 2: group2 has pending messages but no tail-drain entry
+    const hasPendingMessages = true;
+    if (!phase1Enqueued.has(phase2Only) && hasPendingMessages) {
+      enqueued.push(phase2Only);
+    }
+
+    expect(enqueued).toEqual(["group1@g.us", "group2@g.us"]);
   });
 });
 
