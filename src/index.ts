@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -327,6 +328,18 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // If we had a session and it failed, clear it and retry once with a fresh session.
+      // This handles corrupted/incompatible sessions after container rebuilds or SDK updates.
+      if (sessionId) {
+        logger.warn(
+          { group: group.name, sessionId, error: output.error },
+          'Session resume failed, retrying with fresh session',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+        return runAgent(group, prompt, chatJid, onOutput);
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -336,6 +349,17 @@ async function runAgent(
 
     return 'success';
   } catch (err) {
+    // Same retry logic for thrown errors (e.g. container crash during resume)
+    if (sessionId) {
+      logger.warn(
+        { group: group.name, sessionId, err },
+        'Session resume threw, retrying with fresh session',
+      );
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+      return runAgent(group, prompt, chatJid, onOutput);
+    }
+
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
