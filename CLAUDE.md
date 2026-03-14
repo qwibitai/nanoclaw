@@ -42,7 +42,7 @@ npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
-Service management:
+Service management (replace `nanoclaw` with `nanoclaw-<instance>` for named instances):
 ```bash
 # macOS (launchd)
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
@@ -53,6 +53,20 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
 systemctl --user start nanoclaw
 systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
+```
+
+## Multi-Instance
+
+Set `NANOCLAW_INSTANCE` in `.env` to run multiple instances on one machine. Each instance needs its own project directory and unique instance name. The instance name scopes service names, container prefixes, and orphan cleanup.
+
+```bash
+# Instance A (.env)
+NANOCLAW_INSTANCE=work
+CREDENTIAL_PROXY_PORT=3001
+
+# Instance B (.env)
+NANOCLAW_INSTANCE=personal
+CREDENTIAL_PROXY_PORT=3002
 ```
 
 ## Troubleshooting
