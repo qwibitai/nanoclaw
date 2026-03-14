@@ -59,43 +59,62 @@ export function stopContainer(name: string): string {
   return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
 }
 
-/** Ensure the container runtime is running, starting it if needed. */
+/** Ensure the container runtime is running, starting it if needed. Retries on boot. */
 export function ensureContainerRuntimeRunning(): void {
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} system status`, { stdio: 'pipe' });
-    logger.debug('Container runtime already running');
-  } catch {
-    logger.info('Starting container runtime...');
+  const MAX_RETRIES = 10;
+  const RETRY_DELAY_MS = 5000;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      execSync(`${CONTAINER_RUNTIME_BIN} system start`, { stdio: 'pipe', timeout: 30000 });
-      logger.info('Container runtime started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start container runtime');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Container runtime failed to start                      ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without a container runtime. To fix:        ║',
-      );
-      console.error(
-        '║  1. Ensure Apple Container is installed                        ║',
-      );
-      console.error(
-        '║  2. Run: container system start                                ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                           ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Container runtime is required but failed to start');
+      execSync(`${CONTAINER_RUNTIME_BIN} system status`, {
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+      logger.debug('Container runtime already running');
+      return;
+    } catch {
+      logger.info({ attempt, maxRetries: MAX_RETRIES }, 'Container runtime not ready, attempting to start...');
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} system start`, { stdio: 'pipe', timeout: 30000 });
+        logger.info('Container runtime started');
+        return;
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          logger.warn(
+            { err, attempt, nextRetryMs: RETRY_DELAY_MS },
+            'Container runtime not yet available, retrying...',
+          );
+          // Blocking sleep — acceptable at startup before the event loop is needed
+          execSync(`sleep ${RETRY_DELAY_MS / 1000}`);
+        } else {
+          logger.error({ err }, 'Failed to start container runtime after all retries');
+          console.error(
+            '\n╔════════════════════════════════════════════════════════════════╗',
+          );
+          console.error(
+            '║  FATAL: Container runtime failed to start                      ║',
+          );
+          console.error(
+            '║                                                                ║',
+          );
+          console.error(
+            '║  Agents cannot run without a container runtime. To fix:        ║',
+          );
+          console.error(
+            '║  1. Ensure Apple Container is installed                        ║',
+          );
+          console.error(
+            '║  2. Run: container system start                                ║',
+          );
+          console.error(
+            '║  3. Restart NanoClaw                                           ║',
+          );
+          console.error(
+            '╚════════════════════════════════════════════════════════════════╝\n',
+          );
+          throw new Error('Container runtime is required but failed to start');
+        }
+      }
     }
   }
 }
