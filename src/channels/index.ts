@@ -5,8 +5,15 @@
 
 // gmail
 
+// signal
+import './signal.js';
+
 // slack
 
 // telegram
 
+// signal
+import './signal.js';
+
 // whatsapp
+import './whatsapp.js';

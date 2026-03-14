@@ -14,8 +14,11 @@ const STEPS: Record<
   groups: () => import('./groups.js'),
   register: () => import('./register.js'),
   mounts: () => import('./mounts.js'),
+  'signal-auth': () => import('./signal-auth.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
+  'signal-auth': () => import('./signal-auth.js'),
+  'whatsapp-auth': () => import('./whatsapp-auth.js'),
 };
 
 async function main(): Promise<void> {

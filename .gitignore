@@ -7,7 +7,9 @@ dist/
 # Local data & auth
 store/
 data/
-logs/
+logs
+.env
+
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*
