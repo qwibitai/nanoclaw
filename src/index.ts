@@ -524,8 +524,9 @@ async function startMessageLoop(): Promise<void> {
 
           // Don't pipe while tail-drain is pending — let processGroupMessages
           // handle the backlog first to avoid cursor jumps that skip messages.
+          // Don't enqueue either — the tail-drain's own success/failure handlers
+          // manage the next run, and an external enqueue defeats retry backoff.
           if (pendingTailDrain.has(chatJid)) {
-            queue.enqueueMessageCheck(chatJid);
             continue;
           }
 

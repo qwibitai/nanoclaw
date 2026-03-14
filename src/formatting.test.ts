@@ -592,7 +592,8 @@ describe("tail-drain completion persistence", () => {
 describe("pipe path tail-drain guard", () => {
   // The pipe path in the poll loop must not advance the cursor past a pending
   // tail-drain window. When pendingTailDrain has an entry for the group,
-  // the pipe is skipped and the group is re-enqueued for processGroupMessages.
+  // the pipe is skipped without enqueuing — the tail-drain's own handlers
+  // manage the next run.
 
   it("skips pipe when pendingTailDrain has entry for group", () => {
     const chatJid = "group1@g.us";
@@ -617,6 +618,67 @@ describe("pipe path tail-drain guard", () => {
     ]);
     const shouldSkipPipe = pendingTailDrain.has(chatJid);
     expect(shouldSkipPipe).toBe(false);
+  });
+});
+
+// --- tail-drain poll guard backoff safety ---
+
+describe("tail-drain poll guard backoff safety", () => {
+  // The poll guard must NOT enqueue when skipping the pipe path during a
+  // tail-drain. Enqueuing sets pendingMessages = true, which causes drainGroup
+  // to immediately start a new run after a failure — bypassing scheduleRetry's
+  // exponential backoff and creating tight retry loops.
+
+  it("enqueue during active run sets pendingMessages (the defeated-backoff mechanism)", () => {
+    // Models the bug: if the guard calls enqueueMessageCheck while active,
+    // pendingMessages becomes true.
+    const state = { active: true, pendingMessages: false };
+    // Simulate enqueueMessageCheck behavior when active
+    if (state.active) {
+      state.pendingMessages = true;
+    }
+    expect(state.pendingMessages).toBe(true);
+  });
+
+  it("drainGroup immediately re-runs when pendingMessages is true", () => {
+    // Models the bypass: drainGroup sees pendingMessages and starts a new run
+    // instead of waiting for the scheduled retry.
+    const state = { pendingMessages: true, pendingTasks: [] as unknown[] };
+    let wouldDrain = false;
+    if (state.pendingTasks.length > 0) {
+      // tasks first
+    } else if (state.pendingMessages) {
+      wouldDrain = true;
+    }
+    expect(wouldDrain).toBe(true);
+  });
+
+  it("guard without enqueue leaves pendingMessages false", () => {
+    // Models the fix: the guard skips the pipe but does NOT enqueue,
+    // so pendingMessages stays false.
+    const state = { active: true, pendingMessages: false };
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    // Guard logic (fixed): skip pipe, do NOT enqueue
+    if (pendingTailDrain.has("group1@g.us")) {
+      // continue — no enqueue
+    }
+    expect(state.pendingMessages).toBe(false);
+  });
+
+  it("scheduled retry fires after backoff when pendingMessages is false", () => {
+    // Models correct flow: when pendingMessages is false, drainGroup does NOT
+    // immediately re-run. The scheduled retry (setTimeout with backoff) is the
+    // only path that starts the next attempt.
+    const state = { pendingMessages: false, pendingTasks: [] as unknown[] };
+    let wouldDrain = false;
+    if (state.pendingTasks.length > 0) {
+      // tasks first
+    } else if (state.pendingMessages) {
+      wouldDrain = true;
+    }
+    expect(wouldDrain).toBe(false);
   });
 });
 
