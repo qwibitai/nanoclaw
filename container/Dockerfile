@@ -26,9 +26,17 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chromium path for agent-browser
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+# Chromium wrapper: reset XDG_CONFIG_HOME and XDG_CACHE_HOME to writable temp
+# dirs before launching. The main container mounts the project root read-only
+# at /workspace/project, and Claude Code inherits/sets XDG_CONFIG_HOME to that
+# path. Chromium does an early CHECK on XDG_CONFIG_HOME writability (before
+# --user-data-dir is even parsed) and SIGTRAPs if it's read-only.
+RUN printf '#!/bin/sh\nexport XDG_CONFIG_HOME=/tmp/chromium-xdg-config\nexport XDG_CACHE_HOME=/tmp/chromium-xdg-cache\nexec /usr/bin/chromium "$@"\n' \
+    > /usr/local/bin/chromium-wrapper && chmod +x /usr/local/bin/chromium-wrapper
+
+# Set Chromium path for agent-browser (use wrapper to fix XDG env)
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/bin/chromium-wrapper
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium-wrapper
 
 # Install agent-browser, claude-code, and Google Workspace CLI globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code @googleworkspace/cli

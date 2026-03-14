@@ -239,6 +239,19 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Custom seccomp profile: Docker's default + syscalls Chromium needs.
+  // Specifically adds: userfaultfd (PartitionAlloc memory reclaim), clone3
+  // (unconditional — default profile blocks it with ENOSYS for non-admin,
+  // which some Chromium subprocess paths don't handle gracefully), and kcmp.
+  const seccompProfile = path.join(
+    process.cwd(),
+    'container',
+    'chromium-seccomp.json',
+  );
+  if (fs.existsSync(seccompProfile)) {
+    args.push('--security-opt', `seccomp=${seccompProfile}`);
+  }
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
