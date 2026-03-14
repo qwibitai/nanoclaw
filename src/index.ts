@@ -204,6 +204,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  // Send immediate acknowledgment so the user knows the request was received
+  await channel.sendMessage(
+    chatJid,
+    `Got it! I received your request and I'm working on it now. I'll reply when I'm done — complex tasks like research can take a few minutes.`,
+  );
   let hadError = false;
   let outputSentToUser = false;
 
