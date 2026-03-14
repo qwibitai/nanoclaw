@@ -193,12 +193,14 @@ Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these envir
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
+ANTHROPIC_MODEL=your-model-id
 ```
 
 This allows you to use:
 - Local models via [Ollama](https://ollama.ai) with an API proxy
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
 - Custom model deployments with Anthropic-compatible APIs
+- Hosted Anthropic-compatible providers that expose the API under a subpath, such as `https://.../apps/anthropic`
 
 Note: The model must support the Anthropic API format for best compatibility.
 

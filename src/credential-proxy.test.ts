@@ -11,7 +11,11 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import {
+  buildUpstreamPath,
+  detectAuthMode,
+  startCredentialProxy,
+} from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -65,6 +69,8 @@ describe('credential-proxy', () => {
   });
 
   afterEach(async () => {
+    proxyServer?.closeAllConnections?.();
+    upstreamServer?.closeAllConnections?.();
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
@@ -95,6 +101,26 @@ describe('credential-proxy', () => {
     );
 
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
+  });
+
+  it('ANTHROPIC_AUTH_TOKEN uses API-key mode for Anthropic-compatible providers', async () => {
+    proxyPort = await startProxy({ ANTHROPIC_AUTH_TOKEN: 'provider-token' });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['x-api-key']).toBe('provider-token');
+    expect(lastUpstreamHeaders['authorization']).toBeUndefined();
   });
 
   it('OAuth mode replaces Authorization when container sends one', async () => {
@@ -188,5 +214,24 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('detects ANTHROPIC_AUTH_TOKEN as api-key mode', () => {
+    Object.assign(mockEnv, {
+      ANTHROPIC_AUTH_TOKEN: 'provider-token',
+    });
+
+    expect(detectAuthMode()).toBe('api-key');
+  });
+
+  it('preserves upstream base path when forwarding requests', () => {
+    const upstreamUrl = new URL('https://example.com/apps/anthropic');
+
+    expect(buildUpstreamPath(upstreamUrl, '/v1/messages?beta=true')).toBe(
+      '/apps/anthropic/v1/messages?beta=true',
+    );
+    expect(buildUpstreamPath(upstreamUrl, 'v1/messages')).toBe(
+      '/apps/anthropic/v1/messages',
+    );
   });
 });

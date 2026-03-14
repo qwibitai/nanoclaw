@@ -23,6 +23,22 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
+function buildUpstreamPath(
+  upstreamUrl: URL,
+  requestUrl: string | undefined,
+): string {
+  const [requestPath = '/', query = ''] = (requestUrl || '/').split('?', 2);
+  const basePath =
+    upstreamUrl.pathname && upstreamUrl.pathname !== '/'
+      ? upstreamUrl.pathname.replace(/\/$/, '')
+      : '';
+  const normalizedRequestPath = requestPath.startsWith('/')
+    ? requestPath
+    : `/${requestPath}`;
+
+  return `${basePath}${normalizedRequestPath}${query ? `?${query}` : ''}`;
+}
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
@@ -34,9 +50,13 @@ export function startCredentialProxy(
     'ANTHROPIC_BASE_URL',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  const authMode: AuthMode = secrets.CLAUDE_CODE_OAUTH_TOKEN
+    ? 'oauth'
+    : secrets.ANTHROPIC_API_KEY || secrets.ANTHROPIC_AUTH_TOKEN
+      ? 'api-key'
+      : 'oauth';
+  const apiKey = secrets.ANTHROPIC_API_KEY || secrets.ANTHROPIC_AUTH_TOKEN;
+  const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN;
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -65,7 +85,7 @@ export function startCredentialProxy(
         if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+          headers['x-api-key'] = apiKey;
         } else {
           // OAuth mode: replace placeholder Bearer token with the real one
           // only when the container actually sends an Authorization header
@@ -83,7 +103,7 @@ export function startCredentialProxy(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: buildUpstreamPath(upstreamUrl, req.url),
             method: req.method,
             headers,
           } as RequestOptions,
@@ -120,6 +140,16 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const secrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+  ]);
+
+  if (secrets.CLAUDE_CODE_OAUTH_TOKEN) return 'oauth';
+  return secrets.ANTHROPIC_API_KEY || secrets.ANTHROPIC_AUTH_TOKEN
+    ? 'api-key'
+    : 'oauth';
 }
+
+export { buildUpstreamPath };
