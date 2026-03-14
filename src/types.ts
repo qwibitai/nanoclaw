@@ -90,6 +90,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send file attachments. Channels that support it implement it.
+  sendFile?(jid: string, text: string, filePaths: string[]): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
