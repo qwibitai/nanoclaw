@@ -56,3 +56,20 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 - ```triple backticks``` for code
 
 No ## headings. No [links](url). No **double stars**.
+
+## Available Tools
+
+**jq** — Safe JSON processor. Use for parsing and filtering API responses.
+
+```bash
+# Extract data from JSON
+jq '.data[] | select(.status == "active") | {id, name}' input.json
+
+# Parse API response
+curl -s https://api.example.com/items | jq '.items | length'
+
+# Validate JSON
+jq . malformed.json  # fails with clear error if invalid
+```
+
+Prefer `jq` over `node -e` for JSON operations — it has no code execution risk.
