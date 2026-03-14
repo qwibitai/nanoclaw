@@ -486,10 +486,7 @@ function isToolScoped(tools: string[] | undefined, name: string): boolean {
   return tools.some(t => t.startsWith(name + ':')) && !tools.includes(name);
 }
 
-// Read-only Gmail tools — scoped groups (e.g. gmail:illysium) get these instead of mcp__gmail__*
-// Excluded write tools: send_email, draft_email, modify_email, delete_email,
-// batch_modify_emails, batch_delete_emails, create_label, update_label, delete_label,
-// get_or_create_label, create_filter, create_filter_from_template, delete_filter
+// Read-only Gmail tools — gmail-readonly:<account> groups get these
 const GMAIL_READ_TOOLS = [
   'mcp__gmail__search_emails',
   'mcp__gmail__read_email',
@@ -497,6 +494,28 @@ const GMAIL_READ_TOOLS = [
   'mcp__gmail__list_filters',
   'mcp__gmail__get_filter',
   'mcp__gmail__download_attachment',
+] as const;
+
+// Gmail tools for scoped groups (e.g. gmail:illysium) — everything except permanent delete.
+// Excluded: delete_email, batch_delete_emails (permanent delete requires mail.google.com scope anyway)
+const GMAIL_SCOPED_TOOLS = [
+  'mcp__gmail__search_emails',
+  'mcp__gmail__read_email',
+  'mcp__gmail__list_email_labels',
+  'mcp__gmail__list_filters',
+  'mcp__gmail__get_filter',
+  'mcp__gmail__download_attachment',
+  'mcp__gmail__modify_email',
+  'mcp__gmail__batch_modify_emails',
+  'mcp__gmail__send_email',
+  'mcp__gmail__draft_email',
+  'mcp__gmail__create_label',
+  'mcp__gmail__update_label',
+  'mcp__gmail__delete_label',
+  'mcp__gmail__get_or_create_label',
+  'mcp__gmail__create_filter',
+  'mcp__gmail__create_filter_from_template',
+  'mcp__gmail__delete_filter',
 ] as const;
 
 // Read-only Calendar tools — scoped groups get these instead of mcp__google-calendar__*
@@ -557,10 +576,14 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
     'NotebookEdit',
     'mcp__nanoclaw__*',
   ];
+  if (isToolEnabled(tools, 'gmail-readonly')) {
+    // Read-only access (shared groups like Illysium Slack)
+    allowed.push(...GMAIL_READ_TOOLS);
+  }
   if (isToolEnabled(tools, 'gmail')) {
     if (isToolScoped(tools, 'gmail')) {
-      // Scoped = read-only access (shared group, e.g. Slack with coworkers)
-      allowed.push(...GMAIL_READ_TOOLS);
+      // Scoped = everything except permanent delete
+      allowed.push(...GMAIL_SCOPED_TOOLS);
     } else {
       allowed.push('mcp__gmail__*');
       // Also allow additional Gmail account MCP servers (gmail-sunday, gmail-illysium, etc.)
@@ -605,7 +628,7 @@ function buildMcpServers(
       },
     },
   };
-  if (isToolEnabled(tools, 'gmail')) {
+  if (isToolEnabled(tools, 'gmail') || isToolEnabled(tools, 'gmail-readonly')) {
     // Primary account
     const primaryDir = '/home/node/.gmail-mcp';
     servers.gmail = {

@@ -1019,12 +1019,13 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials — gated by tools config
-  if (isToolEnabled(tools, 'gmail')) {
-    const { scopes: gmailAccounts, isScoped: gmailScoped } = extractToolScopes(
-      tools,
-      'gmail',
-    );
+  // Gmail credentials — gated by tools config ('gmail', 'gmail:<account>', or 'gmail-readonly:<account>')
+  if (isToolEnabled(tools, 'gmail') || isToolEnabled(tools, 'gmail-readonly')) {
+    const gmailScopes = extractToolScopes(tools, 'gmail');
+    const readonlyScopes = extractToolScopes(tools, 'gmail-readonly');
+    const gmailAccounts = [...gmailScopes.scopes, ...readonlyScopes.scopes];
+    const gmailScoped =
+      gmailAccounts.length > 0 && !tools?.includes('gmail');
 
     if (gmailScoped) {
       // Mount only the specified account's credentials as /home/node/.gmail-mcp

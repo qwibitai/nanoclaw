@@ -35,7 +35,8 @@ export interface ContainerConfig {
   model?: string; // Default model for this group (e.g. "claude-sonnet-4-6")
   // Integrations available inside this group's container.
   // Undefined = all tools (backwards compatible).
-  // Supported: 'gmail', 'gmail:<account>' (e.g. 'gmail:illysium'), 'calendar',
+  // Supported: 'gmail', 'gmail:<account>' (full minus perma-delete),
+  //            'gmail-readonly:<account>' (read-only), 'calendar',
   //            'calendar:<account>' (e.g. 'calendar:illysium'), 'granola',
   //            'google-workspace', 'google-workspace:<account>' (e.g. 'google-workspace:illysium'),
   //            'dbt', 'dbt:<profile>' (e.g. 'dbt:sunday-snowflake-db', 'dbt:apollo-snowflake'),
