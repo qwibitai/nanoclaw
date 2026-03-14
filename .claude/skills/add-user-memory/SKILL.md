@@ -1,39 +1,39 @@
 ---
 name: add-user-memory
-description: Add a structured USER.md file for persistent user identity, preferences, and context — shared across all agents with a character limit to prevent bloat.
+description: Add a structured USER.md file inside groups/global/ for persistent user identity, preferences, and context — readable by all agent containers with a 2000-character limit to prevent bloat.
 ---
 
 # Add User Memory (USER.md)
 
-This skill creates a `USER.md` file at the nanoclaw root and updates the global agent configuration to read and maintain it. Agents use `USER.md` as a lightweight, shared user profile: who the user is, how they prefer to communicate, and what context is currently relevant.
+This skill creates `groups/global/USER.md` and updates `groups/global/CLAUDE.md` to instruct all agents to read and maintain it. Agents use `USER.md` as a shared, lightweight user profile: who the user is, how they like to communicate, and what context is currently relevant.
 
-`USER.md` has a hard 2 000-character limit. Agents replace stale entries rather than appending, keeping the file compact and always useful.
+`groups/global/` is mounted read-write into every agent container, making this the correct location for shared state. `USER.md` has a hard 2 000-byte limit. Agents replace stale entries rather than appending, keeping the file compact.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
 ```bash
-test -f USER.md && echo "Already applied" || echo "Not applied"
+test -f groups/global/USER.md && echo "Already applied" || echo "Not applied"
 ```
 
-If `USER.md` already exists, skip to Phase 3 (Verify).
+If already applied, skip to Phase 3 (Verify).
 
 ## Phase 2: Apply
 
-### Create USER.md
+### Create groups/global/USER.md
 
-Create `USER.md` in the nanoclaw root with the following template.
-Fill in the fields that are known; leave the rest as the placeholder comments:
+Create the file with the following template.
+Fill in fields that are known; leave the rest as placeholder comments:
 
 ```markdown
 # USER.md
-<!-- Hard limit: 2 000 characters. Agents: replace stale entries, do not append. -->
+<!-- Hard limit: 2000 bytes. Agents: replace stale entries, do not append. -->
 
 ## Identity
 - Name: <!-- e.g. Alex -->
 - Timezone: <!-- e.g. America/New_York -->
-- Language: <!-- e.g. English / 中英混用 -->
+- Language: <!-- e.g. English / mixed English-Chinese -->
 
 ## Communication Preferences
 - Tone: <!-- e.g. concise, encouraging, no sarcasm -->
@@ -41,83 +41,82 @@ Fill in the fields that are known; leave the rest as the placeholder comments:
 - Formatting: <!-- e.g. plain text preferred / markdown ok -->
 
 ## Ongoing Context
-<!-- 3–5 bullet points of what the user is currently working on.
-     Agents update this section when significant project state changes. -->
+<!-- 3–5 bullets of what the user is currently working on.
+     Update when project state changes significantly. -->
 -
 
 ## Recent Decisions
-<!-- Last 5 decisions or preference changes, with dates.
-     Remove oldest when adding new ones. -->
+<!-- Last 5 preference changes or decisions, newest first, with dates.
+     Remove oldest when list exceeds 5 entries. -->
 -
 ```
 
-### Update global CLAUDE.md
+### Update groups/global/CLAUDE.md
 
-Open `groups/global/CLAUDE.md` (or the equivalent global configuration file in your setup) and add the following block **before** the first agent-specific section:
+Open `groups/global/CLAUDE.md` and add the following block **before** any agent-specific sections:
 
 ```markdown
 ## User Memory
 
-A shared `USER.md` file lives at the nanoclaw root. All agents MUST:
+`groups/global/USER.md` contains a shared user profile. All agents MUST:
 
 1. **Read `USER.md` at the start of each session** to load current user context.
 2. **Update `USER.md`** when:
    - The user states a new preference or changes an existing one.
    - A significant project decision is made.
    - Ongoing context becomes stale.
-3. **Keep it under 2 000 characters** — replace old entries, do not append.
+3. **Keep it under 2 000 bytes** — replace old entries, do not append.
 4. **Never store sensitive data** (passwords, tokens, private keys) in `USER.md`.
 ```
 
-### Verify character limit tooling (optional)
+### Verify the size guard
 
-If you want an automated guard, add this one-liner to your pre-commit hook or CI:
+Confirm the file is within the limit:
 
 ```bash
-awk 'END { if (NR > 80) { print "USER.md exceeds ~2000 chars (80 lines). Trim it."; exit 1 } }' USER.md
+wc -c groups/global/USER.md
 ```
 
-> Adjust the line count to match your average line length.
+Output should be well under 2 000 bytes on a fresh install.
+To enforce this automatically, add to your pre-commit hook or CI:
+
+```bash
+size=$(wc -c < groups/global/USER.md)
+if [ "$size" -gt 2000 ]; then
+  echo "USER.md exceeds 2000 bytes ($size). Trim it before committing." >&2
+  exit 1
+fi
+```
 
 ## Phase 3: Verify
 
-### Confirm file exists
+### Confirm file exists and is readable from a container
 
 ```bash
-cat USER.md
+cat groups/global/USER.md
+wc -c groups/global/USER.md
 ```
-
-The file should be present and follow the template structure.
 
 ### Confirm agents read it
 
 Restart NanoClaw and open a new conversation with any agent.
 Ask: *"What do you know about me?"*
-The agent should surface the information from `USER.md` rather than asking again.
-
-### Check size
-
-```bash
-wc -c USER.md
-```
-
-Output should be well under 2 000 characters on a fresh install.
+The agent should surface information from `USER.md` rather than asking again.
 
 ## Troubleshooting
 
 ### Agents ignore USER.md
 
-- Confirm the instruction block was added to `groups/global/CLAUDE.md` and that NanoClaw reloaded it.
-- Some agents cache their system prompt at startup — restart the relevant container.
+- Confirm the instruction block was added to `groups/global/CLAUDE.md` and that NanoClaw reloaded the container image.
+- Restart the relevant container if it cached an older system prompt.
 
 ### File grows too large
 
-- Review the **Ongoing Context** and **Recent Decisions** sections.
-- Remove entries older than 30 days or no longer relevant.
-- Run `wc -c USER.md` after trimming to confirm it is under 2 000 characters.
+- Review **Ongoing Context** and **Recent Decisions** — remove entries older than 30 days or no longer relevant.
+- Run `wc -c groups/global/USER.md` after trimming to confirm it is under 2 000 bytes.
 
 ### Multiple agents overwrite each other
 
-- Agents should use a read-modify-write pattern: read the full file, make the minimal change, write it back.
-- Avoid concurrent writes from two agents in the same second; NanoClaw's single-threaded group queue makes this unlikely in normal use.
+- Agents should use a read-modify-write pattern: read the full file, make the minimal targeted change, write it back.
+- NanoClaw's single-threaded group queue makes concurrent writes unlikely in normal use.
 
