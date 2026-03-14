@@ -109,6 +109,7 @@ export interface TaskRunLog {
 
 export interface ShipLogEntry {
   id: string;
+  group_folder: string;
   title: string;
   description: string | null;
   pr_url: string | null;
@@ -119,6 +120,7 @@ export interface ShipLogEntry {
 
 export interface BacklogItem {
   id: string;
+  group_folder: string;
   title: string;
   description: string | null;
   status: 'open' | 'in_progress' | 'resolved' | 'wont_fix';

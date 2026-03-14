@@ -174,6 +174,7 @@ function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS ship_log (
       id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL DEFAULT 'main',
       title TEXT NOT NULL,
       description TEXT,
       pr_url TEXT,
@@ -182,9 +183,11 @@ function createSchema(database: Database.Database): void {
       shipped_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ship_log_shipped_at ON ship_log(shipped_at);
+    CREATE INDEX IF NOT EXISTS idx_ship_log_group ON ship_log(group_folder);
 
     CREATE TABLE IF NOT EXISTS backlog (
       id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL DEFAULT 'main',
       title TEXT NOT NULL,
       description TEXT,
       status TEXT NOT NULL DEFAULT 'open',
@@ -197,7 +200,26 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_backlog_status ON backlog(status);
     CREATE INDEX IF NOT EXISTS idx_backlog_priority ON backlog(priority);
+    CREATE INDEX IF NOT EXISTS idx_backlog_group ON backlog(group_folder);
   `);
+
+  // Add group_folder to ship_log (scopes entries per group)
+  try {
+    database.exec(
+      `ALTER TABLE ship_log ADD COLUMN group_folder TEXT NOT NULL DEFAULT 'main'`,
+    );
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Add group_folder to backlog (scopes entries per group)
+  try {
+    database.exec(
+      `ALTER TABLE backlog ADD COLUMN group_folder TEXT NOT NULL DEFAULT 'main'`,
+    );
+  } catch {
+    // Column already exists — ignore
+  }
 
   // Migrate existing sessions into sessions_v2 (skip if already migrated)
   const v2Count = (
@@ -1423,10 +1445,11 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 export function addShipLogEntry(entry: ShipLogEntry): void {
   db.prepare(
-    `INSERT OR REPLACE INTO ship_log (id, title, description, pr_url, branch, tags, shipped_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO ship_log (id, group_folder, title, description, pr_url, branch, tags, shipped_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.id,
+    entry.group_folder,
     entry.title,
     entry.description,
     entry.pr_url,
@@ -1436,20 +1459,26 @@ export function addShipLogEntry(entry: ShipLogEntry): void {
   );
 }
 
-export function getShipLog(limit: number = 50): ShipLogEntry[] {
+export function getShipLog(
+  groupFolder: string,
+  limit: number = 50,
+): ShipLogEntry[] {
   return db
-    .prepare(`SELECT * FROM ship_log ORDER BY shipped_at DESC LIMIT ?`)
-    .all(limit) as ShipLogEntry[];
+    .prepare(
+      `SELECT * FROM ship_log WHERE group_folder = ? ORDER BY shipped_at DESC LIMIT ?`,
+    )
+    .all(groupFolder, limit) as ShipLogEntry[];
 }
 
 // --- Backlog accessors ---
 
 export function addBacklogItem(item: BacklogItem): void {
   db.prepare(
-    `INSERT OR REPLACE INTO backlog (id, title, description, status, priority, tags, notes, created_at, updated_at, resolved_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO backlog (id, group_folder, title, description, status, priority, tags, notes, created_at, updated_at, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     item.id,
+    item.group_folder,
     item.title,
     item.description,
     item.status,
@@ -1519,31 +1548,35 @@ export function updateBacklogItem(
   );
 }
 
-export function deleteBacklogItem(id: string): void {
-  db.prepare('DELETE FROM backlog WHERE id = ?').run(id);
+export function deleteBacklogItem(id: string, groupFolder: string): void {
+  db.prepare('DELETE FROM backlog WHERE id = ? AND group_folder = ?').run(
+    id,
+    groupFolder,
+  );
 }
 
 const PRIORITY_ORDER = `CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END`;
 
 export function getBacklog(
+  groupFolder: string,
   status?: string,
   limit: number = 100,
 ): BacklogItem[] {
   if (status) {
     return db
       .prepare(
-        `SELECT * FROM backlog WHERE status = ? ORDER BY ${PRIORITY_ORDER}, created_at DESC LIMIT ?`,
+        `SELECT * FROM backlog WHERE group_folder = ? AND status = ? ORDER BY ${PRIORITY_ORDER}, created_at DESC LIMIT ?`,
       )
-      .all(status, limit) as BacklogItem[];
+      .all(groupFolder, status, limit) as BacklogItem[];
   }
   return db
     .prepare(
-      `SELECT * FROM backlog ORDER BY
+      `SELECT * FROM backlog WHERE group_folder = ? ORDER BY
          CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END,
          ${PRIORITY_ORDER},
          created_at DESC LIMIT ?`,
     )
-    .all(limit) as BacklogItem[];
+    .all(groupFolder, limit) as BacklogItem[];
 }
 
 // --- JSON migration ---
