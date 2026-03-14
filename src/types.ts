@@ -51,6 +51,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  reply_to_id?: string;
+  quoted_text?: string;
+  quoted_sender?: string;
 }
 
 export interface ScheduledTask {
