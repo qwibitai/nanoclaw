@@ -1,0 +1,12 @@
+skill: composio
+version: 1.0.0
+description: "Composio integration via MCP - gives the agent access to 100+ pre-built tools (GitHub, Gmail, Slack, Notion, Linear, Jira, and more)"
+core_version: 1.0.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run .claude/skills/add-composio/tests/composio.test.ts"
