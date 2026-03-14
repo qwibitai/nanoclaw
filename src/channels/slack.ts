@@ -573,7 +573,12 @@ export class SlackChannel implements Channel {
     messageTs: string,
     emoji: string,
   ): Promise<void> {
-    await this.safeReaction('add', emoji, this.resolveChannelId(jid), messageTs);
+    await this.safeReaction(
+      'add',
+      emoji,
+      this.resolveChannelId(jid),
+      messageTs,
+    );
   }
 
   /**

@@ -153,11 +153,7 @@ export interface Channel {
   setTriggerMessage?(jid: string, messageTs: string): void;
   // Optional: add/remove emoji reactions on a specific message.
   addReaction?(jid: string, messageTs: string, emoji: string): Promise<void>;
-  removeReaction?(
-    jid: string,
-    messageTs: string,
-    emoji: string,
-  ): Promise<void>;
+  removeReaction?(jid: string, messageTs: string, emoji: string): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
   // Optional: clear per-JID thread redirect state after container processing completes.

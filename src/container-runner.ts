@@ -62,6 +62,13 @@ const GRANOLA_REFRESH_TIMEOUT_MS = 10_000;
 // no container spawns occur. 4 hours is well within the ~6h access token TTL.
 const GRANOLA_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
 
+// Google OAuth token refresh (Gmail, Calendar, Google Workspace — same GCP app).
+// If refresh tokens expire every 7 days, the GCP app is in "Testing" mode.
+// Fix: https://console.cloud.google.com/apis/credentials/consent → PUBLISH APP
+const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
+const GOOGLE_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
+let googleRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
 // In-memory cache to avoid redundant disk reads / duplicate refresh calls
 let granolaTokenCache: { token: string; expiresAt: number } | null = null;
 let granolaRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -207,6 +214,268 @@ export function stopGranolaTokenRefresh(): void {
   if (granolaRefreshTimer) {
     clearInterval(granolaRefreshTimer);
     granolaRefreshTimer = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Google OAuth token refresh — Gmail, Calendar, Google Workspace
+// ---------------------------------------------------------------------------
+
+function readGcpOAuthKeys(): {
+  clientId: string;
+  clientSecret: string;
+} | null {
+  try {
+    const keysPath = path.join(os.homedir(), '.gmail-mcp', 'gcp-oauth.keys.json');
+    const keys = JSON.parse(fs.readFileSync(keysPath, 'utf-8'));
+    const installed = keys.installed || keys.web;
+    if (!installed?.client_id || !installed?.client_secret) return null;
+    return { clientId: installed.client_id, clientSecret: installed.client_secret };
+  } catch {
+    return null;
+  }
+}
+
+function discoverGmailDirs(): Array<{ dir: string; label: string }> {
+  const homeDir = os.homedir();
+  const results: Array<{ dir: string; label: string }> = [];
+
+  const primary = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(path.join(primary, 'credentials.json'))) {
+    results.push({ dir: primary, label: 'primary' });
+  }
+
+  try {
+    for (const entry of fs.readdirSync(homeDir)) {
+      if (!entry.startsWith('.gmail-mcp-')) continue;
+      const dir = path.join(homeDir, entry);
+      if (!fs.statSync(dir).isDirectory()) continue;
+      if (!fs.existsSync(path.join(dir, 'credentials.json'))) continue;
+      results.push({ dir, label: entry.replace('.gmail-mcp-', '') });
+    }
+  } catch {
+    /* ignore readdir errors */
+  }
+
+  return results;
+}
+
+async function refreshGoogleToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<{
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+} | null> {
+  try {
+    const resp = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      logger.error(`Google token refresh HTTP ${resp.status}: ${body}`);
+      return null;
+    }
+    return (await resp.json()) as {
+      access_token: string;
+      expires_in: number;
+      refresh_token?: string;
+    };
+  } catch (err) {
+    logger.error({ err }, 'Google token refresh request failed');
+    return null;
+  }
+}
+
+async function refreshAllGmailTokens(oauthKeys: {
+  clientId: string;
+  clientSecret: string;
+}): Promise<void> {
+  for (const { dir, label } of discoverGmailDirs()) {
+    const credPath = path.join(dir, 'credentials.json');
+    try {
+      const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+      const expiryDate = creds.expiry_date as number | undefined;
+      if (expiryDate && Date.now() < expiryDate - 5 * 60 * 1000) continue;
+      if (!creds.refresh_token) {
+        logger.warn({ account: label }, 'Gmail token expired, no refresh_token');
+        continue;
+      }
+
+      const result = await refreshGoogleToken(
+        creds.refresh_token,
+        oauthKeys.clientId,
+        oauthKeys.clientSecret,
+      );
+      if (!result) {
+        logger.error({ account: label }, 'Gmail token refresh failed');
+        continue;
+      }
+
+      // Re-read before write to minimize race window
+      const fresh = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+      fresh.access_token = result.access_token;
+      fresh.expiry_date = Date.now() + (result.expires_in || 3600) * 1000;
+      if (result.refresh_token) fresh.refresh_token = result.refresh_token;
+      fs.writeFileSync(credPath, JSON.stringify(fresh, null, 2) + '\n');
+      logger.info({ account: label }, 'Gmail OAuth token refreshed');
+    } catch (err) {
+      logger.error({ err, account: label }, 'Gmail token refresh error');
+    }
+  }
+}
+
+async function refreshCalendarTokens(oauthKeys: {
+  clientId: string;
+  clientSecret: string;
+}): Promise<void> {
+  const tokensPath = path.join(
+    os.homedir(),
+    '.config',
+    'google-calendar-mcp',
+    'tokens.json',
+  );
+
+  let allTokens: Record<string, Record<string, unknown>>;
+  try {
+    allTokens = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
+  } catch {
+    return;
+  }
+
+  let updated = false;
+  for (const [account, entry] of Object.entries(allTokens)) {
+    try {
+      const expiryDate = entry.expiry_date as number | undefined;
+      if (expiryDate && Date.now() < expiryDate - 5 * 60 * 1000) continue;
+
+      const refreshToken = entry.refresh_token as string | undefined;
+      if (!refreshToken) {
+        logger.warn({ account }, 'Calendar token expired, no refresh_token');
+        continue;
+      }
+
+      const result = await refreshGoogleToken(
+        refreshToken,
+        oauthKeys.clientId,
+        oauthKeys.clientSecret,
+      );
+      if (!result) {
+        logger.error({ account }, 'Calendar token refresh failed');
+        continue;
+      }
+
+      entry.access_token = result.access_token;
+      entry.expiry_date = Date.now() + (result.expires_in || 3600) * 1000;
+      if (result.refresh_token) entry.refresh_token = result.refresh_token;
+      updated = true;
+      logger.info({ account }, 'Calendar OAuth token refreshed');
+    } catch (err) {
+      logger.error({ err, account }, 'Calendar token refresh error');
+    }
+  }
+
+  if (updated) {
+    try {
+      fs.writeFileSync(tokensPath, JSON.stringify(allTokens, null, 2) + '\n');
+    } catch (err) {
+      logger.warn({ err }, 'Failed to persist refreshed calendar tokens');
+    }
+  }
+}
+
+async function refreshGoogleWorkspaceTokens(oauthKeys: {
+  clientId: string;
+  clientSecret: string;
+}): Promise<void> {
+  const credDir = path.join(
+    os.homedir(),
+    '.google_workspace_mcp',
+    'credentials',
+  );
+
+  let files: string[];
+  try {
+    files = fs.readdirSync(credDir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return;
+  }
+
+  for (const file of files) {
+    const filePath = path.join(credDir, file);
+    const account = file.replace('.json', '');
+    try {
+      const creds = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const expiryStr = creds.expiry as string | undefined;
+      const expiryMs = expiryStr ? new Date(expiryStr).getTime() : 0;
+      if (expiryMs && Date.now() < expiryMs - 5 * 60 * 1000) continue;
+
+      const refreshToken = creds.refresh_token as string | undefined;
+      if (!refreshToken) {
+        logger.warn({ account }, 'Google Workspace token expired, no refresh_token');
+        continue;
+      }
+
+      const clientId = creds.client_id || oauthKeys.clientId;
+      const clientSecret = creds.client_secret || oauthKeys.clientSecret;
+
+      const result = await refreshGoogleToken(refreshToken, clientId, clientSecret);
+      if (!result) {
+        logger.error({ account }, 'Google Workspace token refresh failed');
+        continue;
+      }
+
+      const fresh = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      fresh.token = result.access_token;
+      fresh.expiry = new Date(
+        Date.now() + (result.expires_in || 3600) * 1000,
+      ).toISOString();
+      if (result.refresh_token) fresh.refresh_token = result.refresh_token;
+      fs.writeFileSync(filePath, JSON.stringify(fresh, null, 2) + '\n');
+      logger.info({ account }, 'Google Workspace OAuth token refreshed');
+    } catch (err) {
+      logger.error({ err, account }, 'Google Workspace token refresh error');
+    }
+  }
+}
+
+export function startGoogleTokenRefresh(): void {
+  if (googleRefreshTimer) return;
+  const doRefresh = async () => {
+    const oauthKeys = readGcpOAuthKeys();
+    if (!oauthKeys) {
+      logger.warn('GCP OAuth keys not found — skipping Google token refresh');
+      return;
+    }
+    await Promise.all([
+      refreshAllGmailTokens(oauthKeys),
+      refreshCalendarTokens(oauthKeys),
+      refreshGoogleWorkspaceTokens(oauthKeys),
+    ]);
+    logger.debug('Google proactive token refresh: complete');
+  };
+  doRefresh();
+  googleRefreshTimer = setInterval(doRefresh, GOOGLE_PROACTIVE_REFRESH_MS);
+  googleRefreshTimer.unref();
+  logger.info(
+    `Google proactive token refresh started (every ${GOOGLE_PROACTIVE_REFRESH_MS / 1000 / 60 / 60}h)`,
+  );
+}
+
+export function stopGoogleTokenRefresh(): void {
+  if (googleRefreshTimer) {
+    clearInterval(googleRefreshTimer);
+    googleRefreshTimer = null;
   }
 }
 

@@ -41,6 +41,7 @@ import {
   cleanupOrphanWorktrees,
   cleanupThreadWorkspace,
   runContainerAgent,
+  startGoogleTokenRefresh,
   startGranolaTokenRefresh,
   withGroupMutex,
   writeGroupsSnapshot,
@@ -1316,10 +1317,7 @@ async function startMessageLoop(): Promise<void> {
               channel
                 .addReaction?.(chatJid, lastMsg.id, 'hourglass_flowing_sand')
                 ?.catch((err: unknown) =>
-                  logger.warn(
-                    { chatJid, err },
-                    'Failed to add queue reaction',
-                  ),
+                  logger.warn({ chatJid, err }, 'Failed to add queue reaction'),
                 );
             }
           }
@@ -1540,6 +1538,8 @@ async function main(): Promise<void> {
   initDatabase();
   // Keep Granola OAuth token chain alive (proactive refresh every 4h)
   startGranolaTokenRefresh();
+  // Keep Google OAuth token chains alive (Gmail, Calendar, Google Workspace)
+  startGoogleTokenRefresh();
   logger.info('Database initialized');
   loadState();
 
