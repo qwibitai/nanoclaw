@@ -56,6 +56,31 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+/**
+ * Sync agent-runner source files into a per-group directory.
+ * On first run (dest doesn't exist), copies the entire directory.
+ * On subsequent runs, copies each entry individually to pick up changes.
+ * No-op if the source directory doesn't exist.
+ */
+export function syncAgentRunnerSource(
+  srcDir: string,
+  destDir: string,
+): void {
+  if (!fs.existsSync(srcDir)) return;
+
+  if (!fs.existsSync(destDir)) {
+    fs.cpSync(srcDir, destDir, { recursive: true });
+  } else {
+    for (const entry of fs.readdirSync(srcDir)) {
+      fs.cpSync(
+        path.join(srcDir, entry),
+        path.join(destDir, entry),
+        { recursive: true },
+      );
+    }
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -190,9 +215,7 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-  }
+  syncAgentRunnerSource(agentRunnerSrc, groupAgentRunnerDir);
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
