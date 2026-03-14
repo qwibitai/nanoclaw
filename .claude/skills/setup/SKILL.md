@@ -112,15 +112,41 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Claude Authentication
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+If `data/claude-auth/.credentials.json` exists or `.env` contains `ANTHROPIC_API_KEY`, confirm with user: keep or reconfigure?
 
 AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+**Subscription:** Authenticate inside the container and persist credentials. Tell the user to run the following in another terminal:
 
-**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+**Docker:**
+```bash
+docker run -it --entrypoint bash \
+  -v $(pwd)/data/claude-auth:/home/node/.claude \
+  nanoclaw-agent:latest
+```
+
+**Apple Container:**
+```bash
+container run --interactive --entrypoint bash \
+  --mount "src=$(pwd)/data/claude-auth,dst=/home/node/.claude,readOnly=false" \
+  nanoclaw-agent:latest
+```
+
+Then run `claude login` inside the container and `exit` when done.
+
+Credentials are saved to `data/claude-auth/.credentials.json` and automatically copied into each group's session directory on container startup (handled by `container-runner.ts`).
+
+Then use AskUserQuestion to ask whether they have completed the steps (options: "Done" / "I need help"). Do NOT collect tokens in chat.
+
+**API key:** Tell the user to get an API key from the Anthropic Console (https://console.anthropic.com/) and add it to `.env`:
+
+```
+ANTHROPIC_API_KEY=<your-api-key>
+```
+
+Then use AskUserQuestion to ask whether they have completed the steps (options: "Done" / "I need help"). Do NOT collect the key in chat.
 
 ## 5. Set Up Channels
 
