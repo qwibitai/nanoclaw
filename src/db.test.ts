@@ -5,11 +5,14 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllMessagesSince,
   getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
+  getRouterState,
   getTaskById,
   setRegisteredGroup,
+  setRouterState,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -196,6 +199,211 @@ describe("getMessagesSince", () => {
     });
     const msgs = getMessagesSince("group@g.us", "2024-01-01T00:00:04.000Z", "Andy");
     expect(msgs).toHaveLength(0);
+  });
+
+  it("sinceId skips same-timestamp messages at or before cursor id", () => {
+    // Use a separate chat_jid to avoid collisions with beforeEach fixtures
+    const jid = "cursor-test@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    store({
+      id: "a",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "b",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+    store({
+      id: "c",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-c",
+      timestamp: T,
+    });
+    store({
+      id: "d",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-d",
+      timestamp: T2,
+    });
+
+    const msgs = getMessagesSince(jid, T, "Andy", 200, "b");
+    expect(msgs.map((m) => m.id)).toEqual(["c", "d"]);
+  });
+
+  it("sinceId=undefined preserves backward-compatible timestamp-only behavior", () => {
+    const jid = "cursor-compat@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    store({
+      id: "a2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "b2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+    store({
+      id: "c2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-c",
+      timestamp: T,
+    });
+    store({
+      id: "d2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-d",
+      timestamp: T2,
+    });
+
+    // No sinceId → timestamp-only → only messages strictly after T
+    const msgs = getMessagesSince(jid, T, "Andy");
+    expect(msgs.map((m) => m.id)).toEqual(["d2"]);
+  });
+
+  it("composite cursor returns deterministic order with tied timestamps", () => {
+    const jid = "tied-order@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    // Insert 5 messages with same timestamp and scrambled ids
+    for (const id of ["e", "b", "d", "a", "c"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T,
+      });
+    }
+    // limit=3 should return the 3 lexicographically largest ids in ascending order
+    const msgs = getMessagesSince(jid, "", "Andy", 3);
+    expect(msgs.map((m) => m.id)).toEqual(["c", "d", "e"]);
+  });
+
+  it("sequential cursor advancement with tied timestamps produces no duplicates or gaps", () => {
+    const jid = "tied-advance@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["e", "b", "d", "a", "c"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T,
+      });
+    }
+    // Fetch newest 3
+    const batch1 = getMessagesSince(jid, "", "Andy", 3);
+    expect(batch1).toHaveLength(3);
+    // Advance cursor to last returned message
+    const last = batch1[batch1.length - 1];
+    const batch2 = getMessagesSince(jid, last.timestamp, "Andy", 3, last.id);
+    // Should be empty — no more messages after the newest 3
+    expect(batch2).toHaveLength(0);
+
+    // Drain all via getAllMessagesSince with batch size 2
+    const all = getAllMessagesSince(jid, "", "Andy", 2);
+    expect(all).toHaveLength(5);
+    expect(all.map((m) => m.id)).toEqual(["a", "b", "c", "d", "e"]);
+    // No duplicates
+    expect(new Set(all.map((m) => m.id)).size).toBe(5);
+  });
+
+  it("composite cursor with limit across mixed timestamps does not produce duplicates", () => {
+    const jid = "mixed-ts@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T1 = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    // 4 messages at T1
+    for (const id of ["m1", "m2", "m3", "m4"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T1,
+      });
+    }
+    // 2 messages at T2
+    for (const id of ["m5", "m6"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T2,
+      });
+    }
+    // Fetch newest 3 via getMessagesSince
+    const batch1 = getMessagesSince(jid, "", "Andy", 3);
+    expect(batch1).toHaveLength(3);
+    expect(batch1.map((m) => m.id)).toEqual(["m4", "m5", "m6"]);
+    // Advance cursor, verify empty
+    const last = batch1[batch1.length - 1];
+    const batch2 = getMessagesSince(jid, last.timestamp, "Andy", 3, last.id);
+    expect(batch2).toHaveLength(0);
+  });
+
+  it("recovery probe with limit=1 and sinceId finds tied-timestamp messages", () => {
+    const jid = "cursor-recovery@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    store({
+      id: "ra",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "rb",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+
+    // With sinceId: finds "rb" (the bug fix)
+    const withId = getMessagesSince(jid, T, "Andy", 1, "ra");
+    expect(withId).toHaveLength(1);
+    expect(withId[0].id).toBe("rb");
+
+    // Without sinceId: misses it (the bug)
+    const withoutId = getMessagesSince(jid, T, "Andy", 1);
+    expect(withoutId).toHaveLength(0);
   });
 });
 
@@ -411,6 +619,275 @@ describe("message query LIMIT", () => {
   });
 });
 
+// --- getAllMessagesSince (drain loop) ---
+
+describe("getAllMessagesSince", () => {
+  beforeEach(() => {
+    storeChatMetadata("group@g.us", "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 10; i++) {
+      store({
+        id: `drain-${i}`,
+        chat_jid: "group@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+  });
+
+  it("drains all messages across multiple batches", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(10);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[9].content).toBe("message 10");
+  });
+
+  it("returns empty array when no messages exist", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T01:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(0);
+  });
+
+  it("handles count exactly equal to batchSize", () => {
+    // 6 messages (5 through 10) with batchSize 3 → two full batches
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:04.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(6);
+    expect(msgs[0].content).toBe("message 5");
+    expect(msgs[5].content).toBe("message 10");
+  });
+
+  it("single batch when under batchSize", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:08.000Z", "Andy", 200);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toBe("message 9");
+    expect(msgs[1].content).toBe("message 10");
+  });
+
+  it("preserves chronological order across batches", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    for (let i = 1; i < msgs.length; i++) {
+      expect(msgs[i].timestamp >= msgs[i - 1].timestamp).toBe(true);
+    }
+  });
+
+  it("does not skip messages when all share the same timestamp", () => {
+    storeChatMetadata("dup@g.us", "2024-01-01T00:00:00.000Z");
+    for (let i = 1; i <= 5; i++) {
+      store({
+        id: `dup-${i}`,
+        chat_jid: "dup@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `dup message ${i}`,
+        timestamp: "2024-01-01T00:00:01.000Z",
+      });
+    }
+    const msgs = getAllMessagesSince("dup@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(5);
+    const ids = msgs.map((m) => m.id);
+    for (let i = 1; i <= 5; i++) {
+      expect(ids).toContain(`dup-${i}`);
+    }
+  });
+
+  it("handles mixed unique and duplicate timestamps across batches", () => {
+    storeChatMetadata("mix@g.us", "2024-01-01T00:00:00.000Z");
+    const rows = [
+      { id: "mix-a1", ts: "2024-01-01T00:00:01.000Z" },
+      { id: "mix-a2", ts: "2024-01-01T00:00:01.000Z" },
+      { id: "mix-b1", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-b2", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-b3", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-c1", ts: "2024-01-01T00:00:03.000Z" },
+    ];
+    for (const r of rows) {
+      store({
+        id: r.id,
+        chat_jid: "mix@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `content ${r.id}`,
+        timestamp: r.ts,
+      });
+    }
+    const msgs = getAllMessagesSince("mix@g.us", "2024-01-01T00:00:00.000Z", "Andy", 2);
+    expect(msgs).toHaveLength(6);
+    const ids = msgs.map((m) => m.id);
+    for (const r of rows) {
+      expect(ids).toContain(r.id);
+    }
+  });
+
+  it("sinceId excludes same-timestamp messages at or before the cursor id", () => {
+    storeChatMetadata("sid@g.us", "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["a", "b", "c"]) {
+      store({
+        id,
+        chat_jid: "sid@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `msg ${id}`,
+        timestamp: T,
+      });
+    }
+    store({
+      id: "d",
+      chat_jid: "sid@g.us",
+      sender: "user@s.whatsapp.net",
+      sender_name: "User",
+      content: "msg d",
+      timestamp: "2024-01-01T00:00:02.000Z",
+    });
+    const msgs = getAllMessagesSince("sid@g.us", T, "Andy", 200, "b");
+    const ids = msgs.map((m) => m.id);
+    expect(ids).toEqual(["c", "d"]);
+  });
+
+  it("sinceId=undefined preserves backward-compatible behavior", () => {
+    storeChatMetadata("compat@g.us", "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["a", "b", "c"]) {
+      store({
+        id,
+        chat_jid: "compat@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `msg ${id}`,
+        timestamp: T,
+      });
+    }
+    store({
+      id: "d",
+      chat_jid: "compat@g.us",
+      sender: "user@s.whatsapp.net",
+      sender_name: "User",
+      content: "msg d",
+      timestamp: "2024-01-01T00:00:02.000Z",
+    });
+    // Without sinceId, only messages with timestamp > T are returned
+    const msgs = getAllMessagesSince("compat@g.us", T, "Andy");
+    const ids = msgs.map((m) => m.id);
+    expect(ids).toEqual(["d"]);
+  });
+
+  it("composite cursor round-trip simulating truncation boundary", () => {
+    storeChatMetadata("trunc@g.us", "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:05.000Z";
+    // 10 messages: 1-5 have unique timestamps, 6-8 share timestamp T, 9-10 are later
+    const rows = [
+      { id: "t01", ts: "2024-01-01T00:00:01.000Z" },
+      { id: "t02", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "t03", ts: "2024-01-01T00:00:03.000Z" },
+      { id: "t04", ts: "2024-01-01T00:00:04.000Z" },
+      { id: "t05", ts: T },
+      { id: "t06", ts: T },
+      { id: "t07", ts: T },
+      { id: "t08", ts: "2024-01-01T00:00:06.000Z" },
+      { id: "t09", ts: "2024-01-01T00:00:07.000Z" },
+      { id: "t10", ts: "2024-01-01T00:00:08.000Z" },
+    ];
+    for (const r of rows) {
+      store({
+        id: r.id,
+        chat_jid: "trunc@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `content ${r.id}`,
+        timestamp: r.ts,
+      });
+    }
+
+    // First call: get all 10
+    const first = getAllMessagesSince("trunc@g.us", "", "Andy");
+    expect(first).toHaveLength(10);
+
+    // Simulate processing first 7 messages — cursor lands on t07 (shares timestamp T)
+    const processed = first.slice(0, 7);
+    const cursorMsg = processed[processed.length - 1];
+    expect(cursorMsg.id).toBe("t07");
+
+    // Second call with composite cursor — should return exactly the remaining 3
+    const second = getAllMessagesSince(
+      "trunc@g.us",
+      cursorMsg.timestamp,
+      "Andy",
+      200,
+      cursorMsg.id,
+    );
+    const secondIds = second.map((m) => m.id);
+    expect(secondIds).toEqual(["t08", "t09", "t10"]);
+  });
+
+  it("maxRows caps total returned rows", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      3,
+      undefined,
+      5,
+    );
+    expect(msgs).toHaveLength(5);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[4].content).toBe("message 5");
+  });
+
+  it("maxRows less than batchSize uses single bounded query", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      4,
+    );
+    expect(msgs).toHaveLength(4);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[3].content).toBe("message 4");
+  });
+
+  it("maxRows equal to total rows returns all", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      3,
+      undefined,
+      10,
+    );
+    expect(msgs).toHaveLength(10);
+  });
+
+  it("maxRows with composite cursor", () => {
+    storeChatMetadata("maxcur@g.us", "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["a", "b", "c"]) {
+      store({
+        id,
+        chat_jid: "maxcur@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `msg ${id}`,
+        timestamp: T,
+      });
+    }
+    store({
+      id: "d",
+      chat_jid: "maxcur@g.us",
+      sender: "user@s.whatsapp.net",
+      sender_name: "User",
+      content: "msg d",
+      timestamp: "2024-01-01T00:00:02.000Z",
+    });
+    // Start after "a", cap to 2 rows
+    const msgs = getAllMessagesSince("maxcur@g.us", T, "Andy", 200, "a", 2);
+    expect(msgs).toHaveLength(2);
+    expect(msgs.map((m) => m.id)).toEqual(["b", "c"]);
+  });
+});
+
 // --- RegisteredGroup isMain round-trip ---
 
 describe("registered group isMain", () => {
@@ -442,5 +919,145 @@ describe("registered group isMain", () => {
     const group = groups["group@g.us"];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- router_state pending_tail_drain round-trip ---
+
+describe("router_state pending_tail_drain", () => {
+  it("round-trips JSON array", () => {
+    const jids = ["a@g.us", "b@g.us"];
+    setRouterState("pending_tail_drain", JSON.stringify(jids));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual(["a@g.us", "b@g.us"]);
+  });
+
+  it("handles empty array", () => {
+    setRouterState("pending_tail_drain", JSON.stringify([]));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual([]);
+  });
+
+  it("round-trips new Map format (JSON object with cursors)", () => {
+    const data = {
+      "group1@g.us": { ts: "2024-01-01T00:00:05.000Z", id: "msg-50" },
+      "group2@g.us": { ts: "2024-01-01T00:01:00.000Z", id: "msg-120" },
+    };
+    setRouterState("pending_tail_drain", JSON.stringify(data));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    const parsed = JSON.parse(raw!);
+    expect(parsed).toEqual(data);
+    expect(parsed["group1@g.us"].ts).toBe("2024-01-01T00:00:05.000Z");
+    expect(parsed["group1@g.us"].id).toBe("msg-50");
+  });
+
+  it("handles empty object", () => {
+    setRouterState("pending_tail_drain", JSON.stringify({}));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual({});
+  });
+});
+
+// --- Regression: trigger scanning and piping with large backlogs ---
+
+describe("large backlog trigger scanning", () => {
+  it("getAllMessagesSince without maxRows returns full backlog for trigger scanning", () => {
+    const jid = "backlog@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 300; i++) {
+      store({
+        id: `bl-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: i === 250 ? "@Andy trigger message" : `message ${i}`,
+        timestamp: `2024-01-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // Without maxRows: returns all 300 — trigger at position 250 is discoverable
+    const all = getAllMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 200);
+    expect(all).toHaveLength(300);
+    const triggerIdx = all.findIndex((m) => m.content.includes("@Andy"));
+    expect(triggerIdx).toBeGreaterThanOrEqual(0);
+
+    // With maxRows=200: returns only oldest 200 — trigger is NOT discoverable (the bug)
+    const capped = getAllMessagesSince(
+      jid,
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      200,
+    );
+    expect(capped).toHaveLength(200);
+    const cappedTriggerIdx = capped.findIndex((m) => m.content.includes("@Andy"));
+    expect(cappedTriggerIdx).toBe(-1);
+  });
+
+  it("getMessagesSince returns newest messages including recent trigger", () => {
+    const jid = "pipe@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 300; i++) {
+      store({
+        id: `pipe-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: i === 300 ? "@Andy trigger" : `message ${i}`,
+        timestamp: `2024-01-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // getMessagesSince (newest N): trigger is included because it's the last message
+    const newest = getMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 200);
+    expect(newest).toHaveLength(200);
+    expect(newest[newest.length - 1].content).toBe("@Andy trigger");
+
+    // getAllMessagesSince with maxRows (oldest N): trigger is NOT included (the bug)
+    const oldest = getAllMessagesSince(
+      jid,
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      200,
+    );
+    expect(oldest).toHaveLength(200);
+    const hasTrigger = oldest.some((m) => m.content.includes("@Andy"));
+    expect(hasTrigger).toBe(false);
+  });
+
+  it("getMessagesSince cursor advancement leaves no residual", () => {
+    const jid = "residual@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 10; i++) {
+      store({
+        id: `res-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // Fetch newest 5
+    const batch = getMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 5);
+    expect(batch).toHaveLength(5);
+    expect(batch[0].id).toBe("res-6");
+    expect(batch[4].id).toBe("res-10");
+
+    // Advance cursor to last returned message, fetch again — should be empty
+    const last = batch[batch.length - 1];
+    const next = getMessagesSince(jid, last.timestamp, "Andy", 5, last.id);
+    expect(next).toHaveLength(0);
   });
 });

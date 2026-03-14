@@ -27,6 +27,32 @@ export function formatMessages(messages: NewMessage[], timezone: string): string
   return `${header}<messages>\n${lines.join("\n")}\n</messages>`;
 }
 
+export function formatMessagesWithCap(
+  messages: NewMessage[],
+  timezone: string,
+  maxMessages: number = 200,
+  totalCount?: number,
+): string {
+  const kept = messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+  const effectiveTotal = totalCount ?? messages.length;
+  const omitted = effectiveTotal - kept.length;
+  if (omitted <= 0) {
+    return formatMessages(kept, timezone);
+  }
+  return `<note>${omitted} older messages omitted for context window</note>\n${formatMessages(kept, timezone)}`;
+}
+
+export function anchorTriggerWindow(
+  messageCount: number,
+  triggerIdx: number,
+  maxMessages: number,
+): { start: number; end: number; truncated: boolean } {
+  if (messageCount <= maxMessages) return { start: 0, end: messageCount, truncated: false };
+  const end = Math.min(messageCount, triggerIdx + maxMessages);
+  const start = end - maxMessages;
+  return { start, end, truncated: end < messageCount };
+}
+
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, "").trim();
 }

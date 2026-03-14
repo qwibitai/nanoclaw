@@ -31,6 +31,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_chat_ts_id ON messages(chat_jid, timestamp, id);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -260,22 +261,118 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  sinceId?: string,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
+  const tsOnlySql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
+      ORDER BY timestamp DESC, id DESC
       LIMIT ?
-    ) ORDER BY timestamp
+    ) ORDER BY timestamp, id
   `;
-  return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  const compositeSql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND id > ?))
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    ) ORDER BY timestamp, id
+  `;
+  const cursorId = sinceId || null;
+  if (cursorId !== null) {
+    return db
+      .prepare(compositeSql)
+      .all(
+        chatJid,
+        sinceTimestamp,
+        sinceTimestamp,
+        cursorId,
+        `${botPrefix}:%`,
+        limit,
+      ) as NewMessage[];
+  }
+  return db
+    .prepare(tsOnlySql)
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+}
+
+/**
+ * Drain all non-bot messages after the given cursor.
+ *
+ * Pages forward using `ORDER BY timestamp, id`. Note that `id` ordering is
+ * lexicographic — this may not match real-world arrival order within a shared
+ * timestamp, but no messages are lost because the composite cursor
+ * `(timestamp, id)` is a total order over the primary key.
+ *
+ * When `sinceId` is provided the first batch uses the composite cursor
+ * `(timestamp > ? OR (timestamp = ? AND id > ?))` instead of timestamp-only,
+ * so callers can resume exactly where they left off without skipping rows that
+ * share the cursor timestamp.
+ */
+export function getAllMessagesSince(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+  batchSize: number = 200,
+  sinceId?: string,
+  maxRows?: number,
+): NewMessage[] {
+  const initialSql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp, id
+    LIMIT ?
+  `;
+  const pageSql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    FROM messages
+    WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND id > ?))
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp, id
+    LIMIT ?
+  `;
+  const initialStmt = db.prepare(initialSql);
+  const pageStmt = db.prepare(pageSql);
+  const all: NewMessage[] = [];
+  let cursorTs = sinceTimestamp;
+  let cursorId: string | null = sinceId || null;
+  while (true) {
+    const remaining = maxRows !== undefined ? maxRows - all.length : batchSize;
+    if (remaining <= 0) break;
+    const limit = maxRows !== undefined ? Math.min(batchSize, remaining) : batchSize;
+    const batch: NewMessage[] =
+      cursorId === null
+        ? (initialStmt.all(chatJid, cursorTs, `${botPrefix}:%`, limit) as NewMessage[])
+        : (pageStmt.all(
+            chatJid,
+            cursorTs,
+            cursorTs,
+            cursorId,
+            `${botPrefix}:%`,
+            limit,
+          ) as NewMessage[]);
+    if (batch.length === 0) break;
+    all.push(...batch);
+    const last = batch[batch.length - 1];
+    cursorTs = last.timestamp;
+    cursorId = last.id;
+    if (batch.length < limit) break;
+  }
+  return all;
 }
 
 export function createTask(task: Omit<ScheduledTask, "last_run" | "last_result">): void {
