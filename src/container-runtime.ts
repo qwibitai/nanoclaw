@@ -11,11 +11,19 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/**
+ * Hostname or IP containers use to reach the host machine.
+ * Apple Container VMs can reach the host via the bridge IP directly.
+ * Docker Desktop resolves host.docker.internal automatically.
+ */
+export const CONTAINER_HOST_GATEWAY =
+  os.platform() === 'darwin'
+    ? (detectAppleContainerBridgeIp() ?? 'host.docker.internal')
+    : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.
+ * Apple Container (macOS): bind to the bridge100 IP — VMs route via this bridge.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
@@ -23,8 +31,28 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
+/**
+ * Detect the IP of Apple Container's VM bridge (bridge100 or similar).
+ * Returns null if no bridge interface with a non-loopback IPv4 is found.
+ */
+function detectAppleContainerBridgeIp(): string | null {
+  const ifaces = os.networkInterfaces();
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    if (!name.startsWith('bridge')) continue;
+    const ipv4 = addrs?.find((a) => a.family === 'IPv4' && !a.internal);
+    if (ipv4) return ipv4.address;
+  }
+  return null;
+}
+
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') {
+    // Apple Container VMs use a bridge network — bind to the bridge IP so containers can reach us.
+    // Docker Desktop doesn't create a visible bridge; fall back to loopback for that case.
+    const bridgeIp = detectAppleContainerBridgeIp();
+    if (bridgeIp) return bridgeIp;
+    return '127.0.0.1';
+  }
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
@@ -42,7 +70,9 @@ function detectProxyBindHost(): string {
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  // Apple Container uses the bridge IP directly (set in CONTAINER_HOST_GATEWAY) — no extra args needed.
+  // Docker Desktop resolves host.docker.internal automatically on macOS.
+  // On Linux, host.docker.internal isn't built-in — add it explicitly.
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
