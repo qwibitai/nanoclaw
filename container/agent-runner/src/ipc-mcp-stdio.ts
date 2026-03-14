@@ -45,6 +45,7 @@ server.tool(
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    thread_id: z.string().optional().describe('Message ID to reply to as a thread (e.g., Slack thread_ts). If omitted, sends as a top-level message.'),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -52,6 +53,7 @@ server.tool(
       chatJid,
       text: args.text,
       sender: args.sender || undefined,
+      threadId: args.thread_id || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
