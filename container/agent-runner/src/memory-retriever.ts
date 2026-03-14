@@ -13,6 +13,11 @@ import {
   parseAccessMetadata,
   computeEffectiveHalfLife,
 } from "./memory-access-tracker.js";
+import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
+import type { MemoryTier } from "./smart-metadata.js";
+import { DecayEngine, createDecayEngine } from "./decay-engine.js";
+import { TierManager } from "./tier-manager.js";
+import { shouldSkipRetrieval } from "./adaptive-retrieval.js";
 
 // ============================================================================
 // Types & Configuration
@@ -353,6 +358,8 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 export class MemoryRetriever {
   private accessTracker: AccessTracker | null = null;
+  private decayEngine: DecayEngine;
+  private tierManager: TierManager;
   private telemetry = {
     totalRequests: 0,
     skippedRequests: 0,
@@ -374,7 +381,10 @@ export class MemoryRetriever {
     private store: MemoryStore,
     private embedder: Embedder,
     private config: RetrievalConfig = DEFAULT_RETRIEVAL_CONFIG,
-  ) { }
+  ) {
+    this.decayEngine = createDecayEngine();
+    this.tierManager = new TierManager();
+  }
 
   setAccessTracker(tracker: AccessTracker): void {
     this.accessTracker = tracker;
@@ -403,6 +413,19 @@ export class MemoryRetriever {
       resultCount: 0,
     };
 
+    // Adaptive retrieval: skip for trivial queries (auto-recall only)
+    // Manual and CLI queries always proceed — user explicitly requested retrieval
+    if (source === "auto-recall") {
+      const skipDecision = shouldSkipRetrieval(query);
+      if (skipDecision.skip) {
+        this.pushTrace(trace, "adaptive_skip", 1, 0, 0, { reason: skipDecision.reason });
+        this.recordSkippedRequest(source, skipDecision.reason);
+        trace.totalElapsedMs = Date.now() - startedAt;
+        trace.resultCount = 0;
+        return { results: [], trace };
+      }
+    }
+
     let results: RetrievalResult[];
     // Vector-only mode: force the legacy path.
     // Note: do NOT gate hybrid retrieval on store.hasFtsSupport here.
@@ -427,9 +450,28 @@ export class MemoryRetriever {
       );
     }
 
+    // Exclude inactive (superseded) memories
+    const activeStartedAt = Date.now();
+    const activeResults = results.filter(r => {
+      const meta = parseSmartMetadata(r.entry.metadata);
+      return isMemoryActiveAt(meta);
+    });
+    this.pushTrace(trace, "exclude_inactive", results.length, activeResults.length, Date.now() - activeStartedAt);
+    results = activeResults;
+
+    // Lifecycle boost: tier floors prevent core memories from scoring too low
+    const boostStartedAt = Date.now();
+    results = this.applyLifecycleBoost(results, trace, Boolean(trace));
+    this.pushTrace(trace, "lifecycle_boost", activeResults.length, results.length, Date.now() - boostStartedAt);
+
     // Record access for reinforcement (manual recall only)
     if (this.accessTracker && source === "manual" && results.length > 0) {
       this.accessTracker.recordAccess(results.map((r) => r.entry.id));
+    }
+
+    // Tier transitions for top-3 results (async, fire-and-forget)
+    if (source === "manual" && results.length > 0) {
+      this.evaluateTierTransitions(results.slice(0, 3));
     }
 
     trace.totalElapsedMs = Date.now() - startedAt;
@@ -1167,6 +1209,70 @@ export class MemoryRetriever {
       threshold: similarityThreshold,
     });
     return finalResults;
+  }
+
+  /**
+   * Lifecycle boost: apply tier-based floor scores so core memories
+   * never score below the decay floor, even after all scoring stages.
+   */
+  private applyLifecycleBoost(
+    results: RetrievalResult[],
+    trace?: RetrievalTrace,
+    trackScores = false,
+  ): RetrievalResult[] {
+    const TIER_FLOOR: Record<MemoryTier, number> = {
+      core: 0.6,
+      working: 0.4,
+      peripheral: 0.2,
+    };
+
+    return results.map(r => {
+      const meta = parseSmartMetadata(r.entry.metadata);
+      const tier = meta.tier || 'working';
+      const floor = TIER_FLOOR[tier] ?? 0.2;
+      if (r.score >= floor) return r;
+
+      const prevScore = r.score;
+      const newScore = floor;
+      const result = { ...r, score: newScore };
+      if (trackScores && result.scoreHistory) {
+        result.scoreHistory = [...result.scoreHistory, {
+          stage: "lifecycle_boost",
+          stageType: "transform" as const,
+          scoreBefore: prevScore,
+          score: newScore,
+          delta: newScore - prevScore,
+          reason: `tier=${tier} floor=${floor}`,
+        }];
+      }
+      return result;
+    }).sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Evaluate tier transitions for accessed results (fire-and-forget).
+   * Promotes/demotes memories based on access patterns.
+   */
+  private evaluateTierTransitions(results: RetrievalResult[]): void {
+    const now = Date.now();
+    for (const r of results) {
+      const meta = parseSmartMetadata(r.entry.metadata);
+      const transition = this.tierManager.evaluate({
+        id: r.entry.id,
+        currentTier: meta.tier || 'working',
+        accessCount: meta.access_count || 0,
+        compositeScore: r.score,
+        importance: r.entry.importance,
+        ageMs: now - (r.entry.timestamp || now),
+      });
+
+      if (transition) {
+        // Apply tier change via metadata patch (fire-and-forget)
+        this.store.patchMetadata(r.entry.id, { tier: transition.to }).catch(err => {
+          console.warn(`[retriever] Tier transition failed for ${r.entry.id}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    }
   }
 
   // Update configuration

@@ -866,6 +866,94 @@ export class MemoryStore {
     return new Set(rows.map((r: any) => r.id as string));
   }
 
+  /**
+   * Partial metadata update without re-embedding.
+   * Merges `patch` into the existing metadata JSON, preserving all other fields.
+   */
+  async patchMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+    scopeFilter?: string[],
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+
+    const entry = await this.getById(id);
+    if (!entry) return false;
+
+    // Check scope permissions
+    if (scopeFilter && scopeFilter.length > 0 && !scopeFilter.includes(entry.scope)) {
+      return false;
+    }
+
+    let parsed: Record<string, unknown> = {};
+    try { parsed = JSON.parse(entry.metadata || '{}'); } catch { /* ignore */ }
+    const merged = { ...parsed, ...patch };
+
+    const safeId = escapeSqlLiteral(id);
+    await this.table!.delete(`id = '${safeId}'`);
+    await this.table!.add([{
+      ...entry,
+      metadata: JSON.stringify(merged),
+    } as unknown as Record<string, unknown>]);
+
+    return true;
+  }
+
+  /**
+   * Lexical fallback search: in-memory text matching against l0/l1/l2 metadata
+   * fields when FTS index is unavailable. Returns matches sorted by relevance.
+   */
+  async lexicalFallbackSearch(
+    query: string,
+    limit: number = 5,
+    scopeFilter?: string[],
+  ): Promise<MemorySearchResult[]> {
+    await this.ensureInitialized();
+
+    // Fetch entries (capped for performance)
+    const entries = await this.list(scopeFilter, undefined, 500, 0);
+    if (entries.length === 0) return [];
+
+    const queryLower = query.toLowerCase();
+    const queryTerms = queryLower.split(/\s+/).filter(t => t.length > 2);
+    if (queryTerms.length === 0) return [];
+
+    const scored: MemorySearchResult[] = [];
+
+    for (const entry of entries) {
+      let meta: Record<string, unknown> = {};
+      try { meta = JSON.parse(entry.metadata || '{}'); } catch { /* ignore */ }
+
+      // Build searchable text from metadata levels + entry text
+      const searchText = [
+        entry.text,
+        meta.l0_abstract as string || '',
+        meta.l1_overview as string || '',
+        meta.l2_content as string || '',
+      ].join(' ').toLowerCase();
+
+      // Score based on term matches
+      let matchCount = 0;
+      for (const term of queryTerms) {
+        if (searchText.includes(term)) matchCount++;
+      }
+
+      if (matchCount === 0) continue;
+
+      // Normalize score: proportion of query terms matched
+      const score = matchCount / queryTerms.length;
+
+      scored.push({
+        entry: { ...entry, vector: [] },
+        score: Math.min(score, 0.95), // Cap below 1.0
+      });
+    }
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+
   get hasFtsSupport(): boolean {
     return this.ftsSupported;
   }

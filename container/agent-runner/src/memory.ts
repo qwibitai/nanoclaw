@@ -23,6 +23,13 @@ import { MemoryStore } from './memory-store.js';
 import { MemoryRetriever, DEFAULT_RETRIEVAL_CONFIG } from './memory-retriever.js';
 import type { RetrievalConfig } from './memory-retriever.js';
 import { Embedder } from './memory-embedder.js';
+import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata } from './smart-metadata.js';
+import type { SmartMemoryMetadata } from './smart-metadata.js';
+import { normalizeCategory, toLegacyCategory } from './memory-categories.js';
+import type { MemoryCategory } from './memory-categories.js';
+import { createDecayEngine } from './decay-engine.js';
+import type { DecayEngine } from './decay-engine.js';
+import { TierManager } from './tier-manager.js';
 
 // ── Storage config ───────────────────────────────────────────────────────────
 
@@ -192,6 +199,8 @@ let _embeddingConfig: ReturnType<typeof resolveEmbeddingConfig> | null = null;
 let _store: MemoryStore | null = null;
 let _embedder: Embedder | null = null;
 let _retriever: MemoryRetriever | null = null;
+let _decayEngine: DecayEngine | null = null;
+let _tierManager: TierManager | null = null;
 
 function getEmbeddingConfig() {
   if (!_embeddingConfig) {
@@ -236,6 +245,20 @@ function getRetriever(): MemoryRetriever {
   return _retriever;
 }
 
+function getDecayEngine(): DecayEngine {
+  if (!_decayEngine) {
+    _decayEngine = createDecayEngine();
+  }
+  return _decayEngine;
+}
+
+function getTierManager(): TierManager {
+  if (!_tierManager) {
+    _tierManager = new TierManager();
+  }
+  return _tierManager;
+}
+
 // ── Public API (drop-in replacement for basic memory.ts) ─────────────────────
 
 export async function memoryStore(
@@ -249,12 +272,21 @@ export async function memoryStore(
   const embedder = getEmbedder();
   const vector = await embedder.embed(text);
 
+  const normalizedCat = normalizeCategory(category);
+  const smartMeta = buildSmartMetadata({
+    text,
+    category: normalizedCat,
+    importance,
+    existingMeta: meta as Partial<SmartMemoryMetadata>,
+    source: (meta.source as string) || 'user',
+  });
+
   const entry = await store.store({
     text,
-    category: normalizeCategory(category),
+    category: toLegacyCategory(normalizedCat),
     scope,
     importance,
-    metadata: JSON.stringify(meta),
+    metadata: stringifySmartMetadata(smartMeta),
     vector,
   });
 
@@ -281,7 +313,7 @@ export async function memorySearch(
     query,
     limit,
     scopeFilter: Array.isArray(scope) ? scope : [scope],
-    ...(category ? { category: normalizeCategory(category) } : {}),
+    ...(category ? { category: toLegacyCategory(normalizeCategory(category)) } : {}),
     source: 'manual',
   });
 
@@ -308,25 +340,121 @@ export async function memoryCount(scope?: string): Promise<number> {
   return stats.totalCount;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── New Public API (list, update, status) ────────────────────────────────
 
-type ProCategory = 'preference' | 'fact' | 'decision' | 'entity' | 'other' | 'reflection';
-
-function normalizeCategory(cat: string): ProCategory {
-  const direct: Record<string, ProCategory> = {
-    preference: 'preference',
-    decision:   'decision',
-    entity:     'entity',
-    fact:       'fact',
-    reflection: 'reflection',
-    other:      'other',
-  };
-  // Map legacy category names to the closest pro category so
-  // category-filtered searches still return results.
-  const aliases: Record<string, ProCategory> = {
-    event:   'fact',
-    general: 'other',
-  };
-  const lower = cat.toLowerCase();
-  return direct[lower] ?? aliases[lower] ?? 'other';
+export async function memoryList(
+  scope?: string,
+  category?: string,
+  limit: number = 20,
+  offset: number = 0,
+): Promise<Array<{
+  id: string;
+  text: string;
+  category: string;
+  importance: number;
+  timestamp: number;
+  metadata: string;
+}>> {
+  const store = getStore();
+  const legacyCat = category ? toLegacyCategory(normalizeCategory(category)) : undefined;
+  const entries = await store.list(
+    scope ? [scope] : undefined,
+    legacyCat,
+    limit,
+    offset,
+  );
+  return entries.map(e => ({
+    id: e.id,
+    text: e.text,
+    category: e.category,
+    importance: e.importance,
+    timestamp: e.timestamp,
+    metadata: e.metadata ?? '{}',
+  }));
 }
+
+export async function memoryUpdate(
+  id: string,
+  updates: {
+    text?: string;
+    importance?: number;
+    category?: string;
+    metadata?: Record<string, unknown>;
+  },
+  scope?: string,
+): Promise<boolean> {
+  const store = getStore();
+  const embedder = getEmbedder();
+
+  const storeUpdates: {
+    text?: string;
+    vector?: number[];
+    importance?: number;
+    category?: 'preference' | 'fact' | 'decision' | 'entity' | 'other' | 'reflection';
+    metadata?: string;
+  } = {};
+
+  if (updates.text) {
+    storeUpdates.text = updates.text;
+    storeUpdates.vector = await embedder.embed(updates.text);
+  }
+  if (updates.importance !== undefined) {
+    storeUpdates.importance = updates.importance;
+  }
+  if (updates.category) {
+    storeUpdates.category = toLegacyCategory(normalizeCategory(updates.category));
+  }
+  if (updates.metadata) {
+    const existing = await store.getById(id);
+    if (existing) {
+      const parsed = parseSmartMetadata(existing.metadata);
+      const merged = { ...parsed, ...updates.metadata };
+      storeUpdates.metadata = JSON.stringify(merged);
+    }
+  }
+
+  const result = await store.update(id, storeUpdates, scope ? [scope] : undefined);
+  return result !== null;
+}
+
+export async function memoryStatus(
+  scope?: string,
+): Promise<{
+  totalCount: number;
+  scopeCounts: Record<string, number>;
+  categoryCounts: Record<string, number>;
+  tierDistribution: Record<string, number>;
+  ftsHealth: { supported: boolean; indexExists: boolean; lastError: string | null };
+}> {
+  const store = getStore();
+  const stats = await store.stats(scope ? [scope] : undefined);
+  const ftsHealth = store.getFtsStatus();
+
+  // Compute tier distribution from a sample of entries (capped at 500 for performance)
+  const tierDistribution: Record<string, number> = { core: 0, working: 0, peripheral: 0 };
+  const sampleEntries = await store.list(scope ? [scope] : undefined, undefined, 500, 0);
+  for (const entry of sampleEntries) {
+    const meta = parseSmartMetadata(entry.metadata);
+    const tier = meta.tier || 'working';
+    tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
+  }
+
+  return {
+    totalCount: stats.totalCount,
+    scopeCounts: stats.scopeCounts,
+    categoryCounts: stats.categoryCounts,
+    tierDistribution,
+    ftsHealth,
+  };
+}
+
+/** Expose the store singleton for direct access by advanced modules */
+export function getMemoryStore(): MemoryStore {
+  return getStore();
+}
+
+/** Expose the embedder singleton for direct access by advanced modules */
+export function getMemoryEmbedder(): Embedder {
+  return getEmbedder();
+}
+
