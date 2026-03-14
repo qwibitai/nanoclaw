@@ -327,8 +327,9 @@ When the task fires:
 3. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
 4. **Select a photo** for each post from `asset-catalog.md` using the theme-to-photo mapping. Record the Drive file ID alongside each post.
    - **If asset-catalog.md has no photos yet**: Note "NO PHOTO" in the Drive File ID column of `pending-posts.md` and generate the post as text-only. When photos become available, update `asset-catalog.md` and future posts will automatically include them.
-5. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo (or "NO PHOTO"), and place-id from `houston-places.md`
-6. Send WhatsApp preview of all 5 posts for owner review
+5. **For each Facebook post, also generate an Instagram caption version**: same photo reference, but longer caption (150-300 chars), include 15-20 relevant hashtags from the hashtag strategy in `brand-voice.md`, and note the Instagram location ID from `houston-places.md`.
+6. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo (or "NO PHOTO"), place-id from `houston-places.md`, and the Instagram caption version alongside the Facebook version.
+7. Send WhatsApp preview of all 5 posts for owner review
 
 ### Handling Approval Messages
 When the owner replies with approval (e.g., "approved", "looks good", "approve all"):
@@ -353,6 +354,7 @@ A scheduled task (`snak-fb-post-daily`) reads `pending-posts.md` and posts today
       - Do NOT pass `--source`. Text-only posts should follow the "40-80 chars + engagement hook" format from content-creation guidelines.
       - The post still goes through the normal pending-posts.md approval workflow.
    c. Record the post_id in `pending-posts.md` and `content-calendar.md` log
+   d. **After posting to Facebook, also post to Instagram** using `post-instagram.ts` with the Instagram caption version and the same image URL. Use `--image-url` with the Facebook post's photo URL (after Facebook hosting makes it public). Use `--location-id` with the Instagram location ID from `houston-places.md`. Record the Instagram post_id in `pending-posts.md`.
 3. If not approved → skip and notify: "Skipping today's post — not yet approved"
 4. If already posted → skip silently
 

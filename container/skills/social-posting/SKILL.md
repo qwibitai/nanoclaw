@@ -1,7 +1,7 @@
 ---
 name: social-posting
 description: Post content to X (Twitter), Facebook, and LinkedIn. Manage LinkedIn warm outreach and connection requests. Use when asked to post on social media, share content, manage social presence, or do LinkedIn outreach.
-allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *), Bash(npx tsx /workspace/project/tools/drive/drive.ts *)
+allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-instagram.ts *), Bash(npx tsx /workspace/project/tools/social/post-tiktok.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *), Bash(npx tsx /workspace/project/tools/drive/drive.ts *)
 ---
 
 # Social Media Posting
@@ -56,6 +56,41 @@ npx tsx /workspace/project/tools/social/post-facebook.ts \
 ```
 
 Videos route to the `/{pageId}/videos` endpoint automatically (detected by file extension).
+
+## Post to Instagram
+
+```bash
+npx tsx /workspace/project/tools/social/post-instagram.ts \
+  --caption "Your caption with #hashtags" \
+  --image-url "https://public-url-to-image.jpg" \
+  [--video-url "https://public-url-to-video.mp4"] \
+  [--location-id "instagram_location_id"] \
+  [--dry-run]
+```
+
+Options:
+- `--caption` (required): Post caption (up to 2,200 chars). Include hashtags inline.
+- `--image-url` (required): Publicly accessible URL to the image. Instagram fetches it server-side.
+- `--video-url` (optional): Publicly accessible URL to a video (Reels). Mutually exclusive with `--image-url` for single-media posts.
+- `--location-id` (optional): Instagram location ID for geo-tagging (see `houston-places.md`).
+- `--search-location` (optional): Search for Instagram location IDs by name (e.g., `--search-location "Houston, TX"`).
+- `--dry-run` (optional): Validate inputs without actually posting.
+
+## Post to TikTok
+
+```bash
+npx tsx /workspace/project/tools/social/post-tiktok.ts \
+  --title "Video caption" \
+  --video-url "https://public-url-to-video.mp4" \
+  [--privacy "PUBLIC_TO_EVERYONE"] \
+  [--dry-run]
+```
+
+Options:
+- `--title` (required): Video caption/description.
+- `--video-url` (required): Publicly accessible URL to the video file.
+- `--privacy` (optional): Privacy setting. One of `PUBLIC_TO_EVERYONE` (default), `MUTUAL_FOLLOW_FRIENDS`, `FOLLOWER_OF_CREATOR`, `SELF_ONLY`.
+- `--dry-run` (optional): Validate inputs without actually posting.
 
 ## Post to LinkedIn
 
@@ -199,11 +234,24 @@ When engaging with prospects' LinkedIn posts:
 - Ask questions to drive engagement
 - Include 1 geo hashtag (#Houston, #Tomball, etc.) per post
 
+### Instagram
+- Photo or video required (no text-only posts)
+- Caption up to 2,200 chars — use the space for storytelling
+- 15-20 hashtags: mix of broad (#vending), niche (#houstonbreakroom), and geo (#houston)
+- Always include location tag for local discovery
+- First line of caption is the hook (visible before "more")
+
 ### LinkedIn
 - Professional tone
 - 1,300 characters is the sweet spot
 - Use line breaks for readability
 - Post industry insights and thought leadership
+
+### TikTok
+- Video content only — skip if no video available
+- Caption/title should hook in first 3 seconds
+- Use trending sounds and hashtags when relevant
+- Keep videos under 60 seconds for best engagement
 
 ## Read Facebook Post Insights
 
@@ -215,10 +263,19 @@ npx tsx /workspace/project/tools/social/read-facebook-insights.ts \
 Returns engagement metrics per post: reactions, comments, shares, reach, impressions, clicks.
 Falls back gracefully if `read_insights` permission is unavailable (still returns reactions/comments/shares).
 
-## Cross-Platform Posting
+## Cross-Platform Posting Strategy
 
-When posting the same content across platforms, adapt the message for each:
-1. Start with the core message
-2. Adjust length for each platform
-3. Add platform-specific elements (hashtags for Twitter, professional tone for LinkedIn)
-4. Never post identical content across all platforms
+When generating weekly posts (Sunday), create platform-adapted versions of each post. Same core message, adapted per platform's style:
+
+- **Facebook**: 40-80 chars + photo + place-id + 1 geo hashtag
+- **Instagram**: Photo + longer caption (up to 2,200 chars) + 15-20 hashtags + location ID
+- **X/Twitter**: 280 chars max, 2-3 hashtags, link if relevant
+- **LinkedIn**: Professional tone, 800-1,300 chars, 3-5 hashtags
+- **TikTok**: Only when video content is available
+
+### Posting Rules
+
+1. Start with the core message and adapt length/tone for each platform
+2. Never post identical content across all platforms
+3. **Post timing**: Stagger posts by 30-60 minutes across platforms to avoid looking automated (e.g., Facebook at 9:00 AM, Instagram at 9:30 AM, X at 10:00 AM, LinkedIn at 10:30 AM)
+4. Each platform version should feel native — not like a copy-paste from another platform
