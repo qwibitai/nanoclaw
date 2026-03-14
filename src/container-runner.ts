@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -26,8 +27,23 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+// Tool credentials (not Claude API secrets) — passed to containers for MCP tools
+const TOOL_SECRET_KEYS = [
+  // LanceDB storage
+  'LANCEDB_URI', 'LANCEDB_API_KEY', 'MEMORY_LANCEDB_DIR',
+  // Embedding providers
+  'EMBEDDING_PROVIDER', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL',
+  'EMBEDDING_BASE_URL', 'EMBEDDING_DIM',
+  'GEMINI_API_KEY', 'JINA_API_KEY', 'OPENAI_API_KEY',
+  // Rerank providers
+  'RERANK_PROVIDER', 'RERANK_API_KEY', 'RERANK_MODEL', 'RERANK_ENDPOINT',
+  'SILICONFLOW_API_KEY', 'VOYAGE_API_KEY', 'PINECONE_API_KEY',
+];
+const toolSecrets = readEnvFile(TOOL_SECRET_KEYS);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -163,6 +179,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const homeDir = os.homedir();
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -236,6 +263,22 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Tool API keys (non-Claude credentials for MCP tools like semantic memory)
+  // Write to a temp file and use --env-file to avoid leaking secrets in ps/cmdline.
+  const envLines: string[] = [];
+  for (const key of TOOL_SECRET_KEYS) {
+    if (toolSecrets[key]) {
+      envLines.push(`${key}=${toolSecrets[key]}`);
+    }
+  }
+  if (envLines.length > 0) {
+    const envFilePath = path.join(os.tmpdir(), `.nanoclaw-env-${Date.now()}`);
+    fs.writeFileSync(envFilePath, envLines.join('\n'), { mode: 0o600 });
+    args.push('--env-file', envFilePath);
+    // Clean up after container starts (best-effort; file is 0600 so low risk)
+    setTimeout(() => { try { fs.unlinkSync(envFilePath); } catch {} }, 30_000);
   }
 
   // Runtime-specific args for host gateway resolution
