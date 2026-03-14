@@ -76,7 +76,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -91,7 +94,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -112,7 +118,9 @@ const providers: Record<string, ProviderConfig> = {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: message || 'Say OK' }] }] }),
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: message || 'Say OK' }] }],
+          }),
         },
       ),
   },
@@ -123,7 +131,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -138,7 +149,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.fireworks.ai/inference/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -153,7 +167,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -168,7 +185,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -183,7 +203,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.cohere.com/v2/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -197,7 +220,10 @@ const providers: Record<string, ProviderConfig> = {
     testFn: (apiKey, message, model) =>
       fetch('https://api.together.xyz/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: message || 'Say OK' }],
@@ -228,15 +254,22 @@ app.get('/', (_req, res) => {
   if (fs.existsSync(htmlPath)) {
     res.sendFile(htmlPath);
   } else {
-    res.status(500).send('provider-test.html not found next to provider-test.ts');
+    res
+      .status(500)
+      .send('provider-test.html not found next to provider-test.ts');
   }
 });
 
 // GET /api/providers — provider list + defaults for the frontend
 app.get('/api/providers', (_req, res) => {
   res.json({
-    providers: Object.entries(providers).map(([key, p]) => ({ key, name: p.name })),
-    defaults: Object.fromEntries(Object.entries(providers).map(([key, p]) => [key, p.defaultModel])),
+    providers: Object.entries(providers).map(([key, p]) => ({
+      key,
+      name: p.name,
+    })),
+    defaults: Object.fromEntries(
+      Object.entries(providers).map(([key, p]) => [key, p.defaultModel]),
+    ),
   });
 });
 
@@ -269,7 +302,12 @@ app.post('/api/fetch-models', async (req, res) => {
         const d: any = await r.json();
         models = (d.data as any[])
           .map((m: any) => m.id as string)
-          .filter((id) => id.startsWith('gpt') || id.startsWith('o1') || id.startsWith('o3'))
+          .filter(
+            (id) =>
+              id.startsWith('gpt') ||
+              id.startsWith('o1') ||
+              id.startsWith('o3'),
+          )
           .sort();
       }
     } else if (provider === 'groq') {
@@ -343,7 +381,10 @@ app.post('/api/test-provider', async (req, res) => {
   const apiKey = (req.body.apiKey as string) || readEnvKey(provider);
 
   if (!provider || !model || !apiKey) {
-    return res.json({ success: false, error: 'Missing provider, model, or API key' });
+    return res.json({
+      success: false,
+      error: 'Missing provider, model, or API key',
+    });
   }
 
   const cfg = providers[provider];
@@ -376,7 +417,12 @@ app.post('/api/test-provider', async (req, res) => {
 
     res.json({ success: true, provider: cfg.name, responseTime, responseText });
   } catch (err) {
-    res.json({ success: false, provider: cfg.name, status: 0, details: String(err) });
+    res.json({
+      success: false,
+      provider: cfg.name,
+      status: 0,
+      details: String(err),
+    });
   }
 });
 
@@ -386,7 +432,10 @@ app.post('/api/save-key', (req, res) => {
   const envVar = ENV_VAR_NAMES[provider];
 
   if (!envVar || !apiKey) {
-    return res.json({ success: false, error: 'No env var mapping for provider: ' + provider });
+    return res.json({
+      success: false,
+      error: 'No env var mapping for provider: ' + provider,
+    });
   }
 
   let content = '';
@@ -418,4 +467,7 @@ const server = app.listen(PORT, () => {
 });
 
 process.on('SIGTERM', () => server.close());
-process.on('SIGINT', () => { server.close(); process.exit(0); });
+process.on('SIGINT', () => {
+  server.close();
+  process.exit(0);
+});

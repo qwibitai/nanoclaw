@@ -122,11 +122,15 @@ function createSchema(database: Database.Database): void {
   // Add quoted message columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN quoted_content TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
 
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN quoted_sender_name TEXT`);
-  } catch { /* column already exists */ }
+  } catch {
+    /* column already exists */
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
