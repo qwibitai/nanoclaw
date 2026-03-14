@@ -139,18 +139,36 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+/** @internal - exported for testing */
+export function _setLastAgentTimestamp(ts: Record<string, string>): void {
+  lastAgentTimestamp = ts;
+}
+
+/** @internal - exported for testing */
+export function _getLastAgentTimestamp(): Record<string, string> {
+  return { ...lastAgentTimestamp };
+}
+
+/** @internal - exported for testing */
+export const _processGroupMessages: (
+  chatJid: string,
+) => Promise<{ success: boolean; rateLimitResetAt?: Date }> =
+  processGroupMessages;
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
+async function processGroupMessages(
+  chatJid: string,
+): Promise<{ success: boolean; rateLimitResetAt?: Date }> {
   const group = registeredGroups[chatJid];
-  if (!group) return true;
+  if (!group) return { success: true };
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-    return true;
+    return { success: true };
   }
 
   const isMainGroup = group.isMain === true;
@@ -162,7 +180,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     ASSISTANT_NAME,
   );
 
-  if (missedMessages.length === 0) return true;
+  if (missedMessages.length === 0) return { success: true };
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -172,7 +190,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (!hasTrigger) return { success: true };
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -206,6 +224,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let rateLimitResetAt: Date | undefined;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -231,6 +250,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+      if (result.rateLimitResetAt) {
+        const d = new Date(result.rateLimitResetAt);
+        if (!isNaN(d.getTime())) rateLimitResetAt = d;
+      }
     }
   });
 
@@ -238,26 +261,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
+    // If we already sent output to the user AND this isn't a rate-limit error,
+    // don't roll back the cursor — re-processing would send duplicates.
+    // For rate-limit errors we DO roll back: the output was only the rate-limit
+    // notice (not the real answer), so the original message needs to be retried.
+    if (outputSentToUser && !rateLimitResetAt) {
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
-      return true;
+      return { success: true };
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
-    logger.warn(
-      { group: group.name },
-      'Agent error, rolled back message cursor for retry',
-    );
-    return false;
+    if (rateLimitResetAt) {
+      logger.warn(
+        { group: group.name, resetAt: rateLimitResetAt.toISOString() },
+        'Rate limit hit, will auto-retry after reset',
+      );
+    } else {
+      logger.warn(
+        { group: group.name },
+        'Agent error, rolled back message cursor for retry',
+      );
+    }
+    return { success: false, rateLimitResetAt };
   }
 
-  return true;
+  return { success: true };
 }
 
 async function runAgent(
@@ -577,6 +609,22 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.setRateLimitRetryNotifyFn((groupJid) => {
+    const channel = findChannel(channels, groupJid);
+    if (channel) {
+      channel
+        .sendMessage(
+          groupJid,
+          'Rate limit has reset — retrying your previous task now.',
+        )
+        .catch((err) =>
+          logger.warn(
+            { groupJid, err },
+            'Failed to send rate-limit retry notification',
+          ),
+        );
+    }
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

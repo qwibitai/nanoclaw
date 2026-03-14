@@ -46,7 +46,7 @@ describe('GroupQueue', () => {
       // Simulate async work
       await new Promise((resolve) => setTimeout(resolve, 100));
       concurrentCount--;
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -74,7 +74,7 @@ describe('GroupQueue', () => {
       maxActive = Math.max(maxActive, activeCount);
       await new Promise<void>((resolve) => completionCallbacks.push(resolve));
       activeCount--;
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -112,7 +112,7 @@ describe('GroupQueue', () => {
         });
       }
       executionOrder.push('messages');
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -145,7 +145,7 @@ describe('GroupQueue', () => {
 
     const processMessages = vi.fn(async () => {
       callCount++;
-      return false; // failure
+      return { success: false }; // failure
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -166,10 +166,183 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(3);
   });
 
+  // --- Rate limit: retry at reset time, not exponential backoff ---
+
+  it('retries at rate limit reset time instead of exponential backoff', async () => {
+    let callCount = 0;
+
+    const resetAt = new Date(Date.now() + 60_000); // resets in 60s
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      // Only fail with rate limit on the first call
+      if (callCount === 1) return { success: false, rateLimitResetAt: resetAt };
+      return { success: true };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // First call happens immediately
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Should NOT retry at the normal 5s backoff interval
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(callCount).toBe(1);
+
+    // Should retry at resetAt + 2s buffer (62s total)
+    await vi.advanceTimersByTimeAsync(57_000); // now at 62s
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+  });
+
+  it('does not consume retryCount on rate limit errors', async () => {
+    let callCount = 0;
+    const resetAt = new Date(Date.now() + 1_000);
+
+    // First call: rate limit error
+    // Second call: generic error (should still have full 5 retries available)
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) return { success: false, rateLimitResetAt: resetAt };
+      return { success: false };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Rate limit retry fires at ~3s (1s reset + 2s buffer)
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+
+    // retryCount should be 1 (first generic failure), not 2
+    // — so 4 retries remain before dropping (5s, 10s, 20s, 40s, 80s)
+    await vi.advanceTimersByTimeAsync(5_000 + 10);
+    expect(callCount).toBe(3);
+  });
+
+  it('retries immediately if rate limit reset time is already past', async () => {
+    let callCount = 0;
+    const alreadyPast = new Date(Date.now() - 5_000); // 5s ago
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1)
+        return { success: false, rateLimitResetAt: alreadyPast };
+      return { success: true };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // delayMs = Math.max(-5000 + 2000, 0) = 0, so retry fires within the same tick
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+
+    // No more retries after success
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(callCount).toBe(2);
+  });
+
+  it('handles multiple consecutive rate limit errors', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      // Compute resetAt fresh each call so it's always ~1s in the future
+      if (callCount <= 3)
+        return {
+          success: false,
+          rateLimitResetAt: new Date(Date.now() + 1_000),
+        };
+      return { success: true };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Each retry fires at ~3s (1s reset + 2s buffer)
+    await vi.advanceTimersByTimeAsync(3_000 + 10);
+    expect(callCount).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(3_000 + 10);
+    expect(callCount).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(3_000 + 10);
+    expect(callCount).toBe(4);
+
+    // No further retries after success
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(callCount).toBe(4);
+  });
+
+  it('stops retrying after MAX_RATE_LIMIT_RETRIES consecutive rate limit errors', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return { success: false, rateLimitResetAt: new Date(Date.now() + 1_000) };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Run through all 10 rate limit retries + initial call (11 total)
+    for (let i = 0; i < 11; i++) {
+      await vi.advanceTimersByTimeAsync(3_100);
+    }
+    expect(callCount).toBe(11);
+
+    // After MAX_RATE_LIMIT_RETRIES (10) the circuit breaks — no more retries
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(callCount).toBe(11);
+  });
+
+  it('resets rateLimitRetryCount after a successful retry', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      // 3 rate limit errors, then success, then rate limit again
+      if (callCount <= 3)
+        return {
+          success: false,
+          rateLimitResetAt: new Date(Date.now() + 1_000),
+        };
+      if (callCount === 4) return { success: true };
+      return { success: false, rateLimitResetAt: new Date(Date.now() + 1_000) };
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Burn through 3 rate limit retries
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(3_100);
+    }
+    expect(callCount).toBe(4); // 1 initial + 3 retries
+
+    // Trigger a new message after success resets the counter
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(5); // called once more
+
+    // Rate limit retry counter was reset — should retry again (not hit cap)
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(callCount).toBe(6);
+  });
+
   // --- Shutdown prevents new enqueues ---
 
   it('prevents new enqueues after shutdown', async () => {
-    const processMessages = vi.fn(async () => true);
+    const processMessages = vi.fn(async () => ({ success: true }));
     queue.setProcessMessagesFn(processMessages);
 
     await queue.shutdown(1000);
@@ -187,7 +360,7 @@ describe('GroupQueue', () => {
 
     const processMessages = vi.fn(async () => {
       callCount++;
-      return false; // always fail
+      return { success: false }; // always fail
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -220,7 +393,7 @@ describe('GroupQueue', () => {
     const processMessages = vi.fn(async (groupJid: string) => {
       processed.push(groupJid);
       await new Promise<void>((resolve) => completionCallbacks.push(resolve));
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -288,7 +461,7 @@ describe('GroupQueue', () => {
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
       });
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -328,7 +501,7 @@ describe('GroupQueue', () => {
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
       });
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -371,7 +544,7 @@ describe('GroupQueue', () => {
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
       });
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);
@@ -441,7 +614,7 @@ describe('GroupQueue', () => {
       await new Promise<void>((resolve) => {
         resolveProcess = resolve;
       });
-      return true;
+      return { success: true };
     });
 
     queue.setProcessMessagesFn(processMessages);

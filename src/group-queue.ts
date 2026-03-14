@@ -12,6 +12,7 @@ interface QueuedTask {
 }
 
 const MAX_RETRIES = 5;
+const MAX_RATE_LIMIT_RETRIES = 10;
 const BASE_RETRY_MS = 5000;
 
 interface GroupState {
@@ -25,14 +26,19 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  rateLimitRetryCount: number;
 }
 
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
   private waitingGroups: string[] = [];
-  private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
-    null;
+  private processMessagesFn:
+    | ((
+        groupJid: string,
+      ) => Promise<{ success: boolean; rateLimitResetAt?: Date }>)
+    | null = null;
+  private rateLimitRetryNotifyFn: ((groupJid: string) => void) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -49,14 +55,23 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        rateLimitRetryCount: 0,
       };
       this.groups.set(groupJid, state);
     }
     return state;
   }
 
-  setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
+  setProcessMessagesFn(
+    fn: (
+      groupJid: string,
+    ) => Promise<{ success: boolean; rateLimitResetAt?: Date }>,
+  ): void {
     this.processMessagesFn = fn;
+  }
+
+  setRateLimitRetryNotifyFn(fn: (groupJid: string) => void): void {
+    this.rateLimitRetryNotifyFn = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -211,11 +226,12 @@ export class GroupQueue {
 
     try {
       if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid);
-        if (success) {
+        const result = await this.processMessagesFn(groupJid);
+        if (result.success) {
           state.retryCount = 0;
+          state.rateLimitRetryCount = 0;
         } else {
-          this.scheduleRetry(groupJid, state);
+          this.scheduleRetry(groupJid, state, result.rateLimitResetAt);
         }
       }
     } catch (err) {
@@ -260,7 +276,48 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(groupJid: string, state: GroupState): void {
+  private scheduleRetry(
+    groupJid: string,
+    state: GroupState,
+    rateLimitResetAt?: Date,
+  ): void {
+    if (rateLimitResetAt) {
+      // Claude API rate limit: the container extracted the exact reset timestamp
+      // from the response headers (anthropic-ratelimit-*-reset). Schedule a
+      // single retry 2s after that time rather than burning through the generic
+      // exponential backoff retries — which top out at 80s and would drop the
+      // message if the limit resets later than that.
+      state.rateLimitRetryCount++;
+      if (state.rateLimitRetryCount > MAX_RATE_LIMIT_RETRIES) {
+        logger.error(
+          { groupJid, rateLimitRetryCount: state.rateLimitRetryCount },
+          'Max rate limit retries exceeded, dropping messages',
+        );
+        state.rateLimitRetryCount = 0;
+        return;
+      }
+      const delayMs = Math.max(
+        rateLimitResetAt.getTime() - Date.now() + 2000,
+        0,
+      );
+      logger.info(
+        {
+          groupJid,
+          resetAt: rateLimitResetAt.toISOString(),
+          delayMs,
+          rateLimitRetryCount: state.rateLimitRetryCount,
+        },
+        'Rate limit hit, scheduling retry after reset',
+      );
+      setTimeout(() => {
+        if (!this.shuttingDown) {
+          this.rateLimitRetryNotifyFn?.(groupJid);
+          this.enqueueMessageCheck(groupJid);
+        }
+      }, delayMs);
+      return;
+    }
+
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
       logger.error(

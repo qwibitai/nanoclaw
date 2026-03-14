@@ -207,4 +207,42 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  // --- Rate-limit passthrough ---
+
+  it('passes rateLimitResetAt through to the onOutput callback intact', async () => {
+    // This is the critical bridge test: the agent-runner emits an error output
+    // with a rateLimitResetAt field; the container-runner must pass the full
+    // object (including that field) to the onOutput callback so processGroupMessages
+    // can schedule a retry at the correct time.
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const rateLimitMsg =
+      "You've hit your usage limit · resets 2am (America/Los_Angeles)";
+    emitOutputMarker(fakeProc, {
+      status: 'error',
+      result: rateLimitMsg,
+      rateLimitResetAt: '2025-01-01T10:00:00.000Z',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await resultPromise;
+
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        result: rateLimitMsg,
+        rateLimitResetAt: '2025-01-01T10:00:00.000Z',
+      }),
+    );
+  });
 });
