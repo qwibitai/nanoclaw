@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -240,6 +241,17 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Non-secret model configuration can be passed through safely.
+  // This prevents SDK fallback to a default model when ANTHROPIC_MODEL is set on host.
+  const envModel = process.env.ANTHROPIC_MODEL;
+  const fileModel = envModel
+    ? undefined
+    : readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
+  const selectedModel = envModel ?? fileModel;
+  if (selectedModel) {
+    args.push('-e', `ANTHROPIC_MODEL=${selectedModel}`);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

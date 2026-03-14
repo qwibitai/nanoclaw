@@ -11,7 +11,7 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import { detectAuthMode, startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -49,14 +49,22 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamUrl: string;
+  let lastUpstreamBody = '';
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      lastUpstreamUrl = req.url || '';
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        lastUpstreamBody = Buffer.concat(chunks).toString();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
     });
     await new Promise<void>((resolve) =>
       upstreamServer.listen(0, '127.0.0.1', resolve),
@@ -188,5 +196,211 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('preserves upstream base path prefix when forwarding', async () => {
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages?x=1',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamUrl).toBe('/api/v1/messages?x=1');
+  });
+
+  it('translates non-Anthropic OpenRouter models to chat completions', async () => {
+    Object.assign(mockEnv, {
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api`,
+    });
+
+    upstreamServer.close();
+    upstreamServer = http.createServer((req, res) => {
+      lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamUrl = req.url || '';
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        lastUpstreamBody = Buffer.concat(chunks).toString();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'gen_test',
+            model: 'arcee-ai/trinity-large-preview:free',
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: { role: 'assistant', content: 'OK' },
+              },
+            ],
+            usage: { prompt_tokens: 11, completion_tokens: 2 },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      upstreamServer.listen(upstreamPort, '127.0.0.1', resolve),
+    );
+
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      JSON.stringify({
+        model: 'arcee-ai/trinity-large-preview:free',
+        max_tokens: 32,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    );
+
+    expect(lastUpstreamUrl).toBe('/api/v1/chat/completions');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-or-real-key');
+    expect(JSON.parse(lastUpstreamBody)).toMatchObject({
+      model: 'arcee-ai/trinity-large-preview:free',
+      provider: { only: ['arcee-ai'], allow_fallbacks: false },
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(JSON.parse(res.body)).toMatchObject({
+      type: 'message',
+      model: 'arcee-ai/trinity-large-preview:free',
+      content: [{ type: 'text', text: 'OK' }],
+      usage: { input_tokens: 11, output_tokens: 2 },
+      stop_reason: 'end_turn',
+    });
+  });
+
+  it('synthesizes Anthropic streaming events for translated OpenRouter responses', async () => {
+    Object.assign(mockEnv, {
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api`,
+    });
+
+    upstreamServer.close();
+    upstreamServer = http.createServer((req, res) => {
+      lastUpstreamHeaders = { ...req.headers };
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        lastUpstreamBody = Buffer.concat(chunks).toString();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'gen_tool',
+            model: 'arcee-ai/trinity-large-preview:free',
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: 'Using tool',
+                  tool_calls: [
+                    {
+                      id: 'call_1',
+                      type: 'function',
+                      function: {
+                        name: 'lookup',
+                        arguments: '{"q":"abc"}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 20, completion_tokens: 5 },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      upstreamServer.listen(upstreamPort, '127.0.0.1', resolve),
+    );
+
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      JSON.stringify({
+        model: 'arcee-ai/trinity-large-preview:free',
+        max_tokens: 32,
+        stream: true,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    );
+
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.body).toContain('event: message_start');
+    expect(res.body).toContain('event: content_block_start');
+    expect(res.body).toContain('text_delta');
+    expect(res.body).toContain('input_json_delta');
+    expect(res.body).toContain('tool_use');
+    expect(res.body).toContain('event: message_stop');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-or-real-key');
+  });
+
+  it('keeps OAuth mode for non-OpenRouter upstream when only OPENROUTER_API_KEY exists', async () => {
+    proxyPort = await startProxy({
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer real-oauth-token');
+    expect(lastUpstreamHeaders['x-api-key']).toBeUndefined();
+  });
+
+  it('detectAuthMode uses OPENROUTER_API_KEY only for OpenRouter upstream', () => {
+    Object.assign(mockEnv, {
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+    expect(detectAuthMode()).toBe('oauth');
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+    });
+    expect(detectAuthMode()).toBe('api-key');
   });
 });
