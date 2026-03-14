@@ -11,6 +11,7 @@ import {
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
+import { initBookingDb } from './booking-db.js';
 
 let db: Database.Database;
 
@@ -82,6 +83,59 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS tenants (
+      id TEXT PRIMARY KEY,
+      whatsapp_jid TEXT NOT NULL UNIQUE,
+      business_name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      config_json TEXT NOT NULL DEFAULT '{}',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tenants_jid ON tenants(whatsapp_jid);
+
+    CREATE TABLE IF NOT EXISTS staff (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      services_json TEXT NOT NULL DEFAULT '[]',
+      working_hours_json TEXT NOT NULL DEFAULT '[]',
+      active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_staff_tenant ON staff(tenant_id);
+
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      staff_id TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      service_duration_min INTEGER NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'confirmed',
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+      FOREIGN KEY (staff_id) REFERENCES staff(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bookings_tenant ON bookings(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_staff_time ON bookings(staff_id, start_time);
+    CREATE INDEX IF NOT EXISTS idx_bookings_customer ON bookings(customer_phone, tenant_id);
+
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      name TEXT NOT NULL,
+      last_booking_at TEXT,
+      UNIQUE(tenant_id, phone),
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(tenant_id, phone);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -147,6 +201,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  initBookingDb(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -156,6 +211,7 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  initBookingDb(db);
 }
 
 /**
