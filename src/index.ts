@@ -483,6 +483,16 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Warn if timezone resolved to UTC without an explicit TZ env var.
+  // On servers this usually means TZ wasn't set, causing wrong day-of-week.
+  if (!process.env.TZ && TIMEZONE === 'UTC') {
+    logger.warn(
+      'No TZ environment variable set — defaulting to UTC. ' +
+        'Set TZ in your systemd unit or .bashrc (e.g. TZ=America/New_York) ' +
+        'so the agent reports the correct local time.',
+    );
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');

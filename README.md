@@ -176,7 +176,12 @@ Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) 
 
 **Can I run this on Linux?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`. On servers where the system timezone is UTC, set `TZ` in your systemd unit so the agent knows your local time:
+
+```ini
+# In your systemd service file
+Environment=TZ=America/New_York
+```
 
 **Is this secure?**
 
