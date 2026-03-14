@@ -483,25 +483,32 @@ export function hasUserMessageAtTimestamp(
 // avoiding a redundant INSERT OR IGNORE on every thread message.
 const knownThreadChats = new Set<string>();
 
+/** Derive channel name from a JID prefix. */
+function channelFromJid(jid: string): string {
+  const prefix = jid.split(':')[0];
+  return prefix || 'unknown';
+}
+
+/** Ensure a chats row exists for the given JID (idempotent). */
+function ensureChatExists(jid: string, timestamp: string): void {
+  if (knownThreadChats.has(jid)) return;
+  db.prepare(
+    `INSERT OR IGNORE INTO chats (jid, last_message_time, channel, is_group) VALUES (?, ?, ?, 1)`,
+  ).run(jid, timestamp, channelFromJid(jid));
+  knownThreadChats.add(jid);
+}
+
 export function storeMessage(msg: NewMessage): void {
   // Thread JIDs (e.g. slack:C123:thread:ts) may not have a chats row yet.
   // Auto-create one to satisfy the foreign key on messages.chat_jid.
-  if (
-    msg.chat_jid.includes(':thread:') &&
-    !knownThreadChats.has(msg.chat_jid)
-  ) {
-    db.prepare(
-      `INSERT OR IGNORE INTO chats (jid, last_message_time, channel, is_group) VALUES (?, ?, ?, 1)`,
-    ).run(
-      msg.chat_jid,
-      msg.timestamp,
-      msg.chat_jid.startsWith('slack:') ? 'slack' : 'discord',
-    );
-    knownThreadChats.add(msg.chat_jid);
+  if (msg.chat_jid.includes(':thread:')) {
+    ensureChatExists(msg.chat_jid, msg.timestamp);
   }
-  db.prepare(
+
+  const insertStmt = db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
+  );
+  const params = [
     msg.id,
     msg.chat_jid,
     msg.sender,
@@ -510,7 +517,24 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-  );
+  ];
+
+  try {
+    insertStmt.run(...params);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('FOREIGN KEY')) {
+      // Auto-create missing chats entry and retry — prevents message loss
+      // when the chats row is missing (e.g. race condition, stale DB state).
+      ensureChatExists(msg.chat_jid, msg.timestamp);
+      logger.warn(
+        { chat_jid: msg.chat_jid },
+        'Auto-created missing chats entry on FK constraint failure',
+      );
+      insertStmt.run(...params);
+    } else {
+      throw err;
+    }
+  }
 }
 
 /**

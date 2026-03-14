@@ -713,7 +713,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Use the original threadId from resolveGroup for queue slot lookup —
   // synthesized effectiveThreadId won't match the GROUP_THREAD_KEY slot
   // used for top-level Discord/Slack messages.
-  const slotLookupKey = threadId || undefined;
+  let slotLookupKey = threadId || undefined;
+
+  // Reassign the slot from GROUP_THREAD_KEY to the actual thread ID.
+  // This frees GROUP_THREAD_KEY so the next parent message can start
+  // its own container in parallel instead of queueing.
+  if (isThreadEnabled && effectiveThreadId && !threadId) {
+    queue.reassignThreadKey(parentJid, GROUP_THREAD_KEY, effectiveThreadId);
+    slotLookupKey = effectiveThreadId;
+
+    if (hasMorePendingTriggers) {
+      // GROUP_THREAD_KEY is now free — start next trigger immediately
+      queue.enqueueMessageCheck(parentJid, chatJid);
+      hasMorePendingTriggers = false; // Prevent duplicate enqueue at end
+    }
+  }
 
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
@@ -727,6 +741,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
   queue.setOnActivity(parentJid, slotLookupKey, resetIdleTimer);
 
+  // Snapshot the trigger message ts so emoji reactions target the correct
+  // message even when multiple parent messages are processing in parallel.
+  if (effectiveThreadId) {
+    channel.setTriggerMessage?.(chatJid, effectiveThreadId);
+    // Remove ⏳ (added when queued) now that processing is starting.
+    // safeReaction silently ignores no_reaction if it wasn't queued.
+    channel
+      .removeReaction?.(chatJid, effectiveThreadId, 'hourglass_flowing_sand')
+      ?.catch((err: unknown) =>
+        logger.warn({ chatJid, err }, 'Failed to remove queue reaction'),
+      );
+  }
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -841,11 +867,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
     // Roll back in-memory cursor so retries can re-process these messages.
     // No saveState() needed — we never persisted the advance.
-    lastAgentTimestamp[chatJid] = previousCursor;
-    logger.warn(
-      { group: group.name },
-      'Agent error, rolled back message cursor for retry',
-    );
+    // Only roll back if we were the last to advance the cursor — a parallel
+    // container may have already advanced it further.
+    const myCursor = missedMessages[missedMessages.length - 1].timestamp;
+    if (lastAgentTimestamp[chatJid] === myCursor) {
+      lastAgentTimestamp[chatJid] = previousCursor;
+      logger.warn(
+        { group: group.name },
+        'Agent error, rolled back message cursor for retry',
+      );
+    } else {
+      logger.warn(
+        { group: group.name },
+        'Agent error, skipping cursor rollback (parallel container advanced cursor)',
+      );
+    }
     return false;
   }
 
@@ -1263,10 +1299,29 @@ async function startMessageLoop(): Promise<void> {
               'Debouncing thread creation for rapid messages',
             );
           } else {
+            // Check if this message will queue behind an active container
+            const willQueue =
+              !incomingThreadId &&
+              isThreadEnabled &&
+              queue.isThreadActive(parentJid, undefined);
+
             // No active container or thread mismatch — enqueue for a new one.
             // Pass chatJid as processJid and incomingThreadId so the queue
             // knows which JID and thread to process.
             queue.enqueueMessageCheck(parentJid, chatJid, incomingThreadId);
+
+            // Add ⏳ to signal the message is queued (not lost)
+            if (willQueue) {
+              const lastMsg = messagesToSend[messagesToSend.length - 1];
+              channel
+                .addReaction?.(chatJid, lastMsg.id, 'hourglass_flowing_sand')
+                ?.catch((err: unknown) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to add queue reaction',
+                  ),
+                );
+            }
           }
         }
       }
@@ -1301,13 +1356,13 @@ function recoverPendingMessages(): void {
   // Notify threads that were mid-processing when the service stopped.
   // Single query returns all in-flight threads with their correct chat_jid.
   const inFlightThreads = findAllInFlightThreads();
-  for (const {
-    thread_id,
-    chat_jid: parentJid,
-    group_folder,
-  } of inFlightThreads) {
-    const threadJid = `${parentJid}:thread:${thread_id}`;
-    const channel = findChannel(channels, parentJid);
+  for (const { thread_id, chat_jid, group_folder } of inFlightThreads) {
+    // chat_jid from the DB may already be a thread JID (e.g. slack:C12345:thread:ts).
+    // Extract the parent JID to avoid producing double-threaded JIDs like
+    // slack:C12345:thread:ts:thread:ts which Slack rejects.
+    const recoveryParentJid = getParentJid(chat_jid);
+    const threadJid = `${recoveryParentJid}:thread:${thread_id}`;
+    const channel = findChannel(channels, recoveryParentJid);
     if (channel?.isConnected()) {
       channel
         .sendMessage(

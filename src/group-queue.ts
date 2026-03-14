@@ -250,6 +250,27 @@ export class GroupQueue {
     }
   }
 
+  /**
+   * Reassign a thread slot from one key to another.
+   * Used to free GROUP_THREAD_KEY once effectiveThreadId is known,
+   * allowing the next parent message to start its own container in parallel.
+   */
+  reassignThreadKey(
+    groupJid: string,
+    oldKey: string,
+    newKey: string,
+  ): void {
+    const state = this.getGroup(groupJid);
+    const slot = state.activeThreads.get(oldKey);
+    if (!slot) return;
+    state.activeThreads.delete(oldKey);
+    state.activeThreads.set(newKey, slot);
+    logger.debug(
+      { groupJid, oldKey, newKey },
+      'Reassigned thread slot',
+    );
+  }
+
   /** Check if a group has any active containers. */
   isActive(groupJid: string): boolean {
     const state = this.groups.get(groupJid);

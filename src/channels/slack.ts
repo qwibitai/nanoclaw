@@ -61,6 +61,12 @@ export class SlackChannel implements Channel {
 
   private opts: ChannelOpts;
 
+  /** Extract Slack channel ID from a JID (handles both base and thread JIDs). */
+  private resolveChannelId(jid: string): string {
+    const parsed = parseThreadJid(jid);
+    return parsed ? parsed.parentId : jid.replace(/^slack:/, '');
+  }
+
   constructor(opts: ChannelOpts) {
     this.opts = opts;
 
@@ -236,6 +242,9 @@ export class SlackChannel implements Channel {
           const threadJid = `slack:${msg.channel}:thread:${threadTs}`;
           this.lastUserMessageTs.set(threadJid, msg.ts);
         }
+        // Immediate acknowledgment — react before debounce/queueing so the
+        // user knows their message was received even if processing is delayed.
+        this.safeReaction('add', 'eyes', msg.channel, msg.ts);
       }
 
       // If the message is inside a thread and thread sessions are NOT enabled,
@@ -364,7 +373,11 @@ export class SlackChannel implements Channel {
     await this.syncChannelMetadata();
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    triggerMessageId?: string,
+  ): Promise<void> {
     const parsed = parseThreadJid(jid);
     const channelId = parsed ? parsed.parentId : jid.replace(/^slack:/, '');
 
@@ -379,7 +392,9 @@ export class SlackChannel implements Channel {
 
     const originalText = text;
     try {
-      const threadTs = parsed ? parsed.threadId : this.replyThreadTs.get(jid);
+      const threadTs = parsed
+        ? parsed.threadId
+        : triggerMessageId || this.replyThreadTs.get(jid);
       await this.postToSlack(channelId, text, threadTs);
       logger.info({ jid, length: text.length, threadTs }, 'Slack message sent');
     } catch (err) {
@@ -534,6 +549,75 @@ export class SlackChannel implements Channel {
     }
   }
 
+  /**
+   * Snapshot the trigger message ts so emoji reactions target the correct
+   * message even when multiple parent messages process in parallel.
+   * Call before setTyping(true).
+   */
+  setTriggerMessage(jid: string, messageTs: string): void {
+    const parsedJid = parseThreadJid(jid);
+    const baseJid = parsedJid ? `slack:${parsedJid.parentId}` : jid;
+    // Set for the specific lookup key (thread JID or base JID)
+    this.lastUserMessageTs.set(parsedJid ? jid : baseJid, messageTs);
+    // For thread messages, also set for baseJid so setTyping's fallback works
+    if (parsedJid) {
+      this.lastUserMessageTs.set(baseJid, messageTs);
+    }
+  }
+
+  /**
+   * Add an emoji reaction to a specific message.
+   */
+  async addReaction(
+    jid: string,
+    messageTs: string,
+    emoji: string,
+  ): Promise<void> {
+    await this.safeReaction('add', emoji, this.resolveChannelId(jid), messageTs);
+  }
+
+  /**
+   * Remove an emoji reaction from a specific message.
+   */
+  async removeReaction(
+    jid: string,
+    messageTs: string,
+    emoji: string,
+  ): Promise<void> {
+    await this.safeReaction(
+      'remove',
+      emoji,
+      this.resolveChannelId(jid),
+      messageTs,
+    );
+  }
+
+  /**
+   * Safely add/remove a reaction, ignoring already_reacted/no_reaction errors.
+   */
+  private async safeReaction(
+    method: 'add' | 'remove',
+    name: string,
+    channelId: string,
+    timestamp: string,
+  ): Promise<void> {
+    try {
+      await this.app.client.reactions[method]({
+        channel: channelId,
+        timestamp,
+        name,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('already_reacted') && !msg.includes('no_reaction')) {
+        logger.warn(
+          { channelId, method, name, err: msg },
+          'Slack reaction failed',
+        );
+      }
+    }
+  }
+
   // Slack doesn't have a typing indicator API for bots.
   // Instead, add/remove a reaction emoji on the triggering message
   // so the user knows the bot is processing.
@@ -569,27 +653,14 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    const safeReaction = async (method: 'add' | 'remove', name: string) => {
-      try {
-        await this.app.client.reactions[method]({
-          channel: channelId,
-          timestamp: messageTs,
-          name,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes('already_reacted') && !msg.includes('no_reaction')) {
-          logger.warn({ jid, isTyping, err: msg }, 'Slack reaction failed');
-        }
-      }
-    };
-
     if (isTyping) {
-      await safeReaction('add', 'eyes');
+      await this.safeReaction('add', 'eyes', channelId, messageTs);
     } else {
-      // Swap 👀 → ✅ to signal completion
-      await safeReaction('remove', 'eyes');
-      await safeReaction('add', 'white_check_mark');
+      // Swap 👀 → ✅ to signal completion (independent calls, run in parallel)
+      await Promise.all([
+        this.safeReaction('remove', 'eyes', channelId, messageTs),
+        this.safeReaction('add', 'white_check_mark', channelId, messageTs),
+      ]);
     }
   }
 
@@ -653,8 +724,7 @@ export class SlackChannel implements Channel {
     jid: string,
     messageId: string,
   ): Promise<import('../types.js').NewMessage | undefined> {
-    const parsed = parseThreadJid(jid);
-    const channelId = parsed ? parsed.parentId : jid.replace(/^slack:/, '');
+    const channelId = this.resolveChannelId(jid);
     try {
       const result = await this.app.client.conversations.history({
         channel: channelId,
