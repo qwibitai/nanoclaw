@@ -1,0 +1,15 @@
+skill: add-file-sending
+version: 1.0.0
+description: "Add file sending capability — agents can send PDFs, images, and documents to WhatsApp via mcp__nanoclaw__send_file"
+core_version: 1.1.3
+adds: []
+modifies:
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/types.ts
+  - src/ipc.ts
+  - src/index.ts
+  - src/channels/whatsapp.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run"

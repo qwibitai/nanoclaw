@@ -82,6 +82,24 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS received_files (
+      id TEXT PRIMARY KEY,
+      chat_jid TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      sender_name TEXT,
+      file_path TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_size INTEGER,
+      mime_type TEXT,
+      caption TEXT,
+      timestamp TEXT NOT NULL,
+      analyzed INTEGER DEFAULT 0,
+      analysis_result TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_received_files_chat ON received_files(chat_jid);
+    CREATE INDEX IF NOT EXISTS idx_received_files_timestamp ON received_files(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_received_files_analyzed ON received_files(analyzed);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -694,4 +712,82 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Received files accessors ---
+
+export interface ReceivedFile {
+  id: string;
+  chatJid: string;
+  sender: string;
+  senderName?: string;
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  caption?: string;
+  timestamp: string;
+  analyzed: boolean;
+  analysisResult?: string;
+}
+
+export function saveReceivedFile(file: {
+  id: string;
+  chatJid: string;
+  sender: string;
+  senderName?: string;
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  caption?: string;
+  timestamp: string;
+}): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO received_files
+     (id, chat_jid, sender, sender_name, file_path, file_name, file_size, mime_type, caption, timestamp, analyzed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+  ).run(
+    file.id,
+    file.chatJid,
+    file.sender,
+    file.senderName || null,
+    file.filePath,
+    file.fileName,
+    file.fileSize,
+    file.mimeType,
+    file.caption || null,
+    file.timestamp,
+  );
+}
+
+export function getReceivedFiles(
+  chatJid: string,
+  limit: number = 50,
+): ReceivedFile[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM received_files WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(chatJid, limit) as any[];
+  return rows.map((r) => ({
+    id: r.id,
+    chatJid: r.chat_jid,
+    sender: r.sender,
+    senderName: r.sender_name,
+    filePath: r.file_path,
+    fileName: r.file_name,
+    fileSize: r.file_size,
+    mimeType: r.mime_type,
+    caption: r.caption,
+    timestamp: r.timestamp,
+    analyzed: Boolean(r.analyzed),
+    analysisResult: r.analysis_result,
+  }));
+}
+
+export function markFileAnalyzed(id: string, result: string): void {
+  db.prepare(
+    `UPDATE received_files SET analyzed = 1, analysis_result = ? WHERE id = ?`,
+  ).run(result, id);
 }
