@@ -54,3 +54,28 @@ export function getAnthropicApiKey(): string {
   if (!cachedApiKey) throw new Error('ANTHROPIC_API_KEY not found in .env');
   return cachedApiKey;
 }
+
+/**
+ * Returns HTTP auth headers for direct Anthropic API calls.
+ * Supports both API key mode (ANTHROPIC_API_KEY → x-api-key) and
+ * OAuth mode (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN → Authorization: Bearer).
+ * Throws if neither credential is available in .env.
+ */
+let cachedAuthHeaders: Record<string, string> | undefined;
+export function getAnthropicAuthHeaders(): Record<string, string> {
+  if (cachedAuthHeaders) return cachedAuthHeaders;
+  const secrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
+  if (secrets.ANTHROPIC_API_KEY) {
+    cachedAuthHeaders = { 'x-api-key': secrets.ANTHROPIC_API_KEY };
+  } else {
+    const oauthToken =
+      secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+    if (!oauthToken) throw new Error('No Anthropic credentials found in .env');
+    cachedAuthHeaders = { Authorization: `Bearer ${oauthToken}` };
+  }
+  return cachedAuthHeaders;
+}

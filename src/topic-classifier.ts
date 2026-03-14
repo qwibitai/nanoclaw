@@ -7,7 +7,7 @@
  * 3. Ambiguous zone (5-30 min): call Haiku to classify topic change
  */
 
-import { getAnthropicApiKey } from './env.js';
+import { getAnthropicAuthHeaders } from './env.js';
 import { logger } from './logger.js';
 
 const SHORT_CIRCUIT_MINUTES = 5;
@@ -73,8 +73,6 @@ async function classifyWithHaiku(
   recentMessages: Array<{ content: string; is_from_me: boolean }>,
   newMessage: string,
 ): Promise<boolean> {
-  const apiKey = getAnthropicApiKey();
-
   // Build context from recent messages (last 5)
   const context = recentMessages
     .slice(-5)
@@ -88,8 +86,8 @@ async function classifyWithHaiku(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
+      ...getAnthropicAuthHeaders(),
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',

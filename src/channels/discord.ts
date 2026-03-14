@@ -29,7 +29,7 @@ import {
 } from '../config.js';
 import { downloadAttachment } from '../attachment-downloader.js';
 import { getThreadOrigin, setThreadOrigin } from '../db.js';
-import { getAnthropicApiKey, readEnvFile } from '../env.js';
+import { getAnthropicAuthHeaders, readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Attachment, Channel } from '../types.js';
@@ -42,13 +42,12 @@ import { transformTablesInText } from '../table-renderer.js';
  */
 async function generateThreadName(userMessage: string): Promise<string> {
   try {
-    const apiKey = getAnthropicApiKey();
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        ...getAnthropicAuthHeaders(),
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
@@ -70,7 +69,7 @@ async function generateThreadName(userMessage: string): Promise<string> {
       data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
     return name.slice(0, 100) || 'Thread';
   } catch (err) {
-    logger.debug({ err }, 'Failed to generate thread name');
+    logger.warn({ err }, 'Failed to generate thread name');
     return 'Thread';
   }
 }

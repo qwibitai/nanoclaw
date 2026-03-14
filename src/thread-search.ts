@@ -18,7 +18,7 @@ import {
   searchThreadsFTS,
   upsertThreadIndex,
 } from './db.js';
-import { getAnthropicApiKey } from './env.js';
+import { getAnthropicAuthHeaders } from './env.js';
 import { logger } from './logger.js';
 
 export interface ThreadSearchResult {
@@ -152,8 +152,6 @@ async function rerankWithHaiku(
   candidates: ThreadSearchResult[],
   limit: number,
 ): Promise<ThreadSearchResult[]> {
-  const apiKey = getAnthropicApiKey();
-
   const summaryList = candidates
     .map((c, i) => `${i + 1}. [${c.thread_key}] ${c.topic_summary}`)
     .join('\n');
@@ -162,8 +160,8 @@ async function rerankWithHaiku(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
+      ...getAnthropicAuthHeaders(),
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
