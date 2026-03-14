@@ -568,7 +568,8 @@ async function main(): Promise<void> {
     },
     sendImage: (jid, imageUrl, caption) => {
       const channel = findChannel(channels, jid);
-      if (!channel?.sendImage) throw new Error(`No image-capable channel for JID: ${jid}`);
+      if (!channel?.sendImage)
+        throw new Error(`No image-capable channel for JID: ${jid}`);
       return channel.sendImage(jid, imageUrl, caption);
     },
     registeredGroups: () => registeredGroups,
