@@ -606,7 +606,18 @@ export class DiscordChannel implements Channel {
     const originalText = text;
 
     try {
+      // Check for thread redirect — the lead agent's sendMessage may have
+      // already created a thread for this channel. Redirect swarm messages
+      // into that thread so they don't land as top-level channel messages.
       const parsed = parseThreadJid(jid);
+      if (!parsed) {
+        for (const [key, threadJid] of this.createdThreadJid) {
+          if (key === jid || key.startsWith(`${jid}:`)) {
+            return this.sendSwarmMessage(threadJid, text, sender);
+          }
+        }
+      }
+
       const parentChannelId = parsed
         ? parsed.parentId
         : jid.replace(/^dc:/, '');
