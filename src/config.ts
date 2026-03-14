@@ -123,8 +123,7 @@ export const EFFORT_LEVELS: Set<string> = new Set([
 export const EFFORT_FLAG_PATTERN =
   /(?:^|\s)-e\s+(low|medium|high|max|default|reset)\b/i;
 // One-shot flag: "-e1 max" — just this invocation, doesn't stick
-export const EFFORT_ONESHOT_PATTERN =
-  /(?:^|\s)-e1\s+(low|medium|high|max)\b/i;
+export const EFFORT_ONESHOT_PATTERN = /(?:^|\s)-e1\s+(low|medium|high|max)\b/i;
 
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,

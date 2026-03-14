@@ -1042,10 +1042,7 @@ function buildVolumeMounts(
         });
       }
       for (let i = 1; i < gmailAccounts.length; i++) {
-        const accountDir = path.join(
-          homeDir,
-          `.gmail-mcp-${gmailAccounts[i]}`,
-        );
+        const accountDir = path.join(homeDir, `.gmail-mcp-${gmailAccounts[i]}`);
         if (fs.existsSync(accountDir)) {
           mounts.push({
             hostPath: accountDir,

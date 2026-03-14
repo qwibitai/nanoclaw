@@ -39,6 +39,7 @@ export class SlackChannel implements Channel {
   private app: App;
   private botToken: string;
   private botUserId: string | undefined;
+  private botBotId: string | undefined; // Bot's bot_id (different from user_id; used to detect bot_message echoes)
   private teamId: string | undefined;
   private autoRegisterConfig: Record<string, AutoRegisterTemplate> = {};
   private connected = false;
@@ -188,7 +189,11 @@ export class SlackChannel implements Channel {
         group.containerConfig?.enableThreadSessions !== false;
 
       // Distinguish our bot from external bots (dbt Cloud, GitHub, etc.)
-      const isOurBot = msg.user === this.botUserId;
+      // bot_message echoes (e.g. swarm messages with username override) have
+      // msg.user undefined but msg.bot_id matching our bot — check both.
+      const isOurBot =
+        msg.user === this.botUserId ||
+        (!!msg.bot_id && msg.bot_id === this.botBotId);
       const isAnyBot = !!msg.bot_id || isOurBot;
 
       let senderName: string;
@@ -333,9 +338,14 @@ export class SlackChannel implements Channel {
     try {
       const auth = await this.app.client.auth.test();
       this.botUserId = auth.user_id as string;
+      this.botBotId = auth.bot_id as string | undefined;
       this.teamId = auth.team_id as string;
       logger.info(
-        { botUserId: this.botUserId, teamId: this.teamId },
+        {
+          botUserId: this.botUserId,
+          botBotId: this.botBotId,
+          teamId: this.teamId,
+        },
         'Connected to Slack',
       );
     } catch (err) {
@@ -367,52 +377,10 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    // Capture original text before any transformation so the catch block can
-    // queue pre-transform content (sendMessage will re-apply transforms on retry).
     const originalText = text;
     try {
-      // Thread ts from JID takes priority (thread-session mode),
-      // then fall back to replyThreadTs map (legacy mode)
       const threadTs = parsed ? parsed.threadId : this.replyThreadTs.get(jid);
-      text = this.replaceMentions(text);
-
-      // Convert markdown tables: single table → Slack Block Kit attachment,
-      // multiple tables → monospace code blocks inline.
-      const { text: transformed, slackAttachmentBlocks } =
-        transformTablesInText('slack', text);
-      text = transformed;
-      const attachments = slackAttachmentBlocks?.length
-        ? [{ blocks: slackAttachmentBlocks }]
-        : undefined;
-
-      // Slack limits messages to ~4000 characters; split if needed.
-      // Attachment blocks are sent only with the last chunk.
-      if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.app.client.chat.postMessage({
-          channel: channelId,
-          text,
-          thread_ts: threadTs,
-          ...(attachments ? { attachments } : {}),
-        });
-      } else {
-        const chunks: string[] = [];
-        for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
-          chunks.push(text.slice(i, i + MAX_MESSAGE_LENGTH));
-        }
-        for (let i = 0; i < chunks.length - 1; i++) {
-          await this.app.client.chat.postMessage({
-            channel: channelId,
-            text: chunks[i],
-            thread_ts: threadTs,
-          });
-        }
-        await this.app.client.chat.postMessage({
-          channel: channelId,
-          text: chunks[chunks.length - 1],
-          thread_ts: threadTs,
-          ...(attachments ? { attachments } : {}),
-        });
-      }
+      await this.postToSlack(channelId, text, threadTs);
       logger.info({ jid, length: text.length, threadTs }, 'Slack message sent');
     } catch (err) {
       this.outgoingQueue.push({ jid, text: originalText });
@@ -420,6 +388,115 @@ export class SlackChannel implements Channel {
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Slack message, queued',
       );
+    }
+  }
+
+  /**
+   * Send a message with a custom username override (agent swarm).
+   * Requires chat:write.customize scope. Falls back to prefixed sendMessage.
+   */
+  async sendSwarmMessage(
+    jid: string,
+    text: string,
+    sender: string,
+  ): Promise<void> {
+    const parsed = parseThreadJid(jid);
+    const channelId = parsed ? parsed.parentId : jid.replace(/^slack:/, '');
+
+    if (!this.connected) {
+      this.outgoingQueue.push({ jid, text: `*[${sender}]* ${text}` });
+      return;
+    }
+
+    const originalText = text;
+    try {
+      const threadTs = parsed ? parsed.threadId : this.replyThreadTs.get(jid);
+      await this.postToSlack(channelId, text, threadTs, sender);
+      logger.info(
+        { jid, sender, length: text.length, threadTs },
+        'Slack swarm message sent',
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (
+        errMsg.includes('missing_scope') ||
+        errMsg.includes('not_allowed_token_type')
+      ) {
+        logger.warn(
+          { jid, sender },
+          'Slack chat:write.customize scope missing, falling back to prefix',
+        );
+        try {
+          await this.sendMessage(jid, `*[${sender}]* ${originalText}`);
+        } catch {
+          this.outgoingQueue.push({
+            jid,
+            text: `*[${sender}]* ${originalText}`,
+          });
+        }
+      } else {
+        this.outgoingQueue.push({
+          jid,
+          text: `*[${sender}]* ${originalText}`,
+        });
+        logger.warn(
+          { jid, sender, err, queueSize: this.outgoingQueue.length },
+          'Failed to send Slack swarm message, queued with prefix',
+        );
+      }
+    }
+  }
+
+  /**
+   * Transform text and send to Slack via chat.postMessage.
+   * Handles mention replacement, table rendering, and chunking.
+   * Optional username override for agent swarm identity.
+   */
+  private async postToSlack(
+    channelId: string,
+    text: string,
+    threadTs?: string,
+    username?: string,
+  ): Promise<void> {
+    text = this.replaceMentions(text);
+
+    const { text: transformed, slackAttachmentBlocks } = transformTablesInText(
+      'slack',
+      text,
+    );
+    text = transformed;
+    const attachments = slackAttachmentBlocks?.length
+      ? [{ blocks: slackAttachmentBlocks }]
+      : undefined;
+
+    if (text.length <= MAX_MESSAGE_LENGTH) {
+      await this.app.client.chat.postMessage({
+        channel: channelId,
+        text,
+        thread_ts: threadTs,
+        ...(username ? { username } : {}),
+        ...(attachments ? { attachments } : {}),
+      });
+    } else {
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
+        chunks.push(text.slice(i, i + MAX_MESSAGE_LENGTH));
+      }
+      for (let i = 0; i < chunks.length - 1; i++) {
+        await this.app.client.chat.postMessage({
+          channel: channelId,
+          text: chunks[i],
+          thread_ts: threadTs,
+          ...(username ? { username } : {}),
+        });
+      }
+      await this.app.client.chat.postMessage({
+        channel: channelId,
+        text: chunks[chunks.length - 1],
+        thread_ts: threadTs,
+        ...(username ? { username } : {}),
+        ...(attachments ? { attachments } : {}),
+      });
     }
   }
 

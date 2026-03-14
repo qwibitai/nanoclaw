@@ -159,6 +159,10 @@ export interface Channel {
     jid: string,
     messageId: string,
   ): Promise<NewMessage | undefined>;
+  // Optional: send a message with a custom sender identity (agent swarm).
+  // Discord uses webhooks, Slack uses username override.
+  // Channels that don't implement this fall back to normal sendMessage.
+  sendSwarmMessage?(jid: string, text: string, sender: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

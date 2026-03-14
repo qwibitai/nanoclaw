@@ -576,7 +576,10 @@ describe('set_group_model', () => {
       ...OTHER_GROUP,
       containerConfig: { enableThreadSessions: true },
     });
-    groups['other@g.us'] = { ...OTHER_GROUP, containerConfig: { enableThreadSessions: true } };
+    groups['other@g.us'] = {
+      ...OTHER_GROUP,
+      containerConfig: { enableThreadSessions: true },
+    };
 
     await processTaskIpc(
       { type: 'set_group_model', jid: 'other@g.us', model: 'claude-opus-4-6' },
@@ -594,7 +597,10 @@ describe('set_group_model', () => {
       ...OTHER_GROUP,
       containerConfig: { model: 'claude-opus-4-6' },
     });
-    groups['other@g.us'] = { ...OTHER_GROUP, containerConfig: { model: 'claude-opus-4-6' } };
+    groups['other@g.us'] = {
+      ...OTHER_GROUP,
+      containerConfig: { model: 'claude-opus-4-6' },
+    };
 
     await processTaskIpc(
       { type: 'set_group_model', jid: 'other@g.us', model: '' },
@@ -608,7 +614,11 @@ describe('set_group_model', () => {
 
   it('set_group_model ignores unknown jid', async () => {
     await processTaskIpc(
-      { type: 'set_group_model', jid: 'nonexistent@g.us', model: 'claude-opus-4-6' },
+      {
+        type: 'set_group_model',
+        jid: 'nonexistent@g.us',
+        model: 'claude-opus-4-6',
+      },
       'whatsapp_main',
       true,
       deps,
