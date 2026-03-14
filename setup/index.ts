@@ -16,7 +16,6 @@ const STEPS: Record<
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
-  'whatsapp-auth': () => import('./whatsapp-auth.js'),
 };
 
 async function main(): Promise<void> {
