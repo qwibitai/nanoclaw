@@ -1,0 +1,37 @@
+skill: group-auth
+version: 1.0.0
+description: "Per-group encrypted credential system with interactive scripted reauth"
+core_version: 1.2.1
+adds:
+  - container/shims/xdg-open
+  - src/auth/types.ts
+  - src/auth/store.ts
+  - src/auth/store.test.ts
+  - src/auth/registry.ts
+  - src/auth/registry.test.ts
+  - src/auth/exec.ts
+  - src/auth/gpg.ts
+  - src/auth/gpg.test.ts
+  - src/auth/guard.ts
+  - src/auth/provision.ts
+  - src/auth/provision.test.ts
+  - src/auth/reauth.ts
+  - src/auth/reauth.test.ts
+  - src/auth/index.ts
+  - src/auth/providers/claude.ts
+  - src/auth/providers/claude.test.ts
+modifies:
+  - src/config.ts
+  - src/container-runner.ts
+  - src/credential-proxy.ts
+  - src/credential-proxy.test.ts
+  - src/index.ts
+  - src/types.ts
+structured:
+  env_additions:
+    - NEW_GROUPS_USE_DEFAULT_CREDENTIALS
+conflicts: []
+depends: []
+post_apply:
+  - "chmod +x container/shims/xdg-open"
+test: "npx vitest run src/auth/"

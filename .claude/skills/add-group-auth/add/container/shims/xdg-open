@@ -1,0 +1,6 @@
+#!/bin/sh
+# Shim replacing xdg-open inside auth containers.
+# Captures the URL (localhost callback) for the auth flow.
+# Exits 0 so the CLI thinks the browser opened and waits for the callback.
+echo "$1" > /workspace/auth-ipc/.oauth-url
+exit 0
