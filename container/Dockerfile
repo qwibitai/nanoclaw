@@ -26,6 +26,11 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Set UTF-8 locale so Chinese and other multi-byte characters are handled correctly
+# C.UTF-8 is built into glibc and always available without locale-gen
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
