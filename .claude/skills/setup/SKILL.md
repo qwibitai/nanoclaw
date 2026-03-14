@@ -122,6 +122,41 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
+### Validate token immediately
+
+After writing the token to `.env`, make a live API call to confirm it works before proceeding:
+
+```bash
+node -e "
+const https = require('https');
+const fs = require('fs');
+const content = fs.readFileSync('.env', 'utf-8');
+let token = '', isApiKey = false;
+for (const line of content.split('\n')) {
+  let m = line.match(/^ANTHROPIC_API_KEY=[\"']?(.+?)[\"']?\s*$/);
+  if (m) { token = m[1]; isApiKey = true; break; }
+  m = line.match(/^(?:CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN)=[\"']?(.+?)[\"']?\s*$/);
+  if (m) { token = m[1]; break; }
+}
+if (!token) { console.log('CREDENTIAL_CHECK: no_token'); process.exit(1); }
+const headers = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' };
+if (isApiKey) headers['x-api-key'] = token; else headers['authorization'] = 'Bearer ' + token;
+const body = JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] });
+const req = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(body) } }, (res) => {
+  console.log('CREDENTIAL_CHECK: ' + (res.statusCode === 401 ? 'invalid_token' : 'ok') + ' HTTP=' + res.statusCode);
+  process.exit(res.statusCode === 401 ? 1 : 0);
+});
+req.on('error', (e) => { console.log('CREDENTIAL_CHECK: network_error ' + e.message); process.exit(2); });
+req.write(body); req.end();
+"
+```
+
+Parse the output:
+- `CREDENTIAL_CHECK: ok` → continue to step 5
+- `CREDENTIAL_CHECK: invalid_token` → token was rejected (401). Tell the user and ask them to re-run `claude setup-token`, paste a fresh token, re-write `.env`, and validate again
+- `CREDENTIAL_CHECK: network_error` → API unreachable. Warn the user and ask if they want to continue anyway
+- `CREDENTIAL_CHECK: no_token` → `.env` has no recognised credential key — re-run step 4
+
 ## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
@@ -146,9 +181,10 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+**After all channel skills complete**, do a clean install of dependencies and rebuild — channel merges can leave node_modules in a broken state with conflicting native binaries:
 
 ```bash
+rm -rf node_modules
 npm install && npm run build
 ```
 

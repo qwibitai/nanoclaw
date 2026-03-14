@@ -78,10 +78,16 @@ function buildVolumeMounts(
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
     // Credentials are injected by the credential proxy, never exposed to containers.
+    // Use an empty file instead of /dev/null (Docker may reject /dev/null mounts in sandboxes).
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
+      const emptyEnv = path.join(DATA_DIR, 'empty-env');
+      if (!fs.existsSync(emptyEnv)) {
+        fs.mkdirSync(path.dirname(emptyEnv), { recursive: true });
+        fs.writeFileSync(emptyEnv, '');
+      }
       mounts.push({
-        hostPath: '/dev/null',
+        hostPath: emptyEnv,
         containerPath: '/workspace/project/.env',
         readonly: true,
       });
@@ -220,6 +226,55 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Forward proxy and CA settings so containers can reach external services
+  const caCertEnvVars = [
+    'NODE_EXTRA_CA_CERTS',
+    'SSL_CERT_FILE',
+    'REQUESTS_CA_BUNDLE',
+  ];
+  for (const envVar of [
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'NO_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'no_proxy',
+    ...caCertEnvVars,
+  ]) {
+    if (process.env[envVar]) {
+      if (caCertEnvVars.includes(envVar)) {
+        args.push('-e', `${envVar}=/workspace/ca-cert/proxy-ca.crt`);
+      } else if (envVar === 'NO_PROXY' || envVar === 'no_proxy') {
+        // Add host.docker.internal to NO_PROXY so the credential proxy
+        // (ANTHROPIC_BASE_URL) isn't routed through the HTTPS proxy
+        const val = process.env[envVar];
+        const extra = val
+          ? `${val},host.docker.internal`
+          : 'host.docker.internal';
+        args.push('-e', `${envVar}=${extra}`);
+      } else {
+        args.push('-e', `${envVar}=${process.env[envVar]}`);
+      }
+    }
+  }
+
+  // Mount CA certificate into container if NODE_EXTRA_CA_CERTS is set.
+  // Docker may reject mounts from restricted host paths, so we copy the cert
+  // into the project's data directory and mount from there.
+  const hostCaCert =
+    process.env.NODE_EXTRA_CA_CERTS || process.env.SSL_CERT_FILE;
+  if (hostCaCert && fs.existsSync(hostCaCert)) {
+    const caCertDir = path.join(DATA_DIR, 'ca-cert');
+    const caCertDst = path.join(caCertDir, 'proxy-ca.crt');
+    fs.mkdirSync(caCertDir, { recursive: true });
+    fs.copyFileSync(hostCaCert, caCertDst);
+    mounts.push({
+      hostPath: caCertDir,
+      containerPath: '/workspace/ca-cert',
+      readonly: true,
+    });
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
