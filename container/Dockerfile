@@ -41,7 +41,7 @@ RUN curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gi
     | tar -xz -C /usr/local/bin gitleaks
 
 # Install Go toolchain (for Hubris project development)
-ENV GOLANG_VERSION=1.23.6
+ENV GOLANG_VERSION=1.24.1
 RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:/home/node/go/bin:${PATH}"
 ENV GOPATH="/home/node/go"
