@@ -345,7 +345,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
       );
       if (truncated) {
-        const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast!;
+        const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
         pendingTailDrain.set(chatJid, cutoff);
         savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
@@ -361,7 +361,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     if (isTailDrain) {
-      pendingTailDrain.set(chatJid, tailDrainCutoff!);
+      pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
       savePendingTailDrain();
     } else if (wasTailDrain) {
       savePendingTailDrain();
@@ -371,7 +371,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   if (truncated) {
-    const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast!;
+    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
     pendingTailDrain.set(chatJid, cutoff);
     savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
@@ -520,6 +520,13 @@ async function startMessageLoop(): Promise<void> {
                 (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;
+          }
+
+          // Don't pipe while tail-drain is pending — let processGroupMessages
+          // handle the backlog first to avoid cursor jumps that skip messages.
+          if (pendingTailDrain.has(chatJid)) {
+            queue.enqueueMessageCheck(chatJid);
+            continue;
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger

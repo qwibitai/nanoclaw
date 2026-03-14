@@ -464,7 +464,7 @@ describe("tail-drain cutoff filtering", () => {
       ts: cycle2Messages[cycle2Messages.length - 1].timestamp,
       id: cycle2Messages[cycle2Messages.length - 1].id,
     };
-    const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast;
+    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
     expect(cutoff).toEqual(originalCutoff);
   });
 });
@@ -584,5 +584,94 @@ describe("tail-drain completion persistence", () => {
     // Normal path: no tail-drain state to persist
     const shouldPersist = truncated || isTailDrain || wasTailDrain;
     expect(shouldPersist).toBe(false);
+  });
+});
+
+// --- pipe path tail-drain guard ---
+
+describe("pipe path tail-drain guard", () => {
+  // The pipe path in the poll loop must not advance the cursor past a pending
+  // tail-drain window. When pendingTailDrain has an entry for the group,
+  // the pipe is skipped and the group is re-enqueued for processGroupMessages.
+
+  it("skips pipe when pendingTailDrain has entry for group", () => {
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      [chatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const shouldSkipPipe = pendingTailDrain.has(chatJid);
+    expect(shouldSkipPipe).toBe(true);
+  });
+
+  it("allows pipe when no pending tail-drain", () => {
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+    const shouldSkipPipe = pendingTailDrain.has(chatJid);
+    expect(shouldSkipPipe).toBe(false);
+  });
+
+  it("allows pipe when pending tail-drain is for different group", () => {
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      ["group2@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const shouldSkipPipe = pendingTailDrain.has(chatJid);
+    expect(shouldSkipPipe).toBe(false);
+  });
+});
+
+// --- empty sentinel cutoff fallback ---
+
+describe("empty sentinel cutoff fallback", () => {
+  // The migrated empty sentinel { ts: "", id: "" } is truthy as an object.
+  // The cutoff ternary must check tailDrainCutoff?.ts to avoid persisting
+  // the sentinel, which would cause infinite tail-drain with no filtering.
+
+  it("empty sentinel falls back to fullBacklogLast", () => {
+    const isTailDrain = true;
+    const tailDrainCutoff = { ts: "", id: "" }; // migrated sentinel
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
+    expect(cutoff).toEqual(fullBacklogLast);
+  });
+
+  it("valid cutoff is preserved over fullBacklogLast", () => {
+    const isTailDrain = true;
+    const tailDrainCutoff = { ts: "2024-01-01T00:05:00.000Z", id: "msg-200" };
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
+    expect(cutoff).toEqual(tailDrainCutoff);
+  });
+
+  it("null cutoff falls back to fullBacklogLast", () => {
+    const isTailDrain = false;
+    const tailDrainCutoff = null as { ts: string; id: string } | null;
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    // When isTailDrain is false, condition short-circuits regardless of cutoff
+    const useTailDrain = isTailDrain && tailDrainCutoff?.ts;
+    expect(useTailDrain).toBeFalsy();
+    const cutoff = useTailDrain ? tailDrainCutoff : fullBacklogLast;
+    expect(cutoff).toEqual(fullBacklogLast);
+  });
+});
+
+// --- error rollback cutoff with empty sentinel ---
+
+describe("error rollback cutoff with empty sentinel", () => {
+  // The error+rollback path re-sets pendingTailDrain. If the cutoff is an
+  // empty sentinel, it must fall back to fullBacklogLast to avoid infinite loops.
+
+  it("empty sentinel in rollback uses fullBacklogLast", () => {
+    const tailDrainCutoff = { ts: "", id: "" };
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    const rollbackCutoff = tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
+    expect(rollbackCutoff).toEqual(fullBacklogLast);
+  });
+
+  it("valid cutoff in rollback is preserved", () => {
+    const tailDrainCutoff = { ts: "2024-01-01T00:05:00.000Z", id: "msg-200" };
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    const rollbackCutoff = tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
+    expect(rollbackCutoff).toEqual(tailDrainCutoff);
   });
 });
