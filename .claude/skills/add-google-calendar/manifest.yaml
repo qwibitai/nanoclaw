@@ -1,0 +1,19 @@
+skill: google-calendar
+version: 1.0.0
+description: "Google Calendar integration via @cocal/google-calendar-mcp - tool mode for reading and managing calendar events"
+core_version: 0.1.0
+adds: []
+modifies:
+  - container/agent-runner/src/index.ts
+  - src/container-runner.ts
+  - groups/global/CLAUDE.md
+  - groups/main/CLAUDE.md
+structured:
+  npx_dependencies:
+    - "@cocal/google-calendar-mcp"
+  env_additions:
+    - GOOGLE_OAUTH_CREDENTIALS
+  directory_mounts:
+    - ~/.google-calendar-mcp
+conflicts: []
+depends: []
