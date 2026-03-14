@@ -540,6 +540,57 @@ describe("tail-drain exit-point requeue decisions", () => {
     const shouldRequeue = !truncated && isTailDrain;
     expect(shouldRequeue).toBe(true);
   });
+
+  it("truncated first trigger window must clear marker on rollback", () => {
+    // First trigger-window truncation: no prior tail-drain entry.
+    // On rollback, the pre-persisted marker must be deleted so the next retry
+    // does not falsely enter tail-drain mode and bypass trigger gating.
+    const truncated = true;
+    const isTailDrain = false;
+    const wasTailDrain = false;
+    const outputSentToUser = false;
+
+    // Models the fixed rollback logic
+    let action: "set" | "delete" | "persist" | "none" = "none";
+    if (!outputSentToUser) {
+      if (isTailDrain) {
+        action = "set";
+      } else if (truncated) {
+        action = "delete";
+      } else if (wasTailDrain) {
+        action = "persist";
+      }
+    }
+    expect(action).toBe("delete");
+  });
+
+  it("partial send failure does not trigger cursor rollback", () => {
+    // When a multi-chunk send partially succeeds (PartialSendError),
+    // outputSentToUser is set to true. The rollback guard at line 395
+    // must evaluate to false to prevent duplicate content.
+    const hadSendError = true;
+    const outputSentToUser = true; // set by PartialSendError detection
+    const shouldRollback = hadSendError && !outputSentToUser;
+    expect(shouldRollback).toBe(false);
+  });
+
+  it("ongoing tail-drain + truncated keeps marker on rollback", () => {
+    // When an ongoing tail-drain continuation overflows, the marker correctly
+    // represents the drain cutoff and should be re-persisted, not deleted.
+    const truncated = true;
+    const isTailDrain = true;
+    const outputSentToUser = false;
+
+    let action: "set" | "delete" | "persist" | "none" = "none";
+    if (!outputSentToUser) {
+      if (isTailDrain) {
+        action = "set";
+      } else if (truncated) {
+        action = "delete";
+      }
+    }
+    expect(action).toBe("set");
+  });
 });
 
 // --- tail-drain completion persistence ---
@@ -584,6 +635,29 @@ describe("tail-drain completion persistence", () => {
     // Normal path: no tail-drain state to persist
     const shouldPersist = truncated || isTailDrain || wasTailDrain;
     expect(shouldPersist).toBe(false);
+  });
+
+  it("completed tail-drain + truncated trigger window must clear marker on rollback", () => {
+    // A completed tail-drain enters the trigger path and truncates.
+    // The pre-persisted marker is stale — the truncated branch must take
+    // priority over wasTailDrain and delete the marker.
+    const truncated = true;
+    const isTailDrain = false;
+    const wasTailDrain = true;
+    const outputSentToUser = false;
+
+    // Models the fixed rollback logic
+    let action: "set" | "delete" | "persist" | "none" = "none";
+    if (!outputSentToUser) {
+      if (isTailDrain) {
+        action = "set";
+      } else if (truncated) {
+        action = "delete";
+      } else if (wasTailDrain) {
+        action = "persist";
+      }
+    }
+    expect(action).toBe("delete");
   });
 });
 

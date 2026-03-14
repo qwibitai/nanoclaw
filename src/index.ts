@@ -69,7 +69,7 @@ import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
-import { Channel, NewMessage, RegisteredGroup } from "./types.js";
+import { Channel, NewMessage, PartialSendError, RegisteredGroup } from "./types.js";
 import { logger } from "./logger.js";
 
 // Re-export for backwards compatibility during refactor
@@ -334,7 +334,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             outputSentToUser = true;
           } catch (err) {
             hadSendError = true;
-            logger.error({ group: group.name, chatJid, err }, "Failed to send output to channel");
+            if (err instanceof PartialSendError) {
+              outputSentToUser = true;
+              logger.warn(
+                {
+                  group: group.name,
+                  chatJid,
+                  chunksSent: err.chunksSent,
+                  totalChunks: err.totalChunks,
+                },
+                "Partial send: some chunks delivered, skipping cursor rollback",
+              );
+            } else {
+              logger.error({ group: group.name, chatJid, err }, "Failed to send output to channel");
+            }
           }
         }
       }
@@ -379,6 +392,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
       savePendingTailDrain();
+    } else if (truncated) {
+      // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
+      pendingTailDrain.delete(chatJid);
+      savePendingTailDrain();
     } else if (wasTailDrain) {
       savePendingTailDrain();
     }
@@ -393,6 +410,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
+      savePendingTailDrain();
+    } else if (truncated) {
+      // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
+      pendingTailDrain.delete(chatJid);
       savePendingTailDrain();
     } else if (wasTailDrain) {
       savePendingTailDrain();

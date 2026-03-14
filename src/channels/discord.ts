@@ -17,6 +17,7 @@ import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
+  PartialSendError,
   PurgeOptions,
   RegisteredGroup,
 } from "../types.js";
@@ -207,8 +208,23 @@ export class DiscordChannel implements Channel {
       if (text.length <= MAX_LENGTH) {
         await textChannel.send(text);
       } else {
+        const totalChunks = Math.ceil(text.length / MAX_LENGTH);
+        let chunksSent = 0;
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await textChannel.send(text.slice(i, i + MAX_LENGTH));
+          try {
+            await textChannel.send(text.slice(i, i + MAX_LENGTH));
+            chunksSent++;
+          } catch (err) {
+            if (chunksSent > 0) {
+              throw new PartialSendError(
+                `Discord send failed after ${chunksSent}/${totalChunks} chunks`,
+                chunksSent,
+                totalChunks,
+                { cause: err },
+              );
+            }
+            throw err;
+          }
         }
       }
       logger.info({ jid, length: text.length }, "Discord message sent");
