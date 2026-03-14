@@ -20,6 +20,7 @@ RestartSec=10
 WatchdogSec=120
 
 # Environment
+EnvironmentFile=/home/nanoclaw/nanoclaw/.env
 Environment=NODE_ENV=production
 Environment=LOG_LEVEL=info
 Environment=TZ=America/Chicago

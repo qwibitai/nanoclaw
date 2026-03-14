@@ -151,16 +151,18 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // First call happens immediately
+    // First call happens immediately (+ MIN_SPAWN_COOLDOWN_MS on first spawn is 0 since lastSpawnTime=0)
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(1);
 
-    // First retry after 5000ms (BASE_RETRY_MS * 2^0)
-    await vi.advanceTimersByTimeAsync(5000);
+    // First retry after 5000ms (BASE_RETRY_MS * 2^0), then MIN_SPAWN_COOLDOWN_MS (10s) cooldown kicks in
+    // Total wait: max(5000 retry delay, 10000 cooldown) = 10000ms + settle
+    await vi.advanceTimersByTimeAsync(10000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(2);
 
-    // Second retry after 10000ms (BASE_RETRY_MS * 2^1)
+    // Second retry after 10000ms (BASE_RETRY_MS * 2^1), cooldown is also 10000ms
+    // Total wait: max(10000 retry delay, 10000 cooldown) = 10000ms + settle
     await vi.advanceTimersByTimeAsync(10000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(3);
@@ -193,19 +195,20 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Run through all 5 retries (MAX_RETRIES = 5)
+    // Run through all 2 retries (MAX_RETRIES = 2)
     // Initial call
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(1);
 
-    // Retry 1: 5000ms, Retry 2: 10000ms, Retry 3: 20000ms, Retry 4: 40000ms, Retry 5: 80000ms
-    const retryDelays = [5000, 10000, 20000, 40000, 80000];
-    for (let i = 0; i < retryDelays.length; i++) {
-      await vi.advanceTimersByTimeAsync(retryDelays[i] + 10);
+    // Retry 1: 5000ms delay + cooldown brings total to ~10000ms
+    // Retry 2: 10000ms delay + cooldown brings total to ~10000ms
+    const retryWaits = [10000, 10000];
+    for (let i = 0; i < retryWaits.length; i++) {
+      await vi.advanceTimersByTimeAsync(retryWaits[i] + 10);
       expect(callCount).toBe(i + 2);
     }
 
-    // After 5 retries (6 total calls), should stop — no more retries
+    // After 2 retries (3 total calls), should stop — no more retries
     const countAfterMaxRetries = callCount;
     await vi.advanceTimersByTimeAsync(200000); // Wait a long time
     expect(callCount).toBe(countAfterMaxRetries);

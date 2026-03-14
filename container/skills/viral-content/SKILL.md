@@ -35,7 +35,34 @@ npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform twitter
 npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform linkedin --query "office coffee" --limit 20
 npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform linkedin --query "vending technology" --limit 20
 npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform linkedin --query "employee satisfaction breakroom" --limit 20
+
+# Facebook competitor scans (use page IDs from competitors.md)
+npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform facebook --query "<competitor_page_id>" --limit 10
 ```
+
+## Weekly Competitor & Inspiration Scan (Before Sunday Post Generation)
+
+Before generating the weekly posts, scan all three tiers of Facebook pages to learn what's working:
+
+### Tier Priority
+- **Tier 1 (Direct Competitors)**: Scan every page, every week. Look for gaps and positioning.
+- **Tier 2 (Local Houston Crushers)**: Scan 3-5 pages per week (rotate through the list). These teach you what hooks and formats work for Houston audiences — the most valuable tier for content quality.
+- **Tier 3 (National Brands)**: Scan 1-2 pages per week (rotate). Learn formats and structures worth adapting.
+
+### Process
+1. Read `competitors.md` for the active group (SNAK or Sheridan)
+2. Scan each selected page:
+   ```bash
+   npx tsx /workspace/project/tools/social/trend-scraper.ts scan --platform facebook --query "<page_id>" --limit 10
+   ```
+3. Run analysis to see updated patterns:
+   ```bash
+   npx tsx /workspace/project/tools/social/trend-scraper.ts analyze
+   ```
+4. Note high-engagement posts across all tiers — what hooks, formats, photos, and topics are working?
+5. Pay special attention to Tier 2 — if a Houston junk removal company gets 200 reactions on a before/after post, that format works for our audience too
+6. Feed observations into `viral-patterns.md` and use them to inform the week's content
+7. Update the "Latest Scan Notes" section in `competitors.md` with key findings per tier
 
 After scanning, run analysis to update pattern knowledge:
 

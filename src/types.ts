@@ -179,6 +179,37 @@ export interface Campaign {
   updated_at: string;
 }
 
+// --- Conversion tracking types ---
+
+export type ConversionStage =
+  | 'inquiry'
+  | 'quoted'
+  | 'negotiating'
+  | 'booked'
+  | 'completed'
+  | 'reviewed';
+
+export interface Conversion {
+  id: string;
+  chat_jid: string;
+  channel: string;
+  customer_id: string | null;
+  stage: ConversionStage;
+  business: string;
+  source: string | null;
+  value_usd: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversionStats {
+  total: number;
+  byStage: Record<string, number>;
+  totalValue: number;
+  conversionRate: number;
+}
+
 // --- Health monitoring ---
 
 export interface HealthInfo {
@@ -199,6 +230,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: health reporting. Channels that implement it expose connection health.
+  getHealthInfo?(): HealthInfo;
 }
 
 // Callback type that channels use to deliver inbound messages

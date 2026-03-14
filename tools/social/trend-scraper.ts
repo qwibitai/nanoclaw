@@ -8,6 +8,7 @@
  * Usage:
  *   npx tsx tools/social/trend-scraper.ts scan --platform linkedin [--query "office coffee"] [--limit 20]
  *   npx tsx tools/social/trend-scraper.ts scan --platform twitter [--query "vending machine"] [--limit 20]
+ *   npx tsx tools/social/trend-scraper.ts scan --platform facebook --query "<page_id>" [--limit 10]
  *   npx tsx tools/social/trend-scraper.ts analyze
  *   npx tsx tools/social/trend-scraper.ts patterns
  *
@@ -332,6 +333,81 @@ async function scanLinkedIn(query: string, limit: number): Promise<TrendingConte
   }
 }
 
+// ── Facebook Page Scanning ───────────────────────────────────────────
+
+async function scanFacebook(pageId: string, limit: number): Promise<TrendingContent[]> {
+  const accessToken = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!accessToken) {
+    console.error(JSON.stringify({
+      status: 'error',
+      error: 'Missing FB_PAGE_ACCESS_TOKEN env var (needed to read public page posts).',
+    }));
+    process.exit(1);
+  }
+
+  const fields = 'message,shares,reactions.summary(true),comments.summary(true),created_time,permalink_url';
+  const params = new URLSearchParams({
+    fields,
+    limit: Math.min(limit, 100).toString(),
+    access_token: accessToken,
+  });
+
+  const url = `https://graph.facebook.com/v21.0/${pageId}/posts?${params}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Facebook API ${res.status}: ${body}`);
+    }
+
+    const data = await res.json() as {
+      data?: Array<{
+        id: string;
+        message?: string;
+        shares?: { count: number };
+        reactions?: { summary: { total_count: number } };
+        comments?: { summary: { total_count: number } };
+        created_time?: string;
+        permalink_url?: string;
+      }>;
+    };
+
+    if (!data.data || data.data.length === 0) {
+      return [];
+    }
+
+    const now = new Date().toISOString();
+    return data.data
+      .filter((post) => post.message) // skip posts without text
+      .map((post) => ({
+        id: crypto.randomUUID(),
+        platform: 'facebook',
+        author: pageId,
+        content_text: post.message || '',
+        url: post.permalink_url || `https://facebook.com/${post.id}`,
+        likes: post.reactions?.summary?.total_count || 0,
+        shares: post.shares?.count || 0,
+        comments: post.comments?.summary?.total_count || 0,
+        scraped_at: now,
+        tags: extractTags(post.message || '').join(','),
+        hook_type: classifyHookType(post.message || ''),
+        format_type: classifyFormatType(post.message || '', 'facebook'),
+      }));
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
 // ── Scan Action ───────────────────────────────────────────────────────
 
 async function scan(platform: string, query: string, limit: number): Promise<void> {
@@ -345,10 +421,14 @@ async function scan(platform: string, query: string, limit: number): Promise<voi
     case 'linkedin':
       results = await scanLinkedIn(query, limit);
       break;
+    case 'facebook':
+    case 'fb':
+      results = await scanFacebook(query, limit);
+      break;
     default:
       console.error(JSON.stringify({
         status: 'error',
-        error: `Unsupported platform "${platform}". Use: twitter, linkedin`,
+        error: `Unsupported platform "${platform}". Use: twitter, linkedin, facebook`,
       }));
       process.exit(1);
   }
@@ -582,7 +662,7 @@ async function main() {
     switch (args.action) {
       case 'scan':
         if (!args.platform) {
-          console.error(JSON.stringify({ status: 'error', error: 'scan requires --platform (twitter, linkedin)' }));
+          console.error(JSON.stringify({ status: 'error', error: 'scan requires --platform (twitter, linkedin, facebook)' }));
           process.exit(1);
         }
         await scan(args.platform, args.query || 'vending machine', args.limit);

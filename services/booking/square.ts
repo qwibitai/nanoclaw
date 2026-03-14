@@ -67,7 +67,7 @@ export async function createPaymentLink(
 ): Promise<{ paymentUrl: string; paymentLinkId: string; orderId: string }> {
   const cfg = getConfig();
   const lineItems = buildSquareLineItems(pricing);
-  const idempotencyKey = `sheridan-${bookingId}-${Date.now()}`;
+  const idempotencyKey = `sheridan-${bookingId}`;
 
   const redirectUrl = process.env.BOOKING_CONFIRMATION_URL
     || 'https://sheridantrailerrentals.us/booking-confirmation';
@@ -98,6 +98,40 @@ export async function createPaymentLink(
     paymentUrl: link?.url || link?.long_url || '',
     paymentLinkId: link?.id || '',
     orderId: link?.order_id || '',
+  };
+}
+
+// ── Refund Payment ──────────────────────────────────────────────────
+
+export async function refundPayment(orderId: string, amountCents?: number): Promise<{
+  refundId: string;
+  status: string;
+  amountCents: number;
+}> {
+  // 1. Get the order to find payment_id from tenders
+  const orderData = await squareRequest('GET', `/orders/${orderId}`);
+  const tenders = orderData.order?.tenders || [];
+  if (tenders.length === 0) throw new Error('No payment found for this order');
+
+  const paymentId = tenders[0].id;
+  const paidCents = tenders[0].amount_money?.amount || 0;
+  const refundAmount = amountCents || paidCents;
+
+  // 2. Create refund via Square Refunds API
+  const refundData = await squareRequest('POST', '/refunds', {
+    idempotency_key: `refund-${orderId}-${Date.now()}`,
+    payment_id: paymentId,
+    amount_money: {
+      amount: refundAmount,
+      currency: 'USD',
+    },
+    reason: 'Customer cancellation',
+  });
+
+  return {
+    refundId: refundData.refund?.id || '',
+    status: refundData.refund?.status || 'UNKNOWN',
+    amountCents: refundAmount,
   };
 }
 

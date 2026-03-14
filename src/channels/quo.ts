@@ -8,6 +8,7 @@ import http from 'http';
 
 import { z } from 'zod/v4';
 
+import { CircuitBreaker } from '../circuit-breaker.js';
 import {
   ASSISTANT_NAME,
   QUO_API_KEY,
@@ -20,47 +21,15 @@ import {
 import { readEnvFile } from '../env.js';
 import { getLastSender, upsertContactFromPhone } from '../db.js';
 import { audit, logger } from '../logger.js';
+import { isWebhookRateLimited } from '../pipeline/stages/webhook-guard.js';
 import {
   Channel,
+  HealthInfo,
   NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
-
-// ── Rate Limiting ──────────────────────────────────────────────────
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 30; // per IP per window
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const rateLimitMap = new Map<string, RateLimitEntry>();
-
-// Clean up stale entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
-      rateLimitMap.delete(ip);
-    }
-  }
-}, 300_000);
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitMap.set(ip, { count: 1, windowStart: now });
-    return false;
-  }
-
-  entry.count++;
-  return entry.count > RATE_LIMIT_MAX_REQUESTS;
-}
 
 // ── Webhook Signature Verification ─────────────────────────────────
 const QUO_WEBHOOK_SECRET =
@@ -126,6 +95,7 @@ export interface QuoChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  shouldProcess?: (msg: { id: string; sender: string; content: string; channel: string }) => boolean;
 }
 
 /** Map business number → OpenPhone phoneNumberId for outbound sending. */
@@ -140,6 +110,7 @@ export class QuoChannel implements Channel {
   private server: http.Server | null = null;
   private connected = false;
   private opts: QuoChannelOpts;
+  private apiBreaker = new CircuitBreaker('openphone-api');
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
@@ -150,9 +121,6 @@ export class QuoChannel implements Channel {
 
   /** Track last seen activity ID per conversation to detect new messages. */
   private lastActivityByConversation = new Map<string, string>();
-
-  /** Track message IDs we've already processed (dedup between webhook and polling). */
-  private processedMessageIds = new Set<string>();
 
   /** Map business number → phoneId for outbound routing. */
   private phoneLines: PhoneLine[] = [];
@@ -184,7 +152,7 @@ export class QuoChannel implements Channel {
           req.headers['x-forwarded-for']?.toString().split(',')[0].trim() ||
           req.socket.remoteAddress ||
           'unknown';
-        if (isRateLimited(ip)) {
+        if (isWebhookRateLimited(ip)) {
           logger.warn({ ip }, 'Quo webhook rate limited');
           audit('webhook_rate_limited', { ip });
           res.writeHead(429, {
@@ -239,29 +207,36 @@ export class QuoChannel implements Channel {
     // Prefix with assistant name for consistency
     const prefixed = `${ASSISTANT_NAME}: ${text}`;
 
-    try {
-      const response = await fetch(`${QUO_API_BASE}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: QUO_API_KEY,
-        },
-        body: JSON.stringify({
-          content: prefixed,
-          from: line.phoneId,
-          to: [customerNumber],
-        }),
-      });
+    if (this.apiBreaker.state === 'open') {
+      logger.error({ jid, breaker: 'openphone-api' }, 'Quo API circuit breaker open, dropping message');
+      return;
+    }
 
-      if (!response.ok) {
-        const body = await response.text();
-        logger.error({ jid, status: response.status, body }, 'Quo send failed');
-      } else {
+    try {
+      await this.apiBreaker.call(async () => {
+        const response = await fetch(`${QUO_API_BASE}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: QUO_API_KEY,
+          },
+          body: JSON.stringify({
+            content: prefixed,
+            from: line.phoneId,
+            to: [customerNumber],
+          }),
+        });
+
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(`Quo send failed ${response.status}: ${body}`);
+        }
+
         logger.info(
           { jid, to: customerNumber, length: prefixed.length },
           'Quo message sent',
         );
-      }
+      });
     } catch (err) {
       logger.error({ jid, err }, 'Quo send error');
     }
@@ -269,6 +244,15 @@ export class QuoChannel implements Channel {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  getHealthInfo(): HealthInfo {
+    return {
+      connected: this.connected,
+      lastConnectedAt: null,
+      recentDisconnects: [],
+      protocolErrorCount: 0,
+    };
   }
 
   ownsJid(jid: string): boolean {
@@ -505,16 +489,6 @@ export class QuoChannel implements Channel {
     const msgId = msg.id;
     if (!msgId) return;
 
-    // Dedup: skip messages we've already processed (from webhook or previous poll)
-    if (this.processedMessageIds.has(msgId)) return;
-    this.processedMessageIds.add(msgId);
-
-    // Cap dedup set size to prevent memory leak
-    if (this.processedMessageIds.size > 5000) {
-      const entries = [...this.processedMessageIds];
-      this.processedMessageIds = new Set(entries.slice(-2500));
-    }
-
     const customerNumber = msg.from;
     const businessNumber = Array.isArray(msg.to) ? msg.to[0] : msg.to;
     const text = msg.text || msg.body || '';
@@ -556,6 +530,15 @@ export class QuoChannel implements Channel {
       is_from_me: false,
       is_bot_message: false,
     };
+
+    if (this.opts.shouldProcess && !this.opts.shouldProcess({
+      id: msgId,
+      sender: customerNumber,
+      content: text,
+      channel: 'quo',
+    })) {
+      return;
+    }
 
     this.opts.onMessage(jid, newMsg);
 

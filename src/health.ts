@@ -21,6 +21,7 @@ import {
   getHealthState,
   getLastMessageTimestamp,
   pruneOldLogs,
+  pruneOldMessageIds,
   setHealthState,
   updateTask,
 } from './db.js';
@@ -50,15 +51,18 @@ export interface HealthMonitorDeps {
   getMainGroupJid: () => string | null;
 }
 
+interface ChannelHealthSnapshot {
+  connected: boolean;
+  lastConnectedAt: string | null;
+  recentDisconnects: number;
+  protocolErrorCount: number;
+}
+
 interface HealthSnapshot {
   timestamp: string;
   status: 'ok' | 'warning' | 'critical';
-  whatsapp: {
-    connected: boolean;
-    lastConnectedAt: string | null;
-    recentDisconnects: number;
-    protocolErrorCount: number;
-  };
+  whatsapp: ChannelHealthSnapshot;
+  channels: Record<string, ChannelHealthSnapshot>;
   lastMessageAt: string | null;
   authPresent: boolean;
   uptimeMinutes: number;
@@ -193,7 +197,19 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
     }
   }
 
-  // Check 6: Disk space (Linux only)
+  // Check 6: Booking service health (Sheridan Rentals API on port 3200)
+  try {
+    const bookingRes = await fetch('http://localhost:3200/health', { signal: AbortSignal.timeout(5000) });
+    if (!bookingRes.ok) {
+      if (status === 'ok') status = 'warning';
+      issues.push(`Booking service unhealthy (HTTP ${bookingRes.status})`);
+    }
+  } catch {
+    if (status === 'ok') status = 'warning';
+    issues.push('Booking service unreachable on port 3200 — website bookings may be failing');
+  }
+
+  // Check 7: Disk space (Linux only)
   try {
     const stats = fs.statfsSync(STORE_DIR);
     const freeGb = (stats.bfree * stats.bsize) / (1024 ** 3);
@@ -208,7 +224,22 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
     // statfsSync may not be available on all platforms
   }
 
-  // Check 7: Daily spend approaching cap
+  // Check 7: Database size
+  try {
+    const dbPath = path.join(DATA_DIR, 'data.db');
+    if (fs.existsSync(dbPath)) {
+      const dbSizeMb = fs.statSync(dbPath).size / (1024 ** 2);
+      if (dbSizeMb > 1024) {
+        status = 'critical';
+        issues.push(`Database critically large: ${(dbSizeMb / 1024).toFixed(1)} GB`);
+      } else if (dbSizeMb > 500) {
+        if (status === 'ok') status = 'warning';
+        issues.push(`Database large: ${dbSizeMb.toFixed(0)} MB`);
+      }
+    }
+  } catch { /* non-critical */ }
+
+  // Check 8: Daily spend approaching cap
   if (MAX_DAILY_SPEND_USD > 0) {
     try {
       const spent = getDailySpendUsd();
@@ -227,11 +258,30 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
   setHealthState('issues', JSON.stringify(issues));
   setHealthState('last_check', new Date().toISOString());
 
+  // Build per-channel health snapshots
+  const channelSnapshots: Record<string, ChannelHealthSnapshot> = {};
+  for (const ch of deps.channels) {
+    const info = ch.getHealthInfo?.() ?? {
+      connected: ch.isConnected(),
+      lastConnectedAt: null,
+      recentDisconnects: [],
+      protocolErrorCount: 0,
+    };
+    channelSnapshots[ch.name] = {
+      connected: info.connected,
+      lastConnectedAt: info.lastConnectedAt,
+      recentDisconnects: Array.isArray(info.recentDisconnects)
+        ? info.recentDisconnects.length
+        : 0,
+      protocolErrorCount: info.protocolErrorCount,
+    };
+  }
+
   // Write health snapshot for Andy's container to read
   const snapshot: HealthSnapshot = {
     timestamp: new Date().toISOString(),
     status,
-    whatsapp: {
+    whatsapp: channelSnapshots['whatsapp'] ?? {
       connected: healthInfo.connected,
       lastConnectedAt: healthInfo.lastConnectedAt,
       recentDisconnects: Array.isArray(healthInfo.recentDisconnects)
@@ -239,6 +289,7 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
         : 0,
       protocolErrorCount: healthInfo.protocolErrorCount,
     },
+    channels: channelSnapshots,
     lastMessageAt: lastMsgTs,
     authPresent,
     uptimeMinutes: Math.round((Date.now() - startTime) / 60000),
@@ -318,6 +369,16 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
       logger.error({ err }, 'Failed to prune logs');
     }
 
+    // Prune old dedup message IDs (>24h)
+    try {
+      const prunedIds = pruneOldMessageIds();
+      if (prunedIds > 0) {
+        logger.info({ prunedIds }, 'Pruned old inbound message IDs');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to prune message IDs');
+    }
+
     // Expire stale pending bookings (>30 min old)
     try {
       expirePendingBookings();
@@ -344,6 +405,19 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
       }
     } catch (err) {
       logger.error({ err }, 'Failed to clean container logs');
+    }
+
+    // Daily database backup (overwrites previous — keeps latest)
+    try {
+      const dbPath = path.join(DATA_DIR, 'data.db');
+      const backupPath = dbPath + '.backup';
+      if (fs.existsSync(dbPath)) {
+        fs.copyFileSync(dbPath, backupPath);
+        const sizeMb = (fs.statSync(backupPath).size / (1024 ** 2)).toFixed(1);
+        logger.info({ backupPath, sizeMb }, 'Daily database backup completed');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Daily database backup failed');
     }
 
     // Clean up IPC error files

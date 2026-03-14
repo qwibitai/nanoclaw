@@ -192,13 +192,37 @@ async function downloadFile(drive: drive_v3.Drive, fileId: string, output: strin
     }, { responseType: 'text' });
     content = res.data as string;
   } else {
-    // Regular files — download directly
-    const res = await drive.files.get({
-      fileId,
-      alt: 'media',
-      supportsAllDrives: true,
-    }, { responseType: 'text' });
-    content = res.data as string;
+    // Regular files — detect binary vs text
+    const isBinary = /^(image|video|audio)\//.test(mimeType)
+      || /^application\/(pdf|zip|octet-stream|x-tar|gzip)/.test(mimeType);
+
+    if (isBinary) {
+      const res = await drive.files.get({
+        fileId,
+        alt: 'media',
+        supportsAllDrives: true,
+      }, { responseType: 'arraybuffer' });
+      const buf = Buffer.from(res.data as ArrayBuffer);
+      fs.writeFileSync(output, buf);
+
+      console.log(JSON.stringify({
+        status: 'success',
+        action: 'download',
+        fileId,
+        fileName: meta.data.name,
+        mimeType,
+        outputPath: output,
+        size: buf.length,
+      }));
+      return;
+    } else {
+      const res = await drive.files.get({
+        fileId,
+        alt: 'media',
+        supportsAllDrives: true,
+      }, { responseType: 'text' });
+      content = res.data as string;
+    }
   }
 
   fs.writeFileSync(output, content, 'utf-8');

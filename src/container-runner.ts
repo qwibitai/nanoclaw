@@ -20,7 +20,7 @@ import {
 
 // Use 'docker' on Linux, 'container' (Apple Container) on macOS
 const CONTAINER_CMD = os.platform() === 'linux' ? 'docker' : 'container';
-import { getDailySpendUsd, getRecentMessages, logUsage } from './db.js';
+import { addInFlightSpend, getDailySpendUsd, getInFlightSpendUsd, getRecentMessages, logUsage, removeInFlightSpend } from './db.js';
 import { readEnvFile } from './env.js';
 import { audit, logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -125,6 +125,17 @@ function buildVolumeMounts(
         hostPath: toolsDir,
         containerPath: '/workspace/project/tools',
         readonly: true,
+      });
+    }
+
+    // Mount store directory so non-main groups can access the database
+    // (tools like track-conversion.ts and query-complaints.ts need store/messages.db)
+    const storeDir = path.join(projectRoot, 'store');
+    if (fs.existsSync(storeDir)) {
+      mounts.push({
+        hostPath: storeDir,
+        containerPath: '/workspace/project/store',
+        readonly: false,
       });
     }
   }
@@ -405,6 +416,17 @@ export function writeMessagesSnapshot(groupFolder: string): void {
   }, null, 2));
 }
 
+/**
+ * In-flight spend tracker: pessimistically reserves budget at spawn time.
+ * Persisted to the database so reservations survive process crashes.
+ * Released when the container completes (actual usage is logged via logUsage).
+ */
+
+/** Get total estimated spend including in-flight containers. */
+export function getEffectiveDailySpend(): number {
+  return getDailySpendUsd() + getInFlightSpendUsd();
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -413,74 +435,115 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
-  // Enforce daily spend cap before spawning a container
+  // Enforce daily spend cap (includes pessimistic in-flight reservations)
+  const reserveAmount = input.maxBudgetUsd || 0.25; // default pessimistic reserve
   if (MAX_DAILY_SPEND_USD > 0) {
-    const todaySpend = getDailySpendUsd();
-    if (todaySpend >= MAX_DAILY_SPEND_USD) {
+    const effectiveSpend = getEffectiveDailySpend();
+    if (effectiveSpend >= MAX_DAILY_SPEND_USD) {
       logger.warn(
-        { todaySpend: todaySpend.toFixed(2), cap: MAX_DAILY_SPEND_USD },
-        'Daily spend cap reached, refusing to spawn container',
+        { logged: getDailySpendUsd().toFixed(2), inFlight: getInFlightSpendUsd().toFixed(2), cap: MAX_DAILY_SPEND_USD },
+        'Daily spend cap reached (including in-flight), refusing to spawn container',
       );
       return {
         status: 'error',
-        error: `Daily spend cap reached ($${todaySpend.toFixed(2)} / $${MAX_DAILY_SPEND_USD}). No more containers will be spawned today.`,
+        error: `Daily spend cap reached. No more containers will be spawned today.`,
         result: null,
         newSessionId: undefined,
       };
     }
   }
 
-  // Validate group folder to prevent path traversal in mount paths
-  validateGroupFolder(group.folder);
-
-  // Generate per-run nonce for output markers to prevent injection
-  const outputNonce = crypto.randomBytes(16).toString('hex');
-  const { start: OUTPUT_START_MARKER, end: OUTPUT_END_MARKER } =
-    makeMarkers(outputNonce);
-  input.outputNonce = outputNonce;
-
-  const groupDir = path.join(GROUPS_DIR, group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
-
-  const mounts = buildVolumeMounts(group, input.isMain);
-  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
-
+  // Pre-debit: reserve budget pessimistically (released on completion).
+  // Written to DB so the reservation survives process crashes.
+  // containerName is assigned later, so use a temporary name until we know it.
+  const reserveId = `reserve-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  addInFlightSpend(reserveId, input.groupFolder, reserveAmount);
   logger.debug(
-    {
-      group: group.name,
-      containerName,
-      mounts: mounts.map(
-        (m) =>
-          `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-      ),
-      containerArgs: containerArgs.join(' '),
-    },
-    'Container mount configuration',
+    { group: group.name, reserveAmount, inFlightTotal: getInFlightSpendUsd().toFixed(2) },
+    'Reserved in-flight spend budget',
   );
 
-  logger.info(
-    {
+  // All setup below can throw synchronously (validation, fs ops, etc.).
+  // Wrap in try/catch to ensure inFlightSpendUsd is always decremented.
+  let outputNonce: string;
+  let OUTPUT_START_MARKER: string;
+  let OUTPUT_END_MARKER: string;
+  let mounts: VolumeMount[];
+  let containerName: string;
+  let containerArgs: string[];
+  let logsDir: string;
+
+  try {
+    // Validate group folder to prevent path traversal in mount paths
+    validateGroupFolder(group.folder);
+
+    // Generate per-run nonce for output markers to prevent injection
+    outputNonce = crypto.randomBytes(16).toString('hex');
+    ({ start: OUTPUT_START_MARKER, end: OUTPUT_END_MARKER } =
+      makeMarkers(outputNonce));
+    input.outputNonce = outputNonce;
+
+    const groupDir = path.join(GROUPS_DIR, group.folder);
+    fs.mkdirSync(groupDir, { recursive: true });
+
+    mounts = buildVolumeMounts(group, input.isMain);
+    const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+    containerName = `nanoclaw-${safeName}-${Date.now()}`;
+    containerArgs = buildContainerArgs(mounts, containerName);
+
+    logger.debug(
+      {
+        group: group.name,
+        containerName,
+        mounts: mounts.map(
+          (m) =>
+            `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+        ),
+        containerArgs: containerArgs.join(' '),
+      },
+      'Container mount configuration',
+    );
+
+    logger.info(
+      {
+        group: group.name,
+        containerName,
+        mountCount: mounts.length,
+        isMain: input.isMain,
+      },
+      'Spawning container agent',
+    );
+
+    audit('container_spawn', {
       group: group.name,
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
-    },
-    'Spawning container agent',
-  );
+    });
 
-  audit('container_spawn', {
-    group: group.name,
-    containerName,
-    mountCount: mounts.length,
-    isMain: input.isMain,
-  });
+    logsDir = path.join(GROUPS_DIR, group.folder, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+  } catch (err) {
+    // Release the in-flight reservation on setup failure
+    removeInFlightSpend(reserveId);
+    logger.error(
+      { group: group.name, err, released: reserveAmount },
+      'Container setup failed, released in-flight spend reservation',
+    );
+    throw err;
+  }
 
-  const logsDir = path.join(GROUPS_DIR, group.folder, 'logs');
-  fs.mkdirSync(logsDir, { recursive: true });
+  return new Promise((rawResolve) => {
+    // Wrap resolve to always release in-flight spend reservation
+    const resolve = (output: ContainerOutput) => {
+      removeInFlightSpend(reserveId);
+      logger.debug(
+        { group: group.name, released: reserveAmount, inFlightRemaining: getInFlightSpendUsd().toFixed(2) },
+        'Released in-flight spend reservation',
+      );
+      rawResolve(output);
+    };
 
-  return new Promise((resolve) => {
     const container = spawn(CONTAINER_CMD, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });

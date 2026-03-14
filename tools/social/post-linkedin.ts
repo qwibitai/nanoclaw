@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
  * Post to LinkedIn Tool for NanoClaw
- * Usage: npx tsx tools/social/post-linkedin.ts --text "post content" [--link "url"] [--visibility "PUBLIC"]
+ * Usage: npx tsx tools/social/post-linkedin.ts --text "post content" [--link "url"] [--visibility "PUBLIC"] [--dry-run]
  *
  * Uses LinkedIn API v2
  * Environment: LINKEDIN_ACCESS_TOKEN, LINKEDIN_PERSON_URN (format: urn:li:person:XXXXX)
@@ -13,6 +13,7 @@ interface LinkedInArgs {
   text: string;
   link?: string;
   visibility?: string;
+  dryRun?: boolean;
 }
 
 function parseArgs(): LinkedInArgs {
@@ -26,15 +27,30 @@ function parseArgs(): LinkedInArgs {
     }
   }
 
+  const dryRun = args.includes('--dry-run');
+
   if (!result.text) {
-    console.error('Usage: post-linkedin --text "post content" [--link "url"] [--visibility "PUBLIC"]');
+    console.error('Usage: post-linkedin --text "post content" [--link "url"] [--visibility "PUBLIC"] [--dry-run]');
     process.exit(1);
   }
 
-  return result as unknown as LinkedInArgs;
+  return { ...result, dryRun } as unknown as LinkedInArgs;
 }
 
 async function postToLinkedIn(args: LinkedInArgs): Promise<void> {
+  if (args.dryRun) {
+    console.log(JSON.stringify({
+      status: 'dry_run',
+      platform: 'linkedin',
+      text: args.text,
+      link: args.link || null,
+      visibility: args.visibility || 'PUBLIC',
+      char_count: args.text.length,
+      message: 'No post was published. Remove --dry-run to post for real.',
+    }));
+    return;
+  }
+
   const accessToken = process.env.LINKEDIN_ACCESS_TOKEN;
   const personUrn = process.env.LINKEDIN_PERSON_URN;
 

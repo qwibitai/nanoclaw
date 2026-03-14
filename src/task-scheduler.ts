@@ -48,6 +48,19 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
+/** Send an alert to the main group (Blayk's WhatsApp). */
+function alertMainGroup(deps: SchedulerDependencies, message: string): void {
+  const groups = deps.registeredGroups();
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.folder === MAIN_GROUP_FOLDER) {
+      deps.sendMessage(jid, message).catch(err =>
+        logger.warn({ err }, 'Failed to send CLI fallback alert'),
+      );
+      return;
+    }
+  }
+}
+
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
@@ -143,6 +156,7 @@ async function runTask(
             { taskId: task.id, event: 'cli_fallback_triggered', reason: error },
             'CLI failed — falling back to container (API credits will be consumed)',
           );
+          alertMainGroup(deps, `⚠️ CLI failed for task "${task.id}" — falling back to container (API credits being used). Reason: ${error}`);
           error = null;
           await runTaskViaContainer(task, group, isMain, deps, startTime, (r, e) => {
             result = r;
@@ -153,6 +167,7 @@ async function runTask(
             { taskId: task.id, event: 'cli_fallback_blocked', reason: error },
             'CLI failed and CLI_FALLBACK_ENABLED=false — task SKIPPED to prevent credit burn. Fix CLI setup or set CLI_FALLBACK_ENABLED=true.',
           );
+          alertMainGroup(deps, `🚨 Task "${task.id}" FAILED and was skipped (no container fallback). Error: ${error}`);
         }
       } else if (cliOutput.result) {
         result = cliOutput.result;
@@ -176,6 +191,7 @@ async function runTask(
           { taskId: task.id, event: 'cli_fallback_triggered', reason: error },
           'CLI exception — falling back to container (API credits will be consumed)',
         );
+        alertMainGroup(deps, `⚠️ CLI exception for task "${task.id}" — falling back to container (API credits being used). Error: ${error}`);
         error = null;
         try {
           await runTaskViaContainer(task, group, isMain, deps, startTime, (r, e) => {
@@ -191,6 +207,7 @@ async function runTask(
           { taskId: task.id, event: 'cli_fallback_blocked', reason: error },
           'CLI exception and CLI_FALLBACK_ENABLED=false — task SKIPPED to prevent credit burn.',
         );
+        alertMainGroup(deps, `🚨 Task "${task.id}" FAILED and was skipped (no container fallback). Error: ${error}`);
       }
     }
   } else {
@@ -211,6 +228,10 @@ async function runTask(
     result,
     error,
   });
+
+  if (error) {
+    alertMainGroup(deps, `🚨 Scheduled task "${task.id}" (${task.group_folder}) failed: ${error}`);
+  }
 
   let nextRun: string | null = null;
   if (task.schedule_type === 'cron') {

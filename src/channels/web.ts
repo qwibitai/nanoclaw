@@ -21,6 +21,7 @@ import {
 import { logger } from '../logger.js';
 import {
   Channel,
+  HealthInfo,
   NewMessage,
   OnChatMetadata,
   OnInboundMessage,
@@ -247,6 +248,15 @@ export class WebChannel implements Channel {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  getHealthInfo(): HealthInfo {
+    return {
+      connected: this.connected,
+      lastConnectedAt: null,
+      recentDisconnects: [],
+      protocolErrorCount: 0,
+    };
   }
 
   ownsJid(jid: string): boolean {

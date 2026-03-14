@@ -6,6 +6,8 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR, TIMEZONE } from './config.js';
 import {
   Campaign,
   Contact,
+  Conversion,
+  ConversionStats,
   Deal,
   DealStageLogEntry,
   NewMessage,
@@ -176,6 +178,43 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_usage_group ON usage_log(group_folder);
     CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_log(timestamp);
+
+    CREATE TABLE IF NOT EXISTS inbound_message_ids (
+      msg_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS conversions (
+      id TEXT PRIMARY KEY,
+      chat_jid TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      customer_id TEXT,
+      stage TEXT NOT NULL DEFAULT 'inquiry',
+      business TEXT NOT NULL,
+      source TEXT,
+      value_usd REAL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversions_stage ON conversions(stage);
+    CREATE INDEX IF NOT EXISTS idx_conversions_business ON conversions(business);
+
+    CREATE TABLE IF NOT EXISTS complaints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_jid TEXT NOT NULL,
+      customer_name TEXT,
+      channel TEXT NOT NULL,
+      category TEXT NOT NULL,
+      matched_patterns TEXT NOT NULL,
+      message_snippet TEXT NOT NULL,
+      resolution_status TEXT NOT NULL DEFAULT 'open',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(resolution_status);
+    CREATE INDEX IF NOT EXISTS idx_complaints_customer ON complaints(customer_jid);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -294,6 +333,34 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Migrations — add business field to CRM tables for multi-business separation
+  const crmMigrations: string[] = [
+    `ALTER TABLE contacts ADD COLUMN business TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE complaints ADD COLUMN business TEXT NOT NULL DEFAULT ''`,
+  ];
+  for (const sql of crmMigrations) {
+    try {
+      database.exec(sql);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_contacts_business ON contacts(business);
+    CREATE INDEX IF NOT EXISTS idx_complaints_business ON complaints(business);
+  `);
+
+  // In-flight spend reservations — survives process crashes
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS in_flight_spend (
+      container_name TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      reserve_usd REAL NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
 }
 
 export function initDatabase(): void {
@@ -1288,6 +1355,25 @@ export function getDailySpendUsd(): number {
   return totalUsd;
 }
 
+/** Reserve in-flight spend for a container (persisted to survive crashes). */
+export function addInFlightSpend(containerName: string, groupFolder: string, reserveUsd: number): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO in_flight_spend (container_name, group_folder, reserve_usd, created_at)
+     VALUES (?, ?, ?, ?)`,
+  ).run(containerName, groupFolder, reserveUsd, new Date().toISOString());
+}
+
+/** Release in-flight spend reservation when a container completes. */
+export function removeInFlightSpend(containerName: string): void {
+  db.prepare(`DELETE FROM in_flight_spend WHERE container_name = ?`).run(containerName);
+}
+
+/** Sum all in-flight spend reservations (used on startup and for budget checks). */
+export function getInFlightSpendUsd(): number {
+  const row = db.prepare(`SELECT COALESCE(SUM(reserve_usd), 0) as total FROM in_flight_spend`).get() as { total: number };
+  return row.total;
+}
+
 export function getUsageStats(
   groupFolder?: string,
   sinceDays = 30,
@@ -1340,6 +1426,22 @@ export function getUsageStats(
  * Prune old log entries to prevent unbounded database growth.
  * Called periodically from the health monitor.
  */
+// --- Inbound message dedup (persistent) ---
+
+export function hasMessageId(msgId: string): boolean {
+  const row = db.prepare('SELECT 1 FROM inbound_message_ids WHERE msg_id = ?').get(msgId);
+  return row !== undefined;
+}
+
+export function recordMessageId(msgId: string): void {
+  db.prepare('INSERT OR IGNORE INTO inbound_message_ids (msg_id) VALUES (?)').run(msgId);
+}
+
+export function pruneOldMessageIds(olderThanMs = 86_400_000): number {
+  const cutoffEpoch = Math.floor((Date.now() - olderThanMs) / 1000);
+  return db.prepare('DELETE FROM inbound_message_ids WHERE created_at < ?').run(cutoffEpoch).changes;
+}
+
 export function pruneOldLogs(): { taskRuns: number; usage: number; messages: number } {
   const taskRunCutoff = new Date(Date.now() - 30 * 86400000).toISOString(); // 30 days
   const usageCutoff = new Date(Date.now() - 90 * 86400000).toISOString(); // 90 days
@@ -1350,6 +1452,223 @@ export function pruneOldLogs(): { taskRuns: number; usage: number; messages: num
   const messages = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(messageCutoff).changes;
 
   return { taskRuns, usage, messages };
+}
+
+// --- Conversion tracking accessors ---
+
+export function createConversion(data: Omit<Conversion, 'updated_at'> & { updated_at?: string }): void {
+  const now = data.updated_at || new Date().toISOString();
+  db.prepare(
+    `INSERT INTO conversions (id, chat_jid, channel, customer_id, stage, business, source, value_usd, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    data.id,
+    data.chat_jid,
+    data.channel,
+    data.customer_id || null,
+    data.stage,
+    data.business,
+    data.source || null,
+    data.value_usd ?? null,
+    data.notes || null,
+    data.created_at,
+    now,
+  );
+}
+
+export function updateConversionStage(id: string, stage: string, notes?: string): void {
+  const now = new Date().toISOString();
+  if (notes) {
+    db.prepare(
+      `UPDATE conversions SET stage = ?, notes = ?, updated_at = ? WHERE id = ?`,
+    ).run(stage, notes, now, id);
+  } else {
+    db.prepare(
+      `UPDATE conversions SET stage = ?, updated_at = ? WHERE id = ?`,
+    ).run(stage, now, id);
+  }
+}
+
+export function getConversionsByBusiness(business: string): Conversion[] {
+  return db
+    .prepare('SELECT * FROM conversions WHERE business = ? ORDER BY updated_at DESC')
+    .all(business) as Conversion[];
+}
+
+export function getConversionStats(business?: string, days?: number): ConversionStats {
+  const cutoff = days
+    ? new Date(Date.now() - days * 86400000).toISOString()
+    : '1970-01-01T00:00:00.000Z';
+
+  const baseWhere = business
+    ? 'WHERE business = ? AND created_at >= ?'
+    : 'WHERE created_at >= ?';
+  const params: unknown[] = business ? [business, cutoff] : [cutoff];
+
+  const stages = db
+    .prepare(`SELECT stage, COUNT(*) as count FROM conversions ${baseWhere} GROUP BY stage`)
+    .all(...params) as Array<{ stage: string; count: number }>;
+
+  const totals = db
+    .prepare(
+      `SELECT COUNT(*) as total, COALESCE(SUM(value_usd), 0) as total_value FROM conversions ${baseWhere}`,
+    )
+    .get(...params) as { total: number; total_value: number };
+
+  const completed = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM conversions ${baseWhere} AND stage IN ('booked', 'completed', 'reviewed')`,
+    )
+    .get(...params) as { count: number };
+
+  const byStage: Record<string, number> = {};
+  for (const s of stages) byStage[s.stage] = s.count;
+
+  return {
+    total: totals.total,
+    byStage,
+    totalValue: totals.total_value,
+    conversionRate: totals.total > 0 ? completed.count / totals.total : 0,
+  };
+}
+
+export function getStaleConversions(staleDays: number): Conversion[] {
+  const cutoff = new Date(Date.now() - staleDays * 86400000).toISOString();
+  return db
+    .prepare(
+      `SELECT * FROM conversions
+       WHERE stage IN ('inquiry', 'quoted') AND updated_at < ?
+       ORDER BY updated_at ASC`,
+    )
+    .all(cutoff) as Conversion[];
+}
+
+// --- Complaint tracking accessors ---
+
+export interface ComplaintRow {
+  id: number;
+  customer_jid: string;
+  customer_name: string | null;
+  channel: string;
+  category: string;
+  matched_patterns: string;
+  message_snippet: string;
+  resolution_status: string;
+  notes: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export function createComplaint(data: {
+  customerJid: string;
+  customerName?: string;
+  channel: string;
+  category: string;
+  matchedPatterns: string[];
+  messageSnippet: string;
+}): number {
+  const result = db.prepare(
+    `INSERT INTO complaints (customer_jid, customer_name, channel, category, matched_patterns, message_snippet)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    data.customerJid,
+    data.customerName || null,
+    data.channel,
+    data.category,
+    JSON.stringify(data.matchedPatterns),
+    data.messageSnippet,
+  );
+  return Number(result.lastInsertRowid);
+}
+
+export function updateComplaintStatus(
+  id: number,
+  status: 'open' | 'investigating' | 'refunded' | 'resolved',
+  notes?: string,
+): void {
+  const now = new Date().toISOString();
+  const resolvedAt = status === 'resolved' || status === 'refunded' ? now : null;
+  if (notes) {
+    db.prepare(
+      `UPDATE complaints SET resolution_status = ?, notes = ?, resolved_at = COALESCE(?, resolved_at) WHERE id = ?`,
+    ).run(status, notes, resolvedAt, id);
+  } else {
+    db.prepare(
+      `UPDATE complaints SET resolution_status = ?, resolved_at = COALESCE(?, resolved_at) WHERE id = ?`,
+    ).run(status, resolvedAt, id);
+  }
+}
+
+function mapComplaintRow(row: ComplaintRow) {
+  return {
+    id: row.id,
+    customerJid: row.customer_jid,
+    customerName: row.customer_name,
+    channel: row.channel,
+    category: row.category,
+    matchedPatterns: row.matched_patterns,
+    messageSnippet: row.message_snippet,
+    resolutionStatus: row.resolution_status,
+    notes: row.notes,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+  };
+}
+
+export function getOpenComplaints() {
+  const rows = db
+    .prepare(
+      `SELECT * FROM complaints WHERE resolution_status = 'open' ORDER BY created_at DESC`,
+    )
+    .all() as ComplaintRow[];
+  return rows.map(mapComplaintRow);
+}
+
+export function getComplaintsByCustomer(jid: string) {
+  const rows = db
+    .prepare(
+      `SELECT * FROM complaints WHERE customer_jid = ? ORDER BY created_at DESC`,
+    )
+    .all(jid) as ComplaintRow[];
+  return rows.map(mapComplaintRow);
+}
+
+export function getComplaintStats(days?: number): {
+  total: number;
+  open: number;
+  resolved: number;
+  avgResolutionHours: number | null;
+} {
+  const cutoff = days
+    ? new Date(Date.now() - days * 86400000).toISOString()
+    : '1970-01-01T00:00:00.000Z';
+
+  const counts = db
+    .prepare(
+      `SELECT
+         COUNT(*) as total,
+         SUM(CASE WHEN resolution_status = 'open' THEN 1 ELSE 0 END) as open,
+         SUM(CASE WHEN resolution_status IN ('resolved', 'refunded') THEN 1 ELSE 0 END) as resolved
+       FROM complaints WHERE created_at >= ?`,
+    )
+    .get(cutoff) as { total: number; open: number; resolved: number };
+
+  const avgRow = db
+    .prepare(
+      `SELECT AVG(
+         (julianday(resolved_at) - julianday(created_at)) * 24
+       ) as avg_hours
+       FROM complaints
+       WHERE resolved_at IS NOT NULL AND created_at >= ?`,
+    )
+    .get(cutoff) as { avg_hours: number | null };
+
+  return {
+    total: counts.total,
+    open: counts.open,
+    resolved: counts.resolved,
+    avgResolutionHours: avgRow.avg_hours !== null ? Math.round(avgRow.avg_hours * 10) / 10 : null,
+  };
 }
 
 // --- JSON migration ---

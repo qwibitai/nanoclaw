@@ -7,6 +7,7 @@
 import crypto from 'crypto';
 import http from 'http';
 
+import { CircuitBreaker } from '../circuit-breaker.js';
 import {
   ASSISTANT_NAME,
   FB_APP_SECRET,
@@ -17,46 +18,15 @@ import {
 } from '../config.js';
 import { getLastSender, upsertContactFromPhone } from '../db.js';
 import { audit, logger } from '../logger.js';
+import { isWebhookRateLimited } from '../pipeline/stages/webhook-guard.js';
 import {
   Channel,
+  HealthInfo,
   NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
-
-// ── Rate Limiting ──────────────────────────────────────────────────
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 30;
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const rateLimitMap = new Map<string, RateLimitEntry>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
-      rateLimitMap.delete(ip);
-    }
-  }
-}, 300_000);
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitMap.set(ip, { count: 1, windowStart: now });
-    return false;
-  }
-
-  entry.count++;
-  return entry.count > RATE_LIMIT_MAX_REQUESTS;
-}
 
 // ── Webhook Signature Verification ─────────────────────────────────
 
@@ -142,6 +112,7 @@ export interface MessengerChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  shouldProcess?: (msg: { id: string; sender: string; content: string; channel: string }) => boolean;
 }
 
 export class MessengerChannel implements Channel {
@@ -150,12 +121,10 @@ export class MessengerChannel implements Channel {
   private server: http.Server | null = null;
   private connected = false;
   private opts: MessengerChannelOpts;
+  private graphBreaker = new CircuitBreaker('messenger-graph-api');
 
   /** Track last sender per JID for reply routing. */
   private lastSenderByJid = new Map<string, string>();
-
-  /** Dedup processed message IDs. */
-  private processedMessageIds = new Set<string>();
 
   constructor(opts: MessengerChannelOpts) {
     this.opts = opts;
@@ -169,7 +138,7 @@ export class MessengerChannel implements Channel {
           req.socket.remoteAddress ||
           'unknown';
 
-        if (isRateLimited(ip)) {
+        if (isWebhookRateLimited(ip)) {
           logger.warn({ ip }, 'Messenger webhook rate limited');
           audit('webhook_rate_limited', { ip, channel: 'messenger' });
           res.writeHead(429, {
@@ -234,9 +203,14 @@ export class MessengerChannel implements Channel {
     // Facebook has a 2000-char limit per message — split if needed
     const chunks = this.splitMessage(prefixed, 2000);
 
+    if (this.graphBreaker.state === 'open') {
+      logger.warn({ jid }, 'Messenger Graph API circuit breaker open — skipping send');
+      return;
+    }
+
     for (const chunk of chunks) {
       try {
-        await sendFacebookMessage(recipientId, chunk);
+        await this.graphBreaker.call(() => sendFacebookMessage(recipientId!, chunk));
         logger.info(
           { jid, to: recipientId, length: chunk.length },
           'Messenger message sent',
@@ -249,6 +223,15 @@ export class MessengerChannel implements Channel {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  getHealthInfo(): HealthInfo {
+    return {
+      connected: this.connected,
+      lastConnectedAt: null,
+      recentDisconnects: [],
+      protocolErrorCount: 0,
+    };
   }
 
   ownsJid(jid: string): boolean {
@@ -387,16 +370,6 @@ export class MessengerChannel implements Channel {
     // Ignore messages from our own page
     if (senderId === FB_PAGE_ID) return;
 
-    // Dedup
-    if (this.processedMessageIds.has(messageId)) return;
-    this.processedMessageIds.add(messageId);
-
-    // Cap dedup set (same pattern as quo.ts)
-    if (this.processedMessageIds.size > 5000) {
-      const entries = [...this.processedMessageIds];
-      this.processedMessageIds = new Set(entries.slice(-2500));
-    }
-
     // Route to the messenger JID
     const jid = 'messenger:sheridan';
 
@@ -432,6 +405,16 @@ export class MessengerChannel implements Channel {
       is_from_me: false,
       is_bot_message: false,
     };
+
+    // Let the pipeline decide whether to process this message
+    if (this.opts.shouldProcess && !this.opts.shouldProcess({
+      id: newMsg.id,
+      sender: newMsg.sender,
+      content: newMsg.content,
+      channel: 'messenger',
+    })) {
+      return;
+    }
 
     this.opts.onMessage(jid, newMsg);
 

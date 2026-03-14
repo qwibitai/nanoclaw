@@ -318,10 +318,16 @@ Always check `pipeline.ts get --contact-id <id>` before responding to a returnin
 A scheduled task (`snak-fb-posts-weekly`) generates next week's 5 Facebook posts (Mon-Fri) and sends them to the group chat for owner approval.
 
 When the task fires:
-1. Read `brand-voice.md`, `content-calendar.md` (check log to avoid topic repeats within 2 weeks), and `viral-patterns.md`
-2. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
-3. Write all posts to `pending-posts.md` with status "awaiting-approval"
-4. Send WhatsApp preview of all 5 posts for owner review
+1. **Tiered competitor & inspiration scan**: Read `competitors.md` which has 3 tiers:
+   - **Tier 1 (Direct Competitors)**: Scan ALL pages — find content gaps to exploit
+   - **Tier 2 (Local Houston Crushers)**: Scan 3-5 pages (rotate weekly) — learn hooks, photo styles, and formats that get Houston audiences to engage. This is the most valuable tier.
+   - **Tier 3 (National Brands)**: Scan 1-2 pages — learn polished formats worth adapting
+   Use `trend-scraper.ts scan --platform facebook --query "<page_id>"` for each. Note what's getting engagement and update "Latest Scan Notes" in competitors.md.
+2. Read `brand-voice.md`, `content-calendar.md` (check log to avoid topic repeats within 2 weeks), `viral-patterns.md`, and `asset-catalog.md`
+3. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
+4. **Select a photo** for each post from `asset-catalog.md` using the theme-to-photo mapping. Record the Drive file ID alongside each post.
+5. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo, and place-id from `houston-places.md`
+6. Send WhatsApp preview of all 5 posts for owner review
 
 ### Handling Approval Messages
 When the owner replies with approval (e.g., "approved", "looks good", "approve all"):
@@ -337,7 +343,10 @@ When the owner requests changes (e.g., "change Wednesday to..." or "I don't like
 ### Daily Posting (Weekdays 9 AM CT)
 A scheduled task (`snak-fb-post-daily`) reads `pending-posts.md` and posts today's approved content:
 1. Find today's entry by date
-2. If approved → post via `post-facebook.ts`, record the post_id in `pending-posts.md` and `content-calendar.md` log
+2. If approved:
+   a. Download the photo from Drive: `drive.ts download --file-id <id> --output /tmp/fb-photo.jpg`
+   b. Post with photo and location: `post-facebook.ts --message "..." --source /tmp/fb-photo.jpg --place-id <houston_place_id>`
+   c. Record the post_id in `pending-posts.md` and `content-calendar.md` log
 3. If not approved → skip and notify: "Skipping today's post — not yet approved"
 4. If already posted → skip silently
 

@@ -1,7 +1,7 @@
 ---
 name: social-posting
 description: Post content to X (Twitter), Facebook, and LinkedIn. Manage LinkedIn warm outreach and connection requests. Use when asked to post on social media, share content, manage social presence, or do LinkedIn outreach.
-allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *)
+allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *), Bash(npx tsx /workspace/project/tools/drive/drive.ts *)
 ---
 
 # Social Media Posting
@@ -27,7 +27,35 @@ npx tsx /workspace/project/tools/social/post-facebook.ts \
 Options:
 - `--message` (required): Post content
 - `--link`: URL to include
-- `--image`: Image URL to attach
+- `--image`: Image URL to attach (Facebook fetches it)
+- `--source`: Local file path to upload (image or video) — mutually exclusive with `--image`
+- `--place-id`: Facebook Place ID for location tagging
+
+### Upload a Photo from Local File (Drive → Facebook)
+
+```bash
+# 1. Search Drive for the photo
+npx tsx /workspace/project/tools/drive/drive.ts search --name "vitro coffee" --mime "image/jpeg"
+
+# 2. Download the photo
+npx tsx /workspace/project/tools/drive/drive.ts download --file-id <id> --output /tmp/fb-photo.jpg
+
+# 3. Post with photo and location tag
+npx tsx /workspace/project/tools/social/post-facebook.ts \
+  --message "Your post content" \
+  --source /tmp/fb-photo.jpg \
+  --place-id "<houston_place_id>"
+```
+
+### Upload a Video from Local File
+
+```bash
+npx tsx /workspace/project/tools/social/post-facebook.ts \
+  --message "Your post content" \
+  --source /tmp/video.mp4
+```
+
+Videos route to the `/{pageId}/videos` endpoint automatically (detected by file extension).
 
 ## Post to LinkedIn
 
@@ -166,8 +194,10 @@ When engaging with prospects' LinkedIn posts:
 
 ### Facebook
 - Optimal length: 40-80 characters for engagement
-- Include images when possible
+- **ALWAYS include a real photo** from the asset catalog — photo posts get 2x+ engagement vs text-only
+- Use `--place-id` on every post for Houston geo-targeting
 - Ask questions to drive engagement
+- Include 1 geo hashtag (#Houston, #Tomball, etc.) per post
 
 ### LinkedIn
 - Professional tone

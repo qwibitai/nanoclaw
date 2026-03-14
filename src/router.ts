@@ -1,3 +1,7 @@
+/**
+ * Message formatting utilities.
+ * Error suppression has moved to the outbound pipeline (pipeline/stages/error-suppressor.ts).
+ */
 import { NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {

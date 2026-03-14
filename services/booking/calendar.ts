@@ -42,8 +42,9 @@ export async function getBookedSlots(
   const cal = getCal();
   const res = await cal.freebusy.query({
     requestBody: {
-      timeMin: `${startDate}T00:00:00Z`,
-      timeMax: `${endDate}T23:59:59Z`,
+      timeMin: `${startDate}T00:00:00`,
+      timeMax: `${endDate}T23:59:59`,
+      timeZone: 'America/Chicago',
       items: [{ id: equipment.calendarId }],
     },
   });
@@ -70,22 +71,39 @@ export async function datesAreAvailable(
   const busySlots = await getBookedSlots(equipmentKey, startDate, endDate);
   if (busySlots.length === 0) return true;
 
-  // Check if any requested date falls within a busy slot
-  for (const date of dates) {
-    const dayStart = new Date(`${date}T00:00:00Z`).getTime();
-    const dayEnd = new Date(`${date}T23:59:59Z`).getTime();
-
-    for (const slot of busySlots) {
-      const busyStart = new Date(slot.start).getTime();
-      const busyEnd = new Date(slot.end).getTime();
-
-      if (dayStart < busyEnd && dayEnd > busyStart) {
-        return false; // overlap
-      }
+  // Convert busy slots to date sets for comparison (all-day events)
+  const busyDates = new Set<string>();
+  for (const slot of busySlots) {
+    const start = new Date(slot.start);
+    const end = new Date(slot.end);
+    const current = new Date(start);
+    while (current < end) {
+      busyDates.add(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 1);
     }
   }
 
+  for (const date of dates) {
+    if (busyDates.has(date)) return false;
+  }
+
   return true;
+}
+
+// ── Delete Calendar Event ───────────────────────────────────────────
+
+export async function deleteCalendarEvent(
+  equipmentKey: EquipmentKey,
+  eventId: string,
+): Promise<void> {
+  const equipment = EQUIPMENT[equipmentKey];
+  if (!equipment) throw new Error(`Unknown equipment: ${equipmentKey}`);
+
+  const cal = getCal();
+  await cal.events.delete({
+    calendarId: equipment.calendarId,
+    eventId,
+  });
 }
 
 // ── Create Booking Event ────────────────────────────────────────────

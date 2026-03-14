@@ -128,3 +128,21 @@ Templates:
 - #FacilityManagement
 - #HRTips
 - #WorkplaceCulture
+
+### Local geo hashtags (always include 1 on Facebook):
+- #Houston, #HoustonTX, #Katy, #Tomball, #CypressTX
+- Pair with industry: #HoustonBusiness, #HoustonOffice
+- Reference local events/weather/sports when contextually relevant
+
+## Quality Checklist — Every Facebook Post
+
+Before publishing any Facebook post, verify ALL of these:
+
+1. **PHOTO REQUIRED** — every post has a real photo from the asset catalog (not stock, not AI-generated)
+2. **SPECIFIC** — name the neighborhood, equipment model, or result (not generic)
+3. **HUMAN VOICE** — read aloud test: would a real marketer post this? No template language.
+4. **ONE IDEA** per post — don't cram multiple messages
+5. **ENGAGEMENT HOOK** — end with a question or opinion prompt, not a sales CTA
+6. **COMPETITOR-INFORMED** — reference latest competitor scan data when generating
+7. **NO REPEAT** within 2 weeks — check `content-calendar.md` log
+8. **LOCAL TIE-IN** — reference something happening in Houston this week (weather, sports, events, season)

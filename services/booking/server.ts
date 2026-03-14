@@ -12,16 +12,16 @@
 import http from 'http';
 import { readEnvFile } from './env.js';
 import { EQUIPMENT, calculatePrice } from './pricing.js';
-import { getBookedSlots, datesAreAvailable, createBookingEvent } from './calendar.js';
-import { createPaymentLink, checkOrderPayment } from './square.js';
+import { getBookedSlots, datesAreAvailable, createBookingEvent, deleteCalendarEvent } from './calendar.js';
+import { createPaymentLink, checkOrderPayment, refundPayment } from './square.js';
 import {
   initDb, generateBookingId, createBooking, getBooking,
   getBookingByOrderId, updateBookingStatus, setCalendarEventId,
-  hasOverlappingBooking,
+  hasOverlappingBooking, cancelBooking, getActiveBookings, getBookingsByEmail,
 } from './db.js';
 import {
   sendOwnerNotification, sendCustomerConfirmation,
-  sendPaymentReceivedNotification,
+  sendPaymentReceivedNotification, sendCancellationConfirmation,
 } from './email.js';
 import type { AvailabilityRequest, CheckoutRequest, EquipmentKey } from './types.js';
 
@@ -276,15 +276,76 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
 
     // Send emails (non-blocking)
     sendCustomerConfirmation(updatedBooking).catch(err =>
-      console.error(`[webhook] Customer email error: ${err.message}`),
+      console.error(`[webhook] CRITICAL: Customer confirmation email failed after retries: ${err.message}. Booking ${updatedBooking.id} — manual follow-up required.`),
     );
     sendPaymentReceivedNotification(updatedBooking).catch(err =>
-      console.error(`[webhook] Owner email error: ${err.message}`),
+      console.error(`[webhook] CRITICAL: Owner payment notification email failed after retries: ${err.message}. Booking ${updatedBooking.id} — manual follow-up required.`),
     );
 
   } catch (err: any) {
     console.error(`[webhook] Parse error: ${err.message}`);
   }
+}
+
+async function handleCancel(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const body = JSON.parse(await readBody(req));
+  const { bookingId, refund } = body as { bookingId: string; refund?: boolean };
+
+  if (!bookingId) {
+    json(res, 400, { error: 'bookingId required' });
+    return;
+  }
+
+  const booking = getBooking(bookingId);
+  if (!booking) {
+    json(res, 404, { error: 'Booking not found' });
+    return;
+  }
+
+  if (booking.status === 'cancelled') {
+    json(res, 409, { error: 'Booking already cancelled' });
+    return;
+  }
+
+  let refundResult = null;
+
+  // Process refund if booking was paid/confirmed and refund requested
+  if (refund !== false && booking.status === 'confirmed' && booking.squareOrderId) {
+    try {
+      refundResult = await refundPayment(booking.squareOrderId);
+    } catch (err: any) {
+      console.error(`[cancel] Refund error: ${err.message}`);
+      // Don't fail the cancellation — still cancel the booking
+    }
+  }
+
+  // Cancel the booking in DB
+  cancelBooking(booking.id, refundResult?.refundId);
+
+  // Delete calendar event if it exists
+  if (booking.calendarEventId) {
+    try {
+      await deleteCalendarEvent(booking.equipment as EquipmentKey, booking.calendarEventId);
+      console.log(`[cancel] Calendar event deleted: ${booking.calendarEventId}`);
+    } catch (err: any) {
+      console.error(`[cancel] Calendar delete error: ${err.message}`);
+    }
+  }
+
+  // Send cancellation email (non-blocking)
+  sendCancellationConfirmation(booking, refundResult?.amountCents || 0).catch(err =>
+    console.error(`[cancel] Email error: ${err.message}`),
+  );
+
+  json(res, 200, {
+    cancelled: true,
+    bookingId: booking.id,
+    refund: refundResult ? {
+      refundId: refundResult.refundId,
+      status: refundResult.status,
+      amount: (refundResult.amountCents / 100).toFixed(2),
+    } : null,
+  });
 }
 
 function handleGetBooking(res: http.ServerResponse, bookingId: string): void {
@@ -378,6 +439,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     // POST /api/square-webhook
     if (req.method === 'POST' && url === '/api/square-webhook') {
       await handleSquareWebhook(req, res);
+      return;
+    }
+
+    // POST /api/cancel
+    if (req.method === 'POST' && url === '/api/cancel') {
+      await handleCancel(req, res);
       return;
     }
 

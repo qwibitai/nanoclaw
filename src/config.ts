@@ -2,6 +2,8 @@ import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
+import { logger } from './logger.js';
+import { RATE_LIMITS } from './filters.js';
 
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
@@ -111,11 +113,18 @@ export const BUDGET_INTERACTIVE = parseFloat(
 );
 
 // Daily spend cap — total estimated API cost across all containers per day.
-// 0 = no cap. Read from .env MAX_DAILY_SPEND_USD.
-// Default $2: scheduled tasks should run free via CLI, only interactive comms use API credits.
+// 0 = no cap. Default $10: generous enough for mixed CLI/container usage.
+// CLI tasks (Max subscription) don't count against this cap.
+// Only container-mode API calls are tracked.
 export const MAX_DAILY_SPEND_USD = parseFloat(
-  process.env.MAX_DAILY_SPEND_USD || '2',
+  process.env.MAX_DAILY_SPEND_USD || '10',
 );
+
+// Hard timeout for container agent execution (prevents indefinite hangs).
+export const CONTAINER_TIMEOUT_MS = parseInt(
+  process.env.CONTAINER_TIMEOUT_MS || '300000',
+  10,
+); // 5 minutes
 
 // --- Web Channel (Socket.IO chat widget) ---
 export const WEB_CHANNEL_PORT = parseInt(
@@ -163,3 +172,75 @@ export const FB_MESSENGER_PORT = parseInt(process.env.FB_MESSENGER_PORT || fbCon
 export const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN || fbConfig.FB_PAGE_ACCESS_TOKEN || '';
 export const FB_PAGE_ID = process.env.FB_PAGE_ID || fbConfig.FB_PAGE_ID || '';
 export const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || fbConfig.FB_VERIFY_TOKEN || '';
+
+// ── Startup config validation ─────────────────────────────────────
+
+export function validateConfig(): void {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // -- Timeout values must be positive --
+  const timeouts: [string, number][] = [
+    ['CONTAINER_TIMEOUT', CONTAINER_TIMEOUT],
+    ['CONTAINER_TIMEOUT_MS', CONTAINER_TIMEOUT_MS],
+    ['IDLE_TIMEOUT', IDLE_TIMEOUT],
+    ['CLI_TIMEOUT', CLI_TIMEOUT],
+  ];
+  for (const [name, value] of timeouts) {
+    if (value <= 0) {
+      errors.push(`${name} must be positive, got ${value}`);
+    } else if (value < 30_000) {
+      warnings.push(`${name} is ${value}ms (< 30s) — this is unusually short`);
+    }
+  }
+
+  // -- MAX_CONCURRENT_CONTAINERS must be >= 1 --
+  if (MAX_CONCURRENT_CONTAINERS < 1) {
+    errors.push(`MAX_CONCURRENT_CONTAINERS must be >= 1, got ${MAX_CONCURRENT_CONTAINERS}`);
+  }
+
+  // -- Rate limit validation --
+  const perHourDayCategories: [string, { perHour: number; perDay: number }][] = [
+    ['outbound', RATE_LIMITS.outbound],
+    ['email', RATE_LIMITS.email],
+    ['sms', RATE_LIMITS.sms],
+    ['messenger', RATE_LIMITS.messenger],
+    ['web', RATE_LIMITS.web],
+    ['whatsapp', RATE_LIMITS.whatsapp],
+  ];
+
+  for (const [name, limit] of perHourDayCategories) {
+    if (!Number.isInteger(limit.perHour) || limit.perHour <= 0) {
+      errors.push(`RATE_LIMITS.${name}.perHour must be a positive integer, got ${limit.perHour}`);
+    }
+    if (!Number.isInteger(limit.perDay) || limit.perDay <= 0) {
+      errors.push(`RATE_LIMITS.${name}.perDay must be a positive integer, got ${limit.perDay}`);
+    }
+    if (limit.perHour > limit.perDay) {
+      errors.push(`RATE_LIMITS.${name}.perHour (${limit.perHour}) must be <= perDay (${limit.perDay})`);
+    }
+    if (limit.perDay < 5) {
+      warnings.push(`RATE_LIMITS.${name}.perDay is ${limit.perDay} — this is very restrictive`);
+    }
+  }
+
+  // Webhook rate limit
+  if (!Number.isInteger(RATE_LIMITS.webhookPerIp.perMinute) || RATE_LIMITS.webhookPerIp.perMinute <= 0) {
+    errors.push(`RATE_LIMITS.webhookPerIp.perMinute must be a positive integer, got ${RATE_LIMITS.webhookPerIp.perMinute}`);
+  }
+
+  // -- Log warnings --
+  for (const w of warnings) {
+    logger.warn(w);
+  }
+
+  // -- Throw on errors --
+  if (errors.length > 0) {
+    for (const e of errors) {
+      logger.error(e);
+    }
+    throw new Error(`Invalid config:\n  - ${errors.join('\n  - ')}`);
+  }
+
+  logger.debug('Config validation passed');
+}

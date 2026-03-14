@@ -52,6 +52,16 @@ function createSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_bookings_equipment_dates ON bookings(equipment, dates);
     CREATE INDEX IF NOT EXISTS idx_bookings_square_order ON bookings(square_order_id);
   `);
+
+  // Migrations — add columns that may not exist in older databases
+  const migrations = [
+    `ALTER TABLE bookings ADD COLUMN refund_id TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE bookings ADD COLUMN followup_sent INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bookings ADD COLUMN followup_sent_at TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
 }
 
 // ── Generate Booking ID ─────────────────────────────────────────────
@@ -131,6 +141,34 @@ export function setCalendarEventId(id: string, eventId: string): void {
     .run(eventId, new Date().toISOString(), id);
 }
 
+export function cancelBooking(id: string, refundId?: string): void {
+  db.prepare(`
+    UPDATE bookings
+    SET status = 'cancelled',
+        updated_at = ?,
+        refund_id = COALESCE(?, refund_id)
+    WHERE id = ?
+  `).run(new Date().toISOString(), refundId || null, id);
+}
+
+export function getBookingsByEmail(email: string): Booking[] {
+  const rows = db.prepare(`
+    SELECT * FROM bookings
+    WHERE customer_email = ? AND status != 'cancelled'
+    ORDER BY created_at DESC
+  `).all(email) as any[];
+  return rows.map(rowToBooking);
+}
+
+export function getActiveBookings(): Booking[] {
+  const rows = db.prepare(`
+    SELECT * FROM bookings
+    WHERE status IN ('pending', 'confirmed')
+    ORDER BY created_at DESC
+  `).all() as any[];
+  return rows.map(rowToBooking);
+}
+
 // ── Double-Booking Prevention ───────────────────────────────────────
 
 export function hasOverlappingBooking(equipment: EquipmentKey, dates: string[]): boolean {
@@ -176,6 +214,9 @@ function rowToBooking(row: any): Booking {
     squarePaymentLinkId: row.square_payment_link_id,
     paymentUrl: row.payment_url,
     calendarEventId: row.calendar_event_id,
+    refundId: row.refund_id || '',
+    followupSent: !!row.followup_sent,
+    followupSentAt: row.followup_sent_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -1,12 +1,16 @@
 /**
- * Gmail (IMAP) Channel
+ * Gmail (IMAP) Channel — thin I/O adapter
  * Polls Gmail via IMAP for new unread emails, delivers them as inbound messages.
  * Sends replies via nodemailer SMTP.
- * JID format: email:address@domain.com (the business email address)
+ * JID format: email:address@domain.com:sender@domain.com (per-sender isolation)
+ *
+ * All filtering (ignore patterns, autoresponder detection, business relevance,
+ * rate limiting, in-memory dedup) is handled by the shared inbound pipeline.
  */
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 
+import { CircuitBreaker } from '../circuit-breaker.js';
 import {
   ASSISTANT_NAME,
   GMAIL_POLL_INTERVAL,
@@ -20,6 +24,7 @@ import { getLastSender, messageExists } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
+  HealthInfo,
   NewMessage,
   OnChatMetadata,
   OnInboundMessage,
@@ -32,11 +37,16 @@ export interface GmailChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerDerivedGroup?: (childJid: string, parentJid: string) => void;
+  /** Pipeline filter: return false to skip the message before delivery. */
+  shouldProcess?: (msg: {
+    id: string;
+    sender: string;
+    content: string;
+    channel: string;
+    rawHeaders?: string;
+    subject?: string;
+  }) => boolean;
 }
-
-/** Track processed email UIDs to avoid duplicates within a single process lifetime. */
-const processedUids = new Set<number>();
-const MAX_PROCESSED_CACHE = 5000;
 
 export class GmailChannel implements Channel {
   name = 'gmail';
@@ -45,6 +55,8 @@ export class GmailChannel implements Channel {
   private opts: GmailChannelOpts;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private transporter: nodemailer.Transporter | null = null;
+  private imapBreaker = new CircuitBreaker('gmail-imap', { maxFailures: 3, resetMs: 30_000, maxBackoffMs: 300_000 });
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Map email JID -> last sender address for reply routing. */
   private lastSenderByJid = new Map<string, string>();
@@ -79,29 +91,10 @@ export class GmailChannel implements Channel {
       });
     }
 
-    // Verify IMAP connection
-    const client = new ImapFlow({
-      host: IMAP_HOST,
-      port: IMAP_PORT,
-      secure: true,
-      auth: {
-        user: IMAP_USER,
-        pass: IMAP_PASS,
-      },
-      logger: false,
-    });
+    // Verify IMAP connection (wrapped in circuit breaker — never throws)
+    await this.attemptImapConnect();
 
-    try {
-      await client.connect();
-      this.connected = true;
-      logger.info({ user: IMAP_USER }, 'Gmail IMAP connected');
-      await client.logout();
-    } catch (err) {
-      logger.error({ err, user: IMAP_USER }, 'Gmail IMAP connection failed');
-      throw err;
-    }
-
-    // Start polling
+    // Start polling (runs even if IMAP is down — pollInbox checks connected flag)
     this.startPolling();
   }
 
@@ -135,10 +128,18 @@ export class GmailChannel implements Channel {
 
     const fromAddress = EMAIL_SNAK_ADDRESS || IMAP_USER;
 
+    // Sanitize header values to prevent email header injection
+    const safeName = ASSISTANT_NAME.replace(/[\r\n\x00-\x1f]/g, '');
+    const safeCustomerEmail = customerEmail.trim();
+    if (/[\r\n,;]/.test(safeCustomerEmail) || safeCustomerEmail.includes(' ')) {
+      logger.warn({ jid, customerEmail }, 'Invalid customer email address, refusing to send');
+      return;
+    }
+
     try {
       await this.transporter.sendMail({
-        from: `${ASSISTANT_NAME} - Snak Group <${fromAddress}>`,
-        to: customerEmail,
+        from: `${safeName} - Snak Group <${fromAddress}>`,
+        to: safeCustomerEmail,
         subject: 'Re: Your inquiry',
         text,
       });
@@ -156,12 +157,71 @@ export class GmailChannel implements Channel {
     return jid.startsWith('email:');
   }
 
+  getHealthInfo(): HealthInfo {
+    return {
+      connected: this.connected,
+      lastConnectedAt: null,
+      recentDisconnects: [],
+      protocolErrorCount: 0,
+    };
+  }
+
   async disconnect(): Promise<void> {
     this.connected = false;
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  // ── IMAP Connection & Reconnection ──────────────────────────────
+
+  private async attemptImapConnect(): Promise<void> {
+    if (this.imapBreaker.state === 'open') {
+      logger.warn({ breaker: 'gmail-imap' }, 'IMAP circuit breaker open, skipping connection attempt');
+      this.connected = false;
+      this.scheduleReconnect();
+      return;
+    }
+
+    const client = new ImapFlow({
+      host: IMAP_HOST,
+      port: IMAP_PORT,
+      secure: true,
+      auth: {
+        user: IMAP_USER,
+        pass: IMAP_PASS,
+      },
+      logger: false,
+    });
+
+    try {
+      await this.imapBreaker.call(async () => {
+        await client.connect();
+        await client.logout();
+      });
+      this.connected = true;
+      logger.info({ user: IMAP_USER }, 'Gmail IMAP connected');
+    } catch (err) {
+      logger.error({ err, user: IMAP_USER }, 'Gmail IMAP connection failed');
+      this.connected = false;
+      this.scheduleReconnect();
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return; // prevent stacking
+
+    const delayMs = this.imapBreaker.backoffMs;
+    logger.info({ delayMs }, 'Gmail IMAP scheduling reconnect');
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      await this.attemptImapConnect();
+    }, delayMs);
   }
 
   // ── Polling ──────────────────────────────────────────────────────
@@ -179,6 +239,12 @@ export class GmailChannel implements Channel {
   }
 
   private async pollInbox(): Promise<void> {
+    if (!this.connected) {
+      logger.debug('Gmail IMAP not connected, skipping poll');
+      this.scheduleReconnect();
+      return;
+    }
+
     const client = new ImapFlow({
       host: IMAP_HOST,
       port: IMAP_PORT,
@@ -202,30 +268,18 @@ export class GmailChannel implements Channel {
         if (uids.length === 0) return;
 
         for (const uid of uids) {
-          if (processedUids.has(uid)) continue;
-
           try {
-            // CRITICAL: Mark as read FIRST, before any processing.
-            // This prevents re-processing if the service restarts mid-handling.
-            await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-
             const message = await client.fetchOne(
               String(uid),
               { envelope: true, source: true, uid: true },
               { uid: true },
             );
 
-            if (!message || !message.envelope) {
-              processedUids.add(uid);
-              continue;
-            }
+            if (!message || !message.envelope) continue;
 
             const envelope = message.envelope;
             const from = envelope.from?.[0];
-            if (!from) {
-              processedUids.add(uid);
-              continue;
-            }
+            if (!from) continue;
 
             const senderEmail = (from.address || '').toLowerCase();
             const senderName = from.name || senderEmail;
@@ -238,28 +292,17 @@ export class GmailChannel implements Channel {
               IMAP_USER.toLowerCase(),
               EMAIL_SNAK_ADDRESS.toLowerCase(),
             ].filter(Boolean);
-            if (selfAddresses.some(a => senderEmail === a)) {
-              processedUids.add(uid);
-              continue;
-            }
+            if (selfAddresses.some(a => senderEmail === a)) continue;
 
             // Also skip if sender name contains our assistant name (Gmail rewrites From headers)
             if (ASSISTANT_NAME && senderName.toLowerCase().includes(ASSISTANT_NAME.toLowerCase())) {
-              processedUids.add(uid);
               continue;
             }
 
             // DB-level dedup: skip if this messageId was already stored (survives restarts)
             if (messageExists(messageId)) {
               logger.debug({ messageId, uid }, 'Email already processed (DB dedup), skipping');
-              processedUids.add(uid);
               continue;
-            }
-
-            // Extract plain text body from source
-            let body = '';
-            if (message.source) {
-              body = extractTextFromSource(message.source);
             }
 
             // Determine the JID — per-sender isolation
@@ -269,30 +312,34 @@ export class GmailChannel implements Channel {
             // Track sender for reply routing (fallback for old-format JIDs)
             this.lastSenderByJid.set(jid, senderEmail);
 
-            processedUids.add(uid);
-
-            // Cap processed cache
-            if (processedUids.size > MAX_PROCESSED_CACHE) {
-              const entries = [...processedUids];
-              processedUids.clear();
-              for (const e of entries.slice(-2500)) processedUids.add(e);
+            // Extract raw headers and body from source
+            let rawHeaders = '';
+            let body = '';
+            if (message.source) {
+              const raw = message.source.toString('utf-8');
+              const headerEnd = raw.indexOf('\r\n\r\n');
+              if (headerEnd !== -1) {
+                rawHeaders = raw.slice(0, headerEnd);
+              }
+              body = extractTextFromSource(message.source);
             }
 
-            // Skip automated/noreply senders to avoid burning credits on notifications
-            const lowerSender = senderEmail.toLowerCase();
-            const IGNORE_PATTERNS = [
-              'noreply@', 'no-reply@', 'donotreply@', 'do-not-reply@',
-              'notify@', 'notification@', 'notifications@', 'alert@', 'alerts@',
-              'mailer-daemon@', 'postmaster@',
-              '@notify.', '@noreply.', '@messaging.',
-              'drive-shares-dm-noreply@', 'calendar-notification@',
-              '@google.com', '@cloudflare.com', '@squareup.com',
-              '@github.com', '@linkedin.com', '@facebookmail.com',
-            ];
-            if (IGNORE_PATTERNS.some(p => lowerSender.includes(p))) {
-              logger.debug({ from: senderEmail, subject }, 'Ignoring automated email');
-              processedUids.add(uid);
-              continue;
+            const content = `Email from ${senderName} <${senderEmail}>\nSubject: ${subject}\n\n${body}`;
+
+            // Pipeline filter: let index.ts decide whether to process this message
+            if (this.opts.shouldProcess) {
+              const shouldProcess = this.opts.shouldProcess({
+                id: messageId,
+                sender: senderEmail,
+                content,
+                channel: 'gmail',
+                rawHeaders,
+                subject,
+              });
+              if (!shouldProcess) {
+                logger.debug({ from: senderEmail, subject }, 'Message rejected by pipeline filter');
+                continue;
+              }
             }
 
             logger.info(
@@ -315,8 +362,6 @@ export class GmailChannel implements Channel {
               }
             }
 
-            const content = `Email from ${senderName} <${senderEmail}>\nSubject: ${subject}\n\n${body}`;
-
             const newMsg: NewMessage = {
               id: messageId,
               chat_jid: jid,
@@ -329,8 +374,12 @@ export class GmailChannel implements Channel {
             };
 
             this.opts.onMessage(jid, newMsg);
+
+            // Mark as read AFTER successful processing.
+            // If processing throws, the email stays unread and gets retried on next poll.
+            await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
           } catch (msgErr) {
-            logger.warn({ uid, err: msgErr }, 'Failed to process email');
+            logger.warn({ uid, err: msgErr }, 'Failed to process email — leaving unread for retry');
           }
         }
       } finally {

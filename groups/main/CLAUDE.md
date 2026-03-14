@@ -61,12 +61,14 @@ This is the **main channel**, which has elevated privileges.
 
 ### Platform Credentials
 
+Login credentials are stored in environment variables (not hardcoded here).
+
 - **HahaVending**: `https://thorh5.hahabianli.com/pages/login/login`
-  - Email: `blayke.elder1@gmail.com`
-  - Password: `Thrive17!`
+  - Email: `$HAHA_EMAIL`
+  - Password: `$HAHA_PASSWORD`
 - **Vendera**: `https://vms.vendera.ai/login`
-  - Email: `blayke.elder1@gmail.com`
-  - Password: `Thrive17!`
+  - Email: `$VENDERA_EMAIL`
+  - Password: `$VENDERA_PASSWORD`
 
 ## Container Mounts
 

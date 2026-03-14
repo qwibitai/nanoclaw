@@ -59,7 +59,7 @@ export interface CheckoutResponse {
   pricing: PriceBreakdown;
 }
 
-export type BookingStatus = 'pending' | 'paid' | 'confirmed' | 'cancelled';
+export type BookingStatus = 'pending' | 'paid' | 'confirmed' | 'cancelled' | 'refunded';
 
 export interface Booking {
   id: string;
@@ -78,6 +78,9 @@ export interface Booking {
   squarePaymentLinkId: string;
   paymentUrl: string;
   calendarEventId: string;
+  refundId: string;
+  followupSent: boolean;
+  followupSentAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

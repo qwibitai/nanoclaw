@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
  * Post Tweet Tool for NanoClaw
- * Usage: npx tsx tools/social/post-tweet.ts --text "tweet content" [--reply-to "tweet_id"]
+ * Usage: npx tsx tools/social/post-tweet.ts --text "tweet content" [--reply-to "tweet_id"] [--dry-run]
  *
  * Uses X API v2 (OAuth 1.0a User Context)
  * Environment: X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
@@ -13,6 +13,7 @@ import https from 'https';
 interface TweetArgs {
   text: string;
   replyTo?: string;
+  dryRun?: boolean;
 }
 
 function parseArgs(): TweetArgs {
@@ -26,12 +27,14 @@ function parseArgs(): TweetArgs {
     }
   }
 
+  const dryRun = args.includes('--dry-run');
+
   if (!result.text) {
-    console.error('Usage: post-tweet --text "tweet content" [--reply-to "tweet_id"]');
+    console.error('Usage: post-tweet --text "tweet content" [--reply-to "tweet_id"] [--dry-run]');
     process.exit(1);
   }
 
-  return { text: result.text, replyTo: result.reply_to };
+  return { text: result.text, replyTo: result.reply_to, dryRun };
 }
 
 function percentEncode(str: string): string {
@@ -88,6 +91,18 @@ function buildAuthHeader(url: string, method: string): string {
 }
 
 async function postTweet(args: TweetArgs): Promise<void> {
+  if (args.dryRun) {
+    console.log(JSON.stringify({
+      status: 'dry_run',
+      platform: 'twitter',
+      text: args.text,
+      reply_to: args.replyTo || null,
+      char_count: args.text.length,
+      message: 'No tweet was posted. Remove --dry-run to post for real.',
+    }));
+    return;
+  }
+
   const url = 'https://api.twitter.com/2/tweets';
 
   if (!process.env.X_API_KEY || !process.env.X_API_SECRET || !process.env.X_ACCESS_TOKEN || !process.env.X_ACCESS_SECRET) {

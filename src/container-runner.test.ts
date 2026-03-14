@@ -14,6 +14,17 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  MAX_DAILY_SPEND_USD: 0, // no cap in tests
+}));
+
+// Mock db
+vi.mock('./db.js', () => ({
+  getDailySpendUsd: vi.fn(() => 0),
+  getRecentMessages: vi.fn(() => []),
+  logUsage: vi.fn(),
+  addInFlightSpend: vi.fn(),
+  removeInFlightSpend: vi.fn(),
+  getInFlightSpendUsd: vi.fn(() => 0),
 }));
 
 // Mock logger

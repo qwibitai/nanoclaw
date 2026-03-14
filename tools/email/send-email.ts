@@ -62,6 +62,18 @@ function loadTemplate(templatePath: string, vars?: string): string {
     }
   }
 
+  // Check for any unfilled template variables remaining after substitution
+  const unfilled = html.match(/\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}/g);
+  if (unfilled) {
+    const unique = [...new Set(unfilled)];
+    console.error(JSON.stringify({
+      status: 'error',
+      error: `Template has unfilled variables: ${unique.join(', ')}`,
+      missing: unique,
+    }));
+    process.exit(1);
+  }
+
   return html;
 }
 
