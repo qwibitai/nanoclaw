@@ -5,20 +5,37 @@ import { request as httpRequest, type RequestOptions } from 'http';
 import { logger } from './logger.js';
 
 /**
- * Module-level cache of secrets fetched from Solo Vault.
- * Populated by initSecrets() at startup, consulted by readEnvFile().
+ * TTL-based cache entry for secrets fetched from Solo Vault.
  */
-const vaultCache: Record<string, string> = {};
+interface CacheEntry {
+  value: string;
+  expiresAt: number;
+}
+
+/** Module-level cache of secrets fetched from Solo Vault with TTL. */
+const vaultCache = new Map<string, CacheEntry>();
+
+/** Resolved vault configuration (set once by initSecrets). */
+let vaultConfig: {
+  url: string;
+  token: string;
+  project: string;
+  environment: string;
+  ttl: number;
+} | null = null;
 
 /**
- * Fetch secrets from Solo Vault REST API and populate the vault cache.
- * Falls back gracefully to .env if Solo Vault is unreachable.
+ * Initialize Solo Vault configuration.
  * Must be called once at startup before any service initialization.
+ * Falls back gracefully to .env if SOLO_VAULT_TOKEN is not set.
  */
 export async function initSecrets(): Promise<void> {
-  const adminKey =
-    process.env.SOLO_VAULT_ADMIN_KEY || readEnvFileRaw('SOLO_VAULT_ADMIN_KEY');
-  const vaultUrl =
+  const token =
+    process.env.SOLO_VAULT_TOKEN ||
+    readEnvFileRaw('SOLO_VAULT_TOKEN') ||
+    process.env.SOLO_VAULT_ADMIN_KEY ||
+    readEnvFileRaw('SOLO_VAULT_ADMIN_KEY');
+  const url =
     process.env.SOLO_VAULT_URL ||
     readEnvFileRaw('SOLO_VAULT_URL') ||
     'https://api.vault.jeffreykeyser.net';
@@ -30,48 +47,36 @@ export async function initSecrets(): Promise<void> {
     process.env.SOLO_VAULT_ENV ||
     readEnvFileRaw('SOLO_VAULT_ENV') ||
     'production';
+  const ttl = 5 * 60 * 1000; // 5 minutes
 
-  if (!adminKey) {
+  if (!token) {
     logger.warn(
-      'SOLO_VAULT_ADMIN_KEY not set — using .env file as secret source',
+      'SOLO_VAULT_TOKEN not set — using .env file as secret source',
     );
     return;
   }
 
-  try {
-    const secrets = await fetchVaultSecrets(
-      vaultUrl,
-      adminKey,
-      project,
-      environment,
-    );
-    for (const [key, value] of Object.entries(secrets)) {
-      vaultCache[key] = value;
-    }
-    logger.info(
-      { project, environment, secretCount: Object.keys(secrets).length },
-      'Secrets loaded from Solo Vault',
-    );
-  } catch (err) {
-    logger.warn(
-      { err },
-      'Solo Vault unreachable — falling back to .env file for secrets',
-    );
-  }
+  vaultConfig = { url, token, project, environment, ttl };
+  logger.info(
+    { project, environment, vaultUrl: url },
+    'Solo Vault configured for on-demand secret fetching',
+  );
 }
 
 /**
- * Fetch secrets from the Solo Vault REST API.
+ * Fetch a single secret from the Solo Vault REST API.
+ * Uses GET /v1/secrets/:project/:env/:key
  */
-function fetchVaultSecrets(
-  baseUrl: string,
-  adminKey: string,
-  project: string,
-  environment: string,
-): Promise<Record<string, string>> {
+function fetchVaultSecret(
+  key: string,
+): Promise<string | undefined> {
+  if (!vaultConfig) return Promise.resolve(undefined);
+
+  const { url: baseUrl, token, project, environment } = vaultConfig;
+
   return new Promise((resolve, reject) => {
     const url = new URL(
-      `/api/secrets?project=${encodeURIComponent(project)}&environment=${encodeURIComponent(environment)}`,
+      `/v1/secrets/${encodeURIComponent(project)}/${encodeURIComponent(environment)}/${encodeURIComponent(key)}`,
       baseUrl,
     );
     const isHttps = url.protocol === 'https:';
@@ -81,10 +86,10 @@ function fetchVaultSecrets(
       {
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
+        path: url.pathname,
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${adminKey}`,
+          Authorization: `Bearer ${token}`,
           Accept: 'application/json',
         },
         timeout: 10000,
@@ -94,26 +99,36 @@ function fetchVaultSecrets(
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           const body = Buffer.concat(chunks).toString('utf-8');
+          if (res.statusCode === 404) {
+            resolve(undefined);
+            return;
+          }
           if (res.statusCode !== 200) {
             reject(
               new Error(
-                `Solo Vault returned ${res.statusCode}: ${body.slice(0, 200)}`,
+                `Solo Vault returned ${res.statusCode} for key "${key}": ${body.slice(0, 200)}`,
               ),
             );
             return;
           }
           try {
             const data = JSON.parse(body);
-            // Support both { secrets: { KEY: VALUE } } and flat { KEY: VALUE }
-            const secrets =
-              data && typeof data.secrets === 'object' ? data.secrets : data;
-            if (typeof secrets !== 'object' || secrets === null) {
-              reject(new Error('Solo Vault returned invalid secrets format'));
+            // Support { value: "..." } or { secret: { value: "..." } }
+            const value =
+              typeof data.value === 'string'
+                ? data.value
+                : data.secret?.value;
+            if (typeof value !== 'string') {
+              reject(
+                new Error(
+                  `Solo Vault returned unexpected format for key "${key}"`,
+                ),
+              );
               return;
             }
-            resolve(secrets as Record<string, string>);
+            resolve(value);
           } catch {
-            reject(new Error('Solo Vault returned invalid JSON'));
+            reject(new Error(`Solo Vault returned invalid JSON for key "${key}"`));
           }
         });
       },
@@ -122,15 +137,53 @@ function fetchVaultSecrets(
     req.on('error', reject);
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('Solo Vault request timed out'));
+      reject(new Error(`Solo Vault request timed out for key "${key}"`));
     });
     req.end();
   });
 }
 
 /**
+ * Refresh vault cache entries for the given keys.
+ * Fetches from Solo Vault any keys that are missing or expired in the cache.
+ * Falls back silently to .env for keys that cannot be fetched.
+ */
+export async function refreshSecrets(keys: string[]): Promise<void> {
+  if (!vaultConfig) return;
+
+  const now = Date.now();
+  const staleKeys = keys.filter((key) => {
+    const entry = vaultCache.get(key);
+    return !entry || now >= entry.expiresAt;
+  });
+
+  if (staleKeys.length === 0) return;
+
+  const results = await Promise.allSettled(
+    staleKeys.map(async (key) => {
+      const value = await fetchVaultSecret(key);
+      return { key, value };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value.value !== undefined) {
+      vaultCache.set(result.value.key, {
+        value: result.value.value,
+        expiresAt: now + vaultConfig.ttl,
+      });
+    } else if (result.status === 'rejected') {
+      logger.warn(
+        { err: result.reason, key: (result as any).value?.key },
+        'Failed to fetch secret from Solo Vault — will use .env fallback',
+      );
+    }
+  }
+}
+
+/**
  * Read a single value directly from the .env file (used during init
- * before the vault cache is populated, e.g. for SOLO_VAULT_ADMIN_KEY).
+ * before the vault cache is populated, e.g. for SOLO_VAULT_TOKEN).
  */
 function readEnvFileRaw(key: string): string | undefined {
   const envFile = path.join(process.cwd(), '.env');
@@ -160,7 +213,7 @@ function readEnvFileRaw(key: string): string | undefined {
 
 /**
  * Parse the .env file and return values for the requested keys.
- * Checks the Solo Vault cache first (populated by initSecrets()),
+ * Checks the Solo Vault cache first (populated by initSecrets/refreshSecrets),
  * then falls back to the .env file. Does NOT load anything into
  * process.env — callers decide what to do with the values. This
  * keeps secrets out of the process environment so they don't leak
@@ -169,11 +222,13 @@ function readEnvFileRaw(key: string): string | undefined {
 export function readEnvFile(keys: string[]): Record<string, string> {
   const result: Record<string, string> = {};
   const remaining: string[] = [];
+  const now = Date.now();
 
-  // Check vault cache first
+  // Check vault cache first (only valid/non-expired entries)
   for (const key of keys) {
-    if (vaultCache[key]) {
-      result[key] = vaultCache[key];
+    const entry = vaultCache.get(key);
+    if (entry && now < entry.expiresAt) {
+      result[key] = entry.value;
     } else {
       remaining.push(key);
     }
@@ -211,4 +266,9 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   }
 
   return result;
+}
+
+/** Check whether the vault is configured (token is set). */
+export function isVaultConfigured(): boolean {
+  return vaultConfig !== null;
 }

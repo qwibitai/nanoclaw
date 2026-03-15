@@ -66,6 +66,19 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Solo Vault configuration for encrypted secret storage.
+// Set SOLO_VAULT_TOKEN env var to a service-scoped read token to enable
+// vault-based credential fetching. When not set, secrets fall back to .env.
+// See: https://api.vault.jeffreykeyser.net
+// Routes: GET /v1/secrets/:project/:env/:key
+export const SOLO_VAULT_URL =
+  process.env.SOLO_VAULT_URL || 'https://api.vault.jeffreykeyser.net';
+export const SOLO_VAULT_TOKEN = process.env.SOLO_VAULT_TOKEN;
+export const SOLO_VAULT_PROJECT =
+  process.env.SOLO_VAULT_PROJECT || 'nanoclaw';
+export const SOLO_VAULT_ENV = process.env.SOLO_VAULT_ENV || 'production';
+export const SOLO_VAULT_TTL = 5 * 60 * 1000; // 5 minute cache TTL
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
