@@ -127,6 +127,13 @@ export class WhatsAppChannel implements Channel {
         this.connected = true;
         logger.info('Connected to WhatsApp');
 
+        // Set the WhatsApp profile name to match ASSISTANT_NAME
+        if (ASSISTANT_NAME) {
+          this.sock.updateProfileName(ASSISTANT_NAME).catch((err) => {
+            logger.warn({ err }, 'Failed to update profile name');
+          });
+        }
+
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
         this.sock.sendPresenceUpdate('available').catch((err) => {
           logger.warn({ err }, 'Failed to send presence update');

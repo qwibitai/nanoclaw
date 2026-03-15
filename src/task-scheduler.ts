@@ -178,7 +178,7 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
+        assistantName: group.containerConfig?.assistantName || ASSISTANT_NAME,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
@@ -259,6 +259,21 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
+        }
+
+        // Advance next_run BEFORE enqueuing to prevent the next poll cycle
+        // from picking up the same task while it's still running.
+        if (currentTask.schedule_type === 'cron') {
+          const interval = CronExpressionParser.parse(
+            currentTask.schedule_value,
+            { tz: TIMEZONE },
+          );
+          const nextRun = interval.next().toISOString();
+          updateTask(currentTask.id, { next_run: nextRun });
+        } else if (currentTask.schedule_type === 'interval') {
+          const ms = parseInt(currentTask.schedule_value, 10);
+          const nextRun = new Date(Date.now() + ms).toISOString();
+          updateTask(currentTask.id, { next_run: nextRun });
         }
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>

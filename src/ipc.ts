@@ -1,3 +1,4 @@
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -164,6 +165,8 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For refresh_data
+    source?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -382,6 +385,37 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'refresh_data': {
+      const validSources = ['calendar', 'slack', 'email', 'granola'];
+      const source = data.source as string;
+      if (source && validSources.includes(source)) {
+        const fetcherScript = path.join(
+          process.cwd(),
+          'scripts',
+          'fetchers',
+          'dist',
+          `${source}-fetcher.js`,
+        );
+        if (fs.existsSync(fetcherScript)) {
+          exec(
+            `node ${fetcherScript}`,
+            { timeout: 60000, cwd: process.cwd() },
+            (err) => {
+              if (err) logger.error({ source, err }, 'Data refresh failed');
+              else logger.info({ source }, 'Data refresh completed');
+            },
+          );
+          logger.info(
+            { source, sourceGroup },
+            'Data refresh triggered via IPC',
+          );
+        } else {
+          logger.warn({ source, fetcherScript }, 'Fetcher script not found');
+        }
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

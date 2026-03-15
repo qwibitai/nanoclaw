@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -223,6 +223,52 @@ function readSecrets(): Record<string, string> {
   ]);
 }
 
+/**
+ * Read env vars that should be passed to containers as Docker -e flags.
+ * Unlike secrets (stdin), these become part of the container environment
+ * so tools like gh and git can use them directly.
+ */
+function readToolEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  // Dynamic GH_TOKEN from host's gh auth (stays fresh, no static token to expire)
+  // Try PATH first, then common install locations (launchd has a minimal PATH)
+  const ghPaths = ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh'];
+  for (const ghBin of ghPaths) {
+    try {
+      const token = execSync(`${ghBin} auth token 2>/dev/null`, {
+        encoding: 'utf-8',
+      }).trim();
+      if (token) {
+        env.GH_TOKEN = token;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+  if (!env.GH_TOKEN) {
+    logger.debug(
+      'gh auth token not available from any path, skipping GH_TOKEN',
+    );
+  }
+
+  // Git user config from .env
+  const gitEnv = readEnvFile([
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+  ]);
+  Object.assign(env, gitEnv);
+
+  // Slack user token for on-demand message lookups
+  const slackEnv = readEnvFile(['SLACK_USER_TOKEN']);
+  Object.assign(env, slackEnv);
+
+  return env;
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -231,6 +277,12 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass tool env vars (GH_TOKEN, git config) so container tools can use them
+  const toolEnv = readToolEnv();
+  for (const [key, value] of Object.entries(toolEnv)) {
+    args.push('-e', `${key}=${value}`);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -404,7 +456,7 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error(
+      logger.info(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );

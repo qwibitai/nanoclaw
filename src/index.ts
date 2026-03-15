@@ -138,7 +138,9 @@ export function _setRegisteredGroups(
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
+async function processGroupMessages(
+  chatJid: string,
+): Promise<boolean | 'permanent'> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
@@ -232,7 +234,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -245,6 +247,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
+
+    // Detect deterministic failures — no point retrying these
+    if (output.permanent) {
+      logger.warn(
+        { group: group.name, error: output.error },
+        'Permanent failure detected, skipping retries',
+      );
+      return 'permanent';
+    }
+
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -255,12 +267,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+interface AgentResult {
+  status: 'success' | 'error';
+  permanent?: boolean;
+  error?: string;
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+): Promise<AgentResult> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -309,7 +327,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: ASSISTANT_NAME,
+        assistantName: group.containerConfig?.assistantName || ASSISTANT_NAME,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -326,13 +344,18 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return 'error';
+      // Detect deterministic failures: exit code 2 (compilation) or TS errors
+      const isPermanent =
+        output.error != null &&
+        (/exited with code 2/.test(output.error) ||
+          /TS\d{4,}:/.test(output.error));
+      return { status: 'error', permanent: isPermanent, error: output.error };
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return { status: 'error' };
   }
 }
 
@@ -565,6 +588,15 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.onMaxRetriesExceeded = async (groupJid, retryCount) => {
+    const channel = findChannel(channels, groupJid);
+    if (channel) {
+      await channel.sendMessage(
+        groupJid,
+        "I'm having trouble processing your message. I'll try again when you send your next message.",
+      );
+    }
+  };
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

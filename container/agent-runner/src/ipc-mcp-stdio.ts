@@ -245,6 +245,30 @@ server.tool(
 );
 
 server.tool(
+  'refresh_data',
+  'Request a fresh sync of external data. Data files update within 15-30 seconds.',
+  {
+    source: z.enum(['calendar', 'slack', 'email', 'granola'])
+      .describe('Which data source to refresh'),
+  },
+  async (args) => {
+    const data = {
+      type: 'refresh_data',
+      source: args.source,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Refresh requested for ${args.source}. Data files will update within 15-30 seconds. Wait briefly, then read the data files.`,
+      }],
+    };
+  },
+);
+
+server.tool(
   'register_group',
   `Register a new chat/group so the agent can respond to messages there. Main group only.
 

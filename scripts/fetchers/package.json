@@ -1,0 +1,21 @@
+{
+  "name": "nanoclaw-fetchers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "fetch:slack": "node dist/slack-fetcher.js",
+    "fetch:email": "node dist/email-fetcher.js",
+    "fetch:calendar": "node dist/calendar-fetcher.js",
+    "fetch:granola": "node dist/granola-fetcher.js"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.8.0",
+    "googleapis": "^144.0.0",
+    "dotenv": "^16.4.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

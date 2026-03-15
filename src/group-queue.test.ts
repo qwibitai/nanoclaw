@@ -481,4 +481,105 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  // --- onMaxRetriesExceeded callback ---
+
+  it('calls onMaxRetriesExceeded when max retries are exceeded', async () => {
+    const onMaxRetries = vi.fn(async () => {});
+
+    const processMessages = vi.fn(async () => false);
+    queue.setProcessMessagesFn(processMessages);
+    queue.onMaxRetriesExceeded = onMaxRetries;
+
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Initial call + 5 retries = 6 total calls, then max exceeded
+    await vi.advanceTimersByTimeAsync(10); // initial
+    const retryDelays = [5000, 10000, 20000, 40000, 80000];
+    for (const delay of retryDelays) {
+      await vi.advanceTimersByTimeAsync(delay + 10);
+    }
+
+    expect(onMaxRetries).toHaveBeenCalledWith('group1@g.us', 6);
+  });
+
+  // --- Permanent failure short-circuits retries ---
+
+  it('skips retries and notifies on permanent failure', async () => {
+    const onMaxRetries = vi.fn(async () => {});
+
+    const processMessages = vi.fn(async () => 'permanent' as const);
+    queue.setProcessMessagesFn(processMessages);
+    queue.onMaxRetriesExceeded = onMaxRetries;
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Should notify immediately without any retries
+    expect(processMessages).toHaveBeenCalledTimes(1);
+    expect(onMaxRetries).toHaveBeenCalledWith('group1@g.us', 0);
+
+    // No retries should be scheduled
+    await vi.advanceTimersByTimeAsync(200000);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Running task dedup ---
+
+  it('prevents re-queuing a currently running task', async () => {
+    let resolveTask: () => void;
+    let taskRunCount = 0;
+
+    const taskFn = vi.fn(async () => {
+      taskRunCount++;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start the task
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRunCount).toBe(1);
+
+    // Try to enqueue the same task while it's running
+    const taskFn2 = vi.fn(async () => {
+      taskRunCount++;
+    });
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn2);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Should not have run the second copy
+    expect(taskRunCount).toBe(1);
+
+    // Complete the first task
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // After completion, should be able to enqueue again
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn2);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRunCount).toBe(2);
+  });
+
+  it('cleans up runningTaskIds even on task error', async () => {
+    let taskRunCount = 0;
+
+    const failingTask = vi.fn(async () => {
+      taskRunCount++;
+      throw new Error('task failed');
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', failingTask);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRunCount).toBe(1);
+
+    // After error, the task ID should be cleaned up
+    const successTask = vi.fn(async () => {
+      taskRunCount++;
+    });
+    queue.enqueueTask('group1@g.us', 'task-1', successTask);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRunCount).toBe(2);
+  });
 });

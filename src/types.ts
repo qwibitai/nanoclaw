@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  assistantName?: string; // Per-group display name (falls back to ASSISTANT_NAME env)
 }
 
 export interface RegisteredGroup {

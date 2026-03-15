@@ -21,10 +21,32 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+/**
+ * Convert markdown formatting to WhatsApp-compatible formatting.
+ * Agents sometimes slip markdown despite instructions.
+ */
+function sanitiseForWhatsApp(text: string): string {
+  let result = text;
+
+  // **double asterisks** → *single asterisks* (WhatsApp bold)
+  result = result.replace(/\*\*([^*]+)\*\*/g, '*$1*');
+
+  // __double underscores__ → _single underscores_ (WhatsApp italic)
+  result = result.replace(/__([^_]+)__/g, '_$1_');
+
+  // [text](url) → text (url) — WhatsApp doesn't render markdown links
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+  // ## Headings → *Headings* (convert to bold)
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+  return result;
+}
+
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return sanitiseForWhatsApp(text);
 }
 
 export function routeOutbound(
