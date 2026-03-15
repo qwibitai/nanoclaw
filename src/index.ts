@@ -771,6 +771,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // A single query may produce multiple results when piped messages
       // create follow-up turns.  Only the between-query session-update
       // marker carries idle: true — intermediate results do NOT.
+      logger.debug(
+        { group: group.name, status: result.status, hasResult: !!result.result, idle: !!result.idle },
+        'onOutput callback invoked',
+      );
       if (result.result) {
         const raw =
           typeof result.result === 'string'
@@ -839,6 +843,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Safety net: if the container exited without ever sending output to the user
+  // (e.g. closedDuringQuery prevented the idle marker, or the SDK produced no
+  // result text), send a fallback message so the user isn't left hanging.
+  if (!outputSentToUser && output !== 'error' && !hadError) {
+    logger.warn(
+      { group: group.name },
+      'Container exited without sending any output to user',
+    );
+    try {
+      await channel.sendMessage(
+        chatJid,
+        'I finished processing but wasn\u2019t able to produce a response. Please try again.',
+        effectiveThreadId,
+      );
+    } catch (err) {
+      logger.warn(
+        { group: group.name, err },
+        'Failed to send no-output fallback message',
+      );
+    }
+  }
 
   // Clear stale thread redirect state so the next conversation (or scheduled
   // task) for this channel doesn't accidentally send into the old thread.
