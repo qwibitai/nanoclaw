@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
+if [ -f dist/cli-send.js ]; then
+  exec node dist/cli-send.js "$@"
+else
+  exec npx tsx src/cli-send.ts "$@"
+fi
