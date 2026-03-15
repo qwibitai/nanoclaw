@@ -431,7 +431,17 @@ export class DiscordChannel implements Channel {
       const convKey = triggerMessageId ? `${jid}:${triggerMessageId}` : jid;
 
       // If we already created a thread for this conversation, redirect there.
-      const redirectJid = this.createdThreadJid.get(convKey);
+      let redirectJid = this.createdThreadJid.get(convKey);
+      // When triggerMessageId is absent (e.g. IPC send_message), scan for any
+      // redirect whose key starts with this JID — same approach as sendSwarmMessage.
+      if (!redirectJid && !triggerMessageId) {
+        for (const [key, threadJid] of this.createdThreadJid) {
+          if (key === jid || key.startsWith(`${jid}:`)) {
+            redirectJid = threadJid;
+            break;
+          }
+        }
+      }
       if (redirectJid) {
         return this.sendMessage(redirectJid, text, triggerMessageId);
       }
@@ -702,6 +712,43 @@ export class DiscordChannel implements Channel {
       );
       return thread.id;
     } catch (err) {
+      // If the message already has a thread, send into the existing thread
+      // instead of falling back to the parent channel.
+      if (
+        err instanceof Error &&
+        'code' in err &&
+        (err as { code: string }).code === 'MessageExistingThread'
+      ) {
+        try {
+          const channel = await this.client!.channels.fetch(parentChannelId);
+          if (channel && 'messages' in channel) {
+            const msg = await (channel as TextChannel).messages.fetch(
+              originalMessageId,
+            );
+            if (msg.thread) {
+              const textChannel = channel as TextChannel;
+              text = await this.replaceMentions(text, textChannel);
+              ({ text } = transformTablesInText('discord', text));
+              const components = this.buildPrButtons(text);
+              await this.sendChunked(msg.thread, text, components);
+              logger.info(
+                {
+                  parentChannelId,
+                  threadId: msg.thread.id,
+                },
+                'Sent to existing thread (MessageExistingThread recovery)',
+              );
+              return msg.thread.id;
+            }
+          }
+        } catch (recoveryErr) {
+          logger.warn(
+            { parentChannelId, originalMessageId, recoveryErr },
+            'Failed to recover into existing thread',
+          );
+        }
+      }
+
       logger.error(
         { parentChannelId, originalMessageId, err },
         'Failed to create Discord thread, falling back to channel',
