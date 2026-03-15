@@ -3,7 +3,13 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, GROUPS_DIR, FILE_SEND_ALLOWLIST, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  GROUPS_DIR,
+  FILE_SEND_ALLOWLIST,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -12,7 +18,11 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendFile: (jid: string, files: Array<{ path: string; name: string }>, caption?: string) => Promise<void>;
+  sendFile: (
+    jid: string,
+    files: Array<{ path: string; name: string }>,
+    caption?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -35,20 +45,39 @@ function resolveContainerPath(
   containerPath: string,
   groupFolder: string,
 ): string | null {
-  const groupPrefix = '/workspace/group/';
-  const ipcPrefix = '/workspace/ipc/';
-
   // Normalize and prevent path traversal
   const normalized = path.normalize(containerPath);
   if (normalized.includes('..')) return null;
 
-  if (normalized.startsWith(groupPrefix)) {
-    const relative = normalized.slice(groupPrefix.length);
-    return path.join(GROUPS_DIR, groupFolder, relative);
+  // Map known container mount prefixes to host paths.
+  // The agent may use various absolute paths depending on where it writes:
+  //   /workspace/group/  → groups/{folder}/     (primary working dir)
+  //   /workspace/ipc/    → data/ipc/{folder}/   (IPC directory)
+  const prefixMap: Array<[string, string]> = [
+    ['/workspace/group/', path.join(GROUPS_DIR, groupFolder) + '/'],
+    ['/workspace/ipc/', path.join(DATA_DIR, 'ipc', groupFolder) + '/'],
+  ];
+
+  for (const [prefix, hostBase] of prefixMap) {
+    if (normalized.startsWith(prefix)) {
+      const relative = normalized.slice(prefix.length);
+      return path.join(hostBase, relative);
+    }
   }
-  if (normalized.startsWith(ipcPrefix)) {
-    const relative = normalized.slice(ipcPrefix.length);
-    return path.join(DATA_DIR, 'ipc', groupFolder, relative);
+
+  // Fallback: if the file is just a basename or relative path, resolve
+  // it under the group directory (the container's CWD is /workspace/group/)
+  if (!normalized.startsWith('/')) {
+    return path.join(GROUPS_DIR, groupFolder, normalized);
+  }
+
+  // For any other absolute path in the container, check if the file
+  // physically exists at the group mount (the container might report
+  // paths like /home/node/workspace/foo which are really /workspace/group/foo)
+  const basename = path.basename(normalized);
+  const groupPath = path.join(GROUPS_DIR, groupFolder, basename);
+  if (fs.existsSync(groupPath)) {
+    return groupPath;
   }
 
   return null;
@@ -245,11 +274,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     valid = false;
                     break;
                   }
-                  resolvedFiles.push({ path: hostPath, name: f.name || path.basename(f.path) });
+                  resolvedFiles.push({
+                    path: hostPath,
+                    name: f.name || path.basename(f.path),
+                  });
                 }
 
                 if (valid && resolvedFiles.length > 0) {
-                  await deps.sendFile(data.chatJid, resolvedFiles, data.caption);
+                  await deps.sendFile(
+                    data.chatJid,
+                    resolvedFiles,
+                    data.caption,
+                  );
                   logger.info(
                     {
                       chatJid: data.chatJid,
@@ -276,10 +312,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC files directory',
-        );
+        logger.error({ err, sourceGroup }, 'Error reading IPC files directory');
       }
     }
 
