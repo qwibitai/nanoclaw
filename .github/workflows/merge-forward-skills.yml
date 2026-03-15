@@ -142,6 +142,7 @@ jobs:
               'nanoclaw-discord',
               'nanoclaw-slack',
               'nanoclaw-gmail',
+              'nanoclaw-docker-sandboxes',
             ];
             const sha = context.sha.substring(0, 7);
             for (const repo of forks) {

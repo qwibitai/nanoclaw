@@ -39,7 +39,11 @@ git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
 
 ```bash
 git fetch telegram main
-git merge telegram/main
+git merge telegram/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
