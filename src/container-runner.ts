@@ -218,9 +218,9 @@ function buildVolumeMounts(
       JSON.stringify(claudeJsonContent, null, 2) + '\n',
     );
     try {
-      fs.chownSync(sessionDotClaudeJson, 1000, 1000);
+      fs.chmodSync(sessionDotClaudeJson, 0o666);
     } catch {
-      // ignore — chown may fail if not running as root (native install)
+      // ignore
     }
   }
   mounts.push({
