@@ -13,9 +13,11 @@ import {
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
+  HOST_BROWSER_CDP_ENABLED,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { getHostBrowserCdpUrl } from './host-browser.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -199,6 +201,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount host browser auth state if it exists (exported from host Chrome CDP).
+  // This lets the sandboxed browser use login sessions from the host Chrome profile.
+  const authStatePath = path.join(DATA_DIR, 'chrome-cdp', 'auth-state.json');
+  if (fs.existsSync(authStatePath)) {
+    mounts.push({
+      hostPath: path.dirname(authStatePath),
+      containerPath: '/workspace/browser-auth',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -236,6 +249,25 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Host browser CDP: pass the rewritten WebSocket URL so the container wrapper
+  // can route agent-browser commands to the host Chrome instance.
+  if (HOST_BROWSER_CDP_ENABLED) {
+    const cdpUrl = getHostBrowserCdpUrl();
+    if (cdpUrl) {
+      args.push('-e', `HOST_BROWSER_CDP_URL=${cdpUrl}`);
+    }
+  }
+
+  // Auth state: point agent-browser to exported cookies from host Chrome profile.
+  // This lets the sandboxed browser use login sessions without needing CDP at runtime.
+  const authStatePath = path.join(DATA_DIR, 'chrome-cdp', 'auth-state.json');
+  if (fs.existsSync(authStatePath)) {
+    args.push(
+      '-e',
+      'AGENT_BROWSER_STATE=/workspace/browser-auth/auth-state.json',
+    );
   }
 
   // Runtime-specific args for host gateway resolution

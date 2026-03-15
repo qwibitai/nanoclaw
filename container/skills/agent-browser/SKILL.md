@@ -157,3 +157,25 @@ agent-browser get text @e1  # Get product title
 agent-browser get attr @e2 href  # Get link URL
 agent-browser screenshot products.png
 ```
+
+## Host Browser Mode
+
+When `HOST_BROWSER_CDP_URL` is set (configured by NanoClaw automatically), all `agent-browser`
+commands route to the host Chrome instance via CDP. No special commands needed — just use
+`agent-browser` normally.
+
+This mode is active when the user has enabled `HOST_BROWSER_CDP_ENABLED=true` in their NanoClaw
+config. The host browser runs with a dedicated profile at `~/.nanoclaw/host-browser-profile`.
+
+Use this when a human needs to:
+- Log into sites manually (visible browser window on host)
+- Solve CAPTCHAs
+- Maintain persistent browser sessions across agent runs
+
+```bash
+# Check if host browser mode is active
+echo "HOST_BROWSER_CDP_URL=$HOST_BROWSER_CDP_URL"
+```
+
+**Important**: Do NOT use `agent-browser close` when host browser mode is active — it kills
+the host Chrome. Just stop issuing commands.

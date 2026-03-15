@@ -20,6 +20,8 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `src/host-browser.ts` | Host browser lifecycle (start/stop agent-browser daemon) |
+| `scripts/start-host-browser.sh` | Convenience script to start host browser manually |
 
 ## Skills
 
@@ -31,6 +33,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/add-host-browser` | Set up host browser via agent-browser for CDP |
 
 ## Development
 
