@@ -20,7 +20,7 @@ export interface MediaResult {
   /** MIME type (e.g., image/jpeg, video/mp4) */
   mimeType: string;
   /** Media type */
-  type: 'photo' | 'video';
+  type: 'photo' | 'video' | 'voice' | 'audio';
 }
 
 export interface MediaFile {
@@ -39,6 +39,10 @@ const MIME_MAP: Record<string, string> = {
   '.mov': 'video/quicktime',
   '.avi': 'video/x-msvideo',
   '.webm': 'video/webm',
+  '.oga': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
 };
 
 function getMimeType(filePath: string): string {
@@ -55,7 +59,7 @@ export async function downloadTelegramMedia(
   fileId: string,
   groupFolder: string,
   messageId: string,
-  type: 'photo' | 'video',
+  type: 'photo' | 'video' | 'voice' | 'audio',
 ): Promise<MediaResult> {
   const file = await bot.api.getFile(fileId);
   if (!file.file_path) {
@@ -63,7 +67,14 @@ export async function downloadTelegramMedia(
   }
 
   const ext =
-    path.extname(file.file_path) || (type === 'photo' ? '.jpg' : '.mp4');
+    path.extname(file.file_path) ||
+    (type === 'photo'
+      ? '.jpg'
+      : type === 'voice'
+        ? '.oga'
+        : type === 'audio'
+          ? '.mp3'
+          : '.mp4');
   const filename = `${type}_${messageId}_${Date.now()}${ext}`;
   const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
