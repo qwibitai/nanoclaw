@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks (must be before imports) ---
 
@@ -130,8 +130,34 @@ describe('FeishuChannel', () => {
     vi.restoreAllMocks();
   });
 
-  // Tests will be added in subsequent tasks
-  it('placeholder', () => {
-    expect(true).toBe(true);
+  describe('factory registration', () => {
+    let capturedFactory: any;
+
+    beforeAll(async () => {
+      const { registerChannel } = await import('./registry.js');
+      // Verify registration happened at module load time (before clearAllMocks runs)
+      expect(registerChannel).toHaveBeenCalledWith('feishu', expect.any(Function));
+      capturedFactory = (registerChannel as any).mock.calls.find(
+        (c: any) => c[0] === 'feishu',
+      )?.[1];
+      expect(capturedFactory).toBeDefined();
+    });
+
+    it('returns null when credentials are missing', () => {
+      const result = capturedFactory(createTestOpts());
+      expect(result).toBeNull();
+    });
+
+    it('returns FeishuChannel instance when credentials are set', () => {
+      process.env.FEISHU_APP_ID = 'cli_test';
+      process.env.FEISHU_APP_SECRET = 'secret_test';
+
+      const result = capturedFactory(createTestOpts());
+      expect(result).toBeInstanceOf(FeishuChannel);
+      expect(result.name).toBe('feishu');
+
+      delete process.env.FEISHU_APP_ID;
+      delete process.env.FEISHU_APP_SECRET;
+    });
   });
 });
