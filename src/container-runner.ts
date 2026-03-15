@@ -230,7 +230,12 @@ function buildVolumeMounts(
   });
 
   // Create .claude sub-directories that claude-code writes to at runtime
-  const sessionDotClaudeDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+  const sessionDotClaudeDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+  );
   for (const subdir of ['debug', 'backups']) {
     const dirPath = path.join(sessionDotClaudeDir, subdir);
     fs.mkdirSync(dirPath, { recursive: true });
