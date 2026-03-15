@@ -164,8 +164,15 @@ export class TelegramChannel implements Channel {
       }
 
       // Store chat metadata for discovery
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'telegram',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
@@ -208,8 +215,15 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
@@ -233,8 +247,15 @@ export class TelegramChannel implements Channel {
         ctx.from?.username ||
         ctx.from?.id?.toString() ||
         'Unknown';
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
       let content = `[Photo]${caption}`;
@@ -292,8 +313,15 @@ export class TelegramChannel implements Channel {
         ctx.from?.username ||
         ctx.from?.id?.toString() ||
         'Unknown';
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       let content = '[Voice message]';
       try {
@@ -401,12 +429,19 @@ export class TelegramChannel implements Channel {
           }
         }
       } catch (fallbackErr) {
-        logger.error({ jid, err: fallbackErr }, 'Failed to send Telegram message');
+        logger.error(
+          { jid, err: fallbackErr },
+          'Failed to send Telegram message',
+        );
       }
     }
   }
 
-  async sendImage(jid: string, imagePath: string, caption?: string): Promise<void> {
+  async sendImage(
+    jid: string,
+    imagePath: string,
+    caption?: string,
+  ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -434,7 +469,10 @@ export class TelegramChannel implements Channel {
         parse_mode: formattedCaption ? 'HTML' : undefined,
       });
 
-      logger.info({ jid, imagePath, hasCaption: !!caption }, 'Telegram image sent');
+      logger.info(
+        { jid, imagePath, hasCaption: !!caption },
+        'Telegram image sent',
+      );
     } catch (err) {
       logger.error({ jid, imagePath, err }, 'Failed to send Telegram image');
     }
@@ -490,12 +528,14 @@ export class TelegramChannel implements Channel {
 
   private downloadFile(url: string): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      https.get(url, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-        res.on('error', reject);
-      }).on('error', reject);
+      https
+        .get(url, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        })
+        .on('error', reject);
     });
   }
 

@@ -218,7 +218,11 @@ export class WhatsAppChannel implements Channel {
           if (isImageMessage(msg)) {
             try {
               const groupEntry = groups[chatJid];
-              const imagePath = await downloadImageToFile(msg, this.sock, groupEntry.folder);
+              const imagePath = await downloadImageToFile(
+                msg,
+                this.sock,
+                groupEntry.folder,
+              );
               if (imagePath) {
                 const caption = content ? ` ${content}` : '';
                 content = `[Photo: ${imagePath}]${caption}`;

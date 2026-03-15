@@ -22,10 +22,15 @@ interface TranscriptionConfig {
 }
 
 function getConfig(): TranscriptionConfig {
-  const env = readEnvFile(['WHISPER_CPP_PATH', 'WHISPER_MODEL_PATH', 'WHISPER_LANGUAGE']);
+  const env = readEnvFile([
+    'WHISPER_CPP_PATH',
+    'WHISPER_MODEL_PATH',
+    'WHISPER_LANGUAGE',
+  ]);
   return {
     whisperBin: env.WHISPER_CPP_PATH || 'whisper-cpp',
-    modelPath: env.WHISPER_MODEL_PATH || '/usr/local/share/whisper/ggml-tiny.bin',
+    modelPath:
+      env.WHISPER_MODEL_PATH || '/usr/local/share/whisper/ggml-tiny.bin',
     enabled: true,
     fallbackMessage: '[Voice Message - transcription unavailable]',
     language: env.WHISPER_LANGUAGE || 'en',
@@ -36,15 +41,26 @@ function getConfig(): TranscriptionConfig {
  * Convert OGG/Opus audio (WhatsApp format) to 16kHz mono WAV (whisper.cpp format)
  * using ffmpeg.
  */
-async function convertToWav(inputPath: string, outputPath: string): Promise<void> {
-  await execFileAsync('ffmpeg', [
-    '-i', inputPath,
-    '-ar', '16000',
-    '-ac', '1',
-    '-f', 'wav',
-    '-y',
-    outputPath,
-  ], { timeout: 30000 });
+async function convertToWav(
+  inputPath: string,
+  outputPath: string,
+): Promise<void> {
+  await execFileAsync(
+    'ffmpeg',
+    [
+      '-i',
+      inputPath,
+      '-ar',
+      '16000',
+      '-ac',
+      '1',
+      '-f',
+      'wav',
+      '-y',
+      outputPath,
+    ],
+    { timeout: 30000 },
+  );
 }
 
 /**
@@ -57,19 +73,30 @@ async function transcribeWithWhisperCpp(
 ): Promise<string | null> {
   // Verify model exists
   if (!fs.existsSync(config.modelPath)) {
-    logger.error({ modelPath: config.modelPath }, 'Whisper model file not found');
+    logger.error(
+      { modelPath: config.modelPath },
+      'Whisper model file not found',
+    );
     return null;
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync(config.whisperBin, [
-      '-m', config.modelPath,
-      '-f', wavPath,
-      '--no-timestamps',
-      '-l', config.language,
-      '--output-txt',
-      '-of', wavPath.replace('.wav', ''),
-    ], { timeout: 120000 }); // 2 minute timeout for long voice notes
+    const { stdout, stderr } = await execFileAsync(
+      config.whisperBin,
+      [
+        '-m',
+        config.modelPath,
+        '-f',
+        wavPath,
+        '--no-timestamps',
+        '-l',
+        config.language,
+        '--output-txt',
+        '-of',
+        wavPath.replace('.wav', ''),
+      ],
+      { timeout: 120000 },
+    ); // 2 minute timeout for long voice notes
 
     // whisper.cpp writes output to <input>.txt
     const txtPath = wavPath.replace('.wav', '.txt');
@@ -82,12 +109,17 @@ async function transcribeWithWhisperCpp(
 
     // Fallback: try to parse stdout (some versions output to stdout)
     if (stdout) {
-      const lines = stdout.split('\n').filter((l: string) => l.trim() && !l.startsWith('['));
+      const lines = stdout
+        .split('\n')
+        .filter((l: string) => l.trim() && !l.startsWith('['));
       const text = lines.join(' ').trim();
       if (text) return text;
     }
 
-    logger.warn({ stderr: stderr?.slice(0, 200) }, 'whisper.cpp produced no output');
+    logger.warn(
+      { stderr: stderr?.slice(0, 200) },
+      'whisper.cpp produced no output',
+    );
     return null;
   } catch (err) {
     logger.error({ err }, 'whisper.cpp transcription failed');
@@ -142,8 +174,12 @@ export async function transcribeAudioBuffer(
     return config.fallbackMessage;
   } finally {
     // Clean up temp files
-    try { fs.unlinkSync(oggPath); } catch {}
-    try { fs.unlinkSync(wavPath); } catch {}
+    try {
+      fs.unlinkSync(oggPath);
+    } catch {}
+    try {
+      fs.unlinkSync(wavPath);
+    } catch {}
   }
 }
 
@@ -227,10 +263,13 @@ export async function downloadImageToFile(
       msg.message?.ephemeralMessage?.message?.imageMessage;
 
     const mimetype = imgMsg?.mimetype || 'image/jpeg';
-    const ext = mimetype.includes('png') ? 'png'
-      : mimetype.includes('webp') ? 'webp'
-      : mimetype.includes('gif') ? 'gif'
-      : 'jpg';
+    const ext = mimetype.includes('png')
+      ? 'png'
+      : mimetype.includes('webp')
+        ? 'webp'
+        : mimetype.includes('gif')
+          ? 'gif'
+          : 'jpg';
 
     // Save to group's IPC input directory (mounted at /workspace/ipc/input/ in container)
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');

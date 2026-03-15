@@ -17,7 +17,11 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendImage: (jid: string, imagePath: string, caption?: string) => Promise<void>;
+  sendImage: (
+    jid: string,
+    imagePath: string,
+    caption?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -31,6 +35,22 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+// Track chatJids that received IPC messages during current agent turn
+// Used to suppress duplicate streaming output when send_message was used
+const ipcMessagesSentThisTurn = new Set<string>();
+
+export function markIpcMessageSent(chatJid: string): void {
+  ipcMessagesSentThisTurn.add(chatJid);
+}
+
+export function wasIpcMessageSent(chatJid: string): boolean {
+  return ipcMessagesSentThisTurn.has(chatJid);
+}
+
+export function clearIpcMessageSent(chatJid: string): void {
+  ipcMessagesSentThisTurn.delete(chatJid);
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -73,7 +93,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
 
             // Atomically move file to processing dir to prevent double processing
-            const processingDir = path.join(ipcBaseDir, sourceGroup, 'processing');
+            const processingDir = path.join(
+              ipcBaseDir,
+              sourceGroup,
+              'processing',
+            );
             fs.mkdirSync(processingDir, { recursive: true });
             const processingPath = path.join(processingDir, file);
             try {
@@ -93,6 +117,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
+                  // Mark that IPC message was sent for this chat
+                  // This prevents duplicate streaming output
+                  markIpcMessageSent(data.chatJid);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -103,7 +130,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (data.type === 'image' && data.chatJid && data.imagePath) {
+              } else if (
+                data.type === 'image' &&
+                data.chatJid &&
+                data.imagePath
+              ) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
@@ -114,15 +145,34 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   // Container: /workspace/group/... -> Host: groups/{folder}/...
                   let hostPath = data.imagePath as string;
                   if (hostPath.startsWith('/workspace/group/')) {
-                    hostPath = path.join(DATA_DIR, '..', 'groups', sourceGroup, hostPath.replace('/workspace/group/', ''));
+                    hostPath = path.join(
+                      DATA_DIR,
+                      '..',
+                      'groups',
+                      sourceGroup,
+                      hostPath.replace('/workspace/group/', ''),
+                    );
                   } else if (hostPath.startsWith('/workspace/ipc/')) {
-                    hostPath = path.join(DATA_DIR, 'ipc', sourceGroup, hostPath.replace('/workspace/ipc/', ''));
+                    hostPath = path.join(
+                      DATA_DIR,
+                      'ipc',
+                      sourceGroup,
+                      hostPath.replace('/workspace/ipc/', ''),
+                    );
                   } else if (hostPath.startsWith('/workspace/')) {
                     // Generic /workspace/ path - try to resolve relative to group
-                    hostPath = path.join(DATA_DIR, '..', 'groups', sourceGroup, hostPath.replace('/workspace/', ''));
+                    hostPath = path.join(
+                      DATA_DIR,
+                      '..',
+                      'groups',
+                      sourceGroup,
+                      hostPath.replace('/workspace/', ''),
+                    );
                   }
 
                   await deps.sendImage(data.chatJid, hostPath, data.caption);
+                  // Mark that IPC message was sent for this chat
+                  markIpcMessageSent(data.chatJid);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup, imagePath: hostPath },
                     'IPC image sent',
@@ -166,7 +216,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(tasksDir, file);
 
             // Atomically move file to processing dir to prevent double processing
-            const processingDir = path.join(ipcBaseDir, sourceGroup, 'processing');
+            const processingDir = path.join(
+              ipcBaseDir,
+              sourceGroup,
+              'processing',
+            );
             fs.mkdirSync(processingDir, { recursive: true });
             const processingPath = path.join(processingDir, file);
             try {
