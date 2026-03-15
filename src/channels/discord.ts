@@ -35,21 +35,6 @@ import { registerChannel, ChannelOpts } from './registry.js';
 import { Attachment, Channel } from '../types.js';
 import { transformTablesInText } from '../table-renderer.js';
 
-const THREAD_TITLE_RE = /<thread-title>([\s\S]*?)<\/thread-title>/;
-
-/**
- * Extract and strip a `<thread-title>` tag from the agent's response.
- * Returns { title, text } where title is the extracted name (or undefined)
- * and text is the response with the tag removed.
- */
-function extractThreadTitle(text: string): { title?: string; text: string } {
-  const match = text.match(THREAD_TITLE_RE);
-  if (!match) return { text };
-  const title = match[1].trim().slice(0, 100); // Discord limit
-  const cleaned = text.replace(THREAD_TITLE_RE, '').trim();
-  return { title: title || undefined, text: cleaned };
-}
-
 export class DiscordChannel implements Channel {
   name = 'discord';
 
@@ -83,7 +68,13 @@ export class DiscordChannel implements Channel {
   private threadOriginMessage = new Map<string, string>();
   private webhookCache = new Map<string, Webhook>();
   private webhookCreating = new Map<string, Promise<Webhook | null>>();
+  private pendingThreadTitleValue: string | undefined;
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  /** Called by index.ts before sendMessage to pass an agent-generated thread title. */
+  setPendingThreadTitle(title: string): void {
+    this.pendingThreadTitleValue = title;
+  }
 
   /** Resolve the parent channel ID from an interaction (thread → parent, else null). */
   private static getInteractionParentId(interaction: {
@@ -680,9 +671,9 @@ export class DiscordChannel implements Channel {
       const originalMessage =
         await textChannel.messages.fetch(originalMessageId);
 
-      // Extract agent-generated thread title from response (if present)
-      const extracted = extractThreadTitle(text);
-      text = extracted.text;
+      // Use agent-generated title (set via setPendingThreadTitle) if available
+      const agentTitle = this.pendingThreadTitleValue;
+      this.pendingThreadTitleValue = undefined;
 
       const fallbackName =
         threadName ||
@@ -691,7 +682,7 @@ export class DiscordChannel implements Channel {
           .trim()
           .slice(0, 40) ||
         'Thread';
-      const name = extracted.title || fallbackName;
+      const name = agentTitle || fallbackName;
 
       const thread = await originalMessage.startThread({
         name,

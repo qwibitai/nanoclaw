@@ -25,7 +25,16 @@ export function formatMessages(
 }
 
 export function stripInternalTags(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  return text
+    .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+    .replace(/<thread-title>[\s\S]*?<\/thread-title>/g, '')
+    .trim();
+}
+
+/** Extract a `<thread-title>` value from raw agent output (before stripping). */
+export function extractThreadTitle(raw: string): string | undefined {
+  const m = raw.match(/<thread-title>([\s\S]*?)<\/thread-title>/);
+  return m?.[1]?.trim().slice(0, 100) || undefined; // Discord 100-char limit
 }
 
 export function formatOutbound(rawText: string): string {

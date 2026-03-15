@@ -89,6 +89,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import {
+  extractThreadTitle,
   findChannel,
   formatMessages,
   formatOutbound,
@@ -785,7 +786,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
-        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        // Extract thread title before stripping (Discord uses it for thread names)
+        const threadTitle = extractThreadTitle(raw);
+        if (threadTitle && 'setPendingThreadTitle' in channel) {
+          (channel as { setPendingThreadTitle(t: string): void }).setPendingThreadTitle(threadTitle);
+        }
+        // Strip <internal> and <thread-title> blocks
         const text = stripInternalTags(raw);
         logger.info(
           { group: group.name },
