@@ -229,6 +229,23 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Create .claude sub-directories that claude-code writes to at runtime
+  const sessionDotClaudeDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+  for (const subdir of ['debug', 'backups']) {
+    const dirPath = path.join(sessionDotClaudeDir, subdir);
+    fs.mkdirSync(dirPath, { recursive: true });
+    try {
+      fs.chmodSync(dirPath, 0o777);
+    } catch {
+      // ignore
+    }
+    mounts.push({
+      hostPath: toHostPath(dirPath),
+      containerPath: `/home/node/.claude/${subdir}`,
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
