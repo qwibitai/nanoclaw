@@ -607,6 +607,50 @@ describe('GroupQueue', () => {
     expect(processMessages).toHaveBeenCalledTimes(2);
   });
 
+  it('cleans up reassigned thread slot after completion', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start with GROUP_THREAD_KEY (top-level message on thread-enabled channel)
+    queue.enqueueMessageCheck('slack:C123');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.isThreadActive('slack:C123', undefined)).toBe(true);
+
+    // Simulate processGroupMessages reassigning to effectiveThreadId
+    queue.reassignThreadKey('slack:C123', '__group__', 'thread-abc');
+
+    // GROUP_THREAD_KEY should be free, thread-abc should be active
+    expect(queue.isThreadActive('slack:C123', undefined)).toBe(false);
+    expect(queue.isThreadActive('slack:C123', 'thread-abc')).toBe(true);
+
+    // Complete the container
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // After completion, the reassigned thread slot must be cleaned up
+    expect(queue.isThreadActive('slack:C123', 'thread-abc')).toBe(false);
+    expect(queue.isActive('slack:C123')).toBe(false);
+
+    // New message for the same thread should start immediately (not get stuck)
+    queue.enqueueMessageCheck('slack:C123', 'slack:C123:thread:thread-abc', 'thread-abc');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toHaveLength(2);
+    expect(processed[1]).toBe('slack:C123:thread:thread-abc');
+
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('drainWaiting processes pendingProcessJids for waiting groups', async () => {
     const processed: string[] = [];
     const completionCallbacks: Array<() => void> = [];

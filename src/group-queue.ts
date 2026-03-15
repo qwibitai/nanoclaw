@@ -27,6 +27,8 @@ export interface ThreadSlot {
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
+  /** Current key in activeThreads (updated by reassignThreadKey). */
+  currentKey: string;
   /** Callback to reset the idle timer when a message is piped to this slot. */
   onActivity?: () => void;
 }
@@ -261,6 +263,7 @@ export class GroupQueue {
     if (!slot) return;
     state.activeThreads.delete(oldKey);
     state.activeThreads.set(newKey, slot);
+    slot.currentKey = newKey;
     logger.debug({ groupJid, oldKey, newKey }, 'Reassigned thread slot');
   }
 
@@ -366,6 +369,7 @@ export class GroupQueue {
       idleWaiting: false,
       isTaskContainer: false,
       runningTaskId: null,
+      currentKey: threadKey,
     };
     state.activeThreads.set(threadKey, slot);
     this.activeCount++;
@@ -387,7 +391,7 @@ export class GroupQueue {
         if (success) {
           state.retryCount = 0;
         } else {
-          this.scheduleRetry(groupJid, state, processJid, threadKey);
+          this.scheduleRetry(groupJid, state, processJid, slot.currentKey);
         }
       }
     } catch (err) {
@@ -395,9 +399,11 @@ export class GroupQueue {
         { groupJid, processJid, err },
         'Error processing messages for group',
       );
-      this.scheduleRetry(groupJid, state, processJid, threadKey);
+      this.scheduleRetry(groupJid, state, processJid, slot.currentKey);
     } finally {
-      state.activeThreads.delete(threadKey);
+      // Use slot.currentKey (not the original threadKey) because
+      // reassignThreadKey may have moved the slot to a different key.
+      state.activeThreads.delete(slot.currentKey);
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -413,6 +419,7 @@ export class GroupQueue {
       idleWaiting: false,
       isTaskContainer: true,
       runningTaskId: task.id,
+      currentKey: taskThreadKey,
     };
     state.activeThreads.set(taskThreadKey, slot);
     this.activeCount++;
