@@ -1,264 +1,235 @@
+/**
+ * Discord Channel Adapter for Atlas
+ *
+ * Maps Discord threads and channels to NanoClaw's group system:
+ * - Control channel (#control) → isMain: true (admin privileges)
+ * - Research/build threads → isMain: false (isolated contexts)
+ */
+
 import {
   Client,
-  Events,
   GatewayIntentBits,
   Message,
+  ThreadChannel,
   TextChannel,
+  ChannelType,
+  ActivityType,
 } from 'discord.js';
-
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { readEnvFile } from '../env.js';
-import { logger } from '../logger.js';
+import { Channel, OnInboundMessage, OnChatMetadata } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnChatMetadata,
-  OnInboundMessage,
-  RegisteredGroup,
-} from '../types.js';
+import { logger } from '../logger.js';
 
-export interface DiscordChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CONTROL_CHANNEL_ID = process.env.DISCORD_CONTROL_CHANNEL_ID;
 
-export class DiscordChannel implements Channel {
-  name = 'discord';
-
-  private client: Client | null = null;
-  private opts: DiscordChannelOpts;
-  private botToken: string;
-
-  constructor(botToken: string, opts: DiscordChannelOpts) {
-    this.botToken = botToken;
-    this.opts = opts;
-  }
-
-  async connect(): Promise<void> {
-    this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-      ],
-    });
-
-    this.client.on(Events.MessageCreate, async (message: Message) => {
-      // Ignore bot messages (including own)
-      if (message.author.bot) return;
-
-      const channelId = message.channelId;
-      const chatJid = `dc:${channelId}`;
-      let content = message.content;
-      const timestamp = message.createdAt.toISOString();
-      const senderName =
-        message.member?.displayName ||
-        message.author.displayName ||
-        message.author.username;
-      const sender = message.author.id;
-      const msgId = message.id;
-
-      // Determine chat name
-      let chatName: string;
-      if (message.guild) {
-        const textChannel = message.channel as TextChannel;
-        chatName = `${message.guild.name} #${textChannel.name}`;
-      } else {
-        chatName = senderName;
-      }
-
-      // Translate Discord @bot mentions into TRIGGER_PATTERN format.
-      // Discord mentions look like <@botUserId> — these won't match
-      // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
-      // when the bot is @mentioned.
-      if (this.client?.user) {
-        const botId = this.client.user.id;
-        const isBotMentioned =
-          message.mentions.users.has(botId) ||
-          content.includes(`<@${botId}>`) ||
-          content.includes(`<@!${botId}>`);
-
-        if (isBotMentioned) {
-          // Strip the <@botId> mention to avoid visual clutter
-          content = content
-            .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
-            .trim();
-          // Prepend trigger if not already present
-          if (!TRIGGER_PATTERN.test(content)) {
-            content = `@${ASSISTANT_NAME} ${content}`;
-          }
-        }
-      }
-
-      // Handle attachments — store placeholders so the agent knows something was sent
-      if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map(
-          (att) => {
-            const contentType = att.contentType || '';
-            if (contentType.startsWith('image/')) {
-              return `[Image: ${att.name || 'image'}]`;
-            } else if (contentType.startsWith('video/')) {
-              return `[Video: ${att.name || 'video'}]`;
-            } else if (contentType.startsWith('audio/')) {
-              return `[Audio: ${att.name || 'audio'}]`;
-            } else {
-              return `[File: ${att.name || 'file'}]`;
-            }
-          },
-        );
-        if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
-        } else {
-          content = attachmentDescriptions.join('\n');
-        }
-      }
-
-      // Handle reply context — include who the user is replying to
-      if (message.reference?.messageId) {
-        try {
-          const repliedTo = await message.channel.messages.fetch(
-            message.reference.messageId,
-          );
-          const replyAuthor =
-            repliedTo.member?.displayName ||
-            repliedTo.author.displayName ||
-            repliedTo.author.username;
-          content = `[Reply to ${replyAuthor}] ${content}`;
-        } catch {
-          // Referenced message may have been deleted
-        }
-      }
-
-      // Store chat metadata for discovery
-      const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(
-        chatJid,
-        timestamp,
-        chatName,
-        'discord',
-        isGroup,
-      );
-
-      // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
-      if (!group) {
-        logger.debug(
-          { chatJid, chatName },
-          'Message from unregistered Discord channel',
-        );
-        return;
-      }
-
-      // Deliver message — startMessageLoop() will pick it up
-      this.opts.onMessage(chatJid, {
-        id: msgId,
-        chat_jid: chatJid,
-        sender,
-        sender_name: senderName,
-        content,
-        timestamp,
-        is_from_me: false,
-      });
-
-      logger.info(
-        { chatJid, chatName, sender: senderName },
-        'Discord message stored',
-      );
-    });
-
-    // Handle errors gracefully
-    this.client.on(Events.Error, (err) => {
-      logger.error({ err: err.message }, 'Discord client error');
-    });
-
-    return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
-        logger.info(
-          { username: readyClient.user.tag, id: readyClient.user.id },
-          'Discord bot connected',
-        );
-        console.log(`\n  Discord bot: ${readyClient.user.tag}`);
-        console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`,
-        );
-        resolve();
-      });
-
-      this.client!.login(this.botToken);
-    });
-  }
-
-  async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.client) {
-      logger.warn('Discord client not initialized');
-      return;
-    }
-
-    try {
-      const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
-
-      if (!channel || !('send' in channel)) {
-        logger.warn({ jid }, 'Discord channel not found or not text-based');
-        return;
-      }
-
-      const textChannel = channel as TextChannel;
-
-      // Discord has a 2000 character limit per message — split if needed
-      const MAX_LENGTH = 2000;
-      if (text.length <= MAX_LENGTH) {
-        await textChannel.send(text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await textChannel.send(text.slice(i, i + MAX_LENGTH));
-        }
-      }
-      logger.info({ jid, length: text.length }, 'Discord message sent');
-    } catch (err) {
-      logger.error({ jid, err }, 'Failed to send Discord message');
-    }
-  }
-
-  isConnected(): boolean {
-    return this.client !== null && this.client.isReady();
-  }
-
-  ownsJid(jid: string): boolean {
-    return jid.startsWith('dc:');
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.client) {
-      this.client.destroy();
-      this.client = null;
-      logger.info('Discord bot stopped');
-    }
-  }
-
-  async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    if (!this.client || !isTyping) return;
-    try {
-      const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
-      if (channel && 'sendTyping' in channel) {
-        await (channel as TextChannel).sendTyping();
-      }
-    } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
-    }
-  }
-}
-
-registerChannel('discord', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
-  const token =
-    process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
-  if (!token) {
-    logger.warn('Discord: DISCORD_BOT_TOKEN not set');
+export function createDiscordChannel(opts: ChannelOpts): Channel | null {
+  if (!DISCORD_TOKEN) {
+    logger.warn('DISCORD_TOKEN not set, skipping Discord channel');
     return null;
   }
-  return new DiscordChannel(token, opts);
-});
+
+  if (!CONTROL_CHANNEL_ID) {
+    logger.warn('DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel');
+    return null;
+  }
+
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
+  });
+
+  let connected = false;
+  const discordJids = new Set<string>();
+
+  /**
+   * Check if a channel/thread is the control channel
+   */
+  function isControlChannel(channelId: string): boolean {
+    return channelId === CONTROL_CHANNEL_ID;
+  }
+
+  /**
+   * Handle incoming messages from Discord
+   */
+  async function handleMessage(message: Message) {
+    // Ignore bot messages
+    if (message.author.bot) return;
+
+    const chatJid = message.channelId;
+    const isControl = isControlChannel(chatJid);
+    const isThread = message.channel.isThread();
+
+    // Track this JID as owned by Discord
+    discordJids.add(chatJid);
+
+    // Build NewMessage
+    const newMessage = {
+      id: message.id,
+      chat_jid: chatJid,
+      sender: message.author.id,
+      sender_name: message.author.username,
+      content: message.content,
+      timestamp: new Date(message.createdTimestamp).toISOString(),
+      is_from_me: false,
+      is_bot_message: false,
+    };
+
+    // Deliver message to orchestrator
+    opts.onMessage(chatJid, newMessage);
+
+    // Deliver metadata
+    let channelName = 'Unknown';
+    if (message.channel.isThread()) {
+      channelName = message.channel.name;
+    } else if (message.channel.type === ChannelType.GuildText) {
+      channelName = message.channel.name;
+    }
+
+    opts.onChatMetadata(
+      chatJid,
+      newMessage.timestamp,
+      channelName,
+      'discord',
+      isThread || !isControl, // Threads and non-control channels are "groups"
+    );
+
+    // Auto-register control channel as main
+    if (isControl) {
+      const groups = opts.registeredGroups();
+      if (!groups[chatJid]) {
+        logger.info(
+          { channelId: chatJid, channelName },
+          'Auto-registering control channel as main',
+        );
+        // Note: Registration happens via IPC or direct call in orchestrator
+        // For now, we just ensure metadata is stored
+      }
+    }
+
+    // Auto-register threads (research/build contexts)
+    if (isThread) {
+      const groups = opts.registeredGroups();
+      if (!groups[chatJid]) {
+        logger.info(
+          { threadId: chatJid, threadName: channelName },
+          'New thread detected, will auto-register on first message',
+        );
+      }
+    }
+  }
+
+  const channel: Channel = {
+    name: 'discord',
+
+    async connect() {
+      if (connected) return;
+
+      client.on('ready', () => {
+        logger.info(
+          { user: client.user?.tag },
+          'Discord bot connected',
+        );
+        connected = true;
+
+        // Set bot status
+        client.user?.setPresence({
+          activities: [{ name: 'Deep Research & Autonomous Building', type: ActivityType.Custom }],
+          status: 'online',
+        });
+      });
+
+      client.on('messageCreate', handleMessage);
+
+      client.on('error', (error) => {
+        logger.error({ error }, 'Discord client error');
+      });
+
+      await client.login(DISCORD_TOKEN);
+    },
+
+    async sendMessage(jid: string, text: string) {
+      try {
+        const discordChannel = await client.channels.fetch(jid);
+        if (!discordChannel) {
+          logger.warn({ jid }, 'Discord channel not found');
+          return;
+        }
+
+        if (discordChannel.isTextBased()) {
+          // Split long messages (Discord has 2000 char limit)
+          const chunks = splitMessage(text, 2000);
+          for (const chunk of chunks) {
+            await discordChannel.send(chunk);
+          }
+        }
+      } catch (err) {
+        logger.error({ jid, err }, 'Failed to send Discord message');
+      }
+    },
+
+    isConnected() {
+      return connected;
+    },
+
+    ownsJid(jid: string) {
+      return discordJids.has(jid);
+    },
+
+    async disconnect() {
+      if (client) {
+        await client.destroy();
+        connected = false;
+      }
+    },
+
+    async setTyping(jid: string, isTyping: boolean) {
+      if (!isTyping) return; // Discord typing indicators auto-expire
+
+      try {
+        const discordChannel = await client.channels.fetch(jid);
+        if (discordChannel?.isTextBased()) {
+          await discordChannel.sendTyping();
+        }
+      } catch (err) {
+        logger.warn({ jid, err }, 'Failed to set Discord typing indicator');
+      }
+    },
+
+    async syncGroups(force: boolean) {
+      // Discord threads are ephemeral and auto-sync via messageCreate
+      // No separate sync needed
+      logger.debug('Discord syncGroups called (no-op for Discord)');
+    },
+  };
+
+  return channel;
+}
+
+/**
+ * Split long messages for Discord's 2000 character limit
+ */
+function splitMessage(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let current = '';
+
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (current.length + line.length + 1 > maxLength) {
+      if (current) chunks.push(current);
+      current = line;
+    } else {
+      current += (current ? '\n' : '') + line;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+// Register the channel factory
+registerChannel('discord', createDiscordChannel);
