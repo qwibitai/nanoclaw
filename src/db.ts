@@ -496,6 +496,86 @@ export function logTaskRun(log: TaskRunLog): void {
   );
 }
 
+// --- Task health summary ---
+
+export interface TaskHealthSummary {
+  totalRuns: number;
+  successCount: number;
+  failureCount: number;
+  failedTasks: Array<{ task_id: string; error: string; run_at: string }>;
+  avgDurationByTask: Array<{
+    task_id: string;
+    avg_duration_ms: number;
+    max_duration_ms: number;
+    run_count: number;
+  }>;
+}
+
+/**
+ * Aggregate task_run_logs for a given time window.
+ * Returns counts by status, failed task details, and per-task duration stats.
+ */
+export function getTaskHealthSummary(
+  hoursBack: number = 24,
+  durationThresholdMs: number = 300000,
+): TaskHealthSummary {
+  const since = new Date(Date.now() - hoursBack * 3600_000).toISOString();
+
+  const counts = db
+    .prepare(
+      `
+      SELECT
+        COUNT(*) as total,
+        COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) as successes,
+        COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) as failures
+      FROM task_run_logs
+      WHERE run_at > ?
+    `,
+    )
+    .get(since) as { total: number; successes: number; failures: number };
+
+  const failedTasks = db
+    .prepare(
+      `
+      SELECT task_id, error, run_at
+      FROM task_run_logs
+      WHERE run_at > ? AND status = 'error'
+      ORDER BY run_at DESC
+    `,
+    )
+    .all(since) as Array<{ task_id: string; error: string; run_at: string }>;
+
+  const avgDurationByTask = db
+    .prepare(
+      `
+      SELECT
+        task_id,
+        CAST(AVG(duration_ms) AS INTEGER) as avg_duration_ms,
+        MAX(duration_ms) as max_duration_ms,
+        COUNT(*) as run_count
+      FROM task_run_logs
+      WHERE run_at > ?
+      GROUP BY task_id
+      HAVING avg_duration_ms > ? OR max_duration_ms > ?
+      ORDER BY avg_duration_ms DESC
+    `,
+    )
+    .all(since, durationThresholdMs, durationThresholdMs) as Array<{
+    task_id: string;
+    avg_duration_ms: number;
+    max_duration_ms: number;
+    run_count: number;
+  }>;
+
+  return {
+    totalRuns: counts.total,
+    successCount: counts.successes,
+    failureCount: counts.failures,
+    failedTasks,
+    avgDurationByTask,
+  };
+}
+
 // --- Router state accessors ---
 
 export function getRouterState(key: string): string | undefined {

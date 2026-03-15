@@ -9,6 +9,8 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  getTaskHealthSummary,
+  logTaskRun,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -480,5 +482,122 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- Task health summary ---
+
+describe('getTaskHealthSummary', () => {
+  beforeEach(() => {
+    createTask({
+      id: 'health-task-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test task',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('returns zeros when no task runs exist', () => {
+    const summary = getTaskHealthSummary(24);
+    expect(summary.totalRuns).toBe(0);
+    expect(summary.successCount).toBe(0);
+    expect(summary.failureCount).toBe(0);
+    expect(summary.failedTasks).toHaveLength(0);
+    expect(summary.avgDurationByTask).toHaveLength(0);
+  });
+
+  it('counts successful runs', () => {
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: new Date().toISOString(),
+      duration_ms: 5000,
+      status: 'success',
+      result: 'ok',
+      error: null,
+    });
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: new Date().toISOString(),
+      duration_ms: 6000,
+      status: 'success',
+      result: 'ok',
+      error: null,
+    });
+
+    const summary = getTaskHealthSummary(24);
+    expect(summary.totalRuns).toBe(2);
+    expect(summary.successCount).toBe(2);
+    expect(summary.failureCount).toBe(0);
+    expect(summary.failedTasks).toHaveLength(0);
+  });
+
+  it('reports failed tasks with error details', () => {
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: new Date().toISOString(),
+      duration_ms: 1000,
+      status: 'error',
+      result: null,
+      error: 'Container timeout',
+    });
+
+    const summary = getTaskHealthSummary(24);
+    expect(summary.failureCount).toBe(1);
+    expect(summary.failedTasks).toHaveLength(1);
+    expect(summary.failedTasks[0].task_id).toBe('health-task-1');
+    expect(summary.failedTasks[0].error).toBe('Container timeout');
+  });
+
+  it('excludes runs outside the time window', () => {
+    const oldDate = new Date(
+      Date.now() - 48 * 3600_000,
+    ).toISOString();
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: oldDate,
+      duration_ms: 5000,
+      status: 'success',
+      result: 'ok',
+      error: null,
+    });
+
+    const summary = getTaskHealthSummary(24);
+    expect(summary.totalRuns).toBe(0);
+  });
+
+  it('reports slow tasks exceeding threshold', () => {
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: new Date().toISOString(),
+      duration_ms: 400000,
+      status: 'success',
+      result: 'ok',
+      error: null,
+    });
+
+    const summary = getTaskHealthSummary(24, 300000);
+    expect(summary.avgDurationByTask).toHaveLength(1);
+    expect(summary.avgDurationByTask[0].task_id).toBe('health-task-1');
+    expect(summary.avgDurationByTask[0].avg_duration_ms).toBe(400000);
+  });
+
+  it('omits tasks under duration threshold', () => {
+    logTaskRun({
+      task_id: 'health-task-1',
+      run_at: new Date().toISOString(),
+      duration_ms: 5000,
+      status: 'success',
+      result: 'ok',
+      error: null,
+    });
+
+    const summary = getTaskHealthSummary(24, 300000);
+    expect(summary.avgDurationByTask).toHaveLength(0);
   });
 });
