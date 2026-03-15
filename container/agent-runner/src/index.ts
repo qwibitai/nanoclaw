@@ -19,6 +19,12 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface MediaFile {
+  containerPath: string;
+  base64: string;
+  mimeType: string;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -27,6 +33,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  mediaFiles?: MediaFile[];
 }
 
 interface ContainerOutput {
@@ -47,9 +54,13 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -67,10 +78,22 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(text: string, mediaFiles?: MediaFile[]): void {
+    let content: string | ContentBlock[];
+    if (mediaFiles && mediaFiles.length > 0) {
+      content = [
+        ...mediaFiles.map(f => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: f.mimeType, data: f.base64 },
+        })),
+        { type: 'text' as const, text },
+      ];
+    } else {
+      content = text;
+    }
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -336,9 +359,10 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  mediaFiles?: MediaFile[],
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(prompt, mediaFiles);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -507,11 +531,14 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  // Media files are only passed on the first query (initial message with photos)
+  let initialMediaFiles: MediaFile[] | undefined = containerInput.mediaFiles;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, initialMediaFiles);
+      initialMediaFiles = undefined; // Only pass media on first query
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

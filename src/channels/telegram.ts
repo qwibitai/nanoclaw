@@ -4,6 +4,8 @@ import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { downloadTelegramMedia } from '../telegram-media.js';
+import { transcribeAudio } from '../transcription.js';
 import {
   Channel,
   OnChatMetadata,
@@ -261,10 +263,101 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      const photos = ctx.message.photo;
+      const largest = photos[photos.length - 1];
+      const msgId = ctx.message.message_id.toString();
+      try {
+        const media = await downloadTelegramMedia(
+          this.bot!,
+          this.botToken,
+          largest.file_id,
+          group.folder,
+          msgId,
+          'photo',
+        );
+        storeNonText(ctx, `[Photo: ${media.containerPath}]`);
+      } catch (err) {
+        logger.error({ err, chatJid }, 'Failed to download Telegram photo');
+        storeNonText(ctx, '[Photo]');
+      }
+    });
+    this.bot.on('message:video', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      const video = ctx.message.video;
+      const msgId = ctx.message.message_id.toString();
+      try {
+        const media = await downloadTelegramMedia(
+          this.bot!,
+          this.botToken,
+          video.file_id,
+          group.folder,
+          msgId,
+          'video',
+        );
+        storeNonText(ctx, `[Video: ${media.containerPath}]`);
+      } catch (err) {
+        logger.error({ err, chatJid }, 'Failed to download Telegram video');
+        storeNonText(ctx, '[Video]');
+      }
+    });
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      const voice = ctx.message.voice;
+      const msgId = ctx.message.message_id.toString();
+      try {
+        const media = await downloadTelegramMedia(
+          this.bot!,
+          this.botToken,
+          voice.file_id,
+          group.folder,
+          msgId,
+          'voice',
+        );
+        const transcript = await transcribeAudio(media.localPath);
+        if (transcript) {
+          storeNonText(ctx, `[Voice: ${transcript}]`);
+        } else {
+          storeNonText(ctx, '[Voice message]');
+        }
+      } catch (err) {
+        logger.error({ err, chatJid }, 'Failed to process voice message');
+        storeNonText(ctx, '[Voice message]');
+      }
+    });
+    this.bot.on('message:audio', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      const audio = ctx.message.audio;
+      const msgId = ctx.message.message_id.toString();
+      try {
+        const media = await downloadTelegramMedia(
+          this.bot!,
+          this.botToken,
+          audio.file_id,
+          group.folder,
+          msgId,
+          'audio',
+        );
+        const transcript = await transcribeAudio(media.localPath);
+        if (transcript) {
+          storeNonText(ctx, `[Audio: ${transcript}]`);
+        } else {
+          storeNonText(ctx, '[Audio]');
+        }
+      } catch (err) {
+        logger.error({ err, chatJid }, 'Failed to process audio message');
+        storeNonText(ctx, '[Audio]');
+      }
+    });
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
       storeNonText(ctx, `[Document: ${name}]`);
