@@ -306,27 +306,30 @@ export class DiscordChannel implements Channel {
       );
     });
 
-    // Handle button clicks and slash commands (restricted to #nanoclaw-dev)
+    // Handle button clicks and slash commands.
+    // Review/Simplify/Deploy are restricted to #nanoclaw-dev and its threads.
+    // Merge button works from any channel.
     const deployChannelId = '1480411210183610418';
     this.client.on(Events.InteractionCreate, async (interaction) => {
-      // Allow interactions from the deploy channel itself OR from threads under it
       const parentId = DiscordChannel.getInteractionParentId(interaction);
-      if (
-        interaction.channelId !== deployChannelId &&
-        parentId !== deployChannelId
-      )
-        return;
+      const isNanoclawChannel =
+        interaction.channelId === deployChannelId ||
+        parentId === deployChannelId;
       try {
         if (interaction.isButton()) {
           const btn = interaction as ButtonInteraction;
-          if (btn.customId.startsWith('review-merge:')) {
-            await this.handleReviewMergeButton(btn);
-          } else if (btn.customId.startsWith('simplify-merge:')) {
-            await this.handleSimplifyMergeButton(btn);
-          } else if (btn.customId.startsWith('merge:')) {
+          if (btn.customId.startsWith('merge:')) {
+            // Merge works from any channel
             await this.handleMergeButton(btn);
+          } else if (isNanoclawChannel) {
+            // Review/Simplify restricted to nanoclaw-dev
+            if (btn.customId.startsWith('review-merge:')) {
+              await this.handleReviewMergeButton(btn);
+            } else if (btn.customId.startsWith('simplify-merge:')) {
+              await this.handleSimplifyMergeButton(btn);
+            }
           }
-        } else if (interaction.isChatInputCommand()) {
+        } else if (interaction.isChatInputCommand() && isNanoclawChannel) {
           if (interaction.commandName === 'deploy') {
             await this.handleDeployCommand(
               interaction as ChatInputCommandInteraction,
@@ -763,7 +766,9 @@ export class DiscordChannel implements Channel {
   private static PR_URL_RE =
     /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
 
-  /** Build Review & Merge / Merge buttons if the text contains a GitHub PR URL. */
+  /** Build PR action buttons if the text contains a GitHub PR URL.
+   * NanoClaw PRs get Review & Merge + Simplify & Merge + Merge.
+   * All other PRs get only a Merge button. */
   private buildPrButtons(
     text: string,
   ): ActionRowBuilder<ButtonBuilder>[] | undefined {
@@ -771,16 +776,27 @@ export class DiscordChannel implements Channel {
     if (!match) return undefined;
     // Discord customId max is 100 chars; "review-merge:" prefix is 13 chars
     if (match[0].length > 87) return undefined;
+    const isNanoclawPr = /\/nanoclaw\/pull\//.test(match[0]);
+    if (isNanoclawPr) {
+      return [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`review-merge:${match[0]}`)
+            .setLabel('Review & Merge')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`simplify-merge:${match[0]}`)
+            .setLabel('Simplify & Merge')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`merge:${match[0]}`)
+            .setLabel('Merge')
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ];
+    }
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`review-merge:${match[0]}`)
-          .setLabel('Review & Merge')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`simplify-merge:${match[0]}`)
-          .setLabel('Simplify & Merge')
-          .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId(`merge:${match[0]}`)
           .setLabel('Merge')
