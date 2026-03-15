@@ -10,6 +10,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startPortalServer } from './portal-api/server.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -487,6 +488,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    portalServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -596,6 +598,10 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Start portal API server
+  const portalPort = parseInt(process.env.PORTAL_PORT || '3100', 10);
+  const portalServer = await startPortalServer(portalPort);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
