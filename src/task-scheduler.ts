@@ -18,7 +18,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { logger } from './logger.js';
+import { createCorrelationLogger, logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -80,6 +80,12 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
+  const log = createCorrelationLogger(undefined, {
+    op: 'scheduled-task',
+    taskId: task.id,
+    group: task.group_folder,
+  });
+
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
@@ -87,8 +93,8 @@ async function runTask(
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
     updateTask(task.id, { status: 'paused' });
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder, error },
+    log.error(
+      { groupFolder: task.group_folder, error },
       'Task has invalid group folder',
     );
     logTaskRun({
@@ -103,10 +109,7 @@ async function runTask(
   }
   fs.mkdirSync(groupDir, { recursive: true });
 
-  logger.info(
-    { taskId: task.id, group: task.group_folder },
-    'Running scheduled task',
-  );
+  log.info('Running scheduled task');
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(
@@ -114,8 +117,8 @@ async function runTask(
   );
 
   if (!group) {
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
+    log.error(
+      { groupFolder: task.group_folder },
       'Group not found for task',
     );
     logTaskRun({
@@ -163,7 +166,7 @@ async function runTask(
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Closing task container after result');
+      log.debug('Closing task container after result');
       deps.queue.closeStdin(task.chat_jid);
     }, TASK_CLOSE_DELAY_MS);
   };
@@ -197,6 +200,7 @@ async function runTask(
           error = streamedOutput.error || 'Unknown error';
         }
       },
+      log.bindings().correlationId as string,
     );
 
     if (closeTimer) clearTimeout(closeTimer);
@@ -208,14 +212,14 @@ async function runTask(
       result = output.result;
     }
 
-    logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
+    log.info(
+      { durationMs: Date.now() - startTime },
       'Task completed',
     );
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
-    logger.error({ taskId: task.id, error }, 'Task failed');
+    log.error({ error }, 'Task failed');
   }
 
   const durationMs = Date.now() - startTime;

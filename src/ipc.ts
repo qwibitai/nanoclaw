@@ -2,12 +2,13 @@ import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
+import type pino from 'pino';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
-import { logger } from './logger.js';
+import { createCorrelationLogger, logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -71,6 +72,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
+            const log = createCorrelationLogger(undefined, {
+              op: 'ipc-message',
+              sourceGroup,
+              file,
+            });
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
@@ -81,21 +87,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                  log.info(
+                    { chatJid: data.chatJid },
                     'IPC message sent',
                   );
                 } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
+                  log.warn(
+                    { chatJid: data.chatJid },
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
+              log.error(
+                { err },
                 'Error processing IPC message',
               );
               const errorDir = path.join(ipcBaseDir, 'errors');
@@ -122,14 +128,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+            const log = createCorrelationLogger(undefined, {
+              op: 'ipc-task',
+              sourceGroup,
+              file,
+            });
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, sourceGroup, isMain, deps, log);
               fs.unlinkSync(filePath);
             } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
+              log.error(
+                { err },
                 'Error processing IPC task',
               );
               const errorDir = path.join(ipcBaseDir, 'errors');
@@ -175,7 +186,9 @@ export async function processTaskIpc(
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
+  log?: pino.Logger,
 ): Promise<void> {
+  const _log = log ?? logger;
   const registeredGroups = deps.registeredGroups();
 
   switch (data.type) {
@@ -191,7 +204,7 @@ export async function processTaskIpc(
         const targetGroupEntry = registeredGroups[targetJid];
 
         if (!targetGroupEntry) {
-          logger.warn(
+          _log.warn(
             { targetJid },
             'Cannot schedule task: target group not registered',
           );
@@ -202,7 +215,7 @@ export async function processTaskIpc(
 
         // Authorization: non-main groups can only schedule for themselves
         if (!isMain && targetFolder !== sourceGroup) {
-          logger.warn(
+          _log.warn(
             { sourceGroup, targetFolder },
             'Unauthorized schedule_task attempt blocked',
           );
@@ -219,7 +232,7 @@ export async function processTaskIpc(
             });
             nextRun = interval.next().toISOString();
           } catch {
-            logger.warn(
+            _log.warn(
               { scheduleValue: data.schedule_value },
               'Invalid cron expression',
             );
@@ -228,7 +241,7 @@ export async function processTaskIpc(
         } else if (scheduleType === 'interval') {
           const ms = parseInt(data.schedule_value, 10);
           if (isNaN(ms) || ms <= 0) {
-            logger.warn(
+            _log.warn(
               { scheduleValue: data.schedule_value },
               'Invalid interval',
             );
@@ -238,7 +251,7 @@ export async function processTaskIpc(
         } else if (scheduleType === 'once') {
           const date = new Date(data.schedule_value);
           if (isNaN(date.getTime())) {
-            logger.warn(
+            _log.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
@@ -266,7 +279,7 @@ export async function processTaskIpc(
           status: 'active',
           created_at: new Date().toISOString(),
         });
-        logger.info(
+        _log.info(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
@@ -278,12 +291,12 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'paused' });
-          logger.info(
+          _log.info(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
           );
         } else {
-          logger.warn(
+          _log.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task pause attempt',
           );
@@ -296,12 +309,12 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'active' });
-          logger.info(
+          _log.info(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
           );
         } else {
-          logger.warn(
+          _log.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task resume attempt',
           );
@@ -314,12 +327,12 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           deleteTask(data.taskId);
-          logger.info(
+          _log.info(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
           );
         } else {
-          logger.warn(
+          _log.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task cancel attempt',
           );
@@ -331,14 +344,14 @@ export async function processTaskIpc(
       if (data.taskId) {
         const task = getTaskById(data.taskId);
         if (!task) {
-          logger.warn(
+          _log.warn(
             { taskId: data.taskId, sourceGroup },
             'Task not found for update',
           );
           break;
         }
         if (!isMain && task.group_folder !== sourceGroup) {
-          logger.warn(
+          _log.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task update attempt',
           );
@@ -369,7 +382,7 @@ export async function processTaskIpc(
               );
               updates.next_run = interval.next().toISOString();
             } catch {
-              logger.warn(
+              _log.warn(
                 { taskId: data.taskId, value: updatedTask.schedule_value },
                 'Invalid cron in task update',
               );
@@ -384,7 +397,7 @@ export async function processTaskIpc(
         }
 
         updateTask(data.taskId, updates);
-        logger.info(
+        _log.info(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',
         );
@@ -394,7 +407,7 @@ export async function processTaskIpc(
     case 'refresh_groups':
       // Only main group can request a refresh
       if (isMain) {
-        logger.info(
+        _log.info(
           { sourceGroup },
           'Group metadata refresh requested via IPC',
         );
@@ -408,7 +421,7 @@ export async function processTaskIpc(
           new Set(Object.keys(registeredGroups)),
         );
       } else {
-        logger.warn(
+        _log.warn(
           { sourceGroup },
           'Unauthorized refresh_groups attempt blocked',
         );
@@ -418,7 +431,7 @@ export async function processTaskIpc(
     case 'register_group':
       // Only main group can register new groups
       if (!isMain) {
-        logger.warn(
+        _log.warn(
           { sourceGroup },
           'Unauthorized register_group attempt blocked',
         );
@@ -426,7 +439,7 @@ export async function processTaskIpc(
       }
       if (data.jid && data.name && data.folder && data.trigger) {
         if (!isValidGroupFolder(data.folder)) {
-          logger.warn(
+          _log.warn(
             { sourceGroup, folder: data.folder },
             'Invalid register_group request - unsafe folder name',
           );
@@ -442,7 +455,7 @@ export async function processTaskIpc(
           requiresTrigger: data.requiresTrigger,
         });
       } else {
-        logger.warn(
+        _log.warn(
           { data },
           'Invalid register_group request - missing required fields',
         );
@@ -450,6 +463,6 @@ export async function processTaskIpc(
       break;
 
     default:
-      logger.warn({ type: data.type }, 'Unknown IPC task type');
+      _log.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }

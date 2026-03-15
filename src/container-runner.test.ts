@@ -19,13 +19,24 @@ vi.mock('./config.js', () => ({
 }));
 
 // Mock logger
+const mockChildLogger = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  child: vi.fn(() => mockChildLogger),
+  bindings: vi.fn(() => ({ correlationId: 'test-corr-id' })),
+};
 vi.mock('./logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    child: vi.fn(() => mockChildLogger),
   },
+  generateCorrelationId: vi.fn(() => 'test-corr-id'),
+  createCorrelationLogger: vi.fn(() => mockChildLogger),
 }));
 
 // Mock fs
