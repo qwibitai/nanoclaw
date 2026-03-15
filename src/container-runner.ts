@@ -203,8 +203,21 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  // Sync agent-runner source files that are newer than the deployed copy.
+  // This ensures updates to container/agent-runner/src/ propagate to all
+  // existing groups without requiring a full reset.
+  if (fs.existsSync(agentRunnerSrc)) {
+    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
+    for (const file of fs.readdirSync(agentRunnerSrc)) {
+      const src = path.join(agentRunnerSrc, file);
+      const dst = path.join(groupAgentRunnerDir, file);
+      const srcMtime = fs.statSync(src).mtimeMs;
+      const dstMtime = fs.existsSync(dst) ? fs.statSync(dst).mtimeMs : 0;
+      if (srcMtime > dstMtime) {
+        fs.copyFileSync(src, dst);
+        logger.debug({ group: group.name, file }, 'Synced agent-runner source file');
+      }
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,

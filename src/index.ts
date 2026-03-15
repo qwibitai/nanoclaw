@@ -4,7 +4,9 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
+  MAX_SESSION_BYTES,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -266,6 +268,37 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Check if the session transcript exceeds MAX_SESSION_BYTES.
+ * If so, delete the session record so the next run starts fresh.
+ * Claude Code stores transcripts at:
+ *   data/sessions/{groupFolder}/.claude/projects/-workspace-group/{sessionId}.jsonl
+ */
+function resetSessionIfTooLarge(groupFolder: string, sessionId: string): boolean {
+  const transcriptPath = path.join(
+    DATA_DIR,
+    'sessions',
+    groupFolder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+    `${sessionId}.jsonl`,
+  );
+  try {
+    const { size } = fs.statSync(transcriptPath);
+    if (size > MAX_SESSION_BYTES) {
+      logger.warn(
+        { group: groupFolder, sizeKB: Math.round(size / 1024), limitKB: Math.round(MAX_SESSION_BYTES / 1024) },
+        'Session transcript too large, resetting to start fresh',
+      );
+      return true;
+    }
+  } catch {
+    // File doesn't exist yet — new session, nothing to reset
+  }
+  return false;
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -273,7 +306,14 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  let sessionId = sessions[group.folder];
+
+  // Reset session if transcript has grown too large to keep costs under control
+  if (sessionId && resetSessionIfTooLarge(group.folder, sessionId)) {
+    sessions[group.folder] = '';
+    setSession(group.folder, '');
+    sessionId = '';
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
