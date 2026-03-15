@@ -10,6 +10,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { classifyAndSelectModel } from './classifier.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -310,6 +311,18 @@ async function runAgent(
       }
     : undefined;
 
+  // Option B: explicit group model takes priority, classifier fills the gap
+  let model: string | undefined;
+  if (group.containerConfig?.model) {
+    model = group.containerConfig.model;
+    logger.debug(
+      { group: group.name, model },
+      'Model selection: using explicit group config',
+    );
+  } else {
+    model = await classifyAndSelectModel(prompt, group.name);
+  }
+
   try {
     const output = await runContainerAgent(
       group,
@@ -320,7 +333,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        model: group.containerConfig?.model || process.env.NANOCLAW_DEFAULT_MODEL,
+        model,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
