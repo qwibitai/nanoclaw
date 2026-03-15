@@ -1501,6 +1501,13 @@ export function getShipLog(
 
 // --- Backlog accessors ---
 
+export function getBacklogItemById(id: string): BacklogItem | null {
+  return (
+    (db.prepare('SELECT * FROM backlog WHERE id = ?').get(id) as BacklogItem) ||
+    null
+  );
+}
+
 export function addBacklogItem(item: BacklogItem): void {
   db.prepare(
     `INSERT OR REPLACE INTO backlog (id, group_folder, title, description, status, priority, tags, notes, created_at, updated_at, resolved_at)
@@ -1534,6 +1541,7 @@ export function updateBacklogItem(
       | 'resolved_at'
     >
   >,
+  groupFolder?: string,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -1572,7 +1580,12 @@ export function updateBacklogItem(
   fields.push('updated_at = ?');
   values.push(new Date().toISOString());
   values.push(id);
-  db.prepare(`UPDATE backlog SET ${fields.join(', ')} WHERE id = ?`).run(
+  const whereClause =
+    groupFolder !== undefined
+      ? 'WHERE id = ? AND group_folder = ?'
+      : 'WHERE id = ?';
+  if (groupFolder !== undefined) values.push(groupFolder);
+  db.prepare(`UPDATE backlog SET ${fields.join(', ')} ${whereClause}`).run(
     ...values,
   );
 }
