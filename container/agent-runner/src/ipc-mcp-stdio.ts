@@ -370,7 +370,7 @@ server.tool(
   'set_group_notify_jid',
   `Set the notification channel JID for a registered group. Main group only.
 
-When set, ship log and backlog notifications from that group will be sent to this JID instead of the group's default channel. Useful for routing notifications from a project group to a shared team channel (e.g. a Slack channel). Pass an empty string to clear the override.`,
+When set, ship log and backlog notifications from that group will be sent to this JID *in addition to* the group's default channel. Useful for also routing notifications to a shared team channel (e.g. a Slack channel). Pass an empty string to clear.`,
   {
     jid: z.string().describe('The JID of the group whose notification target you want to configure (e.g., "dc:1479516831168593974" for the illysium Discord entry)'),
     notifyJid: z.string().describe('Target JID for notifications (e.g., "slack:C0AJA89MN2E"). Empty string to clear.'),

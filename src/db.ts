@@ -1499,6 +1499,17 @@ export function getShipLog(
     .all(groupFolder, limit) as ShipLogEntry[];
 }
 
+export function getShipLogSince(
+  groupFolder: string,
+  since: string,
+): ShipLogEntry[] {
+  return db
+    .prepare(
+      `SELECT * FROM ship_log WHERE group_folder = ? AND shipped_at >= ? ORDER BY shipped_at ASC`,
+    )
+    .all(groupFolder, since) as ShipLogEntry[];
+}
+
 // --- Backlog accessors ---
 
 export function getBacklogItemById(id: string): BacklogItem | null {
@@ -1622,6 +1633,17 @@ export function getBacklog(
          created_at DESC LIMIT ?`,
     )
     .all(groupFolder, limit) as BacklogItem[];
+}
+
+export function getBacklogResolvedSince(
+  groupFolder: string,
+  since: string,
+): BacklogItem[] {
+  return db
+    .prepare(
+      `SELECT * FROM backlog WHERE group_folder = ? AND resolved_at >= ? ORDER BY resolved_at ASC`,
+    )
+    .all(groupFolder, since) as BacklogItem[];
 }
 
 // --- JSON migration ---

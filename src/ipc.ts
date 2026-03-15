@@ -51,31 +51,6 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
-/** Send a notification message for a group folder.
- *  Prefers any entry with containerConfig.notifyJid set; falls back to first non-thread JID. */
-async function notifyGroup(
-  deps: IpcDeps,
-  groups: Record<string, RegisteredGroup>,
-  sourceGroup: string,
-  message: string,
-): Promise<void> {
-  const folderEntries = Object.entries(groups).filter(
-    ([jid, g]) => g.folder === sourceGroup && !jid.includes(':thread:'),
-  );
-  // Prefer an entry that explicitly declares a notifyJid override
-  const overrideEntry = folderEntries.find(
-    ([, g]) => g.containerConfig?.notifyJid,
-  );
-  const targetJid = overrideEntry
-    ? overrideEntry[1].containerConfig!.notifyJid!
-    : folderEntries[0]?.[0];
-  if (!targetJid) return;
-  try {
-    await deps.sendMessage(targetJid, message);
-  } catch (err) {
-    logger.warn({ sourceGroup, err }, 'Failed to send group notification');
-  }
-}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -627,15 +602,6 @@ export async function processTaskIpc(
           { entryId, title: data.title, sourceGroup },
           'Ship log entry added via IPC',
         );
-        const shipLines = [`📦 **Shipped**: ${data.title}`];
-        if (data.description) shipLines.push(data.description);
-        if (data.pr_url) shipLines.push(`PR: ${data.pr_url}`);
-        void notifyGroup(
-          deps,
-          registeredGroups,
-          sourceGroup,
-          shipLines.join('\n'),
-        );
       } else {
         logger.warn({ data }, 'add_ship_log missing title');
       }
@@ -665,16 +631,6 @@ export async function processTaskIpc(
         logger.info(
           { itemId, title: data.title, sourceGroup },
           'Backlog item added via IPC',
-        );
-        const backlogLines = [
-          `📋 **Backlog**: ${data.title} · ${itemPriority} priority`,
-        ];
-        if (data.description) backlogLines.push(data.description);
-        void notifyGroup(
-          deps,
-          registeredGroups,
-          sourceGroup,
-          backlogLines.join('\n'),
         );
       } else {
         logger.warn({ data }, 'add_backlog_item missing title');
@@ -731,21 +687,6 @@ export async function processTaskIpc(
             { itemId: data.itemId, updates },
             'Backlog item updated via IPC',
           );
-          // Notify on meaningful status transitions only
-          if (data.status === 'resolved' || data.status === 'wont_fix') {
-            const emoji = data.status === 'resolved' ? '✅' : '🚫';
-            const label = data.status === 'resolved' ? 'Resolved' : "Won't fix";
-            const resolvedLines = [
-              `${emoji} **${label}**: ${existingItem.title}`,
-            ];
-            if (data.notes) resolvedLines.push(data.notes);
-            void notifyGroup(
-              deps,
-              registeredGroups,
-              sourceGroup,
-              resolvedLines.join('\n'),
-            );
-          }
         } else {
           logger.warn(
             { itemId: data.itemId, sourceGroup },

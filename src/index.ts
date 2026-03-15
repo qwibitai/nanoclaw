@@ -88,6 +88,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { startDailyNotifier } from './daily-notifications.js';
 import {
   extractThreadTitle,
   findChannel,
@@ -1734,6 +1735,17 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+  });
+  startDailyNotifier({
+    registeredGroups: () => registeredGroups,
+    sendMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot send daily summary');
+        return;
+      }
+      await channel.sendMessage(jid, text);
+    },
   });
   // Start web UI for real-time agent activity monitoring
   webUI = await startWebUI(
