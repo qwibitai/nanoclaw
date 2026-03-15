@@ -7,17 +7,17 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  CDP_ENABLED,
-  CDP_PORT,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
+  HOST_BROWSER_CDP_ENABLED,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { getHostBrowserCdpUrl } from './host-browser.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -251,12 +251,13 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
-  // CDP relay: pass config so container entrypoint starts socat forwarding.
-  // Container-side socat forwards localhost:CDP_PORT → host.docker.internal:CDP_PORT
-  // so agent-browser's CDP auto-discovery works (Chrome returns ws://localhost:... URLs).
-  if (CDP_ENABLED) {
-    args.push('-e', 'CDP_ENABLED=1');
-    args.push('-e', `CDP_PORT=${CDP_PORT}`);
+  // Host browser CDP: pass the rewritten WebSocket URL so the container wrapper
+  // can route agent-browser commands to the host Chrome instance.
+  if (HOST_BROWSER_CDP_ENABLED) {
+    const cdpUrl = getHostBrowserCdpUrl();
+    if (cdpUrl) {
+      args.push('-e', `HOST_BROWSER_CDP_URL=${cdpUrl}`);
+    }
   }
 
   // Auth state: point agent-browser to exported cookies from host Chrome profile.

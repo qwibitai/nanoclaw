@@ -9,8 +9,7 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
-  'CDP_ENABLED',
-  'CDP_PORT',
+  'HOST_BROWSER_CDP_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -18,10 +17,10 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-// Host Chrome CDP for container agents (captcha solving, login sessions)
-export const CDP_ENABLED =
-  (process.env.CDP_ENABLED || envConfig.CDP_ENABLED) === '1';
-export const CDP_PORT = process.env.CDP_PORT || envConfig.CDP_PORT || '9222';
+// Host browser via agent-browser CLI (captcha solving, login sessions)
+export const HOST_BROWSER_CDP_ENABLED =
+  (process.env.HOST_BROWSER_CDP_ENABLED ||
+    envConfig.HOST_BROWSER_CDP_ENABLED) === 'true';
 
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;

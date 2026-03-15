@@ -14,8 +14,14 @@ vi.mock('./config.js', () => ({
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HOST_BROWSER_CDP_ENABLED: false,
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+}));
+
+// Mock host-browser
+vi.mock('./host-browser.js', () => ({
+  getHostBrowserCdpUrl: vi.fn(() => null),
 }));
 
 // Mock logger

@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>{{PROJECT_ROOT}}/scripts/start-chrome-cdp.sh</string>
+        <string>{{PROJECT_ROOT}}/scripts/start-host-browser.sh</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{PROJECT_ROOT}}</string>
@@ -18,15 +18,13 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>{{HOME}}</string>
-        <key>CDP_PORT</key>
-        <string>9222</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{PROJECT_ROOT}}/logs/chrome-cdp.log</string>
+    <string>{{PROJECT_ROOT}}/logs/host-browser.log</string>
     <key>StandardErrorPath</key>
-    <string>{{PROJECT_ROOT}}/logs/chrome-cdp.error.log</string>
+    <string>{{PROJECT_ROOT}}/logs/host-browser.error.log</string>
 </dict>
 </plist>
