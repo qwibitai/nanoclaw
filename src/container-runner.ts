@@ -122,6 +122,8 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Docker rootless: container node user needs write access to persist sessions
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -163,12 +165,36 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Per-group mnemon memory directory (isolated per group)
+  const groupMnemonDir = path.join(DATA_DIR, 'sessions', group.folder, '.mnemon');
+  fs.mkdirSync(groupMnemonDir, { recursive: true });
+  fs.chmodSync(groupMnemonDir, 0o777);
+  mounts.push({
+    hostPath: groupMnemonDir,
+    containerPath: '/home/node/.mnemon',
+    readonly: false,
+  });
+
+  // Global shared mnemon memory (read-only)
+  const globalMnemonDir = path.join(GROUPS_DIR, 'global', '.mnemon');
+  if (fs.existsSync(globalMnemonDir)) {
+    mounts.push({
+      hostPath: globalMnemonDir,
+      containerPath: '/workspace/global/.mnemon',
+      readonly: true,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  const inputDir = path.join(groupIpcDir, 'input');
+  fs.mkdirSync(inputDir, { recursive: true });
+  // Docker rootless maps host UID to container root; container node user needs
+  // write access to unlink input files, so make the directory world-writable.
+  fs.chmodSync(inputDir, 0o777);
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -274,6 +300,8 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+  // Docker rootless: container node user needs write access to group folder
+  fs.chmodSync(groupDir, 0o777);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

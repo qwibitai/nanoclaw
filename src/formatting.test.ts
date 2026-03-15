@@ -130,34 +130,35 @@ describe('TRIGGER_PATTERN', () => {
   const lower = name.toLowerCase();
   const upper = name.toUpperCase();
 
-  it('matches @name at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`@${name} hello`)).toBe(true);
+  it('matches name at start of message', () => {
+    expect(TRIGGER_PATTERN.test(`${name} hello`)).toBe(true);
   });
 
   it('matches case-insensitively', () => {
-    expect(TRIGGER_PATTERN.test(`@${lower} hello`)).toBe(true);
-    expect(TRIGGER_PATTERN.test(`@${upper} hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`${lower} hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`${upper} hello`)).toBe(true);
   });
 
-  it('does not match when not at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`hello @${name}`)).toBe(false);
+  it('matches name anywhere in message', () => {
+    expect(TRIGGER_PATTERN.test(`hello ${name}`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`hey ${name} can you help`)).toBe(true);
   });
 
-  it('does not match partial name like @NameExtra (word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}extra hello`)).toBe(false);
+  it('does not match partial name (word boundary)', () => {
+    expect(TRIGGER_PATTERN.test(`${name}extra hello`)).toBe(false);
   });
 
   it('matches with word boundary before apostrophe', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}'s thing`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`${name}'s thing`)).toBe(true);
   });
 
-  it('matches @name alone (end of string is a word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}`)).toBe(true);
+  it('matches name alone (end of string is a word boundary)', () => {
+    expect(TRIGGER_PATTERN.test(`${name}`)).toBe(true);
   });
 
   it('matches with leading whitespace after trim', () => {
     // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
-    expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
+    expect(TRIGGER_PATTERN.test(`${name} hey`.trim())).toBe(true);
   });
 });
 
