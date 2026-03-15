@@ -10,6 +10,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { initSecrets } from './env.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -471,6 +472,10 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  // Fetch secrets from Solo Vault before any service initialization.
+  // Falls back to .env if Solo Vault is unreachable.
+  await initSecrets();
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
