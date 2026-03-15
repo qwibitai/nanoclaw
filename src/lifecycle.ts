@@ -41,6 +41,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -161,10 +162,15 @@ export async function initApp(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start skill registry (scans container/skills/, watches for changes, serves GET /skills)
+  const skillServer = await initSkillRegistry();
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    shutdownSkillRegistry();
     proxyServer.close();
+    if (skillServer) skillServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
