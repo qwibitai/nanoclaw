@@ -6,6 +6,7 @@ export function formatLocalTime(utcIso: string, timezone: string): string {
   const date = new Date(utcIso);
   return date.toLocaleString('en-US', {
     timeZone: timezone,
+    weekday: 'long',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
