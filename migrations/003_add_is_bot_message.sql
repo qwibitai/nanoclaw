@@ -1,0 +1,1 @@
+ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0;
