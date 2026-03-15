@@ -1,5 +1,5 @@
-# NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# BHD-ITSM-Agent Container
+# Runs Claude Agent SDK in isolated Linux container with browser automation
 
 FROM node:22-slim
 

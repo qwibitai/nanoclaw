@@ -1,14 +1,17 @@
 ## Type of Change
 
-- [ ] **Skill** - adds a new skill in `.claude/skills/`
-- [ ] **Fix** - bug fix or security fix to source code
-- [ ] **Simplification** - reduces or simplifies source code
+- [ ] **Feature** — New functionality
+- [ ] **Fix** — Bug fix or security fix
+- [ ] **Integration** — Vivantio or external service integration
+- [ ] **Portal** — Agent Manager Portal changes
+- [ ] **Deployment** — Infrastructure or deployment changes
 
 ## Description
 
 
-## For Skills
+## Testing
 
-- [ ] I have not made any changes to source code
-- [ ] My skill contains instructions for Claude to follow (not pre-built code)
-- [ ] I tested this skill on a fresh clone
+- [ ] Backend TypeScript compiles (`npm run build`)
+- [ ] Portal builds (`npm run portal:build`)
+- [ ] Tests pass (`npm test`)
+- [ ] Container builds (`./container/build.sh`)

@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build portal
+        run: |
+          cd portal
+          npm ci
+          npm run build
+
+      - name: Build container image
+        run: docker build -t bhd-itsm-agent:latest ./container
+
+      # Add your deployment steps here. Examples:
+      #
+      # Option 1: SSH deploy to a server
+      # - name: Deploy to server
+      #   uses: appleboy/ssh-action@v1
+      #   with:
+      #     host: ${{ secrets.DEPLOY_HOST }}
+      #     username: ${{ secrets.DEPLOY_USER }}
+      #     key: ${{ secrets.DEPLOY_KEY }}
+      #     script: |
+      #       cd /opt/bhd-itsm-agent
+      #       git pull
+      #       ./deploy/update.sh
+      #
+      # Option 2: Push container to registry
+      # - name: Push container
+      #   run: |
+      #     docker tag bhd-itsm-agent:latest ${{ secrets.REGISTRY }}/bhd-itsm-agent:latest
+      #     docker push ${{ secrets.REGISTRY }}/bhd-itsm-agent:latest

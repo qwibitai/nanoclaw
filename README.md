@@ -1,231 +1,241 @@
-<p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
-</p>
+# BHD-ITSM-Agent
 
-<p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
-</p>
+**Blackhawk Data ITSM Agent** — AI-powered IT service management automation for managed service providers.
 
-<p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
-  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
-</p>
+Dedicated AI agents triage Vivantio ITSM tickets, search knowledge bases, analyze client history, and post resolutions — all autonomously. Each client gets a fully isolated agent with no data leakage. Specialist agents (Cisco, Fortinet, Microsoft, Cybersecurity) handle escalations.
 
 ---
 
-<h2 align="center">🐳 Now Runs in Docker Sandboxes</h2>
-<p align="center">Every agent gets its own isolated container inside a micro VM.<br>Hypervisor-level isolation. Millisecond startup. No complex setup.</p>
+## Features
 
-**macOS (Apple Silicon)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
-```
-
-**Windows (WSL)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
-```
-
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
-
-<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
-
----
-
-## Why I Built NanoClaw
-
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
-
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
-
-## Quick Start
-
-```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
-claude
-```
-
-<details>
-<summary>Without GitHub CLI</summary>
-
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
-2. `git clone https://github.com/<your-username>/nanoclaw.git`
-3. `cd nanoclaw`
-4. `claude`
-
-</details>
-
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
-
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
-
-## Philosophy
-
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
-
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
-
-**AI-native.**
-- No installation wizard; Claude Code guides setup.
-- No monitoring dashboard; ask Claude what's happening.
-- No debugging tools; describe the problem and Claude fixes it.
-
-**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
-
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
-
-## What It Supports
-
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
-```
-
-From the main channel (your self-chat), you can manage groups and tasks:
-```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
-```
-
-## Customizing
-
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for guided changes.
-
-The codebase is small enough that Claude can safely modify it.
-
-## Contributing
-
-**Don't add features. Add skills.**
-
-If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
-
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
-
-### RFS (Request for Skills)
-
-Skills we'd like to see:
-
-**Communication Channels**
-- `/add-signal` - Add Signal as a channel
-
-**Session Management**
-- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
-
-## Requirements
-
-- macOS or Linux
-- Node.js 20+
-- [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- **Vivantio ITSM Integration** — Polls for new tickets, triages, searches KB, updates with findings
+- **Agent Manager Portal** — Web UI to create/manage agents, teams, knowledge bases, and chat with agents
+- **Per-Client Isolation** — Dedicated agent per client with separate filesystem, memory, and API filters
+- **Specialist Agents** — Cisco, Fortinet, Microsoft 365, and Cybersecurity experts for escalations
+- **Team Orchestration** — Escalation rules route tickets to the right specialist automatically
+- **Knowledge Base Management** — Upload docs per scope (global, specialist, client)
+- **Real-Time Chat** — WebSocket chat to program agents, request updates, test triage
+- **Audit Logging** — Full trail of every agent action, ticket update, and escalation
+- **Container Isolation** — Each agent runs in its own Linux container with filesystem sandboxing
+- **Scheduled Tasks** — Automated follow-ups, pattern detection, SLA monitoring
 
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+┌─────────────────────────────────────────────────────────┐
+│                    BHD-ITSM-Agent                        │
+│                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ Portal UI    │  │ Portal API   │  │ Vivantio     │  │
+│  │ (Next.js)    │  │ (:3100)      │  │ Channel      │  │
+│  │ :3200        │  │ REST + WS    │  │ (Poller)     │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+│         │                 │                  │          │
+│         └─────────┬───────┘                  │          │
+│                   │                          │          │
+│  ┌────────────────▼──────────────────────────▼───────┐  │
+│  │              Core Engine                          │  │
+│  │  SQLite DB │ Container Runner │ Group Queue       │  │
+│  └──────────────────────┬────────────────────────────┘  │
+│                         │                               │
+│  ┌──────────────────────▼────────────────────────────┐  │
+│  │           Isolated Agent Containers               │  │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐ │  │
+│  │  │Client A │ │Client B │ │CiscoBot │ │CyberWch│ │  │
+│  │  │Agent    │ │Agent    │ │Specialist│ │SOC     │ │  │
+│  │  └─────────┘ └─────────┘ └─────────┘ └────────┘ │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+## Quick Start
 
-For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
+### Prerequisites
 
-Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry (self-registration at startup)
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+- Ubuntu 22.04+ or Debian 12+ (Linux server)
+- Node.js 20+
+- Docker
+- [Claude Code](https://claude.com/product/claude-code) (for AI agent runtime)
 
-## FAQ
-
-**Why Docker?**
-
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
-
-**Can I run this on Linux?**
-
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
-
-**Is this secure?**
-
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
-
-**Why no configuration files?**
-
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
-
-**Can I use third-party or open-source models?**
-
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+### Deploy
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+# Clone the repository
+git clone https://github.com/bhd-cap/BHD-ITSM-Agent.git
+cd BHD-ITSM-Agent
+
+# Run the automated setup script
+./deploy/setup.sh
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+The setup script handles:
+1. System dependency installation (Node.js, Docker)
+2. NPM dependency installation (backend + portal)
+3. Container image build
+4. Environment configuration (`.env` from template)
+5. TypeScript compilation
+6. systemd service installation
+7. Portal build
 
-Note: The model must support the Anthropic API format for best compatibility.
+### Manual Setup
 
-**How do I debug issues?**
+```bash
+# Install dependencies
+npm install
+cd portal && npm install && cd ..
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
+# Copy environment template and configure
+cp .env.example .env
+# Edit .env with your API keys
 
-**Why isn't the setup working for me?**
+# Build
+npm run build
+npm run portal:build
 
-If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
+# Build agent container
+./container/build.sh
 
-**What changes will be accepted into the codebase?**
+# Start
+npm start
+```
 
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+## Configuration
 
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
+Copy `.env.example` to `.env` and fill in your credentials:
 
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+```bash
+# Required — Claude API
+ANTHROPIC_API_KEY=your-anthropic-api-key
 
-## Community
+# Required — Vivantio ITSM
+VIVANTIO_API_TOKEN=your-vivantio-api-token
+VIVANTIO_BASE_URL=https://webservices-na01.vivantio.com
+VIVANTIO_AGENT_USER_ID=12345
+VIVANTIO_POLL_INTERVAL=60000
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+# Portal (Agent Manager Web UI)
+PORTAL_PORT=3100
+PORTAL_JWT_SECRET=generate-a-secure-random-string
+PORTAL_ADMIN_EMAIL=admin@blackhawkdata.com
+PORTAL_ADMIN_PASSWORD=change-this-immediately
 
-## Changelog
+# Agent Configuration
+ASSISTANT_NAME=BHDAgent
+CONTAINER_IMAGE=bhd-itsm-agent:latest
+MAX_CONCURRENT_CONTAINERS=5
+CONTAINER_TIMEOUT=1800000
+```
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
+## Service Management
+
+```bash
+# Start/stop/restart
+sudo systemctl start bhd-itsm-agent
+sudo systemctl stop bhd-itsm-agent
+sudo systemctl restart bhd-itsm-agent
+
+# View logs
+journalctl -u bhd-itsm-agent -f
+
+# Check status
+sudo systemctl status bhd-itsm-agent
+```
+
+## Portal Access
+
+After deployment, the Agent Manager Portal is available at:
+
+- **URL:** `http://your-server:3200`
+- **Default Login:** `admin@blackhawkdata.com` / `changeme` (change immediately)
+
+### Portal Features
+
+| Page | Purpose |
+|------|---------|
+| Dashboard | Live agent status, ticket queue, response times, activity feed |
+| Agents | Create/edit agents — role, specializations, triage behavior, custom instructions |
+| Teams | Build agent teams with escalation rules (category/priority routing) |
+| Knowledge Base | Upload documents per scope (global, specialist, client-only) |
+| Chat | Real-time chat with any agent — program behavior, request updates |
+| Tickets | Ticket activity dashboard with agent action timeline |
+| Audit Logs | Full audit trail filterable by agent |
+
+## Agent Types
+
+### Dedicated Client Agent
+Assigned to a single client. Handles all their tickets with full context of their environment, history, and KB. Completely isolated from other clients.
+
+### Specialist Agents
+
+| Agent | Expertise |
+|-------|-----------|
+| **CiscoBot** | Meraki, Catalyst, ISE, AnyConnect, DNA Center, SD-WAN |
+| **FortiBot** | FortiGate, FortiAnalyzer, FortiClient, FortiSIEM, FortiEDR |
+| **MSAgent** | Microsoft 365, Azure AD/Entra, Intune, Windows Server |
+| **CyberWatch** | SIEM triage, EDR alerts, incident response (NIST 800-61), phishing |
+
+### Cybersecurity Response Agent
+Monitors security alerts across all clients. Classifies severity, identifies IOCs, recommends containment. Escalates P1/P2 to human SOC analysts immediately.
+
+## Project Structure
+
+```
+BHD-ITSM-Agent/
+├── src/                    # Core engine
+│   ├── index.ts            # Orchestrator: state, message loop, agent invocation
+│   ├── portal-api/         # Portal REST API + WebSocket server
+│   │   ├── server.ts       # HTTP server (port 3100)
+│   │   ├── db-portal.ts    # Portal database schema + CRUD
+│   │   ├── routes/         # API route handlers
+│   │   └── services/       # Agent provisioner, activity logger
+│   ├── channels/           # Messaging channel adapters
+│   ├── container-runner.ts # Spawns isolated agent containers
+│   ├── db.ts               # SQLite database operations
+│   └── config.ts           # Configuration constants
+├── portal/                 # Next.js web portal
+│   └── src/app/            # Pages: dashboard, agents, teams, KB, chat, tickets, logs
+├── container/              # Agent container image
+│   ├── Dockerfile
+│   ├── build.sh
+│   └── agent-runner/       # Code that runs inside agent containers
+├── deploy/                 # Deployment scripts
+│   ├── setup.sh            # Automated server setup
+│   ├── bhd-itsm-agent.service  # systemd unit file
+│   └── update.sh           # Pull + rebuild + restart
+├── groups/                 # Per-agent isolated directories
+│   ├── main/CLAUDE.md      # Admin agent memory
+│   └── global/CLAUDE.md    # Shared read-only memory
+├── .env.example            # Environment variable template
+└── docs/                   # Architecture and planning docs
+```
+
+## Development
+
+```bash
+# Run backend with hot reload
+npm run dev
+
+# Run portal frontend (separate terminal)
+npm run portal:dev
+
+# Run tests
+npm test
+
+# Type check
+npm run typecheck
+
+# Rebuild agent container
+./container/build.sh
+```
+
+## Security
+
+- **Container isolation** — Each agent runs in its own Docker container with filesystem sandboxing
+- **Per-client data separation** — Separate group folders, sessions, KB, and Vivantio query filters
+- **Credential proxy** — API tokens never enter containers; injected by host-side proxy
+- **JWT authentication** — Portal access requires authentication with role-based permissions
+- **Audit trail** — Every agent action logged with timestamps for compliance
 
 ## License
 
-MIT
+Proprietary — Blackhawk Data Corporation. All rights reserved.

@@ -1,5 +1,5 @@
 /**
- * Container Runner for NanoClaw
+ * Container Runner for BHD-ITSM-Agent
  * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';

@@ -1,0 +1,20 @@
+[Unit]
+Description=BHD-ITSM-Agent — AI Ticket Triage Service
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+# Update User and paths for your environment
+User=bhd
+WorkingDirectory=/opt/bhd-itsm-agent
+ExecStart=/usr/bin/node /opt/bhd-itsm-agent/dist/index.js
+Restart=always
+RestartSec=10
+Environment=HOME=/home/bhd
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/bhd/.local/bin
+StandardOutput=append:/opt/bhd-itsm-agent/logs/bhd-itsm-agent.log
+StandardError=append:/opt/bhd-itsm-agent/logs/bhd-itsm-agent.error.log
+
+[Install]
+WantedBy=multi-user.target

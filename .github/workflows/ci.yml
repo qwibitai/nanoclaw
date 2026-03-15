@@ -1,17 +1,20 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  ci:
+  backend:
+    name: Backend CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
 
@@ -23,3 +26,25 @@ jobs:
 
       - name: Tests
         run: npx vitest run
+
+  portal:
+    name: Portal Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - run: cd portal && npm ci
+      - name: Build Portal
+        run: cd portal && npm run build
+
+  container:
+    name: Container Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build container image
+        run: docker build -t bhd-itsm-agent:test ./container

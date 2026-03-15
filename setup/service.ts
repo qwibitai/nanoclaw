@@ -77,7 +77,7 @@ function setupLaunchd(
     homeDir,
     'Library',
     'LaunchAgents',
-    'com.nanoclaw.plist',
+    'com.bhd-itsm-agent.plist',
   );
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
@@ -86,7 +86,7 @@ function setupLaunchd(
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nanoclaw</string>
+    <string>com.bhd-itsm-agent</string>
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
@@ -106,9 +106,9 @@ function setupLaunchd(
         <string>${homeDir}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
+    <string>${projectRoot}/logs/bhd-itsm-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
+    <string>${projectRoot}/logs/bhd-itsm-agent.error.log</string>
 </dict>
 </plist>`;
 
@@ -128,7 +128,7 @@ function setupLaunchd(
   let serviceLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
-    serviceLoaded = output.includes('com.nanoclaw');
+    serviceLoaded = output.includes('com.bhd-itsm-agent');
   } catch {
     // launchctl list failed
   }
@@ -213,7 +213,7 @@ function setupSystemd(
   let systemctlPrefix: string;
 
   if (runningAsRoot) {
-    unitPath = '/etc/systemd/system/nanoclaw.service';
+    unitPath = '/etc/systemd/system/bhd-itsm-agent.service';
     systemctlPrefix = 'systemctl';
     logger.info('Running as root — installing system-level systemd unit');
   } else {
@@ -229,12 +229,12 @@ function setupSystemd(
     }
     const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
     fs.mkdirSync(unitDir, { recursive: true });
-    unitPath = path.join(unitDir, 'nanoclaw.service');
+    unitPath = path.join(unitDir, 'bhd-itsm-agent.service');
     systemctlPrefix = 'systemctl --user';
   }
 
   const unit = `[Unit]
-Description=NanoClaw Personal Assistant
+Description=BHD-ITSM-Agent — AI Ticket Triage Service
 After=network.target
 
 [Service]
@@ -245,8 +245,8 @@ Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
-StandardOutput=append:${projectRoot}/logs/nanoclaw.log
-StandardError=append:${projectRoot}/logs/nanoclaw.error.log
+StandardOutput=append:${projectRoot}/logs/bhd-itsm-agent.log
+StandardError=append:${projectRoot}/logs/bhd-itsm-agent.error.log
 
 [Install]
 WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
@@ -273,13 +273,13 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   }
 
   try {
-    execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable bhd-itsm-agent`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl enable failed');
   }
 
   try {
-    execSync(`${systemctlPrefix} start nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} start bhd-itsm-agent`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl start failed');
   }
@@ -287,7 +287,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   // Verify
   let serviceLoaded = false;
   try {
-    execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} is-active bhd-itsm-agent`, { stdio: 'ignore' });
     serviceLoaded = true;
   } catch {
     // Not active
@@ -312,12 +312,12 @@ function setupNohupFallback(
 ): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
-  const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
-  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const wrapperPath = path.join(projectRoot, 'start-bhd-agent.sh');
+  const pidFile = path.join(projectRoot, 'bhd-agent.pid');
 
   const lines = [
     '#!/bin/bash',
-    '# start-nanoclaw.sh — Start NanoClaw without systemd',
+    '# start-bhd-agent.sh — Start BHD-ITSM-Agent without systemd',
     `# To stop: kill \\$(cat ${pidFile})`,
     '',
     'set -euo pipefail',
@@ -328,20 +328,20 @@ function setupNohupFallback(
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
     `  OLD_PID=$(cat ${JSON.stringify(pidFile)} 2>/dev/null || echo "")`,
     '  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then',
-    '    echo "Stopping existing NanoClaw (PID $OLD_PID)..."',
+    '    echo "Stopping existing BHD-ITSM-Agent (PID $OLD_PID)..."',
     '    kill "$OLD_PID" 2>/dev/null || true',
     '    sleep 2',
     '  fi',
     'fi',
     '',
-    'echo "Starting NanoClaw..."',
+    'echo "Starting BHD-ITSM-Agent..."',
     `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
-    `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
-    `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
+    `  >> ${JSON.stringify(projectRoot + '/logs/bhd-itsm-agent.log')} \\`,
+    `  2>> ${JSON.stringify(projectRoot + '/logs/bhd-itsm-agent.error.log')} &`,
     '',
     `echo $! > ${JSON.stringify(pidFile)}`,
-    'echo "NanoClaw started (PID $!)"',
-    `echo "Logs: tail -f ${projectRoot}/logs/nanoclaw.log"`,
+    'echo "BHD-ITSM-Agent started (PID $!)"',
+    `echo "Logs: tail -f ${projectRoot}/logs/bhd-itsm-agent.log"`,
   ];
   const wrapper = lines.join('\n') + '\n';
 

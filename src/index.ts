@@ -354,7 +354,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`BHD-ITSM-Agent running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -655,7 +655,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClaw');
+    logger.error({ err }, 'Failed to start BHD-ITSM-Agent');
     process.exit(1);
   });
 }
