@@ -15,6 +15,20 @@ export const CONTAINER_RUNTIME_BIN = 'docker';
 export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 
 /**
+ * Returns the IPv4 address of the docker0 bridge interface, or null if not found.
+ * Used by both the credential proxy bind address and the host gateway fallback.
+ */
+function getDockerBridgeIP(): string | null {
+  const ifaces = os.networkInterfaces();
+  const docker0 = ifaces['docker0'];
+  if (docker0) {
+    const ipv4 = docker0.find((a) => a.family === 'IPv4');
+    if (ipv4) return ipv4.address;
+  }
+  return null;
+}
+
+/**
  * Address the credential proxy binds to.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
@@ -31,22 +45,71 @@ function detectProxyBindHost(): string {
   if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
   // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
-  const ifaces = os.networkInterfaces();
-  const docker0 = ifaces['docker0'];
-  if (docker0) {
-    const ipv4 = docker0.find((a) => a.family === 'IPv4');
-    if (ipv4) return ipv4.address;
+  return getDockerBridgeIP() || '0.0.0.0';
+}
+
+/**
+ * Returns the Docker Engine major.minor version, or null if it can't be determined.
+ * Cached after first call.
+ */
+let dockerVersionCache: [number, number] | null | undefined;
+function getDockerVersion(): [number, number] | null {
+  if (dockerVersionCache !== undefined) return dockerVersionCache;
+  try {
+    const raw = execSync('docker version --format "{{.Server.Version}}"', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+    const match = raw.match(/^(\d+)\.(\d+)/);
+    if (match) {
+      dockerVersionCache = [parseInt(match[1], 10), parseInt(match[2], 10)];
+      return dockerVersionCache;
+    }
+  } catch {
+    logger.debug('Failed to detect Docker version, will use fallback');
   }
-  return '0.0.0.0';
+  dockerVersionCache = null;
+  return null;
 }
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
+  // On Linux, host.docker.internal isn't built-in — add it explicitly.
+  // WSL uses Docker Desktop which handles this automatically.
+  if (
+    os.platform() !== 'linux' ||
+    fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')
+  ) {
+    return [];
+  }
+
+  // host-gateway requires Docker ≥ 20.10. On older versions it silently
+  // fails, causing "Could not resolve host: host.docker.internal".
+  const version = getDockerVersion();
+  const supportsHostGateway =
+    version !== null && (version[0] > 20 || (version[0] === 20 && version[1] >= 10));
+
+  if (supportsHostGateway) {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
-  return [];
+
+  // Fallback: use the explicit docker0 bridge IP
+  const bridgeIP = getDockerBridgeIP();
+  if (bridgeIP) {
+    logger.info(
+      { bridgeIP },
+      'Docker < 20.10 or version unknown — using explicit docker0 IP for host.docker.internal',
+    );
+    return [`--add-host=host.docker.internal:${bridgeIP}`];
+  }
+
+  // Last resort: no docker0 interface found, still try host-gateway
+  // in case Docker supports it but we couldn't detect the version
+  logger.warn(
+    'No docker0 interface found and Docker version unknown — trying host-gateway anyway',
+  );
+  return ['--add-host=host.docker.internal:host-gateway'];
 }
 
 /** Returns CLI args for a readonly bind mount. */
