@@ -630,7 +630,12 @@ export async function processTaskIpc(
         const shipLines = [`📦 **Shipped**: ${data.title}`];
         if (data.description) shipLines.push(data.description);
         if (data.pr_url) shipLines.push(`PR: ${data.pr_url}`);
-        void notifyGroup(deps, registeredGroups, sourceGroup, shipLines.join('\n'));
+        void notifyGroup(
+          deps,
+          registeredGroups,
+          sourceGroup,
+          shipLines.join('\n'),
+        );
       } else {
         logger.warn({ data }, 'add_ship_log missing title');
       }
@@ -665,7 +670,12 @@ export async function processTaskIpc(
           `📋 **Backlog**: ${data.title} · ${itemPriority} priority`,
         ];
         if (data.description) backlogLines.push(data.description);
-        void notifyGroup(deps, registeredGroups, sourceGroup, backlogLines.join('\n'));
+        void notifyGroup(
+          deps,
+          registeredGroups,
+          sourceGroup,
+          backlogLines.join('\n'),
+        );
       } else {
         logger.warn({ data }, 'add_backlog_item missing title');
       }
@@ -683,7 +693,11 @@ export async function processTaskIpc(
         }
         if (!isMain && existingItem.group_folder !== sourceGroup) {
           logger.warn(
-            { itemId: data.itemId, sourceGroup, owner: existingItem.group_folder },
+            {
+              itemId: data.itemId,
+              sourceGroup,
+              owner: existingItem.group_folder,
+            },
             'Unauthorized update_backlog_item attempt blocked',
           );
           break;
@@ -725,7 +739,12 @@ export async function processTaskIpc(
               `${emoji} **${label}**: ${existingItem.title}`,
             ];
             if (data.notes) resolvedLines.push(data.notes);
-            void notifyGroup(deps, registeredGroups, sourceGroup, resolvedLines.join('\n'));
+            void notifyGroup(
+              deps,
+              registeredGroups,
+              sourceGroup,
+              resolvedLines.join('\n'),
+            );
           }
         } else {
           logger.warn(
