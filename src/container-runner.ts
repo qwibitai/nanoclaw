@@ -231,6 +231,11 @@ function buildVolumeMounts(
       sessionDotClaudeJson,
       JSON.stringify(claudeJsonContent, null, 2) + '\n',
     );
+    try {
+      fs.chownSync(sessionDotClaudeJson, 1000, 1000);
+    } catch {
+      // ignore — chown may fail if not running as root (native install)
+    }
   }
   mounts.push({
     hostPath: toHostPath(sessionDotClaudeJson),
