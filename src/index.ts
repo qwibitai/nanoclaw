@@ -274,7 +274,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
  * Claude Code stores transcripts at:
  *   data/sessions/{groupFolder}/.claude/projects/-workspace-group/{sessionId}.jsonl
  */
-function resetSessionIfTooLarge(groupFolder: string, sessionId: string): boolean {
+function resetSessionIfTooLarge(
+  groupFolder: string,
+  sessionId: string,
+): boolean {
   const transcriptPath = path.join(
     DATA_DIR,
     'sessions',
@@ -288,7 +291,11 @@ function resetSessionIfTooLarge(groupFolder: string, sessionId: string): boolean
     const { size } = fs.statSync(transcriptPath);
     if (size > MAX_SESSION_BYTES) {
       logger.warn(
-        { group: groupFolder, sizeKB: Math.round(size / 1024), limitKB: Math.round(MAX_SESSION_BYTES / 1024) },
+        {
+          group: groupFolder,
+          sizeKB: Math.round(size / 1024),
+          limitKB: Math.round(MAX_SESSION_BYTES / 1024),
+        },
         'Session transcript too large, resetting to start fresh',
       );
       return true;

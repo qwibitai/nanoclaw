@@ -48,10 +48,7 @@ async function classify(
   prompt: string,
   groupName: string,
 ): Promise<ClassifierResult> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-  ]);
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL']);
 
   const apiKey = secrets.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -59,7 +56,11 @@ async function classify(
       { group: groupName },
       'Classifier: no API key found, falling back to Sonnet',
     );
-    return { complexity: 'complex', model: COMPLEX_MODEL, reason: 'fallback_error' };
+    return {
+      complexity: 'complex',
+      model: COMPLEX_MODEL,
+      reason: 'fallback_error',
+    };
   }
 
   const baseUrl = secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
@@ -94,10 +95,14 @@ async function classify(
         { group: groupName, status: response.status, body: body.slice(0, 200) },
         'Classifier: API error, falling back to Sonnet',
       );
-      return { complexity: 'complex', model: COMPLEX_MODEL, reason: 'fallback_error' };
+      return {
+        complexity: 'complex',
+        model: COMPLEX_MODEL,
+        reason: 'fallback_error',
+      };
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       content: Array<{ type: string; text: string }>;
     };
 
@@ -108,7 +113,9 @@ async function classify(
       .toLowerCase()
       .trim();
 
-    const complexity: Complexity = text.startsWith('simple') ? 'simple' : 'complex';
+    const complexity: Complexity = text.startsWith('simple')
+      ? 'simple'
+      : 'complex';
     const model = complexity === 'simple' ? SIMPLE_MODEL : COMPLEX_MODEL;
 
     logger.info(
@@ -122,6 +129,10 @@ async function classify(
       { group: groupName, err },
       'Classifier: exception, falling back to Sonnet',
     );
-    return { complexity: 'complex', model: COMPLEX_MODEL, reason: 'fallback_error' };
+    return {
+      complexity: 'complex',
+      model: COMPLEX_MODEL,
+      reason: 'fallback_error',
+    };
   }
 }

@@ -215,7 +215,10 @@ function buildVolumeMounts(
       const dstMtime = fs.existsSync(dst) ? fs.statSync(dst).mtimeMs : 0;
       if (srcMtime > dstMtime) {
         fs.copyFileSync(src, dst);
-        logger.debug({ group: group.name, file }, 'Synced agent-runner source file');
+        logger.debug(
+          { group: group.name, file },
+          'Synced agent-runner source file',
+        );
       }
     }
   }
