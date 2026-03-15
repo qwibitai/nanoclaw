@@ -18,10 +18,7 @@ import {
   setSession,
 } from './db.js';
 import { findChannel, formatMessages } from './router.js';
-import {
-  isTriggerAllowed,
-  loadSenderAllowlist,
-} from './sender-allowlist.js';
+import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import { RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import {
@@ -265,7 +262,10 @@ export async function startMessageLoop(): Promise<void> {
         saveState();
 
         // Deduplicate by group
-        const messagesByGroup = new Map<string, import('./types.js').NewMessage[]>();
+        const messagesByGroup = new Map<
+          string,
+          import('./types.js').NewMessage[]
+        >();
         for (const msg of messages) {
           const existing = messagesByGroup.get(msg.chat_jid);
           if (existing) {

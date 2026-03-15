@@ -117,7 +117,10 @@ export async function startRemoteControl(
   } catch (err: unknown) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
-    return { ok: false, error: `Failed to start: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      ok: false,
+      error: `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   // Close FDs in the parent — the child inherited copies
@@ -196,9 +199,11 @@ export async function startRemoteControl(
   });
 }
 
-export function stopRemoteControl(): {
-  ok: true;
-} | { ok: false; error: string } {
+export function stopRemoteControl():
+  | {
+      ok: true;
+    }
+  | { ok: false; error: string } {
   if (!activeSession) {
     return { ok: false, error: 'No active Remote Control session' };
   }

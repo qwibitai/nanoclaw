@@ -19,13 +19,16 @@ export async function initSecrets(): Promise<void> {
   const adminKey =
     process.env.SOLO_VAULT_ADMIN_KEY || readEnvFileRaw('SOLO_VAULT_ADMIN_KEY');
   const vaultUrl =
-    process.env.SOLO_VAULT_URL || readEnvFileRaw('SOLO_VAULT_URL') ||
+    process.env.SOLO_VAULT_URL ||
+    readEnvFileRaw('SOLO_VAULT_URL') ||
     'https://api.vault.jeffreykeyser.net';
   const project =
-    process.env.SOLO_VAULT_PROJECT || readEnvFileRaw('SOLO_VAULT_PROJECT') ||
+    process.env.SOLO_VAULT_PROJECT ||
+    readEnvFileRaw('SOLO_VAULT_PROJECT') ||
     'nanoclaw';
   const environment =
-    process.env.SOLO_VAULT_ENV || readEnvFileRaw('SOLO_VAULT_ENV') ||
+    process.env.SOLO_VAULT_ENV ||
+    readEnvFileRaw('SOLO_VAULT_ENV') ||
     'production';
 
   if (!adminKey) {

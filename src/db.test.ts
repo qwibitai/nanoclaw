@@ -555,9 +555,7 @@ describe('getTaskHealthSummary', () => {
   });
 
   it('excludes runs outside the time window', () => {
-    const oldDate = new Date(
-      Date.now() - 48 * 3600_000,
-    ).toISOString();
+    const oldDate = new Date(Date.now() - 48 * 3600_000).toISOString();
     logTaskRun({
       task_id: 'health-task-1',
       run_at: oldDate,

@@ -1,10 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import {
-  ASSISTANT_NAME,
-  CREDENTIAL_PROXY_PORT,
-} from './config.js';
+import { ASSISTANT_NAME, CREDENTIAL_PROXY_PORT } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import { initSecrets } from './env.js';
 import './channels/index.js';
@@ -12,9 +9,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  writeGroupsSnapshot,
-} from './container-runner.js';
+import { writeGroupsSnapshot } from './container-runner.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,

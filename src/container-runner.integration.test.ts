@@ -324,17 +324,13 @@ describe.skipIf(SKIP)('container-runner integration (TEST_DOCKER=1)', () => {
       proc.stdout.on('data', (data) => {
         parseBuffer += data.toString();
         let startIdx: number;
-        while (
-          (startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
-        ) {
+        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
           if (endIdx === -1) break;
           const json = parseBuffer
             .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
             .trim();
-          parseBuffer = parseBuffer.slice(
-            endIdx + OUTPUT_END_MARKER.length,
-          );
+          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
           try {
             streamedResults.push(JSON.parse(json));
           } catch {
