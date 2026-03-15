@@ -648,9 +648,12 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel) {
+        logger.warn({ jid }, 'IPC send: no channel owns JID, message dropped');
+        return;
+      }
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,

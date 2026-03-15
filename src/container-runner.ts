@@ -132,27 +132,46 @@ function buildVolumeMounts(
   fs.mkdirSync(debugDir, { recursive: true });
   fs.chmodSync(debugDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
+  const requiredEnv: Record<string, string> = {
+    // Enable agent swarms (subagent orchestration)
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    // Load CLAUDE.md from additional mounted directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Enable Claude's memory feature (persists user preferences between sessions)
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
       settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
+      JSON.stringify({ env: requiredEnv }, null, 2) + '\n',
     );
+  } else {
+    // Merge required env vars into existing settings so upgrades
+    // (e.g., adding agent teams support) take effect immediately.
+    try {
+      const existing = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      const env = existing.env || {};
+      let changed = false;
+      for (const [key, value] of Object.entries(requiredEnv)) {
+        if (env[key] === undefined) {
+          env[key] = value;
+          changed = true;
+        }
+      }
+      if (changed) {
+        existing.env = env;
+        fs.writeFileSync(
+          settingsFile,
+          JSON.stringify(existing, null, 2) + '\n',
+        );
+      }
+    } catch {
+      // Corrupted settings — rewrite with defaults
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify({ env: requiredEnv }, null, 2) + '\n',
+      );
+    }
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -201,7 +220,9 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  if (fs.existsSync(agentRunnerSrc)) {
+    // Always sync from canonical source so code updates (swarm features,
+    // MCP tools, bug fixes) propagate to existing groups immediately.
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({

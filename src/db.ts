@@ -80,7 +80,7 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      requires_trigger INTEGER DEFAULT 0
     );
   `);
 
@@ -118,6 +118,12 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Disable trigger requirement for all non-main groups (migration for existing DBs)
+  // Allows anyone in the group to chat without @mentioning the bot
+  database.exec(
+    `UPDATE registered_groups SET requires_trigger = 0 WHERE requires_trigger = 1 AND (is_main IS NULL OR is_main = 0)`,
+  );
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
