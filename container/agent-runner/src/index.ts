@@ -29,11 +29,29 @@ interface ContainerInput {
   assistantName?: string;
 }
 
+interface UsageData {
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  numTurns?: number;
+  modelUsage: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+  }>;
+}
+
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: UsageData;
 }
 
 interface SessionEntry {
@@ -449,12 +467,50 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const resultMsg = message as {
+        result?: string;
+        subtype: string;
+        total_cost_usd?: number;
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        };
+        modelUsage?: Record<string, {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadInputTokens: number;
+          cacheCreationInputTokens: number;
+        }>;
+        duration_ms?: number;
+        duration_api_ms?: number;
+        num_turns?: number;
+      };
+      const textResult = resultMsg.result || null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      let usage: UsageData | undefined;
+      if (resultMsg.usage || resultMsg.modelUsage) {
+        usage = {
+          totalCostUsd: resultMsg.total_cost_usd || 0,
+          inputTokens: resultMsg.usage?.input_tokens || 0,
+          outputTokens: resultMsg.usage?.output_tokens || 0,
+          cacheReadTokens: resultMsg.usage?.cache_read_input_tokens || 0,
+          cacheCreateTokens: resultMsg.usage?.cache_creation_input_tokens || 0,
+          durationMs: resultMsg.duration_ms,
+          durationApiMs: resultMsg.duration_api_ms,
+          numTurns: resultMsg.num_turns,
+          modelUsage: resultMsg.modelUsage || {},
+        };
+        log(`Usage: cost=$${usage.totalCostUsd.toFixed(4)} in=${usage.inputTokens} out=${usage.outputTokens} models=${Object.keys(usage.modelUsage).join(',')}`);
+      }
+
       writeOutput({
         status: 'success',
-        result: textResult || null,
-        newSessionId
+        result: textResult,
+        newSessionId,
+        usage,
       });
     }
   }

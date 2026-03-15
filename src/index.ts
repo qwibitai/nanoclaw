@@ -31,11 +31,13 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getGroupUsageCategory,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  insertUsageRecord,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -58,11 +60,66 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Channel, NewMessage, RegisteredGroup, UsageData } from './types.js';
 import { logger } from './logger.js';
+import { detectAuthMode } from './credential-proxy.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+/**
+ * Record API usage from a container result.
+ * Stores one row per model used, or a single aggregate row if no model breakdown.
+ */
+function recordUsage(
+  usage: UsageData,
+  groupFolder: string,
+  source: string,
+  sessionId?: string,
+): void {
+  const category = getGroupUsageCategory(groupFolder);
+  const authMode = detectAuthMode();
+
+  const models = Object.keys(usage.modelUsage);
+  if (models.length === 1) {
+    const model = models[0];
+    const mu = usage.modelUsage[model];
+    insertUsageRecord({
+      group_folder: groupFolder,
+      category,
+      source,
+      auth_mode: authMode,
+      model,
+      input_tokens: mu.inputTokens,
+      output_tokens: mu.outputTokens,
+      cache_read_tokens: mu.cacheReadInputTokens,
+      cache_create_tokens: mu.cacheCreationInputTokens,
+      cost_usd: usage.totalCostUsd,
+      duration_ms: usage.durationMs ?? null,
+      duration_api_ms: usage.durationApiMs ?? null,
+      num_turns: usage.numTurns ?? null,
+      session_id: sessionId ?? null,
+    });
+  } else {
+    // Aggregate row (zero or multiple models)
+    insertUsageRecord({
+      group_folder: groupFolder,
+      category,
+      source,
+      auth_mode: authMode,
+      model: models.length > 0 ? models.join(',') : null,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_tokens: usage.cacheReadTokens,
+      cache_create_tokens: usage.cacheCreateTokens,
+      cost_usd: usage.totalCostUsd,
+      duration_ms: usage.durationMs ?? null,
+      duration_api_ms: usage.durationApiMs ?? null,
+      num_turns: usage.numTurns ?? null,
+      session_id: sessionId ?? null,
+    });
+  }
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -228,6 +285,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
+    }
+
+    // Record API usage
+    if (result.usage) {
+      try {
+        recordUsage(
+          result.usage,
+          group.folder,
+          channel.name,
+          result.newSessionId || sessions[group.folder],
+        );
+      } catch (err) {
+        logger.warn({ group: group.name, err }, 'Failed to record usage');
+      }
     }
 
     if (result.status === 'success') {
