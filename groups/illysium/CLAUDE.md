@@ -19,6 +19,7 @@ Key repos:
 - Illysium-ai/XZO-ANALYTICS
 - Illysium-ai/apollo-analytics
 - Illysium-ai/XZO-BACKEND
+- Illysium-ai/ILLYSE
 
 All current and future repos under the Illysium-ai org are in scope.
 

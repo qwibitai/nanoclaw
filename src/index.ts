@@ -772,7 +772,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // create follow-up turns.  Only the between-query session-update
       // marker carries idle: true — intermediate results do NOT.
       logger.debug(
-        { group: group.name, status: result.status, hasResult: !!result.result, idle: !!result.idle },
+        {
+          group: group.name,
+          status: result.status,
+          hasResult: !!result.result,
+          idle: !!result.idle,
+        },
         'onOutput callback invoked',
       );
       if (result.result) {
