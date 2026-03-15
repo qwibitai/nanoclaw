@@ -187,6 +187,14 @@ function buildVolumeMounts(
     let claudeJsonContent: Record<string, unknown> = {
       hasCompletedOnboarding: true,
       lastOnboardingVersion: '2.1.76',
+      oauthAccount: {
+        accountUuid: '00000000-0000-0000-0000-000000000000',
+        emailAddress: 'agent@nanoclaw.local',
+        organizationUuid: '00000000-0000-0000-0000-000000000000',
+        displayName: 'NanoClaw Agent',
+        organizationRole: 'admin',
+        organizationName: 'NanoClaw',
+      },
     };
     if (fs.existsSync(hostDotClaudeJson)) {
       try {
@@ -209,6 +217,11 @@ function buildVolumeMounts(
       sessionDotClaudeJson,
       JSON.stringify(claudeJsonContent, null, 2) + '\n',
     );
+    try {
+      fs.chmodSync(sessionDotClaudeJson, 0o666);
+    } catch {
+      // ignore
+    }
   }
   mounts.push({
     hostPath: toHostPath(sessionDotClaudeJson),
