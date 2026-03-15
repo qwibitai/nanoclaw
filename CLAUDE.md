@@ -31,6 +31,8 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/capabilities` | Show installed skills, tools, and system info (main channel, read-only) |
+| `/status` | Quick health check — session, workspace, tools, tasks (main channel, read-only) |
 
 ## Development
 
