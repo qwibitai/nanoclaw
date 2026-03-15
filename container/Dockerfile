@@ -1,7 +1,7 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
-FROM node:22-slim
+FROM node:22-trixie-slim
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
@@ -17,13 +17,18 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
-    libasound2 \
+    libasound2t64 \
     libpangocairo-1.0-0 \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-requests \
+    jq \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
