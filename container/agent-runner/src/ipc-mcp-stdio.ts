@@ -369,10 +369,20 @@ Use this after generating output files (renders, archives, exports) to share the
       };
     }
 
+    // Copy files that aren't on a mounted path into /workspace/ipc/files/
+    // so the host can access them. Only /workspace/* paths are mounted.
+    const resolvedFiles = args.files.map((f) => {
+      if (f.path.startsWith('/workspace/')) return f;
+      const dest = path.join(FILES_DIR, `${Date.now()}-${path.basename(f.path)}`);
+      fs.mkdirSync(FILES_DIR, { recursive: true });
+      fs.copyFileSync(f.path, dest);
+      return { ...f, path: dest };
+    });
+
     const data = {
       type: 'send_files',
       chatJid,
-      files: args.files,
+      files: resolvedFiles,
       caption: args.caption,
       groupFolder,
       timestamp: new Date().toISOString(),
