@@ -333,6 +333,181 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// ---------------------------------------------------------------------------
+// Case lifecycle tools
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'list_cases',
+  `List all active cases (work items). Shows case name, type, status, description, last activity, and cost.
+From main group: shows all cases. From other groups: shows only that group's cases.`,
+  {},
+  async () => {
+    const casesFile = path.join(IPC_DIR, 'active_cases.json');
+
+    try {
+      if (!fs.existsSync(casesFile)) {
+        return { content: [{ type: 'text' as const, text: 'No active cases.' }] };
+      }
+
+      const cases = JSON.parse(fs.readFileSync(casesFile, 'utf-8'));
+      if (cases.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No active cases.' }] };
+      }
+
+      const formatted = cases
+        .map(
+          (c: {
+            name: string;
+            type: string;
+            status: string;
+            description: string;
+            last_message: string | null;
+            last_activity_at: string | null;
+            total_cost_usd: number;
+            time_spent_ms: number;
+            blocked_on: string | null;
+            initiator: string;
+          }) => {
+            const blocked = c.blocked_on ? ` [blocked: ${c.blocked_on}]` : '';
+            const cost = c.total_cost_usd > 0 ? `$${c.total_cost_usd.toFixed(2)}` : '$0';
+            return `- [${c.name}] (${c.type}, ${c.status}${blocked}) — ${c.description.slice(0, 80)}\n  Last: "${(c.last_message || 'none').slice(0, 60)}" | Cost: ${cost} | By: ${c.initiator}`;
+          },
+        )
+        .join('\n');
+
+      return { content: [{ type: 'text' as const, text: `Active cases:\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading cases: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  },
+);
+
+server.tool(
+  'case_mark_done',
+  `Mark the current case as done. You MUST include:
+1. A conclusion summarizing what was accomplished
+2. A kaizen reflection: list any bugs, impediments, inefficiencies, difficulties, annoyances, or blockers you encountered.
+   For each, suggest what improvement would help: QoL features, bug fixes, cached knowledge, hooks, gates/reviews/checks, workflow improvements.
+   These become suggested dev cases for continuous improvement.
+
+The case will move to DONE status and await user review before being pruned.`,
+  {
+    case_id: z.string().describe('The case ID to mark as done'),
+    conclusion: z.string().describe('Brief summary of what was done and the outcome (2-3 sentences)'),
+    kaizen: z.array(z.object({
+      issue: z.string().describe('What went wrong or was suboptimal'),
+      suggestion: z.string().describe('What tooling/workflow improvement would help'),
+      severity: z.enum(['low', 'medium', 'high']).describe('How much this impacted the work'),
+    })).optional().describe('Kaizen reflections — improvements that would make future cases better'),
+  },
+  async (args) => {
+    const data = {
+      type: 'case_mark_done',
+      caseId: args.case_id,
+      conclusion: args.conclusion,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    // Submit each kaizen reflection as a suggested dev case
+    if (args.kaizen && args.kaizen.length > 0) {
+      for (const k of args.kaizen) {
+        const suggestData = {
+          type: 'case_suggest_dev',
+          sourceCaseId: args.case_id,
+          description: `[${k.severity}] ${k.issue} → ${k.suggestion}`,
+          groupFolder,
+          chatJid,
+          timestamp: new Date().toISOString(),
+        };
+        writeIpcFile(TASKS_DIR, suggestData);
+      }
+    }
+
+    const kaizenCount = args.kaizen?.length || 0;
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Case ${args.case_id} marked as done. Awaiting review.${kaizenCount > 0 ? ` ${kaizenCount} kaizen suggestion(s) submitted.` : ''}`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'case_mark_blocked',
+  `Mark the current case as blocked. Specify what you're blocked on (e.g., "user decision needed", "waiting for API access", "depends on case X").
+This pauses time tracking and signals the user that input is needed.`,
+  {
+    case_id: z.string().describe('The case ID to mark as blocked'),
+    blocked_on: z.string().describe('What is blocking progress (e.g., "user input needed", "waiting for deploy")'),
+  },
+  async (args) => {
+    const data = {
+      type: 'case_mark_blocked',
+      caseId: args.case_id,
+      blocked_on: args.blocked_on,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Case ${args.case_id} marked as blocked on: ${args.blocked_on}` }] };
+  },
+);
+
+server.tool(
+  'case_mark_active',
+  'Resume a blocked case, marking it as active again.',
+  {
+    case_id: z.string().describe('The case ID to resume'),
+  },
+  async (args) => {
+    const data = {
+      type: 'case_mark_active',
+      caseId: args.case_id,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Case ${args.case_id} resumed.` }] };
+  },
+);
+
+server.tool(
+  'case_suggest_dev',
+  `Suggest a dev case (tooling/workflow improvement) based on friction encountered during ANY case — successful or not.
+Use this when:
+• You hit a limitation, missing feature, or workflow problem
+• The user gives negative feedback or corrections that could be prevented by better tooling
+• A workaround was needed that could be eliminated
+• A task took longer than it should have due to tooling gaps
+The suggestion stays in SUGGESTED status until the user approves it → BACKLOG.`,
+  {
+    source_case_id: z.string().describe('The work case ID where the issue was encountered'),
+    description: z.string().describe('What tooling/workflow improvement would help (one paragraph)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'case_suggest_dev',
+      sourceCaseId: args.source_case_id,
+      description: args.description,
+      groupFolder,
+      chatJid,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Dev case suggested from ${args.source_case_id}. User will be notified for approval.` }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

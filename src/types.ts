@@ -114,6 +114,7 @@ export interface UsageRecord {
   duration_api_ms: number | null;
   num_turns: number | null;
   session_id: string | null;
+  case_id?: string | null;
 }
 
 export interface UsageCategory {

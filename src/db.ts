@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { createCasesSchema } from './cases.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -108,11 +109,13 @@ function createSchema(database: Database.Database): void {
       duration_api_ms INTEGER,
       num_turns INTEGER,
       session_id TEXT,
+      case_id TEXT,
       timestamp TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_api_usage_category ON api_usage(category);
     CREATE INDEX IF NOT EXISTS idx_api_usage_timestamp ON api_usage(timestamp);
     CREATE INDEX IF NOT EXISTS idx_api_usage_group ON api_usage(group_folder);
+    CREATE INDEX IF NOT EXISTS idx_api_usage_case ON api_usage(case_id);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -171,6 +174,16 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
+  // Add case_id column to api_usage (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE api_usage ADD COLUMN case_id TEXT`);
+    database.exec(
+      `CREATE INDEX IF NOT EXISTS idx_api_usage_case ON api_usage(case_id)`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add usage_category column to registered_groups (migration for existing DBs)
   try {
     database.exec(
@@ -203,6 +216,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  createCasesSchema(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -212,6 +226,7 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  createCasesSchema(db);
 }
 
 /**
@@ -696,8 +711,8 @@ export function insertUsageRecord(record: UsageRecord): void {
   db.prepare(
     `INSERT INTO api_usage (group_folder, category, source, auth_mode, model,
       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
-      cost_usd, duration_ms, duration_api_ms, num_turns, session_id, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      cost_usd, duration_ms, duration_api_ms, num_turns, session_id, case_id, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
   ).run(
     record.group_folder,
     record.category,
@@ -713,6 +728,7 @@ export function insertUsageRecord(record: UsageRecord): void {
     record.duration_api_ms,
     record.num_turns,
     record.session_id,
+    record.case_id,
   );
 }
 

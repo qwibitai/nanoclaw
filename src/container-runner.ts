@@ -41,6 +41,11 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  /** When set, the container works on this case's workspace. */
+  caseId?: string;
+  caseName?: string;
+  caseType?: 'dev' | 'work';
+  caseWorkspacePath?: string;
 }
 
 export interface ContainerOutput {
@@ -60,6 +65,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  caseInput?: { caseType?: string; caseWorkspacePath?: string },
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -200,6 +206,15 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Case workspace mount: for dev cases, mount the worktree; for work cases, the scratch dir
+  if (caseInput?.caseWorkspacePath && fs.existsSync(caseInput.caseWorkspacePath)) {
+    mounts.push({
+      hostPath: caseInput.caseWorkspacePath,
+      containerPath: '/workspace/case',
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -216,11 +231,19 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  caseInput?: { caseId?: string; caseName?: string; caseType?: string },
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Case context (tells the agent which case it's working on)
+  if (caseInput?.caseId) {
+    args.push('-e', `NANOCLAW_CASE_ID=${caseInput.caseId}`);
+    args.push('-e', `NANOCLAW_CASE_NAME=${caseInput.caseName || ''}`);
+    args.push('-e', `NANOCLAW_CASE_TYPE=${caseInput.caseType || ''}`);
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -276,10 +299,17 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, {
+    caseType: input.caseType,
+    caseWorkspacePath: input.caseWorkspacePath,
+  });
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, {
+    caseId: input.caseId,
+    caseName: input.caseName,
+    caseType: input.caseType,
+  });
 
   logger.debug(
     {

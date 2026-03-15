@@ -6,13 +6,27 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
+## Cases — Isolated Work Items
+
+Every piece of work is a **case**. Cases provide isolated containers, sessions, and (for dev) git worktrees. See `.claude/skills/cases/SKILL.md` for full docs.
+
+- **work** cases use tooling to do useful work. **dev** cases improve tooling/workflows.
+- Lifecycle: `SUGGESTED → BACKLOG → ACTIVE → DONE → REVIEWED → PRUNED`
+- Kaizen: on completion, agents reflect on impediments and suggest dev improvements.
+- With 2+ active cases, Haiku routes incoming messages to the right case.
+- Replies are prefixed `[case: name]` in Telegram.
+- **All dev work MUST be in a case with its own worktree.** Never modify code in main checkout.
+- Case naming: `YYMMDD-HHMM-kebab-description` (e.g., `260315-1430-fix-auth`)
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/cases.ts` | Case model, DB ops, workspace management, lifecycle |
+| `src/case-router.ts` | Haiku-based message routing to cases |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
-| `src/ipc.ts` | IPC watcher and task processing |
+| `src/ipc.ts` | IPC watcher, task/case processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
