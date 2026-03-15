@@ -114,10 +114,10 @@ export async function startRemoteControl(
       stdio: ['ignore', stdoutFd, stderrFd],
       detached: true,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
-    return { ok: false, error: `Failed to start: ${err.message}` };
+    return { ok: false, error: `Failed to start: ${err instanceof Error ? err.message : String(err)}` };
   }
 
   // Close FDs in the parent — the child inherited copies
