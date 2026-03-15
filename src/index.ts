@@ -5,7 +5,6 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
-  POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -33,7 +32,7 @@ import {
   getAllSessions,
   getAllTasks,
   getMessagesSince,
-  getNewMessages,
+  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -64,17 +63,14 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
-let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
-let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
@@ -91,7 +87,6 @@ function loadState(): void {
 }
 
 function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
@@ -182,7 +177,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
+  // Advance cursor so the piping path in dispatchForGroup won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
@@ -346,110 +341,72 @@ async function runAgent(
   }
 }
 
-async function startMessageLoop(): Promise<void> {
-  if (messageLoopRunning) {
-    logger.debug('Message loop already running, skipping duplicate start');
-    return;
-  }
-  messageLoopRunning = true;
+/**
+ * Dispatch a newly received message for a group immediately.
+ * Called directly from the channel onMessage callback — no polling delay.
+ * The message must already be persisted to SQLite before calling this.
+ */
+function dispatchForGroup(chatJid: string, msg: NewMessage): void {
+  try {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
-
-  while (true) {
-    try {
-      const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
-        jids,
-        lastTimestamp,
-        ASSISTANT_NAME,
-      );
-
-      if (messages.length > 0) {
-        logger.info({ count: messages.length }, 'New messages');
-
-        // Advance the "seen" cursor for all messages immediately
-        lastTimestamp = newTimestamp;
-        saveState();
-
-        // Deduplicate by group
-        const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of messages) {
-          const existing = messagesByGroup.get(msg.chat_jid);
-          if (existing) {
-            existing.push(msg);
-          } else {
-            messagesByGroup.set(msg.chat_jid, [msg]);
-          }
-        }
-
-        for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
-
-          const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-            continue;
-          }
-
-          const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-            );
-            if (!hasTrigger) continue;
-          }
-
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
-
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
-          }
-        }
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in message loop');
+    const channel = findChannel(channels, chatJid);
+    if (!channel) {
+      logger.warn({ chatJid }, 'No channel owns JID, skipping dispatch');
+      return;
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+
+    const isMainGroup = group.isMain === true;
+    const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+    // For non-main groups, only act on trigger messages.
+    // Non-trigger messages accumulate in DB and get pulled as
+    // context when a trigger eventually arrives.
+    if (needsTrigger) {
+      const allowlistCfg = loadSenderAllowlist();
+      const hasTrigger =
+        TRIGGER_PATTERN.test(msg.content.trim()) &&
+        (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+      if (!hasTrigger) return;
+    }
+
+    // Pull all messages since lastAgentTimestamp so non-trigger
+    // context that accumulated between triggers is included.
+    const allPending = getMessagesSince(
+      chatJid,
+      lastAgentTimestamp[chatJid] || '',
+      ASSISTANT_NAME,
+    );
+    const messagesToSend = allPending.length > 0 ? allPending : [msg];
+    const formatted = formatMessages(messagesToSend, TIMEZONE);
+
+    if (queue.sendMessage(chatJid, formatted)) {
+      logger.debug(
+        { chatJid, count: messagesToSend.length },
+        'Piped messages to active container',
+      );
+      lastAgentTimestamp[chatJid] =
+        messagesToSend[messagesToSend.length - 1].timestamp;
+      saveState();
+      // Show typing indicator while the container processes the piped message
+      channel
+        .setTyping?.(chatJid, true)
+        ?.catch((err) =>
+          logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+        );
+    } else {
+      // No active container — enqueue for a new one
+      queue.enqueueMessageCheck(chatJid);
+    }
+  } catch (err) {
+    logger.error({ err, chatJid }, 'Error in event-driven dispatch');
   }
 }
 
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
+ * Handles messages that arrived while the process was down.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
@@ -569,6 +526,7 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      dispatchForGroup(chatJid, msg);
     },
     onChatMetadata: (
       chatJid: string,
@@ -639,10 +597,7 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 }
 
 // Guard: only run when executed directly, not when imported by tests
