@@ -58,6 +58,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { loadAndCleanMediaFiles } from './telegram-media.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -390,6 +391,9 @@ async function runAgent(
       }
     : undefined;
 
+  // Collect any pending media files (photos with base64 data) for this group
+  const mediaFiles = loadAndCleanMediaFiles(group.folder);
+
   try {
     const output = await runContainerAgent(
       group,
@@ -401,6 +405,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         persistent: ALWAYS_ON_CONTAINERS,
+        mediaFiles: mediaFiles.length > 0 ? mediaFiles : undefined,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
