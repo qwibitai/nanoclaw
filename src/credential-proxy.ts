@@ -19,6 +19,33 @@ import { logger } from './logger.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
+/**
+ * Replace lone surrogate \uXXXX escape sequences in a JSON body string.
+ * V8's JSON.stringify emits \uD800-\uDFFF escapes for lone surrogates in JS
+ * strings; Anthropic's JSON parser rejects them. Surrogates can originate from
+ * any tool result (file reads, bash output, web fetches) stored in the session
+ * transcript — not just from WhatsApp messages.
+ */
+function sanitizeLoneSurrogateEscapes(str: string): string {
+  // Match any \uXXXX escape in the surrogate range (D800–DFFF)
+  return str.replace(
+    /\\u[dD][89aAbBcCdDeEfF][0-9a-fA-F]{2}/g,
+    (match, offset, full) => {
+      const cp = parseInt(match.slice(2), 16);
+      if (cp <= 0xdbff) {
+        // High surrogate — valid only if immediately followed by a low surrogate
+        const next = full.slice(offset + 6, offset + 12);
+        if (/^\\u[dD][cCdDeEfF][0-9a-fA-F]{2}$/.test(next)) return match;
+      } else {
+        // Low surrogate — valid only if immediately preceded by a high surrogate
+        const prev = full.slice(offset - 6, offset);
+        if (/^\\u[dD][89aAbB][0-9a-fA-F]{2}$/.test(prev)) return match;
+      }
+      return '\\uFFFD';
+    },
+  );
+}
+
 export interface ProxyConfig {
   authMode: AuthMode;
 }
@@ -49,7 +76,15 @@ export function startCredentialProxy(
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        const body = Buffer.concat(chunks);
+        // Sanitize lone surrogate \uXXXX escapes before forwarding.
+        // These can appear in JSON bodies from tool results (file reads, bash
+        // output, web fetches) stored in the session transcript, not just from
+        // incoming WhatsApp messages.
+        const rawBody = Buffer.concat(chunks);
+        const sanitizedStr = sanitizeLoneSurrogateEscapes(
+          rawBody.toString('utf8'),
+        );
+        const body = Buffer.from(sanitizedStr, 'utf8');
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
