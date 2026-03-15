@@ -49,7 +49,7 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 ### Thread titles
 
-When responding to a new conversation (no existing thread), include a concise 2–5 word topic title in `<thread-title>` tags anywhere in your response:
+When responding to **the very first message** in a new conversation (no existing thread, no prior messages in the session), include a concise 2–5 word topic title in `<thread-title>` tags in your **main response only** (never in `send_message` calls or follow-up replies):
 
 ```
 <thread-title>Weekly Sales Report</thread-title>
@@ -57,7 +57,7 @@ When responding to a new conversation (no existing thread), include a concise 2�
 Here's the breakdown of this week's numbers...
 ```
 
-The title is used to name the Discord thread. It is stripped from your visible response. Keep titles short, descriptive, and without punctuation. If the conversation is casual or unclear, omit the tag — a default title will be used.
+The title is used to name the Discord thread. It is stripped from your visible response. **Only include it once per conversation — never in follow-up messages.** Keep titles short, descriptive, and without punctuation. If the conversation is casual or unclear, omit the tag.
 
 ### Sub-agents and teammates
 

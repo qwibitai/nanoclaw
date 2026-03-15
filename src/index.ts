@@ -1715,6 +1715,8 @@ async function main(): Promise<void> {
     sendMessage: (jid, text, sender?) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      text = stripInternalTags(text);
+      if (!text) return Promise.resolve();
       if (sender && channel.sendSwarmMessage) {
         return channel.sendSwarmMessage(jid, text, sender);
       }
