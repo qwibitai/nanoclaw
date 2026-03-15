@@ -37,6 +37,7 @@ groups/gentech_strategies/*
 
 # Temp files
 .tmp-*
+*.pid
 
 # OS
 .DS_Store
