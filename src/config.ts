@@ -62,7 +62,7 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 export const ALWAYS_ON_CONTAINERS =
-  (process.env.ALWAYS_ON_CONTAINERS || 'true') === 'true';
+  (process.env.ALWAYS_ON_CONTAINERS || 'false') === 'true';
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
