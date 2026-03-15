@@ -3,6 +3,13 @@
 
 FROM node:22-slim
 
+# Optional: override apt mirror for faster downloads in restricted networks
+# Usage: docker build --build-arg APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn ...
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|http://deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
