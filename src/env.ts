@@ -15,7 +15,7 @@ export function readEnvFile(keys: string[]): Record<string, string> {
     content = fs.readFileSync(envFile, 'utf-8');
   } catch (err) {
     logger.debug({ err }, '.env file not found, using defaults');
-    return {};
+    content = '';
   }
 
   const result: Record<string, string> = {};
@@ -36,6 +36,15 @@ export function readEnvFile(keys: string[]): Record<string, string> {
       value = value.slice(1, -1);
     }
     if (value) result[key] = value;
+  }
+
+  // Fall back to process.env for any keys not found in the file.
+  // This allows secrets to be injected via environment variables (e.g. --env-file)
+  // when no .env file is present on disk.
+  for (const key of wanted) {
+    if (!result[key] && process.env[key]) {
+      result[key] = process.env[key]!;
+    }
   }
 
   return result;
