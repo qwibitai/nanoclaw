@@ -851,6 +851,33 @@ describe('DiscordChannel', () => {
       expect(currentClient().channels.fetch).not.toHaveBeenCalled();
     });
 
+    it('clears child thread intervals when stopping typing on parent JID', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn(),
+        sendTyping: vi.fn().mockResolvedValue(undefined),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      // Start typing on a thread JID (simulates piped message)
+      await channel.setTyping('dc:123:thread:456', true);
+      expect(mockChannel.sendTyping).toHaveBeenCalledTimes(1);
+
+      // Stop typing on parent JID (simulates processGroupMessages cleanup)
+      await channel.setTyping('dc:123', false);
+
+      // Advance time past the interval — sendTyping should NOT fire again
+      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(10000);
+      vi.useRealTimers();
+
+      // Only the initial call from setTyping(true), no interval renewals
+      expect(mockChannel.sendTyping).toHaveBeenCalledTimes(1);
+    });
+
     it('does nothing when client is not initialized', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);

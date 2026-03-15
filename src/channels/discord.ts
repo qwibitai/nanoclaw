@@ -1079,7 +1079,20 @@ export class DiscordChannel implements Channel {
       this.typingIntervals.delete(jid);
     }
 
-    if (!this.client || !isTyping) return;
+    if (!isTyping) {
+      // Also clear child thread intervals: piped messages may start typing
+      // on dc:parent:thread:xyz while the cleanup code uses the parent dc:parent.
+      const prefix = jid + ':';
+      for (const [key, interval] of this.typingIntervals) {
+        if (key.startsWith(prefix)) {
+          clearInterval(interval);
+          this.typingIntervals.delete(key);
+        }
+      }
+      return;
+    }
+
+    if (!this.client) return;
 
     const parsedJid = parseThreadJid(jid);
     const channelId = parsedJid ? parsedJid.threadId : jid.replace(/^dc:/, '');
