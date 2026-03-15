@@ -238,6 +238,11 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  // Forward GitHub token if configured (gh CLI reads GH_TOKEN automatically)
+  if (process.env.GITHUB_TOKEN) {
+    args.push('-e', `GH_TOKEN=${process.env.GITHUB_TOKEN}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
