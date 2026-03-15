@@ -18,6 +18,17 @@ If `NOT_MAIN`, respond with:
 
 Then stop — do not generate the report.
 
+**Enabled check:** `/status` can be disabled via `/capabilities disable status`. Check:
+
+```bash
+cat /workspace/group/.nanoclaw/admin/capabilities.json 2>/dev/null || echo '{"enabledAdminCommands":["capabilities","status","approve","reject"],"version":1}'
+```
+
+If `status` is NOT in the `enabledAdminCommands` array, respond with:
+> `/status` is currently disabled. An admin can re-enable it with `/capabilities enable status` in the main chat.
+
+Then stop — do not generate the report.
+
 ## How to gather the information
 
 Run the checks below and compile results into the report format.
