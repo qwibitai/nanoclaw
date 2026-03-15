@@ -14,10 +14,16 @@ import {
   TextChannel,
   ChannelType,
   ActivityType,
+  REST,
+  Routes,
+  Collection,
 } from 'discord.js';
 import { Channel, OnInboundMessage, OnChatMetadata } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { logger } from '../logger.js';
+import { researchCommand } from '../commands/research.js';
+import { buildCommand } from '../commands/build.js';
+import { statusCommand } from '../commands/status.js';
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CONTROL_CHANNEL_ID = process.env.DISCORD_CONTROL_CHANNEL_ID;
@@ -29,9 +35,7 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   }
 
   if (!CONTROL_CHANNEL_ID) {
-    logger.warn(
-      'DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel',
-    );
+    logger.warn('DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel');
     return null;
   }
 
@@ -45,6 +49,13 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
 
   let connected = false;
   const discordJids = new Set<string>();
+  const activeContainers = new Set<string>();
+
+  // Slash commands collection
+  const commands = new Collection<string, any>();
+  commands.set(researchCommand.data.name, researchCommand);
+  commands.set(buildCommand.data.name, buildCommand);
+  commands.set(statusCommand.data.name, statusCommand);
 
   /**
    * Check if a channel/thread is the control channel
@@ -129,23 +140,58 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
     async connect() {
       if (connected) return;
 
-      client.on('ready', () => {
-        logger.info({ user: client.user?.tag }, 'Discord bot connected');
+      client.on('ready', async () => {
+        logger.info(
+          { user: client.user?.tag },
+          'Discord bot connected',
+        );
         connected = true;
 
         // Set bot status
         client.user?.setPresence({
-          activities: [
-            {
-              name: 'Deep Research & Autonomous Building',
-              type: ActivityType.Custom,
-            },
-          ],
+          activities: [{ name: 'Deep Research & Autonomous Building', type: ActivityType.Custom }],
           status: 'online',
         });
+
+        // Register slash commands
+        await registerSlashCommands(client);
       });
 
       client.on('messageCreate', handleMessage);
+
+      client.on('interactionCreate', async (interaction) => {
+        // Handle slash commands
+        if (interaction.isChatInputCommand()) {
+          const command = commands.get(interaction.commandName);
+          if (!command) {
+            logger.warn({ command: interaction.commandName }, 'Unknown command');
+            return;
+          }
+
+          try {
+            if (interaction.commandName === 'status') {
+              await command.execute(interaction, opts.registeredGroups(), activeContainers);
+            } else {
+              // Research and build commands
+              await command.execute(interaction, opts.onMessage);
+            }
+          } catch (err) {
+            logger.error({ err, command: interaction.commandName }, 'Command execution failed');
+            const errorMessage = `Failed to execute command: ${err instanceof Error ? err.message : 'Unknown error'}`;
+
+            if (interaction.deferred || interaction.replied) {
+              await interaction.followUp({ content: errorMessage, ephemeral: true });
+            } else {
+              await interaction.reply({ content: errorMessage, ephemeral: true });
+            }
+          }
+        }
+
+        // Handle button interactions (for build workflow)
+        if (interaction.isButton()) {
+          await handleButtonInteraction(interaction);
+        }
+      });
 
       client.on('error', (error) => {
         logger.error({ error }, 'Discord client error');
@@ -162,11 +208,11 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
           return;
         }
 
-        if (discordChannel.isTextBased()) {
+        if (discordChannel.isTextBased() && 'send' in discordChannel) {
           // Split long messages (Discord has 2000 char limit)
           const chunks = splitMessage(text, 2000);
           for (const chunk of chunks) {
-            await discordChannel.send(chunk);
+            await (discordChannel as any).send(chunk);
           }
         }
       } catch (err) {
@@ -194,8 +240,8 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
 
       try {
         const discordChannel = await client.channels.fetch(jid);
-        if (discordChannel?.isTextBased()) {
-          await discordChannel.sendTyping();
+        if (discordChannel?.isTextBased() && 'sendTyping' in discordChannel) {
+          await (discordChannel as any).sendTyping();
         }
       } catch (err) {
         logger.warn({ jid, err }, 'Failed to set Discord typing indicator');
@@ -208,6 +254,76 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
       logger.debug('Discord syncGroups called (no-op for Discord)');
     },
   };
+
+  /**
+   * Register slash commands with Discord
+   */
+  async function registerSlashCommands(client: Client) {
+    if (!client.user || !DISCORD_TOKEN) return;
+
+    const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+    const commandData = [
+      researchCommand.data.toJSON(),
+      buildCommand.data.toJSON(),
+      statusCommand.data.toJSON(),
+    ];
+
+    try {
+      logger.info('Registering slash commands...');
+
+      // Register commands globally (takes up to 1 hour to propagate)
+      // For faster testing, use guild-specific registration instead
+      const data = await rest.put(
+        Routes.applicationCommands(client.user.id),
+        { body: commandData },
+      );
+
+      logger.info({ count: commandData.length }, 'Slash commands registered');
+    } catch (err) {
+      logger.error({ err }, 'Failed to register slash commands');
+    }
+  }
+
+  /**
+   * Handle button interactions for build workflow
+   */
+  async function handleButtonInteraction(interaction: any) {
+    try {
+      await interaction.deferUpdate();
+
+      if (interaction.customId === 'show-spec') {
+        // Show current CLAUDE.md spec (if it exists)
+        await interaction.followUp({
+          content: '📄 The spec is being maintained in the conversation above. Review the thread to see the current specification.',
+          ephemeral: true,
+        });
+      } else if (interaction.customId === 'start-build') {
+        // Trigger autonomous build mode
+        await interaction.followUp({
+          content: '🚀 **Starting autonomous build...**\n\nThe builder agent will now implement the specification. This may take several minutes.',
+        });
+
+        // Send build trigger message
+        opts.onMessage(interaction.channelId, {
+          id: `build-trigger-${Date.now()}`,
+          chat_jid: interaction.channelId,
+          sender: interaction.user.id,
+          sender_name: interaction.user.username,
+          content: '[BUILD_MODE] Begin autonomous implementation of the CLAUDE.md specification.',
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        });
+      } else if (interaction.customId === 'cancel-build') {
+        await interaction.followUp({
+          content: '❌ Build cancelled. The thread will remain open for reference.',
+          ephemeral: true,
+        });
+      }
+    } catch (err) {
+      logger.error({ err, customId: interaction.customId }, 'Button interaction failed');
+    }
+  }
 
   return channel;
 }
