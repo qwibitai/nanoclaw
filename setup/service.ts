@@ -20,6 +20,31 @@ import {
 } from './platform.js';
 import { emitStatus } from './status.js';
 
+/**
+ * Build the PATH for the systemd unit.
+ * Includes the node binary's directory so the service can find node,
+ * and on NixOS adds /run/current-system/sw/bin for Docker and other system tools.
+ */
+function buildServicePath(homeDir: string, nodePath: string): string {
+  const parts = ['/usr/local/bin', '/usr/bin', '/bin', `${homeDir}/.local/bin`];
+
+  // Add the directory containing the node binary (e.g. nvm, nix-profile)
+  const nodeDir = path.dirname(nodePath);
+  if (!parts.includes(nodeDir)) {
+    parts.push(nodeDir);
+  }
+
+  // NixOS: system binaries (docker, etc.) live under /run/current-system/sw/bin
+  if (
+    fs.existsSync('/etc/NIXOS') ||
+    fs.existsSync('/etc/nixos')
+  ) {
+    parts.unshift('/run/current-system/sw/bin');
+  }
+
+  return parts.join(':');
+}
+
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const platform = getPlatform();
@@ -244,7 +269,7 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${buildServicePath(homeDir, nodePath)}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 

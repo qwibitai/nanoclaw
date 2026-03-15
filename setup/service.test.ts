@@ -63,7 +63,7 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin:${path.dirname(nodePath)}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
