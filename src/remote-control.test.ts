@@ -45,14 +45,20 @@ describe('remote-control', () => {
     stdoutFileContent = '';
 
     // Default fs mocks
-    mkdirSyncSpy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined as any);
-    writeFileSyncSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+    mkdirSyncSpy = vi
+      .spyOn(fs, 'mkdirSync')
+      .mockImplementation(() => undefined as any);
+    writeFileSyncSpy = vi
+      .spyOn(fs, 'writeFileSync')
+      .mockImplementation(() => {});
     unlinkSyncSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
     openSyncSpy = vi.spyOn(fs, 'openSync').mockReturnValue(42 as any);
     closeSyncSpy = vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
 
     // readFileSync: return stdoutFileContent for the stdout file, state file, etc.
-    readFileSyncSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((p: string) => {
+    readFileSyncSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((
+      p: string,
+    ) => {
       if (p.endsWith('remote-control.stdout')) return stdoutFileContent;
       if (p.endsWith('remote-control.json')) {
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
@@ -74,7 +80,8 @@ describe('remote-control', () => {
       spawnMock.mockReturnValue(proc);
 
       // Simulate URL appearing in stdout file on first poll
-      stdoutFileContent = 'Session URL: https://claude.ai/code?bridge=env_abc123\n';
+      stdoutFileContent =
+        'Session URL: https://claude.ai/code?bridge=env_abc123\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       const result = await startRemoteControl('user1', 'tg:123', '/project');
@@ -157,7 +164,9 @@ describe('remote-control', () => {
       spawnMock.mockReturnValueOnce(proc1).mockReturnValueOnce(proc2);
 
       // First start: process alive, URL found
-      const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
+      const killSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((() => true) as any);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_first\n';
       await startRemoteControl('user1', 'tg:123', '/project');
 
@@ -239,7 +248,9 @@ describe('remote-control', () => {
       const proc = createMockProcess(55555);
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_stop\n';
-      const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
+      const killSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
 
@@ -337,7 +348,9 @@ describe('remote-control', () => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
         return '';
       }) as any);
-      const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
+      const killSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((() => true) as any);
 
       restoreRemoteControl();
       expect(getActiveSession()).not.toBeNull();
@@ -365,13 +378,15 @@ describe('remote-control', () => {
 
       restoreRemoteControl();
 
-      return startRemoteControl('user2', 'tg:456', '/project').then((result) => {
-        expect(result).toEqual({
-          ok: true,
-          url: 'https://claude.ai/code?bridge=env_restored',
-        });
-        expect(spawnMock).not.toHaveBeenCalled();
-      });
+      return startRemoteControl('user2', 'tg:456', '/project').then(
+        (result) => {
+          expect(result).toEqual({
+            ok: true,
+            url: 'https://claude.ai/code?bridge=env_restored',
+          });
+          expect(spawnMock).not.toHaveBeenCalled();
+        },
+      );
     });
   });
 });

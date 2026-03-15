@@ -34,6 +34,34 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Project Shortcuts
+
+When the user references these names, use the corresponding GitHub repo. You have full GitHub access via `mcp__github__*` tools — read files, push commits, create PRs, view issues directly without cloning.
+
+| Shortcut | GitHub Repo | Description |
+|----------|-------------|-------------|
+| `nanoclaw` | `/workspace/project` (mounted) | The NanoClaw project (read-only) |
+| `blog agents` | `BennyG93/boxing-data-agents` | CrewAI multi-agent pipeline generating SEO fight preview articles (4 agents: SEO Planner → Outline → Writer → Editor) |
+| `combat pipelines` | `BennyG93/combat-data-pipelines` | Raw data scraping pipeline — fetches Tapology/BoxLive pages, extracts via BeautifulSoup + Gemini AI, stores in provider MongoDB DBs |
+| `workflows` | `BennyG93/boxing-data-workflows` | Prefect data pipelines — reads from provider DBs, deduplicates/matches/merges into `boxing_data` MongoDB. Runs on GCP Cloud Run |
+| `api` | `BennyG93/boxing-data-api` | FastAPI REST API serving boxing data (fights, fighters, events, divisions, titles). MongoDB + Motor, published via RapidAPI |
+| `web` | `BennyG93/boxing-data-web` | Astro + Starlight site at boxing-data.com — marketing pages, 150+ blog posts, and API documentation |
+
+Each repo has a CLAUDE.md — read it with `mcp__github__get_file_contents` before working on that project. For larger tasks (multi-file changes), clone via SSH: `git clone git@github.com:BennyG93/<repo>.git /workspace/group/<name>`
+
+## MongoDB Access (Read-Only)
+
+You have read-only access to MongoDB Atlas via the `mcp__mongodb__*` tools. Key databases:
+
+| Database | Purpose |
+|----------|---------|
+| `boxing_data` | Primary production database for the boxing data API. Collections: `events`, `fights`, `fighters`, `divisions`, `titles`, `organizations`, `compubox_uploads` |
+| `boxing_data_stg` | Staging/testing copy of `boxing_data` |
+| `tapology` | Raw scraped data from Tapology (populated by combat pipelines). Collections: `events`, `fights`, `fighters`. Documents: `{ source_url, data: {...} }` |
+| `boxlive` | Raw scraped data from BoxLive (populated by combat pipelines). Collections: `events`, `fights`, `fighters`. Documents: `{ source_url, data: {...} }` |
+
+Entities carry cross-provider IDs (`boxlive_id`, `tapology_id`, `boxlive_url`, `tapology_url`) for linking records across sources.
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.

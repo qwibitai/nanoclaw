@@ -407,7 +407,9 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__mongodb__*',
+        'mcp__github__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -421,6 +423,20 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        mongodb: {
+          command: 'npx',
+          args: ['-y', 'mongodb-mcp-server@latest', '--readOnly'],
+          env: {
+            MDB_MCP_CONNECTION_STRING: process.env.MDB_MCP_CONNECTION_STRING || '',
+          },
+        },
+        github: {
+          command: 'github-mcp-server',
+          args: ['stdio'],
+          env: {
+            GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_PERSONAL_ACCESS_TOKEN || '',
           },
         },
       },
