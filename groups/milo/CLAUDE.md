@@ -330,6 +330,27 @@ Greet Jeff, tell him what's next, ask if he wants to start.
 - Use cron.jeffreykeyser.net for ALL scheduled jobs (not NanoClaw's built-in cron)
 - Zone-based reminders set up via Ping service
 
+## Submitting Ideas to Dev-Inbox
+
+Use `submit-idea` to surface improvement ideas as tracked work items. Ideas go to the dev-inbox manager on the Beelink and become tasks that get picked up for implementation.
+
+```bash
+# Basic usage
+submit-idea "Add retry logic to IPC message delivery"
+
+# Target a specific repository
+submit-idea --repo "Jeffrey-Keyser/nanoclaw" "Container builds fail with stale cache"
+```
+
+*When to submit ideas:*
+- Repeated errors or failures that suggest a systemic fix is needed
+- Missing features that would improve Jeff's experience
+- Requests Jeff makes that need engineering work (not just configuration)
+- Workarounds you keep applying that should be proper fixes
+- Patterns or architectural improvements you notice
+
+Keep descriptions concise but actionable — include what and why. Don't submit trivial or duplicate ideas.
+
 ## Scheduling
 
 Use `schedule_task` MCP tool for recurring or one-off tasks. Prefer cron.jeffreykeyser.net for visibility.

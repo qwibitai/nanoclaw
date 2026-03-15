@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# submit-idea — Submit an improvement idea to the dev-inbox manager
+# Usage: submit-idea [--repo <repository>] "<description>"
+set -euo pipefail
+
+DEV_INBOX_URL="${DEV_INBOX_URL:-http://host.docker.internal:3100/tasks}"
+DEFAULT_REPO="Jeffrey-Keyser/nanoclaw"
+
+repo="$DEFAULT_REPO"
+description=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)
+      repo="${2:-}"
+      if [[ -z "$repo" ]]; then
+        echo "Error: --repo requires a value" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    --repo=*)
+      repo="${1#--repo=}"
+      shift
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      description="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$description" ]]; then
+  echo "Usage: submit-idea [--repo <repository>] \"<description>\"" >&2
+  echo "Error: description is required" >&2
+  exit 1
+fi
+
+# Build the task description with repository context
+task_description="[${repo}] ${description}"
+
+# POST to the dev-inbox manager
+response=$(curl -sf --max-time 10 \
+  -X POST "$DEV_INBOX_URL" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg desc "$task_description" '{description: $desc}')" \
+  2>&1) || {
+  exit_code=$?
+  echo "Warning: Failed to submit idea to dev-inbox (exit code $exit_code)" >&2
+  echo "Endpoint: $DEV_INBOX_URL" >&2
+  echo "Response: $response" >&2
+  echo "The idea was NOT recorded. You may want to note it for later." >&2
+  exit 1
+}
+
+echo "Idea submitted to dev-inbox: $description"
+if [[ -n "$response" ]]; then
+  echo "Response: $response"
+fi
