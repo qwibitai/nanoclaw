@@ -16,8 +16,14 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+
+interface WebAccessConfig {
+  webFetch?: boolean; // Default: true
+  webSearch?: boolean; // Default: true
+  fetchAllowlist?: string[]; // Optional URL prefixes to restrict WebFetch
+}
 
 interface ContainerInput {
   prompt: string;
@@ -27,6 +33,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  webAccess?: WebAccessConfig;
 }
 
 interface ContainerOutput {
@@ -182,6 +189,62 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
     return {};
   };
+}
+
+// Secrets to strip from Bash tool subprocess environments.
+// These are needed by claude-code for API auth but should never
+// be visible to commands Kit runs.
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+
+function createSanitizeBashHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const command = (preInput.tool_input as { command?: string })?.command;
+    if (!command) return {};
+
+    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        updatedInput: {
+          ...(preInput.tool_input as Record<string, unknown>),
+          command: unsetPrefix + command,
+        },
+      },
+    };
+  };
+}
+
+function createWebFetchAllowlistHook(allowlist: string[]): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const url = (preInput.tool_input as { url?: string })?.url ?? '';
+    const allowed = allowlist.some((pattern) => url.startsWith(pattern));
+    if (!allowed) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse' as const,
+          permissionDecision: 'deny' as const,
+        },
+        reason: `WebFetch blocked: ${url} is not in the allowlist`,
+      };
+    }
+    return {};
+  };
+}
+
+function buildAllowedTools(webAccess?: WebAccessConfig): string[] {
+  return [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    ...(webAccess?.webSearch !== false ? ['WebSearch'] : []),
+    ...(webAccess?.webFetch !== false ? ['WebFetch'] : []),
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    'mcp__nanoclaw__*',
+  ];
 }
 
 function sanitizeFilename(summary: string): string {
@@ -399,16 +462,7 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
+      allowedTools: buildAllowedTools(containerInput.webAccess),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -426,6 +480,12 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          ...(containerInput.webAccess?.fetchAllowlist?.length
+            ? [{ matcher: 'WebFetch', hooks: [createWebFetchAllowlistHook(containerInput.webAccess.fetchAllowlist)] }]
+            : []),
+        ],
       },
     }
   })) {
