@@ -789,7 +789,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Extract thread title before stripping (Discord uses it for thread names)
         const threadTitle = extractThreadTitle(raw);
         if (threadTitle && 'setPendingThreadTitle' in channel) {
-          (channel as { setPendingThreadTitle(t: string): void }).setPendingThreadTitle(threadTitle);
+          (
+            channel as { setPendingThreadTitle(t: string): void }
+          ).setPendingThreadTitle(threadTitle);
         }
         // Strip <internal> and <thread-title> blocks
         const text = stripInternalTags(raw);
