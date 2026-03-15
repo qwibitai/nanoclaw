@@ -47,6 +47,18 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
+  addCaseTime,
+  Case,
+  formatCaseStatus,
+  getActiveCases,
+  getCaseById,
+  getRoutableCases,
+  getSuggestedCases,
+  updateCase,
+  writeCasesSnapshot,
+} from './cases.js';
+import { routeMessageToCase } from './case-router.js';
+import {
   restoreRemoteControl,
   startRemoteControl,
   stopRemoteControl,
@@ -147,6 +159,9 @@ export function _setRegisteredGroups(
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
+ *
+ * If the group has active cases, messages are routed through the case router
+ * before being dispatched to the appropriate case's container.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
@@ -180,6 +195,71 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  // --- Case routing ---
+  const activeCases = getActiveCases(chatJid);
+  let targetCase: Case | undefined;
+
+  if (activeCases.length > 0) {
+    const lastMsg = missedMessages[missedMessages.length - 1].content.trim();
+
+    // Status command — show all cases and return
+    if (/^(status|cases|tasks)\b/i.test(lastMsg)) {
+      const statusLines = activeCases.map((c) => formatCaseStatus(c));
+      const suggested = getSuggestedCases(chatJid);
+      let statusText = `Active cases:\n\n${statusLines.join('\n\n')}`;
+      if (suggested.length > 0) {
+        statusText += `\n\nSuggested dev cases:\n${suggested.map((s) => `  - ${s.name}: ${s.description.slice(0, 100)}`).join('\n')}`;
+      }
+      await channel.sendMessage(chatJid, statusText);
+      lastAgentTimestamp[chatJid] =
+        missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      return true;
+    }
+
+    // Route message to a case
+    const routableCases = getRoutableCases(chatJid);
+
+    if (routableCases.length >= 2) {
+      const lastMsgText = missedMessages[missedMessages.length - 1].content;
+      const senderName =
+        missedMessages[missedMessages.length - 1].sender_name ||
+        missedMessages[missedMessages.length - 1].sender;
+
+      const routeResult = await routeMessageToCase(
+        lastMsgText,
+        senderName,
+        routableCases,
+      );
+
+      if (routeResult.caseId) {
+        targetCase = getCaseById(routeResult.caseId) || undefined;
+        logger.info(
+          {
+            caseId: routeResult.caseId,
+            caseName: routeResult.caseName,
+            confidence: routeResult.confidence,
+          },
+          'Message routed to case',
+        );
+      } else if (routeResult.suggestNew) {
+        const caseList = routableCases
+          .map((c) => `  - ${c.name} (${c.status})`)
+          .join('\n');
+        await channel.sendMessage(
+          chatJid,
+          `This doesn't seem to match any active case:\n${caseList}\n\nIs this a new case? Reply with a brief description to create one, or specify which case this belongs to.`,
+        );
+        lastAgentTimestamp[chatJid] =
+          missedMessages[missedMessages.length - 1].timestamp;
+        saveState();
+        return true;
+      }
+    } else if (routableCases.length === 1) {
+      targetCase = routableCases[0];
+    }
+  }
+
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -190,7 +270,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      caseId: targetCase?.id,
+      caseName: targetCase?.name,
+    },
     'Processing messages',
   );
 
@@ -208,43 +293,73 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  const agentStartTime = Date.now();
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  // Case-specific session key to isolate conversation context per case
+  const sessionKey = targetCase ? `case:${targetCase.id}` : group.folder;
+
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        let text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+
+        // Prefix with case name for tracking in Telegram/chat
+        if (targetCase && text && !text.startsWith(`[case: ${targetCase.name}]`)) {
+          text = `[case: ${targetCase.name}]\n${text}`;
+          updateCase(targetCase.id, {
+            last_message: text.slice(0, 200),
+            last_activity_at: new Date().toISOString(),
+          });
+        }
+
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    targetCase,
+    sessionKey,
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  // Track time spent on this case (cost tracking requires usage-tracking skill)
+  if (targetCase) {
+    const durationMs = Date.now() - agentStartTime;
+    try {
+      addCaseTime(targetCase.id, durationMs);
+    } catch (err) {
+      logger.warn({ caseId: targetCase.id, err }, 'Failed to update case time');
+    }
+  }
+
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
@@ -252,7 +367,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       );
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
@@ -270,9 +384,12 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  targetCase?: Case,
+  sessionKey?: string,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const effectiveSessionKey = sessionKey || group.folder;
+  const sessionId = sessions[effectiveSessionKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -299,12 +416,16 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Update cases snapshot for container to read
+  const allCases = getActiveCases();
+  writeCasesSnapshot(group.folder, isMain, allCases);
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[effectiveSessionKey] = output.newSessionId;
+          setSession(effectiveSessionKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -320,6 +441,10 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        caseId: targetCase?.id,
+        caseName: targetCase?.name,
+        caseType: targetCase?.type,
+        caseWorkspacePath: targetCase?.workspace_path,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -327,8 +452,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[effectiveSessionKey] = output.newSessionId;
+      setSession(effectiveSessionKey, output.newSessionId);
     }
 
     if (output.status === 'error') {

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { createCasesSchema } from './cases.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -147,6 +148,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  createCasesSchema(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -156,6 +158,7 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  createCasesSchema(db);
 }
 
 /**
