@@ -11,12 +11,22 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/** True when running on NixOS, where Docker bridge networking to the host is broken. */
+const IS_NIXOS = fs.existsSync('/etc/NIXOS') || fs.existsSync('/etc/nixos');
+
+/**
+ * Hostname containers use to reach the host machine.
+ * NixOS: containers run with --network=host, so they reach the proxy on localhost.
+ * Others: host.docker.internal (Docker Desktop adds it; Linux adds it via --add-host).
+ */
+export const CONTAINER_HOST_GATEWAY = IS_NIXOS
+  ? 'localhost'
+  : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
+ * NixOS: 127.0.0.1 — containers share host network via --network=host.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
  */
@@ -30,6 +40,9 @@ function detectProxyBindHost(): string {
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
   if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
+  // NixOS: --network=host means the container shares loopback with the host.
+  if (IS_NIXOS) return '127.0.0.1';
+
   // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
   const ifaces = os.networkInterfaces();
   const docker0 = ifaces['docker0'];
@@ -42,6 +55,11 @@ function detectProxyBindHost(): string {
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
+  // NixOS: Docker bridge networking to host is broken — use host network instead.
+  // This sacrifices network isolation but is the only reliable path on NixOS.
+  if (IS_NIXOS) {
+    return ['--network=host'];
+  }
   // On Linux, host.docker.internal isn't built-in — add it explicitly
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
