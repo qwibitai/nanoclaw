@@ -62,7 +62,8 @@ export async function downloadTelegramMedia(
     throw new Error('Telegram returned no file_path for file_id');
   }
 
-  const ext = path.extname(file.file_path) || (type === 'photo' ? '.jpg' : '.mp4');
+  const ext =
+    path.extname(file.file_path) || (type === 'photo' ? '.jpg' : '.mp4');
   const filename = `${type}_${messageId}_${Date.now()}${ext}`;
   const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
@@ -98,15 +99,28 @@ export async function downloadTelegramMedia(
     }
   }
 
-  const result: MediaResult = { localPath, containerPath, mimeType: type === 'photo' ? 'image/jpeg' : mimeType, type, base64 };
+  const result: MediaResult = {
+    localPath,
+    containerPath,
+    mimeType: type === 'photo' ? 'image/jpeg' : mimeType,
+    type,
+    base64,
+  };
 
   // Write sidecar JSON for the container pipeline to pick up
   if (base64) {
-    const sidecar: MediaFile = { containerPath, base64, mimeType: result.mimeType };
+    const sidecar: MediaFile = {
+      containerPath,
+      base64,
+      mimeType: result.mimeType,
+    };
     fs.writeFileSync(`${localPath}.media.json`, JSON.stringify(sidecar));
   }
 
-  logger.info({ type, groupFolder, localPath, size: buffer.length }, 'Telegram media downloaded');
+  logger.info(
+    { type, groupFolder, localPath, size: buffer.length },
+    'Telegram media downloaded',
+  );
   return result;
 }
 
@@ -128,7 +142,11 @@ export function loadAndCleanMediaFiles(groupFolder: string): MediaFile[] {
       fs.unlinkSync(sidecarPath); // consume once
     } catch (err) {
       logger.warn({ sidecarPath, err }, 'Failed to read media sidecar');
-      try { fs.unlinkSync(sidecarPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(sidecarPath);
+      } catch {
+        /* ignore */
+      }
     }
   }
   return files;

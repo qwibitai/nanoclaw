@@ -42,7 +42,11 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   persistent?: boolean;
-  mediaFiles?: Array<{ containerPath: string; base64: string; mimeType: string }>;
+  mediaFiles?: Array<{
+    containerPath: string;
+    base64: string;
+    mimeType: string;
+  }>;
 }
 
 export interface ContainerOutput {

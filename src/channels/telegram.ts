@@ -271,8 +271,12 @@ export class TelegramChannel implements Channel {
       const msgId = ctx.message.message_id.toString();
       try {
         const media = await downloadTelegramMedia(
-          this.bot!, this.botToken, largest.file_id,
-          group.folder, msgId, 'photo',
+          this.bot!,
+          this.botToken,
+          largest.file_id,
+          group.folder,
+          msgId,
+          'photo',
         );
         storeNonText(ctx, `[Photo: ${media.containerPath}]`);
       } catch (err) {
@@ -288,8 +292,12 @@ export class TelegramChannel implements Channel {
       const msgId = ctx.message.message_id.toString();
       try {
         const media = await downloadTelegramMedia(
-          this.bot!, this.botToken, video.file_id,
-          group.folder, msgId, 'video',
+          this.bot!,
+          this.botToken,
+          video.file_id,
+          group.folder,
+          msgId,
+          'video',
         );
         storeNonText(ctx, `[Video: ${media.containerPath}]`);
       } catch (err) {
