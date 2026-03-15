@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
 }
 
 interface ContainerOutput {
@@ -389,6 +390,11 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const resolvedModel = containerInput.model || process.env.NANOCLAW_DEFAULT_MODEL;
+  if (resolvedModel) {
+    log(`Using model: ${resolvedModel}`);
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -396,6 +402,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      model: resolvedModel,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,

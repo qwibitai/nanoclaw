@@ -41,6 +41,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string; // Claude model override for this group
 }
 
 export interface ContainerOutput {
@@ -125,6 +126,11 @@ function buildVolumeMounts(
   // subdirectories here at runtime, so the directory itself must be writable by the node user
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   fs.chmodSync(groupSessionsDir, 0o777);
+  // Pre-create the debug directory required by the Claude Agent SDK.
+  // Without it the SDK crashes with ENOENT on first write, taking the bot down.
+  const debugDir = path.join(groupSessionsDir, 'debug');
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.chmodSync(debugDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
