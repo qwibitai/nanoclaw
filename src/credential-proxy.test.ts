@@ -5,6 +5,8 @@ import type { AddressInfo } from 'net';
 const mockEnv: Record<string, string> = {};
 vi.mock('./env.js', () => ({
   readEnvFile: vi.fn(() => ({ ...mockEnv })),
+  refreshSecrets: vi.fn(() => Promise.resolve()),
+  isVaultConfigured: vi.fn(() => false),
 }));
 
 vi.mock('./logger.js', () => ({
