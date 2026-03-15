@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -236,6 +237,13 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // GitHub CLI token — gh stores tokens in macOS Keychain, which containers
+  // can't access. Inject GH_TOKEN so the gh CLI works inside the container.
+  const secrets = readEnvFile(['GH_TOKEN']);
+  if (secrets.GH_TOKEN) {
+    args.push('-e', `GH_TOKEN=${secrets.GH_TOKEN}`);
   }
 
   // Runtime-specific args for host gateway resolution
