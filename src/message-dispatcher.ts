@@ -1,7 +1,7 @@
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
-  POLL_INTERVAL,
+  IPC_POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -336,7 +336,7 @@ export async function startMessageLoop(): Promise<void> {
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+    await new Promise((resolve) => setTimeout(resolve, IPC_POLL_INTERVAL));
   }
 }
 
