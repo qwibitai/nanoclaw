@@ -366,6 +366,39 @@ Use this to configure which Claude model a group uses by default (e.g. "opus", "
   },
 );
 
+server.tool(
+  'set_group_notify_jid',
+  `Set the notification channel JID for a registered group. Main group only.
+
+When set, ship log and backlog notifications from that group will be sent to this JID instead of the group's default channel. Useful for routing notifications from a project group to a shared team channel (e.g. a Slack channel). Pass an empty string to clear the override.`,
+  {
+    jid: z.string().describe('The JID of the group whose notification target you want to configure (e.g., "dc:1479516831168593974" for the illysium Discord entry)'),
+    notifyJid: z.string().describe('Target JID for notifications (e.g., "slack:C0AJA89MN2E"). Empty string to clear.'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can configure notification channels.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'set_group_model',
+      jid: args.jid,
+      notifyJid: args.notifyJid,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const label = args.notifyJid || '(cleared — reverts to default channel)';
+    return {
+      content: [{ type: 'text' as const, text: `Notification channel set to ${label} for JID ${args.jid}.` }],
+    };
+  },
+);
+
 // --- Query helpers (request-response IPC) ---
 
 const QUERIES_DIR = path.join(IPC_DIR, 'queries');

@@ -51,19 +51,27 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
-/** Send a notification message to the first non-thread JID for a given group folder. */
+/** Send a notification message for a group folder.
+ *  Prefers any entry with containerConfig.notifyJid set; falls back to first non-thread JID. */
 async function notifyGroup(
   deps: IpcDeps,
   groups: Record<string, RegisteredGroup>,
   sourceGroup: string,
   message: string,
 ): Promise<void> {
-  const entry = Object.entries(groups).find(
+  const folderEntries = Object.entries(groups).filter(
     ([jid, g]) => g.folder === sourceGroup && !jid.includes(':thread:'),
   );
-  if (!entry) return;
+  // Prefer an entry that explicitly declares a notifyJid override
+  const overrideEntry = folderEntries.find(
+    ([, g]) => g.containerConfig?.notifyJid,
+  );
+  const targetJid = overrideEntry
+    ? overrideEntry[1].containerConfig!.notifyJid!
+    : folderEntries[0]?.[0];
+  if (!targetJid) return;
   try {
-    await deps.sendMessage(entry[0], message);
+    await deps.sendMessage(targetJid, message);
   } catch (err) {
     logger.warn({ sourceGroup, err }, 'Failed to send group notification');
   }
@@ -265,6 +273,7 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     model?: string;
+    notifyJid?: string;
     // For ship_log / backlog
     itemId?: string;
     title?: string;
@@ -571,10 +580,17 @@ export async function processTaskIpc(
         const updatedConfig = {
           ...existing.containerConfig,
           ...(data.model ? { model: data.model } : {}),
+          ...(data.notifyJid !== undefined
+            ? { notifyJid: data.notifyJid || undefined }
+            : {}),
         };
         // If model is null/empty string, remove the key
         if (!data.model) {
           delete updatedConfig.model;
+        }
+        // If notifyJid is empty string, remove the key
+        if (data.notifyJid === '') {
+          delete updatedConfig.notifyJid;
         }
         deps.registerGroup(data.jid, {
           ...existing,
@@ -582,8 +598,12 @@ export async function processTaskIpc(
             Object.keys(updatedConfig).length > 0 ? updatedConfig : undefined,
         });
         logger.info(
-          { jid: data.jid, model: data.model || '(cleared)' },
-          'Group model updated',
+          {
+            jid: data.jid,
+            model: data.model || '(unchanged)',
+            notifyJid: data.notifyJid || '(unchanged)',
+          },
+          'Group config updated',
         );
       } else {
         logger.warn({ data }, 'set_group_model: missing jid');

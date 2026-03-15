@@ -52,6 +52,7 @@ export interface ContainerConfig {
   enableThreadSessions?: boolean; // Default true for Discord/Slack; set false to disable
   sessionIdleResetHours?: number; // Override global idle reset (0 = never auto-reset)
   threadSessionIdleHours?: number; // Override idle reset for thread sessions
+  notifyJid?: string; // Override channel for ship log / backlog notifications (e.g. a specific Slack channel JID)
 }
 
 export interface RegisteredGroup {
