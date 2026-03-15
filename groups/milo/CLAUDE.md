@@ -354,3 +354,38 @@ Keep descriptions concise but actionable — include what and why. Don't submit 
 ## Scheduling
 
 Use `schedule_task` MCP tool for recurring or one-off tasks. Prefer cron.jeffreykeyser.net for visibility.
+
+## Morning Briefing: Task Health Check
+
+As part of the morning briefing (daily), include a scheduler health summary. Query the NanoClaw database for task execution stats from the past 24 hours:
+
+```sql
+-- Overall counts
+SELECT
+  COUNT(*) as total,
+  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as failures
+FROM task_run_logs
+WHERE run_at > datetime('now', '-24 hours');
+
+-- Failed tasks (if any)
+SELECT task_id, error, run_at
+FROM task_run_logs
+WHERE run_at > datetime('now', '-24 hours') AND status = 'error'
+ORDER BY run_at DESC;
+
+-- Slow tasks (avg > 5 min)
+SELECT task_id, CAST(AVG(duration_ms) AS INTEGER) as avg_ms, MAX(duration_ms) as max_ms, COUNT(*) as runs
+FROM task_run_logs
+WHERE run_at > datetime('now', '-24 hours')
+GROUP BY task_id
+HAVING avg_ms > 300000 OR max_ms > 300000
+ORDER BY avg_ms DESC;
+```
+
+*Formatting rules:*
+- If no tasks ran: "No scheduled tasks ran in the last 24h."
+- If all succeeded: "All N tasks ran successfully." (one line, no details)
+- If failures exist: list each failed task name and error briefly
+- If slow tasks exist: mention them with avg duration
+- Keep it concise — this is one bullet in the briefing, not a report
