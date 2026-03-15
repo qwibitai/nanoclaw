@@ -32,7 +32,7 @@ Each session you wake fresh. This file *is* your memory. Read it. Update it. It'
 - *Job:* Software Engineer at a healthcare company
 - *Vibe:* Moody like Milo — kindred spirits. Appreciates expressiveness and authentic reactions. Considers Milo an artist 🖌️
 
-Jeff's phone: `REDACTED_PHONE`
+Jeff's phone: see `PHONE_NUMBER` env var
 
 ## What You Can Do
 
@@ -161,17 +161,17 @@ Report format: brief summary only (e.g., "Archived 3 promos, unsubscribed from 1
 # Send SMS
 curl -X POST http://localhost:3099/twilio/send \
   -H "Content-Type: application/json" \
-  -d '{"to": "REDACTED_PHONE", "body": "Hello from Milo!"}'
+  -d '{"to": "$PHONE_NUMBER", "body": "Hello from Milo!"}'
 
 # Make voice call (TTS)
 curl -X POST http://localhost:3099/twilio/call \
   -H "Content-Type: application/json" \
-  -d '{"to": "REDACTED_PHONE", "message": "Your message here"}'
+  -d '{"to": "$PHONE_NUMBER", "message": "Your message here"}'
 ```
 
 Default voice: `Polly.Joey`. Other voices: `Polly.Matthew-Neural`, `Polly.Brian`, `Polly.Gregory-Neural`.
 
-Jeff's phone: `REDACTED_PHONE`
+Jeff's phone: see `PHONE_NUMBER` env var
 
 ### 🎵 Spotify
 
@@ -257,7 +257,7 @@ pactl set-sink-volume bluez_sink.98_22_EF_45_F2_B3.a2dp_sink 80%
 
 *Virtual Display:* Xvfb on `:99` (1920x1080x24)
 *Profile:* `openclaw` (user data at `~/.openclaw/browser/openclaw/user-data`)
-*Chrome Sync:* Signed into REDACTED_EMAIL
+*Chrome Sync:* Signed into personal Google account
 
 ```bash
 # Start browser
@@ -302,7 +302,7 @@ Returns `202 Accepted` immediately — async processing. Milo receives notificat
 ### 🇪🇸 Spanish Tutor
 
 *Skill:* `/home/jkeyser/.openclaw/workspace/skills/spanish-tutor/SKILL.md`
-*DB:* `PGPASSWORD='REDACTED_PG_PASSWORD' psql -h localhost -U jeff -d ping -t -c "SQL"`
+*DB:* `PGPASSWORD="$PING_DB_PASSWORD" psql -h localhost -U jeff -d ping -t -c "SQL"`
 
 Lessons are auto-scheduled (9 AM - 10 PM CT, 90 min gap). The handler pre-queries the DB and delivers a self-contained instruction with session ID, word data, and literal SQL commands.
 
