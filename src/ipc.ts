@@ -17,6 +17,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendImage: (jid: string, imagePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -70,8 +71,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
+
+            // Atomically move file to processing dir to prevent double processing
+            const processingDir = path.join(ipcBaseDir, sourceGroup, 'processing');
+            fs.mkdirSync(processingDir, { recursive: true });
+            const processingPath = path.join(processingDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              fs.renameSync(filePath, processingPath);
+            } catch {
+              // File already moved by another poll cycle, skip
+              continue;
+            }
+
+            try {
+              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
@@ -90,8 +103,38 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (data.type === 'image' && data.chatJid && data.imagePath) {
+                // Authorization: verify this group can send to this chatJid
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  // Convert container path to host path
+                  // Container: /workspace/group/... -> Host: groups/{folder}/...
+                  let hostPath = data.imagePath as string;
+                  if (hostPath.startsWith('/workspace/group/')) {
+                    hostPath = path.join(DATA_DIR, '..', 'groups', sourceGroup, hostPath.replace('/workspace/group/', ''));
+                  } else if (hostPath.startsWith('/workspace/ipc/')) {
+                    hostPath = path.join(DATA_DIR, 'ipc', sourceGroup, hostPath.replace('/workspace/ipc/', ''));
+                  } else if (hostPath.startsWith('/workspace/')) {
+                    // Generic /workspace/ path - try to resolve relative to group
+                    hostPath = path.join(DATA_DIR, '..', 'groups', sourceGroup, hostPath.replace('/workspace/', ''));
+                  }
+
+                  await deps.sendImage(data.chatJid, hostPath, data.caption);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, imagePath: hostPath },
+                    'IPC image sent',
+                  );
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC image attempt blocked',
+                  );
+                }
               }
-              fs.unlinkSync(filePath);
+              fs.unlinkSync(processingPath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -100,7 +143,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
-                filePath,
+                processingPath,
                 path.join(errorDir, `${sourceGroup}-${file}`),
               );
             }
@@ -121,11 +164,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+
+            // Atomically move file to processing dir to prevent double processing
+            const processingDir = path.join(ipcBaseDir, sourceGroup, 'processing');
+            fs.mkdirSync(processingDir, { recursive: true });
+            const processingPath = path.join(processingDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              fs.renameSync(filePath, processingPath);
+            } catch {
+              // File already moved by another poll cycle, skip
+              continue;
+            }
+
+            try {
+              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
-              fs.unlinkSync(filePath);
+              fs.unlinkSync(processingPath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -134,7 +189,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
-                filePath,
+                processingPath,
                 path.join(errorDir, `${sourceGroup}-${file}`),
               );
             }

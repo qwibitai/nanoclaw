@@ -17,6 +17,12 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
+import {
+  isVoiceMessage,
+  transcribeAudioMessage,
+  isImageMessage,
+  downloadImageToFile,
+} from '../transcription.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import {
@@ -201,12 +207,42 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          let content =
             normalized.conversation ||
             normalized.extendedTextMessage?.text ||
             normalized.imageMessage?.caption ||
             normalized.videoMessage?.caption ||
             '';
+
+          // Handle image messages — download and pass file path to agent
+          if (isImageMessage(msg)) {
+            try {
+              const groupEntry = groups[chatJid];
+              const imagePath = await downloadImageToFile(msg, this.sock, groupEntry.folder);
+              if (imagePath) {
+                const caption = content ? ` ${content}` : '';
+                content = `[Photo: ${imagePath}]${caption}`;
+              } else if (!content) {
+                content = '[Photo - download failed]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Image download failed');
+              if (!content) content = '[Photo - download failed]';
+            }
+          }
+
+          // Handle voice messages — transcribe and deliver as text
+          if (!content && isVoiceMessage(msg)) {
+            try {
+              const transcript = await transcribeAudioMessage(msg, this.sock);
+              if (transcript) {
+                content = `[Voice: ${transcript}]`;
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription failed');
+              content = '[Voice Message - transcription unavailable]';
+            }
+          }
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           if (!content) continue;
