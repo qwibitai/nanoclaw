@@ -167,7 +167,12 @@ function buildVolumeMounts(
   // (with token refresh if needed) then bind-mounted read-only into the container.
   // This overlays the session dir mount above, giving the container a fresh token
   // without writing into potentially root-owned session directories.
-  const credStagingPath = path.join(DATA_DIR, 'credentials', group.folder, '.credentials.json');
+  const credStagingPath = path.join(
+    DATA_DIR,
+    'credentials',
+    group.folder,
+    '.credentials.json',
+  );
   if (fs.existsSync(credStagingPath)) {
     mounts.push({
       hostPath: credStagingPath,
@@ -190,10 +195,26 @@ function buildVolumeMounts(
   // Mount user directories for persistent research output, inputs, and workspaces
   const homeDir = process.env.HOME || '/home/node';
   const userMounts: VolumeMount[] = [
-    { hostPath: path.join(homeDir, 'notes'), containerPath: '/home/node/notes', readonly: false },
-    { hostPath: path.join(homeDir, 'inputs'), containerPath: '/home/node/inputs', readonly: true },
-    { hostPath: path.join(homeDir, 'workspaces'), containerPath: '/home/node/workspaces', readonly: false },
-    { hostPath: path.join(homeDir, 'projects'), containerPath: '/home/node/projects', readonly: false },
+    {
+      hostPath: path.join(homeDir, 'notes'),
+      containerPath: '/home/node/notes',
+      readonly: false,
+    },
+    {
+      hostPath: path.join(homeDir, 'inputs'),
+      containerPath: '/home/node/inputs',
+      readonly: true,
+    },
+    {
+      hostPath: path.join(homeDir, 'workspaces'),
+      containerPath: '/home/node/workspaces',
+      readonly: false,
+    },
+    {
+      hostPath: path.join(homeDir, 'projects'),
+      containerPath: '/home/node/projects',
+      readonly: false,
+    },
   ];
   for (const um of userMounts) {
     if (fs.existsSync(um.hostPath)) {
@@ -336,7 +357,10 @@ export async function runContainerAgent(
   try {
     await copyFreshCredentials(stagedCredPath);
   } catch (err) {
-    logger.warn({ err, group: group.name }, 'Failed to refresh OAuth credentials, using existing');
+    logger.warn(
+      { err, group: group.name },
+      'Failed to refresh OAuth credentials, using existing',
+    );
   }
 
   const mounts = buildVolumeMounts(group, input.isMain);

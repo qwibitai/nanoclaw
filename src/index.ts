@@ -9,7 +9,10 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { ensureValidOAuthCredentials, startCredentialProxy } from './credential-proxy.js';
+import {
+  ensureValidOAuthCredentials,
+  startCredentialProxy,
+} from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -485,7 +488,9 @@ async function main(): Promise<void> {
     try {
       const creds = await ensureValidOAuthCredentials();
       if (creds) {
-        const expiresIn = Math.round((creds.expiresAt - Date.now()) / 1000 / 60);
+        const expiresIn = Math.round(
+          (creds.expiresAt - Date.now()) / 1000 / 60,
+        );
         logger.info({ expiresIn }, 'OAuth token valid (expires in minutes)');
       }
     } catch (err) {
