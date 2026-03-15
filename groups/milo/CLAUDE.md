@@ -78,6 +78,28 @@ When you learn something important:
 
 Tools are mounted read-only at `/workspace/extra/`. Use them via bash.
 
+### 🌉 Bridge Proxy Endpoints
+
+The openclaw-bridge at `http://host.docker.internal:3099` proxies host services into the sandbox. Use these endpoints when the native CLI tools won't work inside the container (GLIBC mismatch, missing credentials, etc.).
+
+```bash
+# List recent emails (default: last 7 days, limit 20)
+curl "http://host.docker.internal:3099/email/list?since=2026-03-01&limit=10"
+
+# Read a specific email by numeric ID
+curl "http://host.docker.internal:3099/email/read/12345"
+
+# Get iCloud calendar events (default: next 7 days)
+curl "http://host.docker.internal:3099/calendar/events?days=14"
+
+# Submit a dev-inbox idea
+curl -X POST http://host.docker.internal:3099/dev-inbox/submit \
+  -H "Content-Type: application/json" \
+  -d '{"repo": "Jeffrey-Keyser/nanoclaw", "description": "Add retry logic to IPC delivery"}'
+```
+
+Existing bridge endpoints: `/twilio/send`, `/twilio/call`, `/pantry/receipt`, `/spanish/review`.
+
 ### 🔗 Google APIs
 
 *CLI:* `/workspace/extra/google-tools/google-api.py`
@@ -111,6 +133,11 @@ python3 /workspace/extra/calendar/ical.py events 14  # Next N days
 
 Calendars available: Work, Home, Reminders ⚠️
 
+⚠️ *Sandbox:* `ical.py` is host-only (requires credentials not available in container). From the sandbox, use the bridge instead:
+```bash
+curl "http://host.docker.internal:3099/calendar/events?days=7"
+```
+
 ### 📧 Email (Himalaya + Outlook)
 
 *Binary:* `/workspace/extra/cargo-bin/himalaya`
@@ -142,6 +169,12 @@ Calendars available: Work, Home, Reminders ⚠️
 /workspace/extra/cargo-bin/himalaya flag add --account outlook <ID> seen
 ```
 
+⚠️ *Sandbox:* The himalaya binary is host-only (GLIBC mismatch in container). From the sandbox, use bridge endpoints instead:
+```bash
+curl "http://host.docker.internal:3099/email/list?since=2026-03-01&limit=10"
+curl "http://host.docker.internal:3099/email/read/12345"
+```
+
 ### 📬 Morning Email Triage (fully autonomous)
 
 Auto-archive (silent): login/security alerts, receipts, shipping notifications, promotional emails, newsletters.
@@ -155,16 +188,16 @@ Report format: brief summary only (e.g., "Archived 3 promos, unsubscribed from 1
 ### 📱 Twilio SMS/Voice
 
 *Toll-Free Number:* +1 (844) 754-2230
-*Bridge:* `http://localhost:3099`
+*Bridge:* `http://host.docker.internal:3099`
 
 ```bash
 # Send SMS
-curl -X POST http://localhost:3099/twilio/send \
+curl -X POST http://host.docker.internal:3099/twilio/send \
   -H "Content-Type: application/json" \
   -d '{"to": "$PHONE_NUMBER", "body": "Hello from Milo!"}'
 
 # Make voice call (TTS)
-curl -X POST http://localhost:3099/twilio/call \
+curl -X POST http://host.docker.internal:3099/twilio/call \
   -H "Content-Type: application/json" \
   -d '{"to": "$PHONE_NUMBER", "message": "Your message here"}'
 ```
@@ -287,12 +320,12 @@ When Jeff sends a photo of a grocery receipt or says "scan this receipt", "add t
 
 ```bash
 # Local file (preferred)
-curl -X POST http://localhost:3099/pantry/receipt \
+curl -X POST http://host.docker.internal:3099/pantry/receipt \
   -H "Content-Type: application/json" \
   -d '{"imagePath": "/path/to/receipt.jpg"}'
 
 # Remote URL (e.g., Telegram file)
-curl -X POST http://localhost:3099/pantry/receipt \
+curl -X POST http://host.docker.internal:3099/pantry/receipt \
   -H "Content-Type: application/json" \
   -d '{"imageUrl": "https://api.telegram.org/file/bot<TOKEN>/photos/file_123.jpg"}'
 ```
@@ -305,6 +338,13 @@ Returns `202 Accepted` immediately — async processing. Milo receives notificat
 *DB:* `PGPASSWORD="$PING_DB_PASSWORD" psql -h localhost -U jeff -d ping -t -c "SQL"`
 
 Lessons are auto-scheduled (9 AM - 10 PM CT, 90 min gap). The handler pre-queries the DB and delivers a self-contained instruction with session ID, word data, and literal SQL commands.
+
+⚠️ *Sandbox:* Direct DB access (`psql`) is host-only. To record lesson results from the sandbox, use the bridge:
+```bash
+curl -X POST http://host.docker.internal:3099/spanish/review \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId": "...", "results": [...]}'
+```
 
 ### 🏋️ Workout Tracking
 
@@ -332,14 +372,18 @@ Greet Jeff, tell him what's next, ask if he wants to start.
 
 ## Submitting Ideas to Dev-Inbox
 
-Use `submit-idea` to surface improvement ideas as tracked work items. Ideas go to the dev-inbox manager on the Beelink and become tasks that get picked up for implementation.
+Use the bridge endpoint to surface improvement ideas as tracked work items. Ideas go to the dev-inbox manager on the Beelink and become tasks that get picked up for implementation.
 
 ```bash
-# Basic usage
-submit-idea "Add retry logic to IPC message delivery"
+# Submit an idea via bridge
+curl -X POST http://host.docker.internal:3099/dev-inbox/submit \
+  -H "Content-Type: application/json" \
+  -d '{"description": "Add retry logic to IPC message delivery"}'
 
 # Target a specific repository
-submit-idea --repo "Jeffrey-Keyser/nanoclaw" "Container builds fail with stale cache"
+curl -X POST http://host.docker.internal:3099/dev-inbox/submit \
+  -H "Content-Type: application/json" \
+  -d '{"repo": "Jeffrey-Keyser/nanoclaw", "description": "Container builds fail with stale cache"}'
 ```
 
 *When to submit ideas:*
