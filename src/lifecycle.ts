@@ -44,6 +44,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { connectWithBackoff, shouldSkipChannel } from './circuit-breaker.js';
 import type { AvailableGroup } from './container-runner.js';
 
 // --- Shared mutable state ---
@@ -258,7 +259,7 @@ export async function initApp(): Promise<void> {
     registeredGroups: () => state.registeredGroups,
   };
 
-  // Create and connect all registered channels.
+  // Create and connect all registered channels with circuit breaker.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -270,10 +271,26 @@ export async function initApp(): Promise<void> {
       continue;
     }
     channels.push(channel);
-    await channel.connect();
+
+    const connected = await connectWithBackoff(
+      channelName,
+      () => channel.connect(),
+    );
+    if (!connected) {
+      logger.warn(
+        { channel: channelName },
+        'Channel failed to connect after retries — circuit breaker tripped',
+      );
+    }
+  }
+
+  const connectedCount = channels.filter((ch) => ch.isConnected()).length;
+  if (connectedCount === 0 && channels.length > 0) {
+    logger.fatal('No channels connected — all circuit breakers tripped');
+    process.exit(1);
   }
   if (channels.length === 0) {
-    logger.fatal('No channels connected');
+    logger.fatal('No channels configured');
     process.exit(1);
   }
 
