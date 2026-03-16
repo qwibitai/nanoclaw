@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# feedback — File a bug report or feature request via IPC to the Feedback Registry
+# Usage: feedback --type <bug|feature> --title "<title>" --description "<description>" [--email "<email>"]
+set -euo pipefail
+
+IPC_DIR="${IPC_DIR:-/home/user/.ipc}"
+
+type=""
+title=""
+description=""
+email=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --type)
+      type="${2:-}"
+      [[ -z "$type" ]] && { echo "Error: --type requires a value (bug or feature)" >&2; exit 1; }
+      shift 2
+      ;;
+    --type=*)
+      type="${1#--type=}"
+      shift
+      ;;
+    --title)
+      title="${2:-}"
+      [[ -z "$title" ]] && { echo "Error: --title requires a value" >&2; exit 1; }
+      shift 2
+      ;;
+    --title=*)
+      title="${1#--title=}"
+      shift
+      ;;
+    --description)
+      description="${2:-}"
+      [[ -z "$description" ]] && { echo "Error: --description requires a value" >&2; exit 1; }
+      shift 2
+      ;;
+    --description=*)
+      description="${1#--description=}"
+      shift
+      ;;
+    --email)
+      email="${2:-}"
+      [[ -z "$email" ]] && { echo "Error: --email requires a value" >&2; exit 1; }
+      shift 2
+      ;;
+    --email=*)
+      email="${1#--email=}"
+      shift
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      echo "Unexpected argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Validate required fields
+if [[ -z "$type" ]]; then
+  echo "Error: --type is required (bug or feature)" >&2
+  exit 1
+fi
+if [[ "$type" != "bug" && "$type" != "feature" ]]; then
+  echo "Error: --type must be 'bug' or 'feature', got '$type'" >&2
+  exit 1
+fi
+if [[ -z "$title" ]]; then
+  echo "Error: --title is required" >&2
+  exit 1
+fi
+if [[ -z "$description" ]]; then
+  echo "Error: --description is required" >&2
+  exit 1
+fi
+
+# Build JSON payload
+json_args=(
+  --arg feedbackType "$type"
+  --arg title "$title"
+  --arg description "$description"
+)
+
+if [[ -n "$email" ]]; then
+  json_args+=(--arg email "$email")
+  json_template='{type: "feedback", feedbackType: $feedbackType, title: $title, description: $description, email: $email}'
+else
+  json_template='{type: "feedback", feedbackType: $feedbackType, title: $title, description: $description}'
+fi
+
+payload=$(jq -n "${json_args[@]}" "$json_template")
+
+# Write IPC file
+tasks_dir="${IPC_DIR}/tasks"
+mkdir -p "$tasks_dir"
+filename="feedback-$(date +%s)-$$.json"
+echo "$payload" > "${tasks_dir}/${filename}"
+
+echo "Feedback submitted: [$type] $title"
