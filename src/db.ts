@@ -273,6 +273,20 @@ export function setLastGroupSync(): void {
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */
+export function deleteMessages(keys: { id: string; chatJid: string }[]): void {
+  const del = db.prepare(`DELETE FROM messages WHERE id = ? AND chat_jid = ?`);
+  const run = db.transaction(() => {
+    for (const { id, chatJid } of keys) {
+      del.run(id, chatJid);
+    }
+  });
+  run();
+}
+
+export function deleteAllMessages(chatJid: string): void {
+  db.prepare(`DELETE FROM messages WHERE chat_jid = ?`).run(chatJid);
+}
+
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_content, quoted_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
