@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  vi,
+  afterEach,
+} from 'vitest';
 
 // --- Mocks (must be before imports) ---
 
@@ -136,7 +144,10 @@ describe('FeishuChannel', () => {
     beforeAll(async () => {
       const { registerChannel } = await import('./registry.js');
       // Verify registration happened at module load time (before clearAllMocks runs)
-      expect(registerChannel).toHaveBeenCalledWith('feishu', expect.any(Function));
+      expect(registerChannel).toHaveBeenCalledWith(
+        'feishu',
+        expect.any(Function),
+      );
       capturedFactory = (registerChannel as any).mock.calls.find(
         (c: any) => c[0] === 'feishu',
       )?.[1];
@@ -158,6 +169,18 @@ describe('FeishuChannel', () => {
 
       delete process.env.FEISHU_APP_ID;
       delete process.env.FEISHU_APP_SECRET;
+    });
+  });
+
+  describe('ownsJid', () => {
+    it('owns feishu: JIDs', () => {
+      const channel = new FeishuChannel('id', 'secret', createTestOpts());
+      expect(channel.ownsJid('feishu:oc_abc123')).toBe(true);
+    });
+
+    it('does not own telegram JIDs', () => {
+      const channel = new FeishuChannel('id', 'secret', createTestOpts());
+      expect(channel.ownsJid('tg:123456')).toBe(false);
     });
   });
 });

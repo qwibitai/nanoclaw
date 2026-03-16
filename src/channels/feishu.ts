@@ -47,8 +47,8 @@ export class FeishuChannel implements Channel {
     return this.connected;
   }
 
-  ownsJid(_jid: string): boolean {
-    throw new Error('Not implemented');
+  ownsJid(jid: string): boolean {
+    return jid.startsWith('feishu:');
   }
 
   async disconnect(): Promise<void> {
