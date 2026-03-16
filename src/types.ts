@@ -27,8 +27,14 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface McpCredentialMount {
+  hostPath: string; // Absolute path on host (supports ~ for home), e.g. ~/.gmail-mcp
+  name?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/mcp-credentials/{name}
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
+  mcpCredentialMounts?: McpCredentialMount[]; // MCP server credential directories (bypasses additionalMounts security blocklist)
   timeout?: number; // Default: 300000 (5 minutes)
 }
 

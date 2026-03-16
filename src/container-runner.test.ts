@@ -97,8 +97,14 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  buildVolumeMounts,
+  runContainerAgent,
+  ContainerOutput,
+  VolumeMount,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import fsActual from 'fs';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -217,5 +223,143 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('buildVolumeMounts MCP credential mounts', () => {
+  const mockedFs = vi.mocked(fsActual);
+
+  beforeEach(() => {
+    // existsSync returns true for MCP credential paths
+    mockedFs.existsSync.mockImplementation((p: fsActual.PathLike) => {
+      const s = String(p);
+      if (s.includes('.gmail-mcp') || s.includes('.x-mcp')) return true;
+      return false;
+    });
+    mockedFs.mkdirSync.mockReturnValue(undefined);
+    mockedFs.writeFileSync.mockReturnValue(undefined);
+    mockedFs.readdirSync.mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('includes MCP credential mounts for interactive containers', () => {
+    const group: RegisteredGroup = {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: new Date().toISOString(),
+      containerConfig: {
+        mcpCredentialMounts: [
+          { hostPath: '~/.gmail-mcp' },
+          { hostPath: '~/.x-mcp', name: 'x-credentials' },
+        ],
+      },
+    };
+
+    const mounts = buildVolumeMounts(group, false);
+    const mcpMounts = mounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+
+    expect(mcpMounts).toHaveLength(2);
+    expect(mcpMounts[0].containerPath).toBe(
+      '/workspace/mcp-credentials/.gmail-mcp',
+    );
+    expect(mcpMounts[0].readonly).toBe(true);
+    expect(mcpMounts[1].containerPath).toBe(
+      '/workspace/mcp-credentials/x-credentials',
+    );
+    expect(mcpMounts[1].readonly).toBe(true);
+  });
+
+  it('includes MCP credential mounts for scheduled-task containers', () => {
+    const group: RegisteredGroup = {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: new Date().toISOString(),
+      containerConfig: {
+        mcpCredentialMounts: [{ hostPath: '~/.gmail-mcp' }],
+      },
+    };
+
+    // isMain=true simulates the typical scheduled-task invocation path
+    const mounts = buildVolumeMounts(group, true);
+    const mcpMounts = mounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+
+    expect(mcpMounts).toHaveLength(1);
+    expect(mcpMounts[0].containerPath).toBe(
+      '/workspace/mcp-credentials/.gmail-mcp',
+    );
+    expect(mcpMounts[0].readonly).toBe(true);
+  });
+
+  it('skips MCP credential mounts when host path does not exist', () => {
+    mockedFs.existsSync.mockReturnValue(false);
+
+    const group: RegisteredGroup = {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: new Date().toISOString(),
+      containerConfig: {
+        mcpCredentialMounts: [{ hostPath: '~/.nonexistent-mcp' }],
+      },
+    };
+
+    const mounts = buildVolumeMounts(group, false);
+    const mcpMounts = mounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+
+    expect(mcpMounts).toHaveLength(0);
+  });
+
+  it('produces identical MCP mounts for interactive and scheduled paths', () => {
+    const group: RegisteredGroup = {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: new Date().toISOString(),
+      containerConfig: {
+        mcpCredentialMounts: [
+          { hostPath: '~/.gmail-mcp' },
+          { hostPath: '~/.x-mcp', name: 'x-creds' },
+        ],
+      },
+    };
+
+    const interactiveMounts = buildVolumeMounts(group, false);
+    const scheduledMounts = buildVolumeMounts(group, false);
+
+    const interactiveMcp = interactiveMounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+    const scheduledMcp = scheduledMounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+
+    expect(interactiveMcp).toEqual(scheduledMcp);
+  });
+
+  it('works when no MCP credential mounts are configured', () => {
+    const group: RegisteredGroup = {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: new Date().toISOString(),
+    };
+
+    const mounts = buildVolumeMounts(group, false);
+    const mcpMounts = mounts.filter((m) =>
+      m.containerPath.startsWith('/workspace/mcp-credentials/'),
+    );
+
+    expect(mcpMounts).toHaveLength(0);
   });
 });
