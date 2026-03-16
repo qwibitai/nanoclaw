@@ -526,11 +526,31 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
+    // Monitor container lifecycle events so we can identify WHO sends SIGTERM.
+    // This runs in the background and is killed when the container exits.
+    const eventsProc = spawn(
+      CONTAINER_RUNTIME_BIN,
+      [
+        'events',
+        '--filter',
+        `container=${containerName}`,
+        '--format',
+        '{{.Time}} {{.Action}} {{json .Actor.Attributes}}',
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    let dockerEvents = '';
+    eventsProc.stdout.on('data', (data) => {
+      dockerEvents += data.toString();
+    });
+
     container.on('close', () => {
       clearTimeout(timeout);
+      eventsProc.kill();
 
       // Get actual container exit code (docker logs exit code is always 0/1)
       let code: number | null = null;
+      let inspectData = '';
       try {
         const raw = execSync(
           `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='{{.State.ExitCode}}'`,
@@ -540,6 +560,34 @@ export async function runContainerAgent(
         if (isNaN(code)) code = 1;
       } catch {
         code = 1;
+      }
+
+      // On unexpected SIGTERM (code 143), gather detailed diagnostics
+      if (code === 143) {
+        try {
+          inspectData = execSync(
+            `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='` +
+              `OOMKilled={{.State.OOMKilled}} ` +
+              `StartedAt={{.State.StartedAt}} ` +
+              `FinishedAt={{.State.FinishedAt}} ` +
+              `ExitCode={{.State.ExitCode}} ` +
+              `Error={{.State.Error}} ` +
+              `Pid={{.State.Pid}}'`,
+            { encoding: 'utf-8', timeout: 5000 },
+          ).trim();
+        } catch {
+          inspectData = 'inspect failed';
+        }
+        logger.error(
+          {
+            group: group.name,
+            containerName,
+            dockerEvents: dockerEvents.trim(),
+            inspectData,
+            duration: Date.now() - startTime,
+          },
+          'Container received SIGTERM (exit 143) — diagnostics attached',
+        );
       }
 
       // Clean up container and temp files
@@ -646,6 +694,12 @@ export async function runContainerAgent(
           ``,
           `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
           stdout,
+          ``,
+          `=== Docker Events ===`,
+          dockerEvents.trim() || '(none captured)',
+          ``,
+          `=== Container Inspect ===`,
+          inspectData || '(not collected)',
         );
       } else {
         logLines.push(
