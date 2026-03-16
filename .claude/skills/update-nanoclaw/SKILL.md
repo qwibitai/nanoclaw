@@ -11,7 +11,7 @@ Run `/update-nanoclaw` in Claude Code.
 
 ## How it works
 
-**Preflight**: checks for clean working tree (`git status --porcelain`). If `upstream` remote is missing, asks you for the URL (defaults to `https://github.com/wpcapaper/nanoclaw-oc.git`) and adds it. Detects the upstream branch name (`main` or `master`).
+**Preflight**: checks for clean working tree (`git status --porcelain`). If `upstream` remote is missing, asks you for the URL (defaults to `https://github.com/wpcapaper/nanoclaw-oc.git`) and adds it. Uses the `feat/oc-migration` branch for updates (our development branch).
 
 **Backup**: creates a timestamped backup branch and tag (`backup/pre-update-<hash>-<timestamp>`, `pre-update-<hash>-<timestamp>`) before touching anything. Safe to run multiple times.
 
@@ -80,17 +80,14 @@ Confirm remotes:
 - Add it: `git remote add upstream <user-provided-url>`
 - Then: `git fetch upstream --prune`
 
-Determine the upstream branch name:
+Use the development branch:
 
-- `git branch -r | grep upstream/`
-- If `upstream/main` exists, use `main`.
-- If only `upstream/master` exists, use `master`.
-- Otherwise, ask the user which branch to use.
-- Store this as UPSTREAM_BRANCH for all subsequent commands. Every command below that references `upstream/main` should use `upstream/$UPSTREAM_BRANCH` instead.
+- We use `feat/oc-migration` as our development branch (not main/master)
+- Set: `UPSTREAM_BRANCH=feat/oc-migration`
 
 Fetch:
 
-- `git fetch upstream --prune`
+- `git fetch upstream feat/oc-migration`
 
 # Step 1: Create a safety net
 

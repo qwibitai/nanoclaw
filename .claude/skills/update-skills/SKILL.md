@@ -66,7 +66,7 @@ For each `upstream/skill/<name>`:
 1. Check if the user has merged this skill branch before:
    - `git merge-base --is-ancestor upstream/skill/<name>~1 HEAD` — if this succeeds (exit 0) for any ancestor commit of the skill branch, the user has merged it at some point. A simpler check: `git log --oneline --merges --grep="skill/<name>" HEAD` to see if there's a merge commit referencing this branch.
    - Alternative: `MERGE_BASE=$(git merge-base HEAD upstream/skill/<name>)` — if the merge base is NOT the initial commit and the merge base includes commits unique to the skill branch, it has been merged.
-   - Simplest reliable check: compare `git merge-base HEAD upstream/skill/<name>` with `git merge-base HEAD upstream/main`. If the skill merge-base is strictly ahead of (or different from) the main merge-base, the user has merged this skill.
+   - Simplest reliable check: compare `git merge-base HEAD upstream/skill/<name>` with `git merge-base HEAD upstream/feat/oc-migration`. If the skill merge-base is strictly ahead of (or different from) the feat/oc-migration merge-base, the user has merged this skill.
 2. Check if there are new commits on the skill branch not yet in HEAD:
    - `git log --oneline HEAD..upstream/skill/<name>`
    - If this produces output, there are updates available.
