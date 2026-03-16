@@ -29,6 +29,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
+| `/add-sdlc` | Establish PR-based SDLC workflow for auditable, tracked changes |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
@@ -62,3 +63,45 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## SDLC Workflow
+
+**Every code change goes through a branch and PR.** No exceptions.
+
+### Making Changes
+
+1. **Create a branch** from `main`:
+   - `feature/*` — new capabilities or skills
+   - `fix/*` — bug fixes
+   - `config/*` — configuration or environment changes
+   - `docs/*` — documentation only
+
+2. **Make changes and commit** with clear, descriptive messages. Include context about WHY, not just what.
+
+3. **Push and open a PR** against `main`:
+   ```bash
+   git push -u origin <branch-name>
+   gh pr create --title "<short title>" --body "<what and why>"
+   ```
+
+4. **CI runs automatically** on PRs (typecheck, format, tests). Fix failures before merging.
+
+5. **Merge** when ready. Prefer squash-merge for clean history.
+
+### Rules
+
+- **Never commit directly to `main`.** Always use a branch + PR.
+- **Never force-push to `main`.** Use `git revert` to undo bad merges.
+- **Every PR must build clean** (`npm run build` + `npm test` pass).
+- **Write tests** for new functionality. Run `npx vitest run` before pushing.
+- **Tag releases** with semver when deploying: `git tag v<major>.<minor>.<patch>`.
+
+### When the Runtime Agent Wants Code Changes
+
+The agent running inside a container cannot directly modify the NanoClaw codebase. If the agent determines a code change is needed (new skill, bug fix, behavior change), it should:
+
+1. Write a detailed description of the desired change to `groups/main/requested-changes/` as a markdown file
+2. Include: what to change, why, which files, and expected behavior
+3. A human (or Claude Code session) picks up the request, creates a branch, implements it, and opens a PR
+
+This separation ensures the running agent never breaks itself.

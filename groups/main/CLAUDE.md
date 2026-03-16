@@ -244,3 +244,21 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Code Change Requests
+
+You are running inside a container and cannot directly modify the NanoClaw source code. This is intentional — it prevents you from breaking your own runtime.
+
+If you identify a needed code change (bug fix, new feature, skill improvement, behavior modification):
+
+1. Create a file in `requested-changes/` with a descriptive filename (e.g., `fix-timezone-handling.md`, `add-retry-logic.md`)
+2. Include in the file:
+   - **What**: Specific change needed (which files, what code)
+   - **Why**: The problem or improvement this addresses
+   - **Expected behavior**: How things should work after the change
+   - **Priority**: low / medium / high / critical
+3. The host will pick up these requests and implement them through the standard PR workflow
+
+Do NOT attempt to modify files in `src/`, `container/`, or other source directories. Your workspace is `groups/main/` and that is where you should write change requests.
