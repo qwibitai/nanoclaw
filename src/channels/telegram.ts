@@ -81,11 +81,20 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands
-      if (ctx.message.text.startsWith('/')) return;
+      // Strip the @bot_username suffix Telegram appends to slash commands in
+      // group chats (e.g. /remote-control@my_bot → /remote-control).
+      const rawText = ctx.message.text;
+      const normalizedText = rawText.replace(/^(\/\S+?)@\w+/, '$1');
+
+      // Skip commands handled natively by this bot via bot.command() to avoid
+      // double-handling. Any other slash commands (e.g. /remote-control sent
+      // to NanoClaw's dispatcher) are forwarded to onMessage as normal text.
+      const NATIVE_BOT_COMMANDS = new Set(['chatid', 'ping']);
+      const cmdName = normalizedText.match(/^\/(\w+)/)?.[1]?.toLowerCase();
+      if (cmdName && NATIVE_BOT_COMMANDS.has(cmdName)) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
-      let content = ctx.message.text;
+      let content = normalizedText;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
         ctx.from?.first_name ||
