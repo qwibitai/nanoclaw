@@ -188,3 +188,38 @@ export function addMapping(
   configCache.delete(pathOverride ?? groupFolder);
   logger.info({ real, pseudonym, groupFolder }, 'anonymize: added mapping');
 }
+
+/**
+ * Remove a mapping entry from the config file on disk.
+ * Reads the current file, deletes the key, writes it back.
+ * Invalidates the cache for the affected group.
+ */
+export function removeMapping(
+  groupFolder: string,
+  real: string,
+  pathOverride?: string,
+): boolean {
+  const filePath = pathOverride ?? configPath(groupFolder);
+
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    logger.warn(
+      { path: filePath },
+      'anonymize: cannot read config for removeMapping',
+    );
+    return false;
+  }
+
+  const mappings = (obj.mappings ?? {}) as Record<string, string>;
+  if (!(real in mappings)) return false;
+
+  delete mappings[real];
+  obj.mappings = mappings;
+
+  fs.writeFileSync(filePath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
+  configCache.delete(pathOverride ?? groupFolder);
+  logger.info({ real, groupFolder }, 'anonymize: removed mapping');
+  return true;
+}

@@ -54,6 +54,7 @@ import {
   deanonymize,
   loadAnonymizeConfig,
 } from './anonymize.js';
+import { handleAnonCommand, parseAnonIntent } from './anon-commands.js';
 import {
   checkForPii,
   formatPiiAlert,
@@ -719,6 +720,27 @@ async function main(): Promise<void> {
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // Anon commands — intercept before storage/anonymisation
+      if (/^anon\b/i.test(trimmed)) {
+        const group = registeredGroups[chatJid];
+        if (group) {
+          const anonConfig = loadAnonymizeConfig(group.folder);
+          if (anonConfig?.enabled) {
+            const text = trimmed.slice(4).trim();
+            const intent = parseAnonIntent(text, anonConfig.mappings);
+            handleAnonCommand(intent, group.folder, anonConfig)
+              .then((response) => {
+                const ch = findChannel(channels, chatJid);
+                if (ch) return ch.sendMessage(chatJid, response);
+              })
+              .catch((err) =>
+                logger.error({ err, chatJid }, 'Anon command error'),
+              );
+            return;
+          }
+        }
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
