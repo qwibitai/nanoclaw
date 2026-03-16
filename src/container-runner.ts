@@ -4,7 +4,6 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
@@ -220,29 +219,25 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Mount SSH key and config for git push access (read-only)
-  const sshKeyPath = path.join(os.homedir(), '.ssh', 'id_nanoclaw_andy');
-  const sshConfigPath = path.join(process.cwd(), 'data', 'ssh', 'config');
-  if (fs.existsSync(sshKeyPath)) {
-    args.push(...readonlyMountArgs(sshKeyPath, '/home/node/.ssh/id_ed25519'));
-    args.push(...readonlyMountArgs(sshKeyPath + '.pub', '/home/node/.ssh/id_ed25519.pub'));
-    args.push(...readonlyMountArgs(sshConfigPath, '/home/node/.ssh/config'));
-    const gitconfigPath = path.join(process.cwd(), 'data', 'ssh', 'gitconfig');
-    if (fs.existsSync(gitconfigPath)) {
-      args.push(...readonlyMountArgs(gitconfigPath, '/home/node/.gitconfig'));
-    }
-  }
-
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Pass MCP server credentials from .env to the container
-  const mcpEnv = readEnvFile(['MDB_MCP_CONNECTION_STRING', 'GITHUB_PERSONAL_ACCESS_TOKEN']);
+  const mcpEnv = readEnvFile([
+    'MDB_MCP_CONNECTION_STRING',
+    'GITHUB_PERSONAL_ACCESS_TOKEN',
+  ]);
   if (mcpEnv.MDB_MCP_CONNECTION_STRING) {
-    args.push('-e', `MDB_MCP_CONNECTION_STRING=${mcpEnv.MDB_MCP_CONNECTION_STRING}`);
+    args.push(
+      '-e',
+      `MDB_MCP_CONNECTION_STRING=${mcpEnv.MDB_MCP_CONNECTION_STRING}`,
+    );
   }
   if (mcpEnv.GITHUB_PERSONAL_ACCESS_TOKEN) {
-    args.push('-e', `GITHUB_PERSONAL_ACCESS_TOKEN=${mcpEnv.GITHUB_PERSONAL_ACCESS_TOKEN}`);
+    args.push(
+      '-e',
+      `GITHUB_PERSONAL_ACCESS_TOKEN=${mcpEnv.GITHUB_PERSONAL_ACCESS_TOKEN}`,
+    );
   }
 
   // Route API traffic through the credential proxy (containers never see real secrets)

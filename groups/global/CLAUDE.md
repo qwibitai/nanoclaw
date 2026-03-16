@@ -47,7 +47,7 @@ When the user references these names, use the corresponding GitHub repo. You hav
 | `api` | `BennyG93/boxing-data-api` | FastAPI REST API serving boxing data (fights, fighters, events, divisions, titles). MongoDB + Motor, published via RapidAPI |
 | `web` | `BennyG93/boxing-data-web` | Astro + Starlight site at boxing-data.com — marketing pages, 150+ blog posts, and API documentation |
 
-Each repo has a CLAUDE.md — read it with `mcp__github__get_file_contents` before working on that project. For larger tasks (multi-file changes), clone via SSH: `git clone git@github.com:BennyG93/<repo>.git /workspace/group/<name>`
+Each repo has a CLAUDE.md — read it with `mcp__github__get_file_contents` before working on that project. For larger tasks (multi-file changes), clone via HTTPS: `git clone https://x-access-token:${GITHUB_PERSONAL_ACCESS_TOKEN}@github.com/BennyG93/<repo>.git /workspace/group/<name>`
 
 ## MongoDB Access (Read-Only)
 
