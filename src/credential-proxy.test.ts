@@ -11,7 +11,7 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import { startCredentialProxy, _resetTokenCache } from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -52,6 +52,7 @@ describe('credential-proxy', () => {
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    _resetTokenCache();
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
@@ -68,6 +69,7 @@ describe('credential-proxy', () => {
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    _resetTokenCache();
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
