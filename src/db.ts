@@ -537,6 +537,14 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
+export function deleteSessionByFolder(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+}
+
+export function deleteMessagesByJid(chatJid: string): void {
+  db.prepare('DELETE FROM messages WHERE chat_jid = ?').run(chatJid);
+}
+
 // --- Registered group accessors ---
 
 export function getRegisteredGroup(

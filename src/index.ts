@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -27,6 +28,8 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteMessagesByJid,
+  deleteSessionByFolder,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -83,6 +86,19 @@ function loadState(): void {
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
+
+  // Clear stale sessions and messages for groups whose session directory no longer exists
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const sessionDir = path.join(DATA_DIR, 'sessions', group.folder);
+    if (!fs.existsSync(sessionDir)) {
+      deleteSessionByFolder(group.folder);
+      deleteMessagesByJid(jid);
+      logger.info(
+        { jid, folder: group.folder },
+        'Cleared stale session and messages (session dir missing)',
+      );
+    }
+  }
 }
 
 function saveState(): void {
