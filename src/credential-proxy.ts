@@ -13,9 +13,25 @@
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+
+/** Read the live OAuth token from Claude CLI credentials file, with fallback. */
+function getLiveOAuthToken(fallback: string | undefined): string | undefined {
+  try {
+    const credsPath = join(homedir(), '.claude', '.credentials.json');
+    const creds = JSON.parse(readFileSync(credsPath, 'utf8'));
+    const token = creds?.claudeAiOauth?.accessToken as string | undefined;
+    if (token) return token;
+  } catch {
+    // credentials file missing or unreadable — use fallback
+  }
+  return fallback;
+}
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -73,8 +89,9 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            const liveToken = getLiveOAuthToken(oauthToken);
+            if (liveToken) {
+              headers['authorization'] = `Bearer ${liveToken}`;
             }
           }
         }

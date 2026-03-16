@@ -166,7 +166,12 @@ function buildVolumeMounts(
   });
 
   // Per-group mnemon memory directory (isolated per group)
-  const groupMnemonDir = path.join(DATA_DIR, 'sessions', group.folder, '.mnemon');
+  const groupMnemonDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.mnemon',
+  );
   fs.mkdirSync(groupMnemonDir, { recursive: true });
   fs.chmodSync(groupMnemonDir, 0o777);
   mounts.push({

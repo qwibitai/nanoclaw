@@ -83,7 +83,10 @@ export function hostGatewayArgs(): string[] {
   if (os.platform() === 'linux') {
     if (isRootlessDocker()) {
       const hostIp = getHostLanIp();
-      logger.info({ hostIp }, 'Rootless Docker: using host LAN IP for container gateway');
+      logger.info(
+        { hostIp },
+        'Rootless Docker: using host LAN IP for container gateway',
+      );
       return [`--add-host=host.docker.internal:${hostIp}`];
     }
     return ['--add-host=host.docker.internal:host-gateway'];
