@@ -36,7 +36,7 @@ notify() {
 }
 
 notify_kanae() {
-  local MSG_DIR="$NC_DIR/ipc/messages"
+  local MSG_DIR="$NC_DIR/data/ipc/kanae/messages"
   mkdir -p "$MSG_DIR"
   local TS=$(date +%s%3N)
   local ESCAPED=$(printf '%s' "$1" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
@@ -134,11 +134,5 @@ notify_kanae "📋 host-task 执行完毕
 $SUMMARY
 
 请读取 /workspace/extra/host-tasks-done/$FILENAME 查看完整结果并审核。"
-
-# 通知用户
-notify "$STATUS_EMOJI host-task done: $TITLE
-⏱ ${DURATION}s
-
-$(echo "$OUTPUT" | tail -c 3000)"
 
 echo "$(date): Finished task: $FILENAME ($STATUS_TEXT, ${DURATION}s)" >> "$LOG"
