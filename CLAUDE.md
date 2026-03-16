@@ -94,8 +94,15 @@ These policies were learned from past mistakes. Follow them strictly.
 4. **Ask "harness or vertical?"** before writing any code. Domain-specific code (workflows, tools, business data) belongs in the vertical repo. Infrastructure code (channels, routing, containers) belongs here.
 5. **Put durable knowledge in CLAUDE.md and docs/, not just local memory.** `~/.claude/` memory is local to one machine and not synced to git. Any knowledge that future agents need must be in repo files.
 6. **Work agents get read-only tools.** They can USE tools but not modify them. Dev agents modify in worktrees.
-7. **Never claim something is fixed without testing.** Write the fix, TEST it (run the actual tool, verify the actual behavior), THEN commit. "It should work" is not a test. If you can't test locally, say so explicitly — don't pretend the fix is verified. For browser automation: run the script and verify login succeeds before merging.
+7. **Every code change MUST be tested before committing.** Run the code. Verify imports resolve. Execute the test suite. If no tests exist, write them. If the code can't run on the host (e.g., needs chromium), test module loading and error paths on the host, and verify full behavior in a container. A PR that merges untested code wastes more time than writing the tests. "It should work" is not a test.
 8. **Skill branches must stay clean.** A `skill/*` branch is for upstream contribution — it contains ONLY that skill's changes on top of upstream/main. NEVER merge our fork's main into a skill branch. To update a skill branch, cherry-pick only the relevant skill-related commits. Fixes go to main first, then cherry-pick to the skill branch.
+9. **Declare ALL dependencies.** Every `require()` or `import` must have a corresponding entry in the relevant `package.json`. Never assume a package is "globally available." Run `npm install` in a clean state and verify the code loads.
+10. **Prefer simpler dependency stacks.** Before adding wrapper/plugin packages, check if the base library can achieve the same with configuration. Fewer deps = fewer failure points.
+11. **Kaizen reflection on every fix-PR.** When a PR exists to fix a previous mistake, reflect on the root cause and propose a process improvement (new policy, test, or check) to prevent recurrence. Document the incident in the relevant policy entry. File future improvement proposals as issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen).
+
+## Kaizen Backlog
+
+Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). When a dev agent identifies an improvement that's out of scope for the current PR, file it there with the `kaizen` label. Include: what, why, when, how, reproduction steps, and verification criteria.
 
 ## Post-Merge: Deploy & Maintenance Policy
 
