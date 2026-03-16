@@ -21,6 +21,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/enforce-worktree-writes.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
