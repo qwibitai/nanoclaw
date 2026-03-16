@@ -113,20 +113,24 @@ After merging to main, classify the change and follow the appropriate procedure.
 
 ```
 1. CLASSIFY — what action is needed?
-2. NOTIFY leads BEFORE starting:
+2. PRE-FLIGHT checks:
+   - `git status` on main checkout — must be clean. If dirty, investigate (don't blindly stash).
+   - `docker ps` — verify Docker is available (if container build needed).
+   - `git pull origin main` — ensure main is up to date.
+3. NOTIFY leads BEFORE starting:
    "🔧 Maintenance: [what changed]. Building now, will restart when ready (~Xmin)."
-3. BUILD while still running (zero downtime during build):
+4. BUILD while still running (zero downtime during build):
    - npm install (if deps changed)
    - npm run build (if src/ changed)
    - ./container/build.sh (if Dockerfile changed)
-4. If build FAILS → DO NOT restart. Report:
+5. If build FAILS → DO NOT restart. Report:
    "❌ Build failed: [error]. Still running previous version."
    Stop and investigate.
-5. If build SUCCEEDS → report:
+6. If build SUCCEEDS → report:
    "🔧 Build done. Restarting now (~10s downtime)."
    Then restart the service.
-6. Verify health — can the service respond to messages?
-7. Report completion:
+7. Verify health — can the service respond to messages?
+8. Report completion:
    "✅ Maintenance complete. New capabilities: [list]."
    OR "❌ Restart failed: [error]. Investigating."
 ```
