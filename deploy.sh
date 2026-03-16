@@ -115,12 +115,10 @@ echo "  Build complete ✓"
 echo ""
 echo "[5/7] Building agent container..."
 
-if docker image inspect nanoclaw-agent:latest &>/dev/null; then
-  echo "  Container image already exists, skipping (run ./container/build.sh to rebuild)"
-else
-  bash "$PROJECT_ROOT/container/build.sh"
-  echo "  Container image built ✓"
-fi
+# Always rebuild to ensure image matches current code
+# (a stale/broken image from a failed build won't self-heal otherwise)
+bash "$PROJECT_ROOT/container/build.sh"
+echo "  Container image built ✓"
 
 # --- 6. Test container→host connectivity ---
 echo ""

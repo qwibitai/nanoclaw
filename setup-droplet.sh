@@ -121,6 +121,15 @@ if [ -d "${LOCAL_PROJECT}/groups" ]; then
   echo "  Groups ✓"
 fi
 
+# Session data (Claude Agent SDK state, IPC queues, per-group agent-runner)
+# Without this, agents lose conversation context and task history on migration
+if [ -d "${LOCAL_PROJECT}/data" ]; then
+  echo "  Copying session data..."
+  $SSH_CMD "mkdir -p ${DEPLOY_PATH}/data"
+  $SCP_CMD -r "${LOCAL_PROJECT}/data/" "${DROPLET_USER}@${DROPLET_IP}:${DEPLOY_PATH}/data/"
+  echo "  Session data ✓"
+fi
+
 # Mount allowlist config
 if [ -f "$HOME/.config/nanoclaw/mount-allowlist.json" ]; then
   echo "  Copying mount allowlist..."

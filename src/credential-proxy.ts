@@ -132,6 +132,26 @@ function refreshAccessToken(refreshToken: string): Promise<TokenCache> {
   });
 }
 
+async function refreshWithRetry(
+  refreshToken: string,
+  maxRetries = 3,
+): Promise<TokenCache> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await refreshAccessToken(refreshToken);
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+      logger.warn(
+        { attempt, maxRetries, delay, err },
+        'OAuth refresh failed, retrying',
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Unreachable');
+}
+
 async function getValidAccessToken(
   staticFallback: string | undefined,
 ): Promise<string | undefined> {
@@ -144,7 +164,7 @@ async function getValidAccessToken(
     if (needsRefresh && tokenCache.refreshToken) {
       // Use shared promise to prevent concurrent refreshes
       if (!refreshPromise) {
-        refreshPromise = refreshAccessToken(tokenCache.refreshToken)
+        refreshPromise = refreshWithRetry(tokenCache.refreshToken)
           .then((newCache) => {
             tokenCache = newCache;
             logger.info('OAuth access token refreshed successfully');

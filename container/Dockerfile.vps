@@ -64,15 +64,21 @@ RUN id -u node 2>/dev/null || useradd -m -s /bin/bash node
 WORKDIR /app
 COPY agent-runner/ ./
 
-# Install agent-runner dependencies
-RUN npm ci --ignore-scripts 2>/dev/null || npm install
+# Install agent-runner dependencies (don't suppress stderr — surface build errors)
+RUN npm ci --ignore-scripts || npm install
+
+# Pre-compile TypeScript at build time (saves 30s+ on every container startup)
+RUN npx tsc --outDir /app/dist && \
+    ln -s /app/node_modules /app/dist/node_modules
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra \
     /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
-# Create entrypoint script — sources Playwright env vars detected at build time
-RUN printf '#!/bin/bash\nset -e\n# Source Playwright chromium path (set during docker build)\n[ -f /etc/profile.d/playwright.sh ] && . /etc/profile.d/playwright.sh\ntrap '\''echo "[entrypoint] SIGTERM received at $(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.%%3NZ) (PID $$)" >&2'\'' TERM\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\nif [ ! -f /tmp/input.json ]; then\n  cat > /tmp/input.json\nfi\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Create entrypoint script — sources Playwright env vars, uses pre-compiled dist
+# If /app/src has been modified (per-group customizations mounted at runtime),
+# recompile; otherwise use the pre-built dist from docker build.
+RUN printf '#!/bin/bash\nset -e\n# Source Playwright chromium path (set during docker build)\n[ -f /etc/profile.d/playwright.sh ] && . /etc/profile.d/playwright.sh\ntrap '\''echo "[entrypoint] SIGTERM received at $(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.%%3NZ) (PID $$)" >&2'\'' TERM\n\n# Use pre-compiled dist unless agent-runner source was customized\nif [ /app/src -nt /app/dist/index.js ] 2>/dev/null; then\n  echo "[entrypoint] Recompiling agent-runner (source modified)..." >&2\n  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\n  ln -s /app/node_modules /tmp/dist/node_modules\n  chmod -R a-w /tmp/dist\nelse\n  ln -sf /app/dist /tmp/dist\nfi\n\nif [ ! -f /tmp/input.json ]; then\n  cat > /tmp/input.json\nfi\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership for non-root user
 RUN mkdir -p /tmp && chmod 1777 /tmp && mkdir -p /home/node && \
