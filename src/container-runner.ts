@@ -507,7 +507,12 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName, timeoutMs, elapsed: Date.now() - startTime },
+        {
+          group: group.name,
+          containerName,
+          timeoutMs,
+          elapsed: Date.now() - startTime,
+        },
         'Container timeout, stopping gracefully',
       );
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
