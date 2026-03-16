@@ -154,6 +154,43 @@ Skills we'd like to see:
 - LM Studio, Ollama, or any OpenAI-compatible LLM endpoint
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
+## Installation
+
+### 1. Install OpenCode CLI
+
+```bash
+npm install -g opencode
+```
+
+Or install via Homebrew:
+
+```bash
+brew install opencode-ai/tap/opencode
+```
+
+### 2. Install oh-my-opencode Plugin (Required)
+
+The [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode) plugin provides compaction hooks and context management features that NanoClaw depends on. Without it, context compaction (summarizing long conversations to stay within token limits) will not work properly.
+
+```bash
+opencode plugins add oh-my-opencode
+```
+
+The plugin configuration is already set up in `.opencode/oh-my-opencode.jsonc` with non-essential hooks disabled, keeping only the compaction-related functionality that NanoClaw needs.
+
+### 3. Verify Installation
+
+```bash
+opencode --version
+```
+
+Then start NanoClaw setup:
+
+```bash
+opencode
+/setup
+```
+
 ## Architecture
 
 ```
