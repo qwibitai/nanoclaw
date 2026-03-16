@@ -13,6 +13,8 @@ export interface PiiItem {
   text: string;
   type: string;
   suggestion: string;
+  /** Set when matchVariant detects this is likely a nickname of an existing mapping. */
+  variantOf?: string;
 }
 
 export interface PiiResult {
@@ -41,7 +43,7 @@ Message to analyze:
 ${anonymizedText}
 """
 
-If you find PII, respond with JSON: {"found": [{"text": "the exact PII text", "type": "name|date|address|phone|email|other", "suggestion": "a plausible pseudonym"}]}
+If you find PII, respond with JSON: {"found": [{"text": "the exact PII text", "type": "name|date|address|phone|email|other"}]}
 If no PII found, respond with: {"found": []}
 Respond with ONLY valid JSON, nothing else.`;
 
@@ -87,6 +89,19 @@ Respond with ONLY valid JSON, nothing else.`;
       (item) => !pseudonymSet.has(item.text.toLowerCase()),
     );
 
+    // Generate pseudonyms: matchVariant for nicknames, generatePseudonym for new people
+    const usedPseudonyms = new Set(Object.values(config.mappings));
+    for (const item of parsed.found) {
+      const match = matchVariant(item.text, config.mappings);
+      if (match) {
+        item.suggestion = match.pseudo;
+        item.variantOf = match.real;
+      } else {
+        item.suggestion = generatePseudonym(usedPseudonyms);
+        usedPseudonyms.add(item.suggestion); // prevent duplicates within batch
+      }
+    }
+
     if (parsed.found.length === 0) return null;
     return parsed;
   } catch (err: unknown) {
@@ -120,13 +135,88 @@ export function warmupPiiModel(config: AnonymizeConfig): void {
   });
 }
 
+/** Pool of nature/object themed pseudonyms. Clearly not real names. */
+const PSEUDONYM_POOL = [
+  'Ember',
+  'Azure',
+  'Coral',
+  'Sage',
+  'River',
+  'Cedar',
+  'Ivory',
+  'Jade',
+  'Pearl',
+  'Flint',
+  'Hazel',
+  'Onyx',
+  'Robin',
+  'Sterling',
+  'Wren',
+  'Briar',
+  'Echo',
+  'Fern',
+  'Harbor',
+  'Indigo',
+  'Lark',
+  'Maple',
+  'Nova',
+  'Orion',
+  'Piper',
+  'Reed',
+  'Sable',
+  'Terra',
+  'Vale',
+  'Willow',
+];
+
+/** Pick the next unused pseudonym from the pool. */
+export function generatePseudonym(usedPseudonyms: Set<string>): string {
+  const used = new Set([...usedPseudonyms].map((v) => v.toLowerCase()));
+  for (const name of PSEUDONYM_POOL) {
+    if (!used.has(name.toLowerCase())) return name;
+  }
+  // Fallback if pool exhausted
+  return `Person${usedPseudonyms.size + 1}`;
+}
+
+/**
+ * Deterministic variant detection using string similarity.
+ * Returns the existing pseudonym + real name if the detected name is likely
+ * a nickname or shortened form. Only matches on shared substring (≥3 chars)
+ * or shared prefix (≥3 chars). This avoids the 7B model's tendency to
+ * map every new name to the nearest existing pseudonym.
+ */
+export function matchVariant(
+  detectedName: string,
+  mappings: Record<string, string>,
+): { pseudo: string; real: string } | null {
+  const lower = detectedName.toLowerCase();
+  if (lower.length < 3) return null;
+  for (const [real, pseudo] of Object.entries(mappings)) {
+    const realLower = real.toLowerCase();
+    if (realLower.length < 3) continue;
+    // Check for any shared 3-char window between the two names.
+    // Catches: Livvy↔Olivia (share "liv"), Sim↔Simon (share "sim")
+    // Rejects: Claire↔Olivia (no shared 3-char window)
+    let matched = false;
+    for (let i = 0; i <= lower.length - 3; i++) {
+      if (realLower.includes(lower.slice(i, i + 3))) {
+        matched = true;
+        break;
+      }
+    }
+    if (matched) return { pseudo, real };
+  }
+  return null;
+}
+
 /** Format a PII alert message for the user. */
 export function formatPiiAlert(result: PiiResult): string {
   const items = result.found
-    .map(
-      (item) =>
-        `  - "${item.text}" (${item.type}) — suggest mapping to "${item.suggestion}"`,
-    )
+    .map((item) => {
+      const linkNote = item.variantOf ? ` (variant of ${item.variantOf})` : '';
+      return `  - "${item.text}" (${item.type})${linkNote} — suggest mapping to "${item.suggestion}"`;
+    })
     .join('\n');
 
   return [
