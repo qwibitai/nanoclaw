@@ -222,7 +222,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text, assistantNameFromTrigger(group.trigger));
+        await channel.sendMessage(
+          chatJid,
+          text,
+          assistantNameFromTrigger(group.trigger),
+        );
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -561,7 +565,9 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      const groupName = assistantNameFromTrigger(registeredGroups[jid]?.trigger || '');
+      const groupName = assistantNameFromTrigger(
+        registeredGroups[jid]?.trigger || '',
+      );
       if (text) await channel.sendMessage(jid, text, groupName);
     },
   });
@@ -569,7 +575,9 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      const groupName = assistantNameFromTrigger(registeredGroups[jid]?.trigger || '');
+      const groupName = assistantNameFromTrigger(
+        registeredGroups[jid]?.trigger || '',
+      );
       return channel.sendMessage(jid, text, groupName);
     },
     sendImage: (jid, imageUrl, caption) => {

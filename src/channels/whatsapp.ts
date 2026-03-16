@@ -21,7 +21,13 @@ import {
 } from '../config.js';
 import { transcribeAudio } from '../speech.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName, deleteMessages, deleteAllMessages } from '../db.js';
+import {
+  getLastGroupSync,
+  setLastGroupSync,
+  updateChatName,
+  deleteMessages,
+  deleteAllMessages,
+} from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -263,7 +269,10 @@ export class WhatsAppChannel implements Channel {
                   }
                 }
               } catch (err) {
-                logger.warn({ err, chatJid }, 'Failed to transcribe voice message');
+                logger.warn(
+                  { err, chatJid },
+                  'Failed to transcribe voice message',
+                );
               }
             }
 
@@ -341,15 +350,17 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, assistantName?: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    assistantName?: string,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
     const name = assistantName ?? ASSISTANT_NAME;
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${name}: ${text}`;
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER ? text : `${name}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });

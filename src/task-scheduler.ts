@@ -2,7 +2,11 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { SCHEDULER_POLL_INTERVAL, TIMEZONE, assistantNameFromTrigger } from './config.js';
+import {
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+  assistantNameFromTrigger,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,

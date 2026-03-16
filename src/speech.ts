@@ -33,7 +33,7 @@ export async function transcribeAudio(buffer: Buffer): Promise<string | null> {
   const [response] = await operation.promise();
 
   const transcription = response.results
-    ?.map(r => r.alternatives?.[0]?.transcript)
+    ?.map((r) => r.alternatives?.[0]?.transcript)
     .filter(Boolean)
     .join(' ')
     .trim();
