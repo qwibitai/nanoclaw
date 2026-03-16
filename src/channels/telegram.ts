@@ -20,6 +20,125 @@ import { registerChannel } from './registry.js';
 import { readEnvFile } from '../env.js';
 import { DATA_DIR, MAX_ATTACHMENT_SIZE } from '../config.js';
 import { logger } from '../logger.js';
+
+// ── Telegram HTML helpers ──
+
+/**
+ * Convert Markdown-style text to Telegram HTML.
+ * Handles code blocks first (to protect their content), then escapes
+ * bare HTML special chars, then applies inline formatting.
+ *
+ * Supported:
+ *   **bold**      → <b>bold</b>
+ *   *italic*      → <i>italic</i>
+ *   `code`        → <code>code</code>
+ *   ```block```   → <pre><code>block</code></pre>
+ *   # heading     → <b>heading</b>
+ *   bare &, <, >  → &amp;, &lt;, &gt;
+ */
+function markdownToHtml(text: string): string {
+  const placeholders: string[] = [];
+
+  // 1. Extract ```...``` fenced code blocks
+  let out = text.replace(/```(?:[a-zA-Z]*\n)?([\s\S]*?)```/g, (_, code) => {
+    const idx = placeholders.length;
+    const safe = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    placeholders.push(`<pre><code>${safe}</code></pre>`);
+    return `\x00PH${idx}\x00`;
+  });
+
+  // 2. Extract `inline code`
+  out = out.replace(/`([^`\n]+)`/g, (_, code) => {
+    const idx = placeholders.length;
+    const safe = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    placeholders.push(`<code>${safe}</code>`);
+    return `\x00PH${idx}\x00`;
+  });
+
+  // 3. Escape bare HTML special chars in the remaining text
+  out = out.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // 4. Apply Markdown → HTML formatting
+  out = out
+    .replace(/\*\*(.+?)\*\*/gs, '<b>$1</b>')
+    .replace(/\*(.+?)\*/gs, '<i>$1</i>')
+    .replace(/^#{1,3} (.+)$/gm, '<b>$1</b>');
+
+  // 5. Restore placeholders
+  out = out.replace(
+    /\x00PH(\d+)\x00/g,
+    (_, idx) => placeholders[parseInt(idx, 10)],
+  );
+
+  return out;
+}
+
+/** Strip HTML tags for plain-text fallback (used when Telegram rejects HTML) */
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<\/?(b|i|code|pre|br)\s*\/?>/gi, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+// Legacy functions kept for reference (no longer used for sending)
+// function escapeMarkdownV2(text: string): string { ... }
+// function escapeNonCode(text: string): string { ... }
+
+/** Split a long message into shorter chunks at paragraph boundaries */
+function splitMessage(text: string, maxLen = 2000): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  // Split by double newline (paragraphs) first
+  const paragraphs = text.split(/\n\n+/);
+  let current = '';
+
+  for (const para of paragraphs) {
+    if (current && current.length + 2 + para.length > maxLen) {
+      chunks.push(current.trim());
+      current = para;
+    } else {
+      current = current ? current + '\n\n' + para : para;
+    }
+  }
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+
+  // If any chunk is still too long, hard-split at newlines
+  const result: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= maxLen) {
+      result.push(chunk);
+    } else {
+      let remaining = chunk;
+      while (remaining.length > 0) {
+        if (remaining.length <= maxLen) {
+          result.push(remaining);
+          break;
+        }
+        const splitAt = remaining.lastIndexOf('\n', maxLen);
+        if (splitAt > maxLen * 0.3) {
+          result.push(remaining.slice(0, splitAt));
+          remaining = remaining.slice(splitAt + 1);
+        } else {
+          result.push(remaining.slice(0, maxLen));
+          remaining = remaining.slice(maxLen);
+        }
+      }
+    }
+  }
+
+  return result;
+}
 import type {
   Attachment,
   Channel,
@@ -478,6 +597,20 @@ class TelegramMultiBotChannel implements Channel {
       }
     }
 
+    // Last resort: use shinobu (main) bot for unregistered channels
+    if (!instance) {
+      instance = this.bots.get('shinobu');
+      if (!instance && this.bots.size > 0) {
+        instance = this.bots.values().next().value;
+      }
+      if (instance) {
+        logger.info(
+          { jid, botFolder: instance.folder },
+          'Using fallback bot for unregistered JID',
+        );
+      }
+    }
+
     if (!instance) {
       logger.error({ jid }, 'No bot found for JID');
       return;
@@ -486,12 +619,13 @@ class TelegramMultiBotChannel implements Channel {
     // Build send options — include message_thread_id for Forum/Topics support
     // Explicit messageThreadId (from IPC) takes priority over cached thread ID
     const threadId = messageThreadId ?? this.jidToThreadId.get(jid);
-    const sendOpts: Record<string, unknown> = { parse_mode: undefined };
+    const sendOpts: Record<string, unknown> = { parse_mode: 'HTML' };
     if (threadId) {
       sendOpts.message_thread_id = threadId;
     }
 
     // Helper: send with retry on transient errors (504, 429, network)
+    // Falls back to plain text if MarkdownV2 parsing fails (400)
     const sendWithRetry = async (
       targetChatId: string,
       chunk: string,
@@ -504,6 +638,26 @@ class TelegramMultiBotChannel implements Channel {
           return;
         } catch (err: any) {
           const code = err?.error_code || err?.status;
+
+          // HTML parse error → fallback to plain text (strip tags)
+          if (code === 400 && opts.parse_mode === 'HTML') {
+            logger.warn(
+              { chatId: targetChatId },
+              'HTML parse failed, falling back to plain text',
+            );
+            const plainOpts = { ...opts, parse_mode: undefined };
+            try {
+              await instance!.bot.api.sendMessage(
+                targetChatId,
+                stripHtmlTags(chunk),
+                plainOpts,
+              );
+            } catch {
+              // last resort: ignore
+            }
+            return;
+          }
+
           const isRetryable =
             code === 504 ||
             code === 502 ||
@@ -528,29 +682,14 @@ class TelegramMultiBotChannel implements Channel {
       }
     };
 
-    // Split long messages (Telegram limit: 4096 chars)
-    const MAX_LEN = 4096;
-    if (text.length <= MAX_LEN) {
-      await sendWithRetry(chatId, text, sendOpts);
-    } else {
-      // Split at newlines when possible
-      let remaining = text;
-      while (remaining.length > 0) {
-        let chunk: string;
-        if (remaining.length <= MAX_LEN) {
-          chunk = remaining;
-          remaining = '';
-        } else {
-          const splitAt = remaining.lastIndexOf('\n', MAX_LEN);
-          if (splitAt > MAX_LEN * 0.5) {
-            chunk = remaining.slice(0, splitAt);
-            remaining = remaining.slice(splitAt + 1);
-          } else {
-            chunk = remaining.slice(0, MAX_LEN);
-            remaining = remaining.slice(MAX_LEN);
-          }
-        }
-        await sendWithRetry(chatId, chunk, sendOpts);
+    // Split into shorter messages at paragraph boundaries, then send with HTML
+    const chunks = splitMessage(text);
+    for (let i = 0; i < chunks.length; i++) {
+      const htmlChunk = markdownToHtml(chunks[i]);
+      await sendWithRetry(chatId, htmlChunk, sendOpts);
+      // Small delay between chunks to preserve ordering
+      if (i < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, 300));
       }
     }
   }

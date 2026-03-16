@@ -15,6 +15,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
@@ -611,6 +612,25 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // When no sessionId is provided (new container), archive old session files
+  // so the SDK doesn't auto-resume the most recent one from disk.
+  if (!sessionId) {
+    const projectDir = path.join(os.homedir(), '.claude', 'projects', '-workspace-group');
+    if (fs.existsSync(projectDir)) {
+      const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+      if (jsonlFiles.length > 0) {
+        const archiveDir = path.join(projectDir, 'archived-sessions');
+        fs.mkdirSync(archiveDir, { recursive: true });
+        for (const file of jsonlFiles) {
+          const src = path.join(projectDir, file);
+          const dst = path.join(archiveDir, file);
+          try { fs.renameSync(src, dst); } catch { /* best effort */ }
+        }
+        log(`Archived ${jsonlFiles.length} old session files to prevent auto-resume`);
+      }
+    }
+  }
 
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
