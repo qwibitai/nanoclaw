@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import pino from 'pino';
 
+// Log rotation: The application writes structured JSON to stdout, which the
+// service manager (systemd/launchd/nohup) redirects to log files. Rotation is
+// handled externally via logrotate (Linux) or newsyslog (macOS), configured by
+// setup/service.ts. This keeps the logger simple and avoids adding a rotating
+// file transport dependency. See setup/service.ts for rotation config details.
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
   transport: { target: 'pino-pretty', options: { colorize: true } },
