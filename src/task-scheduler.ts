@@ -28,6 +28,28 @@ import { RegisteredGroup, ScheduledTask } from './types.js';
  *
  * Co-authored-by: @community-pr-601
  */
+
+// ─── Output Suppression (defense-in-depth for scheduled tasks) ────
+
+const DEFAULT_SUPPRESSION_PATTERNS = [
+  // Matches full "All bots healthy — no output needed" and variants
+  /^\s*all\s+bots?\s+(are\s+)?healthy[\s\u2014—\-]*(no\s+(output|alerts?|changes?|recoveries)\s+(needed|to\s+report)|nothing\s+to\s+report)?[.\s]*$/i,
+  // Matches standalone "nothing to report" / "no output needed"
+  /^\s*(no\s+(output|alerts?|changes?)\s+needed|nothing\s+to\s+report)[.\s]*$/i,
+];
+
+/**
+ * Check if a scheduled task output should be suppressed (i.e., not posted to Slack).
+ * Returns true if the output matches a "nothing to report" pattern.
+ * Used as defense-in-depth when the gate or prompt fails to prevent output.
+ */
+export function shouldSuppressOutput(text: string, extraPatterns?: RegExp[]): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true; // Empty output is always suppressed
+  const patterns = [...DEFAULT_SUPPRESSION_PATTERNS, ...(extraPatterns ?? [])];
+  return patterns.some(p => p.test(trimmed));
+}
+
 export function computeNextRun(task: ScheduledTask): string | null {
   if (task.schedule_type === 'once') return null;
 
@@ -185,9 +207,14 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          scheduleClose();
+          // Suppress "nothing to report" output from scheduled tasks (defense-in-depth)
+          if (task.schedule_type !== 'once' && shouldSuppressOutput(streamedOutput.result)) {
+            logger.info({ taskId: task.id }, 'Suppressed no-op scheduled task output');
+            scheduleClose();
+          } else {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            scheduleClose();
+          }
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
