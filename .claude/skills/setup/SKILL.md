@@ -39,7 +39,7 @@ Verify with `git remote -v`.
 If continue without fork: add upstream so they can still pull updates:
 
 ```bash
-git remote add upstream https://github.com/wpcapaper/nanoclaw.git
+git remote add upstream https://github.com/wpcapaper/nanoclaw-oc.git
 ```
 
 **Case B — `origin` points to user's fork, no `upstream` remote:**
@@ -47,14 +47,14 @@ git remote add upstream https://github.com/wpcapaper/nanoclaw.git
 Add upstream:
 
 ```bash
-git remote add upstream https://github.com/wpcapaper/nanoclaw.git
+git remote add upstream https://github.com/wpcapaper/nanoclaw-oc.git
 ```
 
 **Case C — both `origin` (user's fork) and `upstream` (qwibitai) exist:**
 
 Already configured. Continue.
 
-**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `wpcapaper/nanoclaw.git`.
+**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `wpcapaper/nanoclaw-oc.git`.
 
 ## 1. Bootstrap (Node.js + Dependencies)
 

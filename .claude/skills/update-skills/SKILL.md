@@ -48,7 +48,7 @@ Check remotes:
 
 If `upstream` is missing:
 
-- Ask the user for the upstream repo URL (default: `https://github.com/wpcapaper/nanoclaw.git`).
+- Ask the user for the upstream repo URL (default: `https://github.com/wpcapaper/nanoclaw-oc.git`).
 - `git remote add upstream <url>`
 
 Fetch:
