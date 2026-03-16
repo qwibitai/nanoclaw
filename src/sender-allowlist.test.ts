@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  isAutoTriggerSender,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -121,6 +122,7 @@ describe('isSenderAllowed', () => {
       default: { allow: '*', mode: 'trigger' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(isSenderAllowed('g1', 'anyone', cfg)).toBe(true);
   });
@@ -130,6 +132,7 @@ describe('isSenderAllowed', () => {
       default: { allow: [], mode: 'trigger' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(isSenderAllowed('g1', 'anyone', cfg)).toBe(false);
   });
@@ -139,6 +142,7 @@ describe('isSenderAllowed', () => {
       default: { allow: ['alice', 'bob'], mode: 'trigger' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(isSenderAllowed('g1', 'alice', cfg)).toBe(true);
     expect(isSenderAllowed('g1', 'eve', cfg)).toBe(false);
@@ -149,6 +153,7 @@ describe('isSenderAllowed', () => {
       default: { allow: '*', mode: 'trigger' },
       chats: { g1: { allow: ['alice'], mode: 'trigger' } },
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(isSenderAllowed('g1', 'bob', cfg)).toBe(false);
     expect(isSenderAllowed('g2', 'bob', cfg)).toBe(true);
@@ -161,6 +166,7 @@ describe('shouldDropMessage', () => {
       default: { allow: '*', mode: 'trigger' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(shouldDropMessage('g1', cfg)).toBe(false);
   });
@@ -170,6 +176,7 @@ describe('shouldDropMessage', () => {
       default: { allow: '*', mode: 'drop' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(shouldDropMessage('g1', cfg)).toBe(true);
   });
@@ -179,6 +186,7 @@ describe('shouldDropMessage', () => {
       default: { allow: '*', mode: 'trigger' },
       chats: { g1: { allow: '*', mode: 'drop' } },
       logDenied: true,
+      autoTriggerSenders: [],
     };
     expect(shouldDropMessage('g1', cfg)).toBe(true);
     expect(shouldDropMessage('g2', cfg)).toBe(false);
@@ -191,6 +199,7 @@ describe('isTriggerAllowed', () => {
       default: { allow: ['alice'], mode: 'trigger' },
       chats: {},
       logDenied: false,
+      autoTriggerSenders: [],
     };
     expect(isTriggerAllowed('g1', 'alice', cfg)).toBe(true);
   });
@@ -200,6 +209,7 @@ describe('isTriggerAllowed', () => {
       default: { allow: ['alice'], mode: 'trigger' },
       chats: {},
       logDenied: false,
+      autoTriggerSenders: [],
     };
     expect(isTriggerAllowed('g1', 'eve', cfg)).toBe(false);
   });
@@ -209,8 +219,72 @@ describe('isTriggerAllowed', () => {
       default: { allow: ['alice'], mode: 'trigger' },
       chats: {},
       logDenied: true,
+      autoTriggerSenders: [],
     };
     isTriggerAllowed('g1', 'eve', cfg);
     // Logger.debug is called — we just verify no crash; logger is a real pino instance
+  });
+});
+
+describe('isAutoTriggerSender', () => {
+  it('returns true for sender in autoTriggerSenders list', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+      autoTriggerSenders: ['5697720897', '123456'],
+    };
+    expect(isAutoTriggerSender('5697720897', cfg)).toBe(true);
+  });
+
+  it('returns false for sender not in autoTriggerSenders list', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+      autoTriggerSenders: ['5697720897'],
+    };
+    expect(isAutoTriggerSender('999999', cfg)).toBe(false);
+  });
+
+  it('returns false when autoTriggerSenders is empty', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+      autoTriggerSenders: [],
+    };
+    expect(isAutoTriggerSender('anyone', cfg)).toBe(false);
+  });
+});
+
+describe('loadSenderAllowlist autoTriggerSenders', () => {
+  it('defaults to empty array when not specified', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.autoTriggerSenders).toEqual([]);
+  });
+
+  it('loads autoTriggerSenders from config', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      autoTriggerSenders: ['5697720897', '123456'],
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.autoTriggerSenders).toEqual(['5697720897', '123456']);
+  });
+
+  it('filters non-string entries from autoTriggerSenders', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      autoTriggerSenders: ['valid', 123, null, 'also-valid'],
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.autoTriggerSenders).toEqual(['valid', 'also-valid']);
   });
 });

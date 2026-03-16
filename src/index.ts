@@ -67,6 +67,7 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import {
+  isAutoTriggerSender,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -356,8 +357,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        // Standard trigger: @Andy prefix from an allowed sender
+        (TRIGGER_PATTERN.test(m.content.trim()) &&
+          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
+        // Auto-trigger: leads/trusted senders activate without prefix
+        isAutoTriggerSender(m.sender, allowlistCfg),
     );
     if (!hasTrigger) return true;
   }
@@ -808,9 +812,12 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+                // Standard trigger: @Andy prefix from an allowed sender
+                (TRIGGER_PATTERN.test(m.content.trim()) &&
+                  (m.is_from_me ||
+                    isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
+                // Auto-trigger: leads/trusted senders activate without prefix
+                isAutoTriggerSender(m.sender, allowlistCfg),
             );
             if (!hasTrigger) continue;
           }

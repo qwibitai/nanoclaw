@@ -12,12 +12,15 @@ export interface SenderAllowlistConfig {
   default: ChatAllowlistEntry;
   chats: Record<string, ChatAllowlistEntry>;
   logDenied: boolean;
+  /** Senders who auto-trigger the agent without needing the @trigger prefix. */
+  autoTriggerSenders: string[];
 }
 
 const DEFAULT_CONFIG: SenderAllowlistConfig = {
   default: { allow: '*', mode: 'trigger' },
   chats: {},
   logDenied: true,
+  autoTriggerSenders: [],
 };
 
 function isValidEntry(entry: unknown): entry is ChatAllowlistEntry {
@@ -81,10 +84,18 @@ export function loadSenderAllowlist(
     }
   }
 
+  const autoTriggerSenders: string[] = [];
+  if (Array.isArray(obj.autoTriggerSenders)) {
+    for (const s of obj.autoTriggerSenders) {
+      if (typeof s === 'string') autoTriggerSenders.push(s);
+    }
+  }
+
   return {
     default: obj.default as ChatAllowlistEntry,
     chats,
     logDenied: obj.logDenied !== false,
+    autoTriggerSenders,
   };
 }
 
@@ -125,4 +136,15 @@ export function isTriggerAllowed(
     );
   }
   return allowed;
+}
+
+/**
+ * Check if a sender is in the autoTriggerSenders list.
+ * Auto-trigger senders activate the agent without needing the @trigger prefix.
+ */
+export function isAutoTriggerSender(
+  sender: string,
+  cfg: SenderAllowlistConfig,
+): boolean {
+  return cfg.autoTriggerSenders.includes(sender);
 }
