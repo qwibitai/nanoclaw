@@ -12,8 +12,10 @@ import {
   getStaleDoneCases,
   insertCase,
   pruneCaseWorkspace,
+  removeWorktreeLock,
   suggestDevCase,
   updateCase,
+  updateWorktreeLockHeartbeat,
 } from './cases.js';
 import type { Case } from './cases.js';
 import { AvailableGroup } from './container-runner.js';
@@ -175,12 +177,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
           { caseId: c.id, name: c.name, doneAt: c.done_at },
           'Auto-pruning stale done case',
         );
-        pruneCaseWorkspace(c);
-        updateCase(c.id, {
-          status: 'pruned',
-          pruned_at: new Date().toISOString(),
-          last_activity_at: new Date().toISOString(),
-        });
+        try {
+          pruneCaseWorkspace(c);
+          updateCase(c.id, {
+            status: 'pruned',
+            pruned_at: new Date().toISOString(),
+            last_activity_at: new Date().toISOString(),
+          });
+        } catch (pruneErr) {
+          logger.warn(
+            { caseId: c.id, err: pruneErr },
+            'Auto-prune skipped for case (locked or status guard)',
+          );
+        }
       }
       if (staleCases.length > 0) {
         logger.info(
@@ -496,6 +505,10 @@ export async function processTaskIpc(
       if (data.caseId) {
         const caseItem = getCaseById(data.caseId);
         if (caseItem && (isMain || caseItem.group_folder === sourceGroup)) {
+          // Release worktree lock when case is done
+          if (caseItem.worktree_path) {
+            removeWorktreeLock(caseItem.worktree_path);
+          }
           updateCase(data.caseId, {
             status: 'done',
             done_at: new Date().toISOString(),
@@ -578,12 +591,7 @@ export async function processTaskIpc(
       if (data.caseId) {
         const caseItem = getCaseById(data.caseId);
         if (caseItem && (isMain || caseItem.group_folder === sourceGroup)) {
-          if (caseItem.status !== 'done' && caseItem.status !== 'reviewed') {
-            logger.warn(
-              { caseId: data.caseId, status: caseItem.status },
-              'Cannot prune case — must be done or reviewed',
-            );
-          } else {
+          try {
             pruneCaseWorkspace(caseItem);
             updateCase(data.caseId, {
               status: 'pruned',
@@ -593,6 +601,11 @@ export async function processTaskIpc(
             logger.info(
               { caseId: data.caseId, sourceGroup },
               'Case pruned via IPC — workspace removed',
+            );
+          } catch (pruneErr) {
+            logger.warn(
+              { caseId: data.caseId, err: pruneErr },
+              'Case prune refused — status guard or lock prevented deletion',
             );
           }
         }
@@ -643,6 +656,7 @@ export async function processTaskIpc(
       const { workspacePath, worktreePath, branchName } = createCaseWorkspace(
         name,
         caseType,
+        id,
       );
 
       const newCase: Case = {
@@ -733,6 +747,39 @@ export async function processTaskIpc(
             .catch(() => {
               /* non-critical */
             });
+        }
+      }
+      break;
+
+    case 'case_heartbeat':
+      if (data.caseId) {
+        const caseItem = getCaseById(data.caseId);
+        if (caseItem && (isMain || caseItem.group_folder === sourceGroup)) {
+          if (caseItem.worktree_path) {
+            updateWorktreeLockHeartbeat(caseItem.worktree_path);
+          }
+          updateCase(data.caseId, {
+            last_activity_at: new Date().toISOString(),
+          });
+          logger.debug(
+            { caseId: data.caseId, sourceGroup },
+            'Case heartbeat updated',
+          );
+        }
+      }
+      break;
+
+    case 'case_unlock':
+      if (data.caseId) {
+        const caseItem = getCaseById(data.caseId);
+        if (caseItem && (isMain || caseItem.group_folder === sourceGroup)) {
+          if (caseItem.worktree_path) {
+            removeWorktreeLock(caseItem.worktree_path);
+            logger.info(
+              { caseId: data.caseId, sourceGroup },
+              'Case worktree unlocked via IPC',
+            );
+          }
         }
       }
       break;

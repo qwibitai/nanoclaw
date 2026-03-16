@@ -295,17 +295,24 @@ const WORKSPACES_DIR = path.join(DATA_DIR, 'case-workspaces');
 /**
  * Create the workspace for a case.
  * Dev cases get a git worktree; work cases get a scratch directory.
+ * For dev cases, a lock file is created in the worktree to prevent
+ * concurrent deletion.
  */
 export function createCaseWorkspace(
   caseName: string,
   caseType: CaseType,
+  caseId?: string,
 ): {
   workspacePath: string;
   worktreePath: string | null;
   branchName: string | null;
 } {
   if (caseType === 'dev') {
-    return createWorktree(caseName);
+    const result = createWorktree(caseName);
+    if (caseId) {
+      createWorktreeLock(result.worktreePath, caseId, caseName);
+    }
+    return result;
   } else {
     return createScratchDir(caseName);
   }
@@ -355,14 +362,130 @@ function createScratchDir(caseName: string): {
   return { workspacePath, worktreePath: null, branchName: null };
 }
 
+// ---------------------------------------------------------------------------
+// Worktree lock files — prevent concurrent deletion of active worktrees
+// ---------------------------------------------------------------------------
+
+const LOCK_FILENAME = '.worktree-lock.json';
+const STALE_LOCK_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+interface WorktreeLock {
+  case_id: string;
+  case_name: string;
+  started_at: string;
+  heartbeat: string;
+  pid: number;
+}
+
+/** Create a lock file in a worktree to signal active use. */
+export function createWorktreeLock(
+  worktreePath: string,
+  caseId: string,
+  caseName: string,
+): void {
+  const lock: WorktreeLock = {
+    case_id: caseId,
+    case_name: caseName,
+    started_at: new Date().toISOString(),
+    heartbeat: new Date().toISOString(),
+    pid: process.pid,
+  };
+  const lockPath = path.join(worktreePath, LOCK_FILENAME);
+  fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2));
+  logger.info({ caseId, worktreePath }, 'Worktree lock created');
+}
+
+/** Update the heartbeat on a worktree lock. */
+export function updateWorktreeLockHeartbeat(worktreePath: string): boolean {
+  const lockPath = path.join(worktreePath, LOCK_FILENAME);
+  try {
+    const lock: WorktreeLock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    lock.heartbeat = new Date().toISOString();
+    fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove a worktree lock file. */
+export function removeWorktreeLock(worktreePath: string): void {
+  const lockPath = path.join(worktreePath, LOCK_FILENAME);
+  try {
+    fs.unlinkSync(lockPath);
+    logger.info({ worktreePath }, 'Worktree lock removed');
+  } catch {
+    // Lock file may not exist — that's fine
+  }
+}
+
+/**
+ * Check if a worktree has an active (non-stale) lock.
+ * Returns the lock if active, null if no lock or stale.
+ */
+export function checkWorktreeLock(
+  worktreePath: string,
+): WorktreeLock | null {
+  const lockPath = path.join(worktreePath, LOCK_FILENAME);
+  try {
+    if (!fs.existsSync(lockPath)) return null;
+    const lock: WorktreeLock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    const heartbeatAge = Date.now() - new Date(lock.heartbeat).getTime();
+    if (heartbeatAge > STALE_LOCK_THRESHOLD_MS) {
+      logger.warn(
+        { worktreePath, lock, ageMinutes: Math.round(heartbeatAge / 60000) },
+        'Worktree lock is stale (heartbeat too old)',
+      );
+      return null;
+    }
+    return lock;
+  } catch {
+    return null;
+  }
+}
+
+/** Statuses that are safe to prune. */
+const PRUNABLE_STATUSES: Set<CaseStatus> = new Set([
+  'done',
+  'reviewed',
+  'pruned',
+]);
+
 /**
  * Prune a case's workspace.
  * For dev: removes worktree and optionally the branch.
  * For work: removes the scratch directory.
  * Preserves the DB record (metadata, cost, conclusion).
+ *
+ * Guards:
+ * 1. Case must be in a prunable status (done/reviewed/pruned).
+ * 2. No active worktree lock file (heartbeat < 30 min old).
  */
 export function pruneCaseWorkspace(c: Case): void {
+  // Guard 1: Status check
+  if (!PRUNABLE_STATUSES.has(c.status)) {
+    logger.error(
+      { caseId: c.id, name: c.name, status: c.status },
+      'REFUSED to prune case — status is not prunable (must be done/reviewed/pruned)',
+    );
+    throw new Error(
+      `Cannot prune case ${c.name}: status is '${c.status}' (must be done/reviewed/pruned)`,
+    );
+  }
+
   if (c.type === 'dev' && c.worktree_path) {
+    // Guard 2: Lock file check
+    const lock = checkWorktreeLock(c.worktree_path);
+    if (lock) {
+      logger.error(
+        { caseId: c.id, name: c.name, lock },
+        'REFUSED to prune case — worktree has active lock',
+      );
+      throw new Error(
+        `Cannot prune case ${c.name}: worktree is locked by agent (case_id=${lock.case_id}, heartbeat=${lock.heartbeat})`,
+      );
+    }
+
     try {
       execSync(
         `git worktree remove ${JSON.stringify(c.worktree_path)} --force`,
@@ -549,6 +672,7 @@ export function approveSuggestedCase(caseId: string): Case | null {
   const { workspacePath, worktreePath, branchName } = createCaseWorkspace(
     c.name,
     c.type,
+    caseId,
   );
 
   updateCase(caseId, {
