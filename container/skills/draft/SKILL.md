@@ -70,14 +70,29 @@ This is a full blog post draft. Follow these rules strictly:
 
 ## Step 5: Generate X/Tweet Draft
 
-Write `x-draft.md` in the thesis directory.
+Write `x-draft.md` in the thesis directory. This file contains **two tweets** separated by `---`:
 
-This is a tweet draft (max 280 characters). Rules:
-- Distill the thesis to one punchy thought
-- Match the casual, first-person voice from voice.md
-- No hashtags unless they serve the content
-- Should stand alone — don't assume the reader knows the blog post
-- Can be provocative or surprising
+1. **Hook tweet** (max 280 characters) — the standalone first tweet:
+   - Distill the thesis to one punchy thought
+   - Match the casual, first-person voice from voice.md
+   - No hashtags unless they serve the content
+   - Should stand alone — don't assume the reader knows the blog post
+   - Can be provocative or surprising
+   - **Never include the blog link** — that goes in the reply
+
+2. **Link reply** (max 280 characters) — the self-reply that shares the blog URL:
+   - Use a placeholder URL: `https://huynh.io/{slug}/`
+   - Add a forward-looking note or honest status update, not just "link here"
+   - Keep the same casual voice
+
+Format:
+```
+Hook tweet text here.
+
+---
+
+Reply with link and context here: https://huynh.io/{slug}/
+```
 
 ## Step 6: Humanize All Drafts
 
