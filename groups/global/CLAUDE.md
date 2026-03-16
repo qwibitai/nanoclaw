@@ -130,18 +130,18 @@ bash /workspace/extra/scripts/kb-query.sh "AI assessment" --year 2023 --no-llm  
 - 用户不需要手动标记任务归属
 
 ## 跨频道发送（仅 Shinobu）
-Shinobu 是 main group，可以通过写 IPC JSON 文件发消息到任何已注册频道或 channel。
+Shinobu 是 main group，可以通过写 IPC JSON 文件发消息到任何已注册频道或 topic。
 
 ```bash
-# 发送消息到「异世界日常」看板频道
+# 发送消息到「异世界日常」Topic（忍群内）
 cat > /workspace/ipc/messages/$(date +%s)-kanban.json << 'IPCEOF'
-{"type":"message","chatJid":"tg:-1003896061843","text":"消息内容","sender":"shinobu"}
+{"type":"message","chatJid":"tg:-1003863760557","text":"消息内容","sender":"shinobu","message_thread_id":778}
 IPCEOF
 ```
 
-看板频道 JID: `tg:-1003896061843`（异世界日常）
+「异世界日常」Topic: 忍群 `tg:-1003863760557`，`message_thread_id: 778`
 
-用途：晨报/周报等经用户确认后，转发到看板频道存档。
+用途：晨报/周报等经用户确认后，发到「异世界日常」Topic 存档。
 
 ## Cross-Agent Coordination
 - 跨 Agent 信号写入 /workspace/extra/vault/cross-agent/alerts/
