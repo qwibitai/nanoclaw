@@ -43,6 +43,11 @@ import {
 } from './sender-allowlist.js';
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import { startCronSubscriber, stopCronSubscriber } from './cron-subscriber.js';
+import {
+  startDispatchLoop,
+  startStallDetector,
+  stopAgencyHqSubsystems,
+} from './agency-hq-dispatcher.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -177,6 +182,7 @@ export async function initApp(): Promise<void> {
     shutdownSkillRegistry();
     proxyServer.close();
     if (skillServer) skillServer.close();
+    await stopAgencyHqSubsystems();
     await stopCronSubscriber();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -326,6 +332,12 @@ export async function initApp(): Promise<void> {
   startSchedulerLoop(schedulerDeps);
   startCronSubscriber(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start cron subscriber'),
+  );
+  startDispatchLoop(schedulerDeps).catch((err) =>
+    logger.error({ err }, 'Failed to start dispatch loop'),
+  );
+  startStallDetector(schedulerDeps).catch((err) =>
+    logger.error({ err }, 'Failed to start stall detector'),
   );
   startIpcWatcher({
     sendMessage: (jid, text) => {

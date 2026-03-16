@@ -85,6 +85,15 @@ export const SOLO_VAULT_TTL = 5 * 60 * 1000; // 5 minute cache TTL
 export const RABBITMQ_URL =
   process.env.RABBITMQ_URL || 'amqp://localhost:5672';
 
+// Agency HQ integration for task dispatch and stall detection.
+// The dispatch loop polls for ready tasks and enqueues them for execution.
+// The stall detector finds in-progress tasks that haven't been updated.
+export const AGENCY_HQ_URL =
+  process.env.AGENCY_HQ_URL || 'http://localhost:3040';
+export const DISPATCH_LOOP_INTERVAL = 60_000;
+export const STALL_DETECTOR_INTERVAL = 15 * 60_000;
+export const STALL_THRESHOLD_MS = 15 * 60_000;
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
