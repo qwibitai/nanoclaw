@@ -69,17 +69,23 @@ Messages and task operations are verified against group identity:
 | View all tasks              | ✓          | Own only       |
 | Manage other groups         | ✓          | ✗              |
 
-### 5. Credential Isolation (Credential Proxy)
+### 5. LLM Credential Handling
 
-Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
+**Note:** The Anthropic credential proxy was removed in the OpenCode migration. LLM credentials are now passed directly to containers.
 
-**How it works:**
+**Current Model:**
 
-1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
-2. Containers receive LLM endpoint URLs pointing to the proxy (e.g., `http://host.docker.internal:<port>/v1`) and placeholder API keys
-3. The SDK sends API requests to the proxy with the placeholder key
-4. The proxy strips placeholder auth, injects real credentials (`Authorization: Bearer` or custom headers), and forwards to the actual LLM endpoint
-5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+1. **Configuration via environment**: LLM endpoint and credentials are passed via `NANOCLAW_LLM_CONFIG` (JSON) or individual env vars
+2. **Container scope**: Credentials exist only in container environment during execution
+3. **SDK-managed**: OpenCode SDK (not agent code) handles credential usage
+4. **Ephemeral**: Containers are destroyed after each request; credentials don't persist on disk
+
+**Security considerations:**
+
+- Credentials are visible in container environment (unlike the previous proxy model)
+- However, agent code still cannot directly access credentials used by OpenCode SDK
+- For cloud providers with sensitive API keys, consider using local LLMs (LM Studio, Ollama) instead
+- Containers run with restricted filesystem access — agent code cannot read `/proc` or environment dumps
 
 **NOT Mounted:**
 
@@ -114,7 +120,6 @@ Real API credentials **never enter containers**. Instead, the host runs an HTTP 
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
-│  • Credential proxy (injects auth headers)                       │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Explicit mounts only, no secrets
@@ -123,7 +128,7 @@ Real API credentials **never enter containers**. Instead, the host runs an HTTP 
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • API calls routed through credential proxy                     │
-│  • No real credentials in environment or filesystem              │
+│  • LLM API calls (via OpenCode SDK)                              │
+│  • Credentials passed via environment (ephemeral)                │
 └──────────────────────────────────────────────────────────────────┘
 ```
