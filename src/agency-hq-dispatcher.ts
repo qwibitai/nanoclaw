@@ -121,8 +121,8 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
       log.error({ status: res.status, body }, 'Failed to fetch ready tasks');
       return;
     }
-    const data = (await res.json()) as { tasks?: AgencyHqTask[] };
-    tasks = data.tasks ?? [];
+    const json = (await res.json()) as { success: boolean; data: AgencyHqTask[] };
+    tasks = json.data ?? [];
   } catch (err) {
     log.error({ err }, 'Failed to fetch ready tasks from Agency HQ');
     return;
@@ -200,8 +200,8 @@ async function dispatchTask(
     try {
       const res = await agencyFetch(`/sprints/${task.sprint_id}`);
       if (res.ok) {
-        const sprint = (await res.json()) as AgencyHqSprint;
-        sprintGoal = sprint.goal;
+        const sprintJson = (await res.json()) as { success: boolean; data: AgencyHqSprint };
+        sprintGoal = sprintJson.data?.goal;
       }
     } catch (err) {
       log.warn({ err, sprintId: task.sprint_id }, 'Failed to fetch sprint');
@@ -305,8 +305,8 @@ async function detectStalledTasks(deps: SchedulerDependencies): Promise<void> {
       log.error({ status: res.status, body }, 'Failed to fetch in-progress tasks');
       return;
     }
-    const data = (await res.json()) as { tasks?: AgencyHqTask[] };
-    tasks = data.tasks ?? [];
+    const json = (await res.json()) as { success: boolean; data: AgencyHqTask[] };
+    tasks = json.data ?? [];
   } catch (err) {
     log.error({ err }, 'Failed to fetch in-progress tasks from Agency HQ');
     return;
