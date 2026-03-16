@@ -96,6 +96,13 @@ NEVER use markdown. Only use Telegram formatting:
 
 No ## headings. No [links](url).
 
+## David's School Schedule
+
+David's remote learning schedule (class ג'2 in 2025/26) is maintained on this Padlet:
+https://padlet.com/ortallevy567/2-ryqyf0c7z2j2n7mm
+
+Updated regularly by teacher אורטל לוי with daily Meet links and assignments.
+
 ## Tips & tricks
 
 In family calendar, "дыба" means Pilates classes (weird, I know)
