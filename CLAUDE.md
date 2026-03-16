@@ -100,6 +100,10 @@ These policies were learned from past mistakes. Follow them strictly.
 10. **Prefer simpler dependency stacks.** Before adding wrapper/plugin packages, check if the base library can achieve the same with configuration. Fewer deps = fewer failure points.
 11. **Kaizen reflection on every fix-PR.** When a PR exists to fix a previous mistake, reflect on the root cause and propose a process improvement (new policy, test, or check) to prevent recurrence. Document the incident in the relevant policy entry. File future improvement proposals as issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen).
 
+## Kaizen Backlog
+
+Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). When a dev agent identifies an improvement that's out of scope for the current PR, file it there with the `kaizen` label. Include: what, why, when, how, reproduction steps, and verification criteria.
+
 ## Post-Merge: Deploy & Maintenance Policy
 
 After merging to main, classify the change and follow the appropriate procedure. **Leads (Aviad/Liraz) MUST be notified** via Telegram at every stage.
