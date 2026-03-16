@@ -41,6 +41,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  maxTurns?: number;
 }
 
 export interface ContainerOutput {
@@ -199,6 +200,15 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Per-group attachments directory (downloaded files from Telegram)
+  const attachmentsDir = path.join(DATA_DIR, 'attachments', group.folder);
+  fs.mkdirSync(attachmentsDir, { recursive: true });
+  mounts.push({
+    hostPath: attachmentsDir,
+    containerPath: '/workspace/attachments',
+    readonly: true,
+  });
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -226,6 +236,9 @@ function buildContainerArgs(
     '-e',
     `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
+
+  // Point knowledge base scripts at host Ollama via the host gateway
+  args.push('-e', `OLLAMA_EMBED_URL=http://${CONTAINER_HOST_GATEWAY}:11434/api/embeddings`);
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
@@ -318,6 +331,10 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    container.stdin.on('error', () => {
+      // Ignore stdin errors — container may have exited before we finish writing.
+      // The 'close' or 'error' event on the container will handle cleanup.
+    });
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
 
@@ -367,7 +384,9 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(() => onOutput(parsed)).catch((err) => {
+              logger.error({ group: group.name, err }, 'Error in streaming onOutput callback');
+            });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -402,6 +421,12 @@ export async function runContainerAgent(
 
     let timedOut = false;
     let hadStreamingOutput = false;
+    let resolved = false;
+    const safeResolve = (result: ContainerOutput) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(result);
+    };
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
@@ -419,7 +444,7 @@ export async function runContainerAgent(
             { group: group.name, containerName, err },
             'Graceful stop failed, force killing',
           );
-          container.kill('SIGKILL');
+          try { container.kill('SIGKILL'); } catch { /* process already dead */ }
         }
       });
     };
@@ -460,8 +485,8 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
+          outputChain.catch(() => {}).then(() => {
+            safeResolve({
               status: 'success',
               result: null,
               newSessionId,
@@ -475,7 +500,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -554,7 +579,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -564,12 +589,12 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
+        outputChain.catch(() => {}).then(() => {
           logger.info(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
           );
-          resolve({
+          safeResolve({
             status: 'success',
             result: null,
             newSessionId,
@@ -607,7 +632,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        resolve(output);
+        safeResolve(output);
       } catch (err) {
         logger.error(
           {
@@ -619,7 +644,7 @@ export async function runContainerAgent(
           'Failed to parse container output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -633,7 +658,7 @@ export async function runContainerAgent(
         { group: group.name, containerName, error: err },
         'Container spawn error',
       );
-      resolve({
+      safeResolve({
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,

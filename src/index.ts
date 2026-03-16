@@ -3,7 +3,9 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  ATTACHMENT_MAX_AGE_DAYS,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -203,9 +205,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // React 👀 on each incoming message to signal "processing"
+  const messageIds = missedMessages.map((m) => m.id);
+  for (const mid of messageIds) {
+    channel.setReaction?.(chatJid, mid, '👀')?.catch(() => {});
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+
+  // After 60s without a reply, switch reaction to ⏳ so user knows it's still working
+  const slowTimer = setTimeout(() => {
+    if (!outputSentToUser) {
+      for (const mid of messageIds) {
+        channel.setReaction?.(chatJid, mid, '⏳')?.catch(() => {});
+      }
+    }
+  }, 60000);
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -220,6 +237,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        // Switch reactions to ✅ on first output
+        for (const mid of messageIds) {
+          channel.setReaction?.(chatJid, mid, '✅')?.catch(() => {});
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -235,6 +256,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   });
 
   await channel.setTyping?.(chatJid, false);
+  clearTimeout(slowTimer);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -254,7 +276,30 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
     );
+    // Notify user about the error with ❌ reaction
+    for (const mid of messageIds) {
+      channel.setReaction?.(chatJid, mid, '❌')?.catch(() => {});
+    }
     return false;
+  }
+
+  // Container finished without error but also sent nothing to the user —
+  // likely rate-limited or silent failure. Notify user and roll back.
+  if (!outputSentToUser) {
+    logger.warn(
+      { group: group.name },
+      'Container exited successfully but produced no output (possible rate limit)',
+    );
+    for (const mid of messageIds) {
+      channel.setReaction?.(chatJid, mid, '❌')?.catch(() => {});
+    }
+    await channel.sendMessage(
+      chatJid,
+      '⚠️ 刚才的消息处理失败了（可能是 API 限流），正在重试…',
+    );
+    lastAgentTimestamp[chatJid] = previousCursor;
+    saveState();
+    return false; // triggers retry via GroupQueue
   }
 
   return true;
@@ -315,6 +360,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        maxTurns: group.containerConfig?.maxTurns,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -415,6 +461,11 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
+          // React 👀 on incoming messages to signal "processing"
+          for (const gm of groupMessages) {
+            channel.setReaction?.(chatJid, gm.id, '👀')?.catch(() => {});
+          }
+
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
@@ -465,11 +516,50 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function cleanupOldAttachments(): void {
+  const attachmentsBase = path.join(DATA_DIR, 'attachments');
+  if (!fs.existsSync(attachmentsBase)) return;
+
+  const maxAgeMs = ATTACHMENT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - maxAgeMs;
+  let cleaned = 0;
+
+  try {
+    for (const folder of fs.readdirSync(attachmentsBase)) {
+      const folderPath = path.join(attachmentsBase, folder);
+      if (!fs.statSync(folderPath).isDirectory()) continue;
+
+      for (const file of fs.readdirSync(folderPath)) {
+        const filePath = path.join(folderPath, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile() && stat.mtimeMs < cutoff) {
+            fs.unlinkSync(filePath);
+            cleaned++;
+          }
+        } catch {
+          // Ignore individual file errors
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Error cleaning up attachments');
+  }
+
+  if (cleaned > 0) {
+    logger.info({ cleaned }, 'Cleaned up old attachments');
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Clean up old attachment files on startup and every 24 hours
+  cleanupOldAttachments();
+  setInterval(cleanupOldAttachments, 24 * 60 * 60 * 1000);
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -477,16 +567,114 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start paper-search MCP server (academic paper search for Homura)
+  const paperSearchScript = path.join(process.cwd(), 'scripts', 'paper-search-mcp.sh');
+  let paperSearchProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  if (fs.existsSync(paperSearchScript)) {
+    const { spawn: spawnProc } = await import('child_process');
+    paperSearchProc = spawnProc('bash', [paperSearchScript], {
+      stdio: 'ignore',
+      detached: false,
+    });
+    paperSearchProc.on('error', (err) => {
+      logger.warn({ err }, 'paper-search-mcp failed to start');
+    });
+    paperSearchProc.on('close', (code) => {
+      if (!shuttingDown) {
+        logger.warn({ code }, 'paper-search-mcp exited unexpectedly');
+      }
+    });
+    logger.info('paper-search MCP server started on port 3002');
+  }
+
+  // Start Google API proxy (wraps gws CLI for container access)
+  const googleProxyScript = path.join(process.cwd(), 'scripts', 'google-api-proxy.mjs');
+  let googleProxyProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  if (fs.existsSync(googleProxyScript)) {
+    const { spawn: spawnProc } = await import('child_process');
+    googleProxyProc = spawnProc('node', [googleProxyScript], {
+      stdio: 'ignore',
+      detached: false,
+    });
+    googleProxyProc.on('error', (err) => {
+      logger.warn({ err }, 'google-api-proxy failed to start');
+    });
+    googleProxyProc.on('close', (code) => {
+      if (!shuttingDown) {
+        logger.warn({ code }, 'google-api-proxy exited unexpectedly');
+      }
+    });
+    logger.info('Google API proxy started on port 3003');
+  }
+
+  // Start Teller API proxy (mTLS proxy for container access to bank data)
+  const tellerProxyScript = path.join(process.cwd(), 'scripts', 'teller-api-proxy.mjs');
+  let tellerProxyProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  if (fs.existsSync(tellerProxyScript)) {
+    const { spawn: spawnProc } = await import('child_process');
+    tellerProxyProc = spawnProc('node', [tellerProxyScript], {
+      stdio: 'ignore',
+      detached: false,
+    });
+    tellerProxyProc.on('error', (err) => {
+      logger.warn({ err }, 'teller-api-proxy failed to start');
+    });
+    tellerProxyProc.on('close', (code) => {
+      if (!shuttingDown) {
+        logger.warn({ code }, 'teller-api-proxy exited unexpectedly');
+      }
+    });
+    logger.info('Teller API proxy started on port 3004');
+  }
+
   // Graceful shutdown handlers
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return; // Prevent double shutdown
+    shuttingDown = true;
     logger.info({ signal }, 'Shutdown signal received');
-    proxyServer.close();
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
+
+    // Hard deadline: force exit after 15s no matter what
+    const forceTimer = setTimeout(() => {
+      logger.error('Shutdown timeout exceeded, forcing exit');
+      process.exit(1);
+    }, 15000);
+    forceTimer.unref();
+
+    try {
+      // 1. Stop accepting new connections & drain existing ones
+      await new Promise<void>((resolve) => {
+        proxyServer.close(() => resolve());
+        // Force-close keep-alive connections so port releases immediately
+        if ('closeAllConnections' in proxyServer) {
+          (proxyServer as any).closeAllConnections();
+        }
+      });
+
+      // 2. Kill containers (sends SIGTERM to docker CLI processes)
+      await queue.shutdown(10000);
+
+      // 3. Stop MCP sidecar services
+      if (paperSearchProc && !paperSearchProc.killed) {
+        try { paperSearchProc.kill(); } catch { /* ignore */ }
+      }
+      if (googleProxyProc && !googleProxyProc.killed) {
+        try { googleProxyProc.kill(); } catch { /* ignore */ }
+      }
+      if (tellerProxyProc && !tellerProxyProc.killed) {
+        try { tellerProxyProc.kill(); } catch { /* ignore */ }
+      }
+
+      // 4. Stop Telegram bots
+      for (const ch of channels) await ch.disconnect();
+    } catch (err) {
+      logger.error({ err }, 'Error during shutdown');
+    }
+
     process.exit(0);
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+  process.on('SIGINT', () => { shutdown('SIGINT'); });
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
@@ -558,10 +746,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, sender, messageThreadId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, sender, messageThreadId);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

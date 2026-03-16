@@ -16,7 +16,15 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    let inner = escapeXml(m.content);
+
+    if (m.attachments && m.attachments.length > 0) {
+      for (const a of m.attachments) {
+        inner += `\n<attachment filename="${escapeXml(a.filename)}" path="${escapeXml(a.containerPath)}" type="${escapeXml(a.mimeType)}" />`;
+      }
+    }
+
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${inner}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
@@ -38,10 +46,11 @@ export function routeOutbound(
   channels: Channel[],
   jid: string,
   text: string,
+  sender?: string,
 ): Promise<void> {
   const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
   if (!channel) throw new Error(`No channel for JID: ${jid}`);
-  return channel.sendMessage(jid, text);
+  return channel.sendMessage(jid, text, sender);
 }
 
 export function findChannel(

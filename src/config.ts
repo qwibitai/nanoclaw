@@ -67,6 +67,13 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Attachment limits
+export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024; // 20MB (Telegram Bot API limit)
+export const ATTACHMENT_MAX_AGE_DAYS = parseInt(
+  process.env.ATTACHMENT_MAX_AGE_DAYS || '7',
+  10,
+);
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

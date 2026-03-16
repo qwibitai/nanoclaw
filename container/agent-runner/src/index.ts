@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  maxTurns?: number;
 }
 
 interface ContainerOutput {
@@ -141,8 +142,9 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 
 /**
  * Archive the full transcript to conversations/ before compaction.
+ * Also write a session handover to Obsidian vault and extract key decisions.
  */
-function createPreCompactHook(assistantName?: string): HookCallback {
+function createPreCompactHook(assistantName?: string, groupFolder?: string): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
@@ -165,6 +167,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
+      // 1. Archive to conversations/ (existing behavior)
       const conversationsDir = '/workspace/group/conversations';
       fs.mkdirSync(conversationsDir, { recursive: true });
 
@@ -176,12 +179,99 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // 2. Write session handover to Obsidian vault
+      const handoverDir = '/workspace/extra/vault/system/session-handovers';
+      if (fs.existsSync('/workspace/extra/vault/system')) {
+        fs.mkdirSync(handoverDir, { recursive: true });
+
+        const agentName = groupFolder || 'unknown';
+        const handoverFilename = `${agentName}-${date}.md`;
+        const handoverPath = path.join(handoverDir, handoverFilename);
+
+        // Extract key decisions and status changes from conversation
+        const handoverContent = extractHandoverContent(messages, agentName, date, summary);
+
+        // Append to existing file if multiple compactions in one day
+        if (fs.existsSync(handoverPath)) {
+          fs.appendFileSync(handoverPath, '\n---\n\n' + handoverContent);
+        } else {
+          fs.writeFileSync(handoverPath, handoverContent);
+        }
+
+        log(`Session handover written to ${handoverPath}`);
+      }
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     return {};
   };
+}
+
+/**
+ * Extract key decisions, facts, and status changes from conversation messages
+ * for the session handover file.
+ */
+function extractHandoverContent(
+  messages: ParsedMessage[],
+  agentName: string,
+  date: string,
+  summary: string | null,
+): string {
+  const lines: string[] = [];
+  lines.push(`# Session Handover: ${agentName} — ${date}`);
+  lines.push('');
+  if (summary) {
+    lines.push(`## Summary`);
+    lines.push(summary);
+    lines.push('');
+  }
+
+  // Extract user decisions and agent actions
+  const decisions: string[] = [];
+  const actions: string[] = [];
+
+  for (const msg of messages) {
+    const text = msg.content.trim();
+    if (!text) continue;
+
+    if (msg.role === 'user') {
+      // Look for decision-like statements
+      if (text.length > 10 && text.length < 500) {
+        decisions.push(`- [user] ${text.slice(0, 200)}`);
+      }
+    } else if (msg.role === 'assistant') {
+      // Look for action statements (writing files, creating tasks, etc.)
+      const actionPatterns = [
+        /更新了|写入了|创建了|修改了|删除了|完成了|设置了/,
+        /Updated|Created|Modified|Wrote|Set|Changed/i,
+      ];
+      for (const pattern of actionPatterns) {
+        if (pattern.test(text)) {
+          const firstLine = text.split('\n')[0].slice(0, 200);
+          actions.push(`- [agent] ${firstLine}`);
+          break;
+        }
+      }
+    }
+  }
+
+  if (decisions.length > 0) {
+    lines.push('## Key User Messages');
+    // Keep last 10 to avoid huge files
+    lines.push(...decisions.slice(-10));
+    lines.push('');
+  }
+
+  if (actions.length > 0) {
+    lines.push('## Agent Actions');
+    lines.push(...actions.slice(-10));
+    lines.push('');
+  }
+
+  lines.push(`_Compacted at ${new Date().toISOString()}_`);
+  return lines.join('\n');
 }
 
 function sanitizeFilename(summary: string): string {
@@ -337,6 +427,7 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  const queryStartTime = Date.now();
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -365,6 +456,9 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let totalCostUsd = 0;
+  let totalTokens = 0;
+  let totalToolUses = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -392,6 +486,8 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: 'opus',
+      maxTurns: containerInput.maxTurns || 30,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -425,7 +521,7 @@ async function runQuery(
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName, containerInput.groupFolder)] }],
       },
     }
   })) {
@@ -449,8 +545,13 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const msg = message as any;
+      const textResult = msg.result ?? null;
+      // Track usage from result messages
+      if (msg.total_cost_usd) totalCostUsd += msg.total_cost_usd;
+      if (msg.usage?.total_tokens) totalTokens += msg.usage.total_tokens;
+      if (msg.usage?.tool_uses) totalToolUses += msg.usage.tool_uses;
+      log(`Result #${resultCount}: subtype=${message.subtype} cost=$${msg.total_cost_usd?.toFixed(4) || '?'} tokens=${msg.usage?.total_tokens || '?'}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -460,7 +561,27 @@ async function runQuery(
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, cost=$${totalCostUsd.toFixed(4)}, tokens=${totalTokens}, tools=${totalToolUses}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+
+  // Append usage record to shared log
+  try {
+    const usageDir = '/workspace/ipc/usage';
+    fs.mkdirSync(usageDir, { recursive: true });
+    const record = {
+      timestamp: new Date().toISOString(),
+      group: containerInput.groupFolder,
+      costUsd: totalCostUsd,
+      totalTokens,
+      toolUses: totalToolUses,
+      messages: messageCount,
+      results: resultCount,
+      durationMs: Date.now() - queryStartTime,
+    };
+    fs.appendFileSync(
+      path.join(usageDir, 'usage.jsonl'),
+      JSON.stringify(record) + '\n',
+    );
+  } catch { /* best effort */ }
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 

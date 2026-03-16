@@ -45,15 +45,17 @@ server.tool(
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    message_thread_id: z.number().optional().describe('Telegram Forum topic ID to send the message to (e.g. 2 for meeting room). Only needed for cross-topic posting.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, string | number | undefined> = {
       type: 'message',
       chatJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
+      message_thread_id: args.message_thread_id,
     };
 
     writeIpcFile(MESSAGES_DIR, data);

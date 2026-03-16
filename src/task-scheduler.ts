@@ -246,6 +246,23 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
     return;
   }
   schedulerRunning = true;
+
+  // Fix tasks with NULL next_run (e.g. created manually or by older code)
+  const allTasks = getAllTasks();
+  let fixed = 0;
+  for (const t of allTasks) {
+    if (t.status === 'active' && !t.next_run && t.schedule_type !== 'once') {
+      const nextRun = computeNextRun(t);
+      if (nextRun) {
+        updateTask(t.id, { next_run: nextRun });
+        fixed++;
+      }
+    }
+  }
+  if (fixed > 0) {
+    logger.info({ fixed }, 'Fixed tasks with missing next_run');
+  }
+
   logger.info('Scheduler loop started');
 
   const loop = async () => {

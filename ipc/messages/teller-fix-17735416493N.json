@@ -1,0 +1,1 @@
+{"type":"message","chatJid":"tg:-1003746091450","text":"teller_certs 挂载问题已修复。NanoClaw 已重启两次，mount allowlist 现在包含 ~/nanoclaw 路径。下次 spawn Elaina 时 /workspace/extra/teller_certs/ 会正常出现。请让忍重新 spawn Elaina 执行 bash /workspace/extra/scripts/teller.sh summary 验证。","sender":"host-admin"}

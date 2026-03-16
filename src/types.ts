@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  maxTurns?: number; // Default: 30 — max tool-use rounds per query
 }
 
 export interface RegisteredGroup {
@@ -42,6 +43,14 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
+export interface Attachment {
+  filename: string;
+  mimeType: string;
+  hostPath: string;
+  containerPath: string;
+  size: number;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -51,6 +60,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  attachments?: Attachment[];
 }
 
 export interface ScheduledTask {
@@ -82,7 +92,7 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, sender?: string, messageThreadId?: number): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -90,6 +100,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: add emoji reaction to a message.
+  setReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

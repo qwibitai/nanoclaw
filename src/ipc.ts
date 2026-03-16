@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,8 +11,17 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+const KB_QUERY_SCRIPT = path.join(
+  process.env.HOME || '/Users/jialingwu',
+  'nanoclaw/store/knowledge-base/query.py',
+);
+const KB_VENV_PYTHON = path.join(
+  process.env.HOME || '/Users/jialingwu',
+  'nanoclaw/store/knowledge-base/.venv/bin/python3',
+);
+
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, sender?: string, messageThreadId?: number) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -80,7 +90,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  const threadId = data.message_thread_id != null ? Number(data.message_thread_id) : undefined;
+                  await deps.sendMessage(data.chatJid, data.text, data.sender, threadId);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -112,6 +123,53 @@ export function startIpcWatcher(deps: IpcDeps): void {
           { err, sourceGroup },
           'Error reading IPC messages directory',
         );
+      }
+
+      // Process knowledge-base queries from this group's IPC directory
+      const kbDir = path.join(ipcBaseDir, sourceGroup, 'kb-queries');
+      try {
+        if (fs.existsSync(kbDir)) {
+          const kbFiles = fs
+            .readdirSync(kbDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of kbFiles) {
+            const filePath = path.join(kbDir, file);
+            const resultPath = filePath.replace('.json', '.result');
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              if (data.query) {
+                const args = [KB_QUERY_SCRIPT, '--q', data.query];
+                if (data.args) {
+                  // Parse extra args like "--top-k 5 --no-llm"
+                  args.push(...data.args.split(/\s+/).filter(Boolean));
+                }
+                logger.info(
+                  { query: data.query, sourceGroup },
+                  'Executing knowledge base query',
+                );
+                try {
+                  const result = execSync(
+                    [KB_VENV_PYTHON, ...args]
+                      .map((a) => `'${a.replace(/'/g, "'\\''")}'`)
+                      .join(' '),
+                    { encoding: 'utf-8', timeout: 120000 },
+                  );
+                  fs.writeFileSync(resultPath, result);
+                } catch (execErr: any) {
+                  const errMsg = execErr.stderr || execErr.message || String(execErr);
+                  fs.writeFileSync(resultPath, `[ERROR] ${errMsg}`);
+                  logger.error({ err: errMsg, sourceGroup }, 'KB query failed');
+                }
+              }
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error({ file, sourceGroup, err }, 'Error processing KB query');
+              try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading KB queries directory');
       }
 
       // Process tasks from this group's IPC directory
