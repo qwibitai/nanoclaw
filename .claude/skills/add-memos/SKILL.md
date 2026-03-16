@@ -227,6 +227,8 @@ services:
     ports:
       - "7474:7474"
       - "7687:7687"
+    env_file:
+      - ../.env
     healthcheck:
       test: wget http://localhost:7474 || exit 1
       interval: 1s
@@ -235,7 +237,7 @@ services:
       start_period: 3s
     environment:
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
-      NEO4J_AUTH: "neo4j/12345678"
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD}"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -271,7 +273,7 @@ networks:
 
 ### Create the MemOS .env file
 
-Create `<clone_path>/.env` with the values from Phase 1. For `openai/text-embedding-3-small` the dimension is 1536. Use the same API key for all three roles (chat, memreader, embedder).
+Create `<clone_path>/.env` with the values from Phase 1. For `openai/text-embedding-3-small` the dimension is 1536. Use the same API key for all three roles (chat, memreader, embedder). Generate a random Neo4j password (e.g., `openssl rand -base64 24`) — it's used by both the Neo4j container and the memos-api container to authenticate.
 
 ```bash
 # Core
@@ -328,7 +330,7 @@ API_SCHEDULER_ON=true
 NEO4J_BACKEND=neo4j-community
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=12345678
+NEO4J_PASSWORD=<generated_password>
 NEO4J_DB_NAME=neo4j
 MOS_NEO4J_SHARED_DB=false
 QDRANT_HOST=qdrant
