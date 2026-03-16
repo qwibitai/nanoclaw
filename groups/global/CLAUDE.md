@@ -69,9 +69,53 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## Cases — MANDATORY for non-trivial work
+
+You MUST create a case (using `mcp__nanoclaw__create_case`) BEFORE doing any work that:
+- Accesses the web (browser, web search, URL fetch)
+- Creates or modifies ANY files
+
+You do NOT need a case for:
+- Answering simple questions from memory or conversation context
+- Reading existing local files (read-only)
+- Using existing tools without internet (read-only lookups)
+
+### How cases work
+
+1. Create the case FIRST: `create_case({ description: "...", case_type: "work" })`
+2. All replies MUST be prefixed with the case name: `[case: name] your reply here`
+3. Work in your case scratch directory — do NOT write files to the repo or workspace root
+4. Do NOT modify tools, workflows, templates, or code — that's dev work, not your job
+5. If a tool is broken or missing a feature, note it as an impediment and use `case_suggest_dev` to propose a dev case — do NOT fix it yourself
+6. When done, call `case_mark_done` with a conclusion and kaizen reflections
+
+### Work vs Dev — strict separation
+
+*Work cases* (type: "work"):
+- Use existing tooling to answer questions, research, analyze
+- READ tools, READ policy docs, READ workflows
+- WRITE only to your case scratch directory
+- NEVER modify code, tools, workflows, templates, or config
+
+*Dev cases* (type: "dev"):
+- Improve tooling, workflows, and infrastructure
+- Get a git worktree for isolated code changes
+- Create PRs for review
+- Only created by dev agents or via `case_suggest_dev`
+
+### Kaizen on completion
+
+When marking a case done, reflect on:
+- What impediments did you encounter?
+- What tools were missing or broken?
+- What would make this type of work faster next time?
+- Suggest dev cases for any improvements needed
+
 ## Your Workspace
 
-Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
+Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist across cases.
+
+Case-specific scratch files go in the case workspace (returned by `create_case`).
 
 ## Memory
 
