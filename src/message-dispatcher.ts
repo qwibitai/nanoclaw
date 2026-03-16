@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
@@ -107,6 +108,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Deduplication guard: track content hashes of results already dispatched
+  // in this invocation. The SDK may emit duplicate result events; only the
+  // first occurrence of each unique result text is sent to the user.
+  const seenResultHashes = new Set<string>();
+
   const output = await runAgent(
     group,
     prompt,
@@ -122,8 +128,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         log.info(`Agent output: ${raw.slice(0, 200)}`);
         if (text) {
-          await channel.sendMessage(chatJid, text);
-          outputSentToUser = true;
+          // Deduplicate: compute a fast hash of the content and skip if seen
+          const hash = createHash('sha256').update(text).digest('hex');
+          if (seenResultHashes.has(hash)) {
+            log.warn('Duplicate SDK result event detected, skipping send');
+          } else {
+            seenResultHashes.add(hash);
+            await channel.sendMessage(chatJid, text);
+            outputSentToUser = true;
+          }
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
         resetIdleTimer();
