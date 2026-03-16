@@ -160,19 +160,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
-    ASSISTANT_NAME,
+    assistantNameFromTrigger(group.trigger),
   );
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
+  // For non-main groups, check if trigger is required and present.
+  // Voice messages bypass the trigger check — the agent decides whether to act.
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = buildTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        m.content.startsWith('[Voice message]') ||
+        (triggerPattern.test(m.content.trim()) &&
+          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))),
     );
     if (!hasTrigger) return true;
   }
@@ -220,7 +222,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await channel.sendMessage(chatJid, text, assistantNameFromTrigger(group.trigger));
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -395,14 +397,16 @@ async function startMessageLoop(): Promise<void> {
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
+          // Voice messages bypass the trigger word check — agent uses judgment.
           if (needsTrigger) {
             const triggerPattern = buildTriggerPattern(group.trigger);
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+                m.content.startsWith('[Voice message]') ||
+                (triggerPattern.test(m.content.trim()) &&
+                  (m.is_from_me ||
+                    isTriggerAllowed(chatJid, m.sender, allowlistCfg))),
             );
             if (!hasTrigger) continue;
           }
@@ -412,7 +416,7 @@ async function startMessageLoop(): Promise<void> {
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
+            assistantNameFromTrigger(group.trigger),
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
@@ -557,14 +561,16 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      const groupName = assistantNameFromTrigger(registeredGroups[jid]?.trigger || '');
+      if (text) await channel.sendMessage(jid, text, groupName);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      const groupName = assistantNameFromTrigger(registeredGroups[jid]?.trigger || '');
+      return channel.sendMessage(jid, text, groupName);
     },
     sendImage: (jid, imageUrl, caption) => {
       const channel = findChannel(channels, jid);

@@ -19,8 +19,9 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
+import { transcribeAudio } from '../speech.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName, deleteMessages, deleteAllMessages } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -249,7 +250,24 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            const content = textContent + attachmentRef;
+            // Transcribe voice notes
+            let voiceTranscript = '';
+            if (normalized.audioMessage?.ptt) {
+              try {
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                if (buffer instanceof Buffer) {
+                  const transcript = await transcribeAudio(buffer);
+                  if (transcript) {
+                    voiceTranscript = `[Voice message]: ${transcript}`;
+                    logger.info({ chatJid }, 'Voice message transcribed');
+                  }
+                }
+              } catch (err) {
+                logger.warn({ err, chatJid }, 'Failed to transcribe voice message');
+              }
+            }
+
+            const content = textContent + attachmentRef + voiceTranscript;
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content.trim()) continue;
@@ -264,7 +282,7 @@ export class WhatsAppChannel implements Channel {
             // (even in DMs/self-chat) so we check for that.
             const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
               ? fromMe
-              : content.startsWith(`${ASSISTANT_NAME}:`);
+              : /^\w+: /.test(content);
 
             const contextInfo =
               normalized.extendedTextMessage?.contextInfo ||
@@ -304,16 +322,34 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+
+    this.sock.ev.on('messages.delete', (event) => {
+      if ('all' in event) {
+        // Clear chat — delete all messages for this JID
+        deleteAllMessages(event.jid);
+        logger.info({ jid: event.jid }, 'Cleared all messages for chat');
+      } else {
+        // Specific messages deleted (delete for me or delete for everyone)
+        const keys = event.keys
+          .filter((k) => k.id && k.remoteJid)
+          .map((k) => ({ id: k.id!, chatJid: k.remoteJid! }));
+        if (keys.length > 0) {
+          deleteMessages(keys);
+          logger.info({ count: keys.length }, 'Deleted messages from DB');
+        }
+      }
+    });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, assistantName?: string): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
+    const name = assistantName ?? ASSISTANT_NAME;
     const prefixed = ASSISTANT_HAS_OWN_NUMBER
       ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+      : `${name}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });

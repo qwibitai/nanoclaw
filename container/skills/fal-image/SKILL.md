@@ -1,21 +1,25 @@
-# fal.ai Image Generation (Flux 2 Flash)
+# fal.ai Image Generation (Flux 2 Turbo)
 
-Generate images from text or edit existing images using fal.ai's Flux 2 Flash endpoints, then send them directly to the user via WhatsApp.
+Generate images from text or edit existing images using fal.ai's Flux 2 Turbo endpoints, then send them directly to the user via WhatsApp.
 
 ## Endpoint Selection
 
 | Situation | Endpoint |
 |-----------|----------|
-| User wants a new image from a text description | `fal-ai/flux-2/flash` (text-to-image) |
-| User provides image URL(s) and wants edits | `fal-ai/flux-2/flash/edit` (image-to-image) |
+| User wants a new image from a text description | `fal-ai/flux-2/turbo` (text-to-image) |
+| User provides image URL(s) and wants edits | `fal-ai/flux-2/turbo/edit` (image-to-image) |
 
-## Prompt Enhancement
+## Prompt Generation
 
-Always enhance prompts for best quality:
-- **Prefix:** `masterpiece, award-winning design, best quality, highly detailed, hyper-realistic, `
-- **Suffix:** `, 8k, 16k`
+Before calling the API, craft the best possible prompt for the requested image. Do not use hardcoded prefixes or suffixes. Instead, think about what makes a great prompt for the specific request:
 
-Flux 2 Flash has **no `negative_prompt` field** — omit it entirely.
+- What subject, scene, or transformation is the user asking for?
+- What style, lighting, mood, or composition would best serve it?
+- What level of detail, realism, or artistic direction fits?
+
+Write a rich, descriptive prompt tailored to the request. Think like a professional art director — be specific and evocative, not generic.
+
+Flux 2 Turbo has **no `negative_prompt` field** — omit it entirely.
 
 ## Image Size Mapping
 
@@ -31,11 +35,11 @@ Flux 2 Flash has **no `negative_prompt` field** — omit it entirely.
 
 ```bash
 RESPONSE=$(curl -s -X POST \
-  "https://fal.run/fal-ai/flux-2/flash" \
+  "https://fal.run/fal-ai/flux-2/turbo" \
   -H "Authorization: Key $FAL_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "masterpiece, award-winning design, best quality, highly detailed, hyper-realistic, a sunset over the ocean, 8k, 16k",
+    "prompt": "Golden hour over a calm ocean, warm amber reflections on the water, dramatic clouds, cinematic wide shot",
     "image_size": "landscape_16_9",
     "num_inference_steps": 4,
     "num_images": 1,
@@ -49,11 +53,11 @@ IMAGE_URL=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.
 
 ```bash
 RESPONSE=$(curl -s -X POST \
-  "https://fal.run/fal-ai/flux-2/flash/edit" \
+  "https://fal.run/fal-ai/flux-2/turbo/edit" \
   -H "Authorization: Key $FAL_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "masterpiece, best quality, highly detailed, convert to black and white, 8k, 16k",
+    "prompt": "Desaturated monochrome portrait, deep contrast, dramatic shadows, timeless black and white photography style",
     "image_url": "https://example.com/original-image.jpg",
     "image_size": "square_hd",
     "num_inference_steps": 4,
@@ -85,7 +89,7 @@ FAL_IMAGE_URL=$(curl -s -X POST \
 
 # Step 2: Edit with fal.ai
 RESPONSE=$(curl -s -X POST \
-  "https://fal.run/fal-ai/flux-2/flash/edit" \
+  "https://fal.run/fal-ai/flux-2/turbo/edit" \
   -H "Authorization: Key $FAL_KEY" \
   -H "Content-Type: application/json" \
   -d "{

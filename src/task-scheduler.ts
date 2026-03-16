@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { SCHEDULER_POLL_INTERVAL, TIMEZONE, assistantNameFromTrigger } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -178,7 +178,7 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
+        assistantName: assistantNameFromTrigger(group.trigger),
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
