@@ -59,6 +59,14 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+## Memory & Experimentation
+
+This NanoClaw instance is for **experimenting and testing** — exploring what Claude can do, finding limits, and trying new approaches. Feel free to push boundaries and experiment freely.
+
+**All agent responses should end with:** `O&B`
+
+This applies to messages sent through all channels (WhatsApp, Telegram, Slack, etc.).
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
