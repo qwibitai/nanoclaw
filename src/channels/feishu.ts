@@ -107,6 +107,8 @@ export class FeishuChannel implements Channel {
   }
 
   private async handleMessage(data: any): Promise<void> {
+    if (!data?.message?.chat_id || !data?.sender) return;
+
     const message = data.message;
     const sender = data.sender;
 
@@ -116,7 +118,7 @@ export class FeishuChannel implements Channel {
     const chatJid = `feishu:${chatId}`;
     const senderId = sender.sender_id?.open_id || '';
     const senderType = sender.sender_type;
-    const timestamp = new Date(parseInt(message.create_time)).toISOString();
+    const timestamp = new Date(parseInt(message.create_time, 10)).toISOString();
     const isGroup = chatType === 'group';
 
     // Always emit metadata for chat discovery

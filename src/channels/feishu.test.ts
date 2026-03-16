@@ -213,6 +213,15 @@ describe('FeishuChannel', () => {
       await channel.disconnect();
       expect(channel.isConnected()).toBe(false);
     });
+
+    it('connect() succeeds even when bot info fetch fails', async () => {
+      sdkRef.botInfoGet.mockRejectedValueOnce(new Error('API error'));
+
+      const channel = new FeishuChannel('id', 'secret', createTestOpts());
+      await channel.connect();
+
+      expect(channel.isConnected()).toBe(true);
+    });
   });
 
   describe('inbound text messages', () => {
@@ -295,6 +304,22 @@ describe('FeishuChannel', () => {
         'feishu:oc_test123',
         expect.objectContaining({ timestamp: '2024-01-01T00:00:00.000Z' }),
       );
+    });
+
+    it('ignores malformed event data gracefully', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      // Missing message field
+      await triggerEvent('im.message.receive_v1', { sender: {} });
+      // Missing sender field
+      await triggerEvent('im.message.receive_v1', {
+        message: { chat_id: 'oc_test123' },
+      });
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onChatMetadata).not.toHaveBeenCalled();
     });
   });
 
@@ -548,6 +573,15 @@ describe('FeishuChannel', () => {
       await expect(
         channel.sendMessage('feishu:oc_test123', 'Will fail'),
       ).resolves.toBeUndefined();
+    });
+
+    it('does nothing when client is not initialized', async () => {
+      const channel = new FeishuChannel('id', 'secret', createTestOpts());
+
+      // Don't connect — client is null
+      await channel.sendMessage('feishu:oc_test123', 'No client');
+
+      expect(sdkRef.messageCreate).not.toHaveBeenCalled();
     });
   });
 
