@@ -138,6 +138,63 @@ curl -s -X PUT http://host.docker.internal:3040/api/v1/agent-sessions/SESSION_ID
   -d '{"output_summary": "...", "ended_at": "2026-03-16T00:00:00Z"}' | jq .
 ```
 
+### Agent Memory
+
+```bash
+# Get all memory for an agent
+curl -s http://host.docker.internal:3040/api/v1/memory/engineering-lead | jq .
+
+# Get memory for a specific project
+curl -s "http://host.docker.internal:3040/api/v1/memory/engineering-lead?project=agency-hq" | jq .
+
+# Update memory (upsert)
+curl -s -X PUT http://host.docker.internal:3040/api/v1/memory/ceo \
+  -H "Content-Type: application/json" \
+  -d '{"content": "...", "project": "_global"}' | jq .
+
+# Append to memory
+curl -s -X POST http://host.docker.internal:3040/api/v1/memory/ceo/append \
+  -H "Content-Type: application/json" \
+  -d '{"content": "New note from today...", "project": "agency-hq"}' | jq .
+```
+
+### Autonomy Rules
+
+```bash
+# List all autonomy rules (what needs human approval vs autonomous)
+curl -s http://host.docker.internal:3040/api/v1/autonomy/rules | jq .
+
+# Check if a decision type needs approval
+curl -s http://host.docker.internal:3040/api/v1/autonomy/check/architecture | jq .
+
+# Submit human feedback on a decision
+curl -s -X POST http://host.docker.internal:3040/api/v1/autonomy/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"decision_id": "UUID", "feedback_type": "approve", "reasoning": "Looks good"}' | jq .
+
+# View feedback stats (approval rate over time)
+curl -s http://host.docker.internal:3040/api/v1/autonomy/feedback/stats | jq .
+```
+
+Trust levels: `propose` (human decides), `act-report` (agent acts, human notified), `act-exception` (agent acts, human notified on error), `autonomous` (agent acts, weekly summary)
+
+### Trigger a Meeting
+
+```bash
+# Trigger a standup meeting (creates + runs automatically)
+curl -s -X POST http://host.docker.internal:3040/api/v1/meetings/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"type": "standup"}' | jq .
+
+# Trigger sprint planning
+curl -s -X POST http://host.docker.internal:3040/api/v1/meetings/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"type": "sprint-planning"}' | jq .
+
+# Run a specific scheduled meeting
+curl -s -X POST http://host.docker.internal:3040/api/v1/meetings/MEETING_ID/run | jq .
+```
+
 ## Dev-Inbox Integration
 
 To execute implementation tasks, invoke dev-inbox from the host:
