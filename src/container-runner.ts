@@ -197,7 +197,10 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  // Always sync from repo source so new MCP tools (e.g. create_case) are
+  // available immediately after deploy.  Previous logic only copied on first
+  // run, which left agents with stale tooling after PRs merged.
+  if (fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({

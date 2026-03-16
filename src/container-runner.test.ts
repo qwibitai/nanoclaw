@@ -42,6 +42,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -110,6 +111,53 @@ function emitOutputMarker(
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
+
+describe('agent-runner source sync', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('always syncs agent-runner source even when session dir exists', async () => {
+    const fs = await import('fs');
+    const cpSyncSpy = vi.spyOn(fs.default, 'cpSync');
+
+    // existsSync returns true for everything — simulating an existing session dir
+    vi.spyOn(fs.default, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs.default, 'readdirSync').mockReturnValue([]);
+    vi.spyOn(fs.default, 'readFileSync').mockReturnValue('{}');
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    // Let setup complete, then emit output and close
+    await vi.advanceTimersByTimeAsync(10);
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    // Verify cpSync was called with agent-runner source path
+    const agentRunnerCalls = cpSyncSpy.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('agent-runner') &&
+        call[0].includes('src'),
+    );
+    expect(agentRunnerCalls.length).toBeGreaterThanOrEqual(1);
+    // Verify it uses recursive: true
+    expect(agentRunnerCalls[0][2]).toEqual({ recursive: true });
+  });
+});
 
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
