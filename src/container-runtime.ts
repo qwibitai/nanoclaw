@@ -11,12 +11,15 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/** IP/hostname containers use to reach the host machine.
+ * Apple Container: host is at the VirtioFS bridge gateway (192.168.65.1).
+ * Docker Desktop: host is at the special hostname host.docker.internal. */
+export const CONTAINER_HOST_GATEWAY = '192.168.65.1';
 
 /**
  * Address the credential proxy binds to.
- * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
+ * Apple Container (macOS): 192.168.65.1 — the container gateway IP. Binding here
+ *   instead of 0.0.0.0 ensures only containers can reach the proxy, not LAN peers.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
  */
@@ -24,7 +27,7 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') return CONTAINER_HOST_GATEWAY;
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
