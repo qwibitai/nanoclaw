@@ -137,10 +137,7 @@ export function cleanupOrphans(): void {
       }
     }
     if (stoppedNames.length > 0) {
-      logger.info(
-        { count: stoppedNames.length },
-        'Removed stopped containers',
-      );
+      logger.info({ count: stoppedNames.length }, 'Removed stopped containers');
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');

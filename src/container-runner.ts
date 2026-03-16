@@ -373,7 +373,9 @@ export async function runContainerAgent(
     // Detached mode avoids this: the container runs as a Docker daemon process.
     try {
       execSync(
-        [CONTAINER_RUNTIME_BIN, ...containerArgs].map((a) => `"${a}"`).join(' '),
+        [CONTAINER_RUNTIME_BIN, ...containerArgs]
+          .map((a) => `"${a}"`)
+          .join(' '),
         { stdio: 'pipe', timeout: 30000 },
       );
     } catch (err) {
@@ -752,7 +754,10 @@ export async function runContainerAgent(
       clearTimeout(timeout);
       // Stop the detached container and clean up
       try {
-        execSync(stopContainer(containerName), { stdio: 'pipe', timeout: 15000 });
+        execSync(stopContainer(containerName), {
+          stdio: 'pipe',
+          timeout: 15000,
+        });
       } catch {
         /* container may not exist */
       }
