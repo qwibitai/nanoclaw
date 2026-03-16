@@ -60,6 +60,10 @@ export function openBrowser(url: string): boolean {
       execSync(`open ${JSON.stringify(url)}`, { stdio: 'ignore' });
       return true;
     }
+    if (process.platform === 'win32') {
+      execSync(`start "" ${JSON.stringify(url)}`, { stdio: 'ignore', shell: true });
+      return true;
+    }
     if (platform === 'linux') {
       // Try xdg-open first, then wslview for WSL
       if (commandExists('xdg-open')) {
@@ -108,7 +112,8 @@ export function getNodePath(): string {
 
 export function commandExists(name: string): boolean {
   try {
-    execSync(`command -v ${name}`, { stdio: 'ignore' });
+    const cmd = process.platform === 'win32' ? `where ${name}` : `command -v ${name}`;
+    execSync(cmd, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
