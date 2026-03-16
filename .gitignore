@@ -36,3 +36,5 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+get-chat-ids.js
+*.bak
