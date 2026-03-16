@@ -62,6 +62,23 @@ You have read-only access to MongoDB Atlas via the `mcp__mongodb__*` tools. Key 
 
 Entities carry cross-provider IDs (`boxlive_id`, `tapology_id`, `boxlive_url`, `tapology_url`) for linking records across sources.
 
+## Logfire (Application Performance Monitoring)
+
+You have read-only access to Logfire via the `mcp__logfire__*` tools. Use this to investigate application performance, find exceptions, and troubleshoot issues across Ben's services.
+
+**Projects:**
+
+| Project | What it covers |
+|---------|---------------|
+| `boxing-data-api` | FastAPI application logs — the Boxing Data REST API |
+| `boxing-data-pipelines` | Pipeline logs — both `combat-data-pipelines` (scraping) and `boxing-data-workflows` (ETL/merge). Both are Prefect-based |
+
+**Available tools:**
+- `find_exceptions_in_file` — Find exceptions/errors in a specific file
+- `arbitrary_query` — Run arbitrary SQL queries against Logfire trace data
+- `logfire_link` — Generate a deep link to the Logfire UI for a specific query
+- `schema_reference` — Get the schema for Logfire's trace data tables
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.

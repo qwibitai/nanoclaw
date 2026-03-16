@@ -226,6 +226,7 @@ function buildContainerArgs(
   const mcpEnv = readEnvFile([
     'MDB_MCP_CONNECTION_STRING',
     'GITHUB_PERSONAL_ACCESS_TOKEN',
+    'LOGFIRE_READ_TOKEN',
   ]);
   if (mcpEnv.MDB_MCP_CONNECTION_STRING) {
     args.push(
@@ -238,6 +239,9 @@ function buildContainerArgs(
       '-e',
       `GITHUB_PERSONAL_ACCESS_TOKEN=${mcpEnv.GITHUB_PERSONAL_ACCESS_TOKEN}`,
     );
+  }
+  if (mcpEnv.LOGFIRE_READ_TOKEN) {
+    args.push('-e', `LOGFIRE_READ_TOKEN=${mcpEnv.LOGFIRE_READ_TOKEN}`);
   }
 
   // Route API traffic through the credential proxy (containers never see real secrets)

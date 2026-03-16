@@ -409,7 +409,8 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__mongodb__*',
-        'mcp__github__*'
+        'mcp__github__*',
+        'mcp__logfire__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -437,6 +438,13 @@ async function runQuery(
           args: ['stdio'],
           env: {
             GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_PERSONAL_ACCESS_TOKEN || '',
+          },
+        },
+        logfire: {
+          type: 'http',
+          url: 'https://logfire-us.pydantic.dev/mcp',
+          headers: {
+            Authorization: `Bearer ${process.env.LOGFIRE_READ_TOKEN || ''}`,
           },
         },
       },
