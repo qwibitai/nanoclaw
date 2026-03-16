@@ -10,7 +10,6 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -19,28 +18,31 @@ import {
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
-  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, StructuredMessage } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 export interface ContainerInput {
+  /** @deprecated Kept for backward compatibility. Use `messages` instead. */
   prompt: string;
+  /** Structured message schema for OpenCode runner. Preferred over `prompt`. */
+  messages?: StructuredMessage[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  /** Unique trace ID for this invocation, used for distributed tracing */
+  traceId: string;
 }
 
 export interface ContainerOutput {
@@ -124,26 +126,7 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    fs.writeFileSync(settingsFile, JSON.stringify({ env: {} }, null, 2) + '\n');
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -221,21 +204,26 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-  } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  if (process.env.NANOCLAW_LLM_CONFIG) {
+    args.push('-e', `NANOCLAW_LLM_CONFIG=${process.env.NANOCLAW_LLM_CONFIG}`);
+  }
+  if (process.env.NANOCLAW_LLM_MODEL) {
+    args.push('-e', `NANOCLAW_LLM_MODEL=${process.env.NANOCLAW_LLM_MODEL}`);
+  }
+  if (process.env.NANOCLAW_LLM_BASE_URL) {
+    args.push(
+      '-e',
+      `NANOCLAW_LLM_BASE_URL=${process.env.NANOCLAW_LLM_BASE_URL}`,
+    );
+  }
+  if (process.env.NANOCLAW_LLM_API_KEY) {
+    args.push('-e', `NANOCLAW_LLM_API_KEY=${process.env.NANOCLAW_LLM_API_KEY}`);
+  }
+  if (process.env.NANOCLAW_LLM_MODEL_ID) {
+    args.push(
+      '-e',
+      `NANOCLAW_LLM_MODEL_ID=${process.env.NANOCLAW_LLM_MODEL_ID}`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution
@@ -283,6 +271,7 @@ export async function runContainerAgent(
   logger.debug(
     {
       group: group.name,
+      traceId: input.traceId,
       containerName,
       mounts: mounts.map(
         (m) =>
@@ -296,6 +285,7 @@ export async function runContainerAgent(
   logger.info(
     {
       group: group.name,
+      traceId: input.traceId,
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
@@ -370,7 +360,7 @@ export async function runContainerAgent(
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
-              { group: group.name, error: err },
+              { group: group.name, traceId: input.traceId, error: err },
               'Failed to parse streamed output chunk',
             );
           }
@@ -410,13 +400,13 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, traceId: input.traceId, containerName },
         'Container timeout, stopping gracefully',
       );
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn(
-            { group: group.name, containerName, err },
+            { group: group.name, traceId: input.traceId, containerName, err },
             'Graceful stop failed, force killing',
           );
           container.kill('SIGKILL');
@@ -444,6 +434,7 @@ export async function runContainerAgent(
           [
             `=== Container Run Log (TIMEOUT) ===`,
             `Timestamp: ${new Date().toISOString()}`,
+            `TraceId: ${input.traceId}`,
             `Group: ${group.name}`,
             `Container: ${containerName}`,
             `Duration: ${duration}ms`,
@@ -457,7 +448,13 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            {
+              group: group.name,
+              traceId: input.traceId,
+              containerName,
+              duration,
+              code,
+            },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -471,7 +468,13 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          {
+            group: group.name,
+            traceId: input.traceId,
+            containerName,
+            duration,
+            code,
+          },
           'Container timed out with no output',
         );
 
@@ -491,6 +494,7 @@ export async function runContainerAgent(
       const logLines = [
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
+        `TraceId: ${input.traceId}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
@@ -545,6 +549,7 @@ export async function runContainerAgent(
         logger.error(
           {
             group: group.name,
+            traceId: input.traceId,
             code,
             duration,
             stderr,
@@ -566,7 +571,12 @@ export async function runContainerAgent(
       if (onOutput) {
         outputChain.then(() => {
           logger.info(
-            { group: group.name, duration, newSessionId },
+            {
+              group: group.name,
+              traceId: input.traceId,
+              duration,
+              newSessionId,
+            },
             'Container completed (streaming mode)',
           );
           resolve({
@@ -600,6 +610,7 @@ export async function runContainerAgent(
         logger.info(
           {
             group: group.name,
+            traceId: input.traceId,
             duration,
             status: output.status,
             hasResult: !!output.result,
@@ -612,6 +623,7 @@ export async function runContainerAgent(
         logger.error(
           {
             group: group.name,
+            traceId: input.traceId,
             stdout,
             stderr,
             error: err,
@@ -630,7 +642,12 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(
-        { group: group.name, containerName, error: err },
+        {
+          group: group.name,
+          traceId: input.traceId,
+          containerName,
+          error: err,
+        },
         'Container spawn error',
       );
       resolve({

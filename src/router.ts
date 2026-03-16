@@ -1,4 +1,4 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, NewMessage, StructuredMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
@@ -22,6 +22,24 @@ export function formatMessages(
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
 
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+}
+
+/**
+ * Convert NewMessage array to structured message schema.
+ * Maps is_from_me to assistant role, others to user role.
+ * Preserves stable IDs and timestamps for replay harness.
+ */
+export function formatMessagesStructured(
+  messages: NewMessage[],
+  timezone: string,
+): StructuredMessage[] {
+  return messages.map((m) => ({
+    id: m.id,
+    role: m.is_from_me ? 'assistant' : 'user',
+    content: [{ type: 'text', text: m.content }],
+    timestamp: m.timestamp,
+    sender_name: m.sender_name,
+  }));
 }
 
 export function stripInternalTags(text: string): string {

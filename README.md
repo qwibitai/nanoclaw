@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  An AI assistant that runs agents securely in their own containers. Powered by OpenCode + any OpenAI-compatible LLM. Lightweight, built to be easily understood and completely customized for your needs.
 </p>
 
 <p align="center">
@@ -15,80 +15,62 @@
 
 ---
 
-<h2 align="center">🐳 Now Runs in Docker Sandboxes</h2>
-<p align="center">Every agent gets its own isolated container inside a micro VM.<br>Hypervisor-level isolation. Millisecond startup. No complex setup.</p>
-
-**macOS (Apple Silicon)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
-```
-
-**Windows (WSL)**
-```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
-```
-
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
-
-<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
-
----
-
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
 
 ## Quick Start
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
-claude
+gh repo fork wpcapaper/nanoclaw-oc --clone --branch feat/oc-migration
+cd nanoclaw-oc
+opencode
 ```
 
 <details>
 <summary>Without GitHub CLI</summary>
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
-2. `git clone https://github.com/<your-username>/nanoclaw.git`
-3. `cd nanoclaw`
-4. `claude`
+1. Fork [wpcapaper/nanoclaw-oc](https://github.com/wpcapaper/nanoclaw-oc) on GitHub (click the Fork button)
+2. `git clone --branch feat/oc-migration https://github.com/<your-username>/nanoclaw-oc.git`
+3. `cd nanoclaw-oc`
+4. `opencode`
 
 </details>
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
+Then run `/setup`. OpenCode handles everything: dependencies, authentication, container setup and service configuration.
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are skills. Type them inside the OpenCode CLI prompt, not in your regular terminal.
 
 ## Philosophy
 
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
+**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask your assistant to walk you through it.
 
 **Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
+**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have OpenCode modify it to match your needs.
 
 **Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
 
 **AI-native.**
-- No installation wizard; Claude Code guides setup.
-- No monitoring dashboard; ask Claude what's happening.
-- No debugging tools; describe the problem and Claude fixes it.
 
-**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
+- No installation wizard; OpenCode guides setup.
+- No monitoring dashboard; ask the assistant what's happening.
+- No debugging tools; describe the problem and the assistant fixes it.
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
+**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit skills like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
+
+**Universal LLM compatibility.** NanoClaw uses OpenCode, supporting any OpenAI-compatible LLM via LM Studio, Ollama, or cloud providers. Run local models for privacy or use cloud APIs. The skills system (`.claude/skills/**/SKILL.md`) and `CLAUDE.md` memory conventions remain fully supported for backward compatibility.
 
 ## What It Supports
 
 - **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Scheduled tasks** - Recurring jobs that run agents and can message you back
 - **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
+- **Container isolation** - Agents are sandboxed in Docker (Linux/macOS) or Apple Container (macOS only)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
@@ -103,6 +85,7 @@ Talk to your assistant with the trigger word (default: `@Andy`):
 ```
 
 From the main channel (your self-chat), you can manage groups and tasks:
+
 ```
 @Andy list all scheduled tasks across groups
 @Andy pause the Monday briefing task
@@ -111,7 +94,7 @@ From the main channel (your self-chat), you can manage groups and tasks:
 
 ## Customizing
 
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
+NanoClaw doesn't use configuration files. To make changes, just tell your assistant what you want:
 
 - "Change the trigger word to @Bob"
 - "Remember in the future to make responses shorter and more direct"
@@ -120,7 +103,7 @@ NanoClaw doesn't use configuration files. To make changes, just tell Claude Code
 
 Or run `/customize` for guided changes.
 
-The codebase is small enough that Claude can safely modify it.
+The codebase is small enough that the assistant can safely modify it.
 
 ## Contributing
 
@@ -135,22 +118,62 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 Skills we'd like to see:
 
 **Communication Channels**
+
 - `/add-signal` - Add Signal as a channel
 
 **Session Management**
-- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+
+- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session).
 
 ## Requirements
 
 - macOS or Linux
 - Node.js 20+
-- [Claude Code](https://claude.ai/download)
+- [OpenCode](https://github.com/opencode-ai/opencode)
+- LM Studio, Ollama, or any OpenAI-compatible LLM endpoint
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+
+## Installation
+
+### 1. Install OpenCode CLI
+
+```bash
+npm install -g opencode
+```
+
+Or install via Homebrew:
+
+```bash
+brew install opencode-ai/tap/opencode
+```
+
+### 2. Install oh-my-opencode Plugin (Required)
+
+The [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode) plugin provides compaction hooks and context management features that NanoClaw depends on. Without it, context compaction (summarizing long conversations to stay within token limits) will not work properly.
+
+```bash
+opencode plugins add oh-my-opencode
+```
+
+The plugin configuration is already set up in `.opencode/oh-my-opencode.jsonc` with non-essential hooks disabled, keeping only the compaction-related functionality that NanoClaw needs.
+
+### 3. Verify Installation
+
+```bash
+opencode --version
+```
+
+Then start NanoClaw setup:
+
+```bash
+opencode
+/setup
+```
 
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channels --> SQLite --> Polling loop --> Container (OpenCode + LLM) --> Response
 ```
 
 Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
@@ -158,6 +181,7 @@ Single Node.js process. Channels are added via skills and self-register at start
 For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
+
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
 - `src/channels/registry.ts` - Channel registry (self-registration at startup)
 - `src/ipc.ts` - IPC watcher and task processing
@@ -184,31 +208,105 @@ Agents run in containers, not behind application-level permission checks. They c
 
 **Why no configuration files?**
 
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
+We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell the assistant to add them.
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw works with any OpenAI-compatible LLM endpoint via a flexible JSON configuration system.
+
+**Primary Method: JSON Configuration (Recommended)**
+
+Set `NANOCLAW_LLM_CONFIG` with a JSON object specifying your provider and model:
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model-name"
+}'
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+You can also override just the model with `NANOCLAW_LLM_MODEL`:
 
-Note: The model must support the Anthropic API format for best compatibility.
+```bash
+NANOCLAW_LLM_MODEL=openai-compatible/llama3.1
+```
+
+**Examples**
+
+LM Studio (local):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model"
+}'
+```
+
+Ollama (local):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:11434/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/llama3.1"
+}'
+```
+
+OpenRouter (cloud):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "your-api-key"
+      }
+    }
+  },
+  "model": "openai-compatible/openai/gpt-4o-mini"
+}'
+```
+
+**Legacy Method: Environment Variables**
+
+For backward compatibility, you can still use individual environment variables:
+
+```bash
+NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model-name
+NANOCLAW_LLM_API_KEY=your-api-key
+```
+
+If `NANOCLAW_LLM_CONFIG` is not set, these variables will be used to construct the provider configuration automatically.
 
 **How do I debug issues?**
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
+Ask your assistant. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
 
 **Why isn't the setup working for me?**
 
-If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
+If you have issues, during setup, the assistant will try to dynamically fix them. If that doesn't work, run `opencode`, then run `/debug`. If you find an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
 
 **What changes will be accepted into the codebase?**
 

@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser and OpenCode globally
+RUN npm install -g agent-browser opencode-ai @opencode-ai/sdk
 
 # Create app directory
 WORKDIR /app
@@ -47,6 +47,11 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Build MCP server and install to known location
+RUN mkdir -p /opt/nanoclaw && \
+    npx tsc src/ipc-mcp-stdio.ts --outDir /opt/nanoclaw --module NodeNext --moduleResolution NodeNext --esModuleInterop --target ES2022 && \
+    ln -s /app/node_modules /opt/nanoclaw/node_modules
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

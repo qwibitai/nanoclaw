@@ -1,32 +1,31 @@
-/**
- * NanoClaw Agent Runner
- * Runs inside a container, receives config via stdin, outputs result to stdout
- *
- * Input protocol:
- *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
- *
- * Stdout protocol:
- *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
- *   Multiple results may be emitted (one per agent teams result).
- *   Final marker after loop ends signals completion.
- */
-
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
-import { fileURLToPath } from 'url';
+import { createOpencodeClient } from '@opencode-ai/sdk';
+import type { OpencodeClient } from '@opencode-ai/sdk';
+
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'attachment'; filename: string; mimeType: string; size: number };
+
+interface StructuredMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: ContentBlock[];
+  timestamp: string;
+  sender_name?: string;
+}
 
 interface ContainerInput {
   prompt: string;
+  messages?: StructuredMessage[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  traceId: string;
 }
 
 interface ContainerOutput {
@@ -36,73 +35,19 @@ interface ContainerOutput {
   error?: string;
 }
 
-interface SessionEntry {
-  sessionId: string;
-  fullPath: string;
-  summary: string;
-  firstPrompt: string;
+interface IpcMessage {
+  type: 'message';
+  text: string;
 }
 
-interface SessionsIndex {
-  entries: SessionEntry[];
-}
-
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
+interface OpenCodePart {
+  type: 'text';
+  text: string;
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
- */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
-      this.waiting = null;
-    }
-  }
-}
-
-async function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
-  });
-}
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -113,185 +58,60 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_END_MARKER);
 }
 
+let currentTraceId: string = 'unknown';
+
 function log(message: string): void {
-  console.error(`[agent-runner] ${message}`);
+  console.error(`[agent-runner] [${currentTraceId}] ${message}`);
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
-  const projectDir = path.dirname(transcriptPath);
-  const indexPath = path.join(projectDir, 'sessions-index.json');
-
-  if (!fs.existsSync(indexPath)) {
-    log(`Sessions index not found at ${indexPath}`);
-    return null;
-  }
-
-  try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const entry = index.entries.find(e => e.sessionId === sessionId);
-    if (entry?.summary) {
-      return entry.summary;
-    }
-  } catch (err) {
-    log(`Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  return null;
-}
-
-/**
- * Archive the full transcript to conversations/ before compaction.
- */
-function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preCompact = input as PreCompactHookInput;
-    const transcriptPath = preCompact.transcript_path;
-    const sessionId = preCompact.session_id;
-
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
-      return {};
-    }
-
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf-8');
-      const messages = parseTranscript(content);
-
-      if (messages.length === 0) {
-        log('No messages to archive');
-        return {};
-      }
-
-      const summary = getSessionSummary(sessionId, transcriptPath);
-      const name = summary ? sanitizeFilename(summary) : generateFallbackName();
-
-      const conversationsDir = '/workspace/group/conversations';
-      fs.mkdirSync(conversationsDir, { recursive: true });
-
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `${date}-${name}.md`;
-      const filePath = path.join(conversationsDir, filename);
-
-      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
-      fs.writeFileSync(filePath, markdown);
-
-      log(`Archived conversation to ${filePath}`);
-    } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return {};
-  };
-}
-
-function sanitizeFilename(summary: string): string {
-  return summary
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
-}
-
-function generateFallbackName(): string {
-  const time = new Date();
-  return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
-}
-
-interface ParsedMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function parseTranscript(content: string): ParsedMessage[] {
-  const messages: ParsedMessage[] = [];
-
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
-        if (text) messages.push({ role: 'user', content: text });
-      } else if (entry.type === 'assistant' && entry.message?.content) {
-        const textParts = entry.message.content
-          .filter((c: { type: string }) => c.type === 'text')
-          .map((c: { text: string }) => c.text);
-        const text = textParts.join('');
-        if (text) messages.push({ role: 'assistant', content: text });
-      }
-    } catch {
-    }
-  }
-
-  return messages;
-}
-
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null, assistantName?: string): string {
-  const now = new Date();
-  const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
+async function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
   });
-
-  const lines: string[] = [];
-  lines.push(`# ${title || 'Conversation'}`);
-  lines.push('');
-  lines.push(`Archived: ${formatDateTime(now)}`);
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : (assistantName || 'Assistant');
-    const content = msg.content.length > 2000
-      ? msg.content.slice(0, 2000) + '...'
-      : msg.content;
-    lines.push(`**${sender}**: ${content}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
 }
 
-/**
- * Check for _close sentinel.
- */
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {}
     return true;
   }
   return false;
 }
 
-/**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
- */
 function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
+    const files = fs
+      .readdirSync(IPC_INPUT_DIR)
+      .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: string[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const data = JSON.parse(
+          fs.readFileSync(filePath, 'utf-8'),
+        ) as IpcMessage;
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(
+          `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {}
       }
     }
     return messages;
@@ -301,10 +121,6 @@ function drainIpcInput(): string[] {
   }
 }
 
-/**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
- */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
@@ -323,145 +139,437 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
-/**
- * Run a single query and stream results via writeOutput.
- * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
- * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
- */
-async function runQuery(
-  prompt: string,
-  sessionId: string | undefined,
-  mcpServerPath: string,
-  containerInput: ContainerInput,
-  sdkEnv: Record<string, string | undefined>,
-  resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
-  const stream = new MessageStream();
-  stream.push(prompt);
+function extractResponseText(parts: unknown[]): string {
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (part && typeof part === 'object' && 'type' in part) {
+      const typedPart = part as { type: string; text?: string };
+      if (typedPart.type === 'text' && typedPart.text) {
+        textParts.push(typedPart.text);
+      }
+    }
+  }
+  return textParts.join('');
+}
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
-  let ipcPolling = true;
+/**
+ * Convert structured messages to OpenCode parts format.
+ * Falls back to legacy prompt if messages not provided.
+ */
+function messagesToOpenCodeParts(
+  messages: StructuredMessage[] | undefined,
+  legacyPrompt: string,
+): Array<{ role: string; parts: OpenCodePart[] }> {
+  // Fallback to legacy prompt if messages not provided
+  if (!messages || messages.length === 0) {
+    return [{ role: 'user', parts: [{ type: 'text', text: legacyPrompt }] }];
+  }
+
+  return messages.map((m) => ({
+    role: m.role,
+    parts: m.content
+      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+      .map((c) => ({ type: 'text', text: c.text })),
+  }));
+}
+
+async function waitForAssistantResponse(
+  client: OpencodeClient,
+  sessionId: string,
+  timeoutMs: number = 300000,
+): Promise<{ text: string; success: boolean }> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const messagesResponse = await client.session.messages({
+        path: { id: sessionId },
+      });
+
+      if (messagesResponse.error) {
+        log(
+          `Error getting messages: ${JSON.stringify(messagesResponse.error)}`,
+        );
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+
+      const messages = messagesResponse.data;
+      if (!messages || messages.length === 0) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+
+      const assistantMessages = messages.filter(
+        (m: unknown) =>
+          m &&
+          typeof m === 'object' &&
+          'role' in m &&
+          (m as { role: string }).role === 'assistant',
+      );
+
+      if (assistantMessages.length > 0) {
+        const lastMessage = assistantMessages[assistantMessages.length - 1] as {
+          parts?: unknown[];
+        };
+        if (lastMessage.parts && lastMessage.parts.length > 0) {
+          const text = extractResponseText(lastMessage.parts);
+          if (text) return { text, success: true };
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 500));
+    } catch (err) {
+      log(
+        `Error polling for messages: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
+  return { text: '', success: false };
+}
+
+interface LLMHealthResult {
+  ok: boolean;
+  error?: string;
+  modelsAvailable?: number;
+}
+
+interface LLMConfig {
+  provider: Record<
+    string,
+    { name?: string; options: { baseURL: string; apiKey: string } }
+  >;
+  model: string;
+}
+
+/**
+ * Parse LLM configuration from environment variables.
+ * Supports NANOCLAW_LLM_CONFIG (JSON) with fallback to legacy env vars.
+ */
+function parseLLMConfig(): LLMConfig {
+  // 1. Try NANOCLAW_LLM_CONFIG first
+  const configJson = process.env.NANOCLAW_LLM_CONFIG;
+  if (configJson) {
+    try {
+      const cfg = JSON.parse(configJson) as LLMConfig;
+      // Validate basic structure
+      if (!cfg.provider || typeof cfg.provider !== 'object') {
+        throw new Error('NANOCLAW_LLM_CONFIG must have provider object');
+      }
+      if (!cfg.model || typeof cfg.model !== 'string') {
+        throw new Error('NANOCLAW_LLM_CONFIG must have model string');
+      }
+      return cfg;
+    } catch (e) {
+      throw new Error(
+        `Invalid NANOCLAW_LLM_CONFIG: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  // 2. Synthesize from legacy env vars
+  const baseURL =
+    process.env.NANOCLAW_LLM_BASE_URL || 'http://host.docker.internal:1234/v1';
+  const apiKey = process.env.NANOCLAW_LLM_API_KEY || 'not-needed';
+  const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
+
+  return {
+    provider: {
+      'openai-compatible': {
+        options: { baseURL, apiKey },
+      },
+    },
+    model: `openai-compatible/${modelId}`,
+  };
+}
+
+/**
+ * Apply optional model override from NANOCLAW_LLM_MODEL.
+ */
+function applyModelOverride(cfg: LLMConfig): LLMConfig {
+  const override = process.env.NANOCLAW_LLM_MODEL;
+  if (!override) return cfg;
+
+  // If override contains '/', use as-is; otherwise prefix with provider type
+  if (override.includes('/')) {
+    cfg.model = override;
+  } else {
+    // Extract provider type from existing model
+    const providerType = cfg.model.split('/')[0];
+    cfg.model = `${providerType}/${override}`;
+  }
+  return cfg;
+}
+
+/**
+ * Extract the base URL from the provider configuration.
+ * Uses the provider type from the model string to find the matching provider config.
+ */
+function getBaseURLFromConfig(cfg: LLMConfig): string | null {
+  const providerType = cfg.model.split('/')[0];
+  const provider = cfg.provider[providerType];
+  if (provider?.options?.baseURL) {
+    return provider.options.baseURL;
+  }
+  // Fallback: try any provider if only one exists
+  const providerKeys = Object.keys(cfg.provider);
+  if (providerKeys.length === 1) {
+    const singleProvider = cfg.provider[providerKeys[0]];
+    if (singleProvider?.options?.baseURL) {
+      return singleProvider.options.baseURL;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get display name for the provider (for logging).
+ */
+function getProviderDisplayName(cfg: LLMConfig): string {
+  const providerType = cfg.model.split('/')[0];
+  const provider = cfg.provider[providerType];
+  return provider?.name || providerType;
+}
+
+async function checkLLMHealth(
+  url: string,
+  maxRetries: number = 3,
+  retryDelayMs: number = 2000,
+): Promise<LLMHealthResult> {
+  let lastError: string = '';
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(`${url}/models`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}: ${response.statusText}`;
+        log(`LLM health check attempt ${attempt} failed: ${lastError}`);
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        }
+        continue;
+      }
+
+      const data = (await response.json()) as { data?: Array<{ id: string }> };
+      const modelsAvailable = data.data?.length ?? 0;
+
+      if (modelsAvailable === 0) {
+        lastError = 'No models available';
+        log(`LLM health check attempt ${attempt}: ${lastError}`);
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        }
+        continue;
+      }
+
+      log(`LLM is healthy with ${modelsAvailable} models available`);
+      return { ok: true, modelsAvailable };
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        lastError = 'Connection timeout (5s)';
+      } else {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+      log(`LLM health check attempt ${attempt} failed: ${lastError}`);
+
+      if (attempt < maxRetries) {
+        log(`Retrying in ${retryDelayMs}ms...`);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    error: `LLM server is not responding after ${maxRetries} attempts. Last error: ${lastError}`,
+  };
+}
+
+async function createOpencodeServer(
+  directory: string,
+  containerInput: ContainerInput,
+): Promise<{ url: string; close(): void }> {
+  const hostname = '127.0.0.1';
+  const port = 4096;
+  const timeout = 10000;
+
+  // Build MCP server configuration for NanoClaw IPC
+  const mcpServerConfig = {
+    nanoclaw: {
+      type: 'stdio' as const,
+      command: 'node',
+      args: ['/opt/nanoclaw/ipc-mcp-stdio.js'],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
+
+  const llmConfig = applyModelOverride(parseLLMConfig());
+
+  const config = {
+    provider: llmConfig.provider,
+    model: llmConfig.model,
+    mcp: mcpServerConfig,
+  };
+
+  const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
+  const proc = spawn('opencode', args, {
+    env: {
+      ...process.env,
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+    },
+    cwd: directory,
+  });
+
+  const url = await new Promise<string>((resolve, reject) => {
+    const id = setTimeout(() => {
+      proc.kill();
+      reject(
+        new Error(`Timeout waiting for server to start after ${timeout}ms`),
+      );
+    }, timeout);
+
+    let output = '';
+    proc.stdout?.on('data', (chunk) => {
+      output += chunk.toString();
+      const lines = output.split('\n');
+      for (const line of lines) {
+        if (line.includes('listening')) {
+          const match = line.match(/(https?:\/\/[^\s]+)/);
+          if (match) {
+            clearTimeout(id);
+            resolve(match[1]!);
+            return;
+          }
+        }
+      }
+    });
+
+    proc.stderr?.on('data', (chunk) => {
+      output += chunk.toString();
+      log(`Server stderr: ${chunk.toString().trim()}`);
+    });
+
+    proc.on('exit', (code) => {
+      clearTimeout(id);
+      reject(new Error(`Server exited with code ${code}. Output: ${output}`));
+    });
+
+    proc.on('error', (error) => {
+      clearTimeout(id);
+      reject(error);
+    });
+  });
+
+  log(`OpenCode server started at ${url}`);
+  return { url, close: () => proc.kill() };
+}
+
+async function runQuery(
+  client: OpencodeClient,
+  prompt: string,
+  messages: StructuredMessage[] | undefined,
+  sessionId: string | undefined,
+  containerInput: ContainerInput,
+): Promise<{ newSessionId: string; closedDuringQuery: boolean }> {
+  let currentSessionId: string;
   let closedDuringQuery = false;
+
+  if (sessionId) {
+    currentSessionId = sessionId;
+    log(`Using existing session: ${currentSessionId}`);
+  } else {
+    log('Creating new session...');
+    const createResponse = await client.session.create({
+      body: { title: `NanoClaw-${containerInput.groupFolder}` },
+    });
+
+    if (createResponse.error) {
+      throw new Error(
+        `Failed to create session: ${JSON.stringify(createResponse.error)}`,
+      );
+    }
+
+    const session = createResponse.data as { id: string };
+    currentSessionId = session.id;
+    log(`Created new session: ${currentSessionId}`);
+  }
+
+  let ipcPolling = true;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
+      log('Close sentinel detected during query');
       closedDuringQuery = true;
-      stream.end();
       ipcPolling = false;
       return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
+  try {
+    const llmConfig = applyModelOverride(parseLLMConfig());
+    const modelParts = llmConfig.model.split('/');
+    const providerId = modelParts[0] || 'openai-compatible';
+    const modelId = modelParts.slice(1).join('/') || 'default';
+    const opencodeMessages = messagesToOpenCodeParts(messages, prompt);
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
-  }
+    log(
+      `Sending ${opencodeMessages.length} messages to session ${currentSessionId}...`,
+    );
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
-      }
-    }
-  }
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
-
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
+    const lastMessage = opencodeMessages[opencodeMessages.length - 1];
+    const promptResponse = await client.session.prompt({
+      path: { id: currentSessionId },
+      body: {
+        parts: lastMessage.parts,
+        model: { providerID: providerId, modelID: modelId },
       },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-      },
-    }
-  })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    });
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (promptResponse.error) {
+      throw new Error(
+        `Failed to send prompt: ${JSON.stringify(promptResponse.error)}`,
+      );
     }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
+    log('Waiting for assistant response...');
+    const { text, success } = await waitForAssistantResponse(
+      client,
+      currentSessionId,
+    );
+
+    if (!success) {
+      throw new Error('Timeout waiting for assistant response');
     }
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-    }
+    log(`Got response (${text.length} chars)`);
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
-    }
+    writeOutput({
+      status: 'success',
+      result: text,
+      newSessionId: currentSessionId,
+    });
+  } finally {
+    ipcPolling = false;
   }
 
-  ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId: currentSessionId, closedDuringQuery };
 }
 
 async function main(): Promise<void> {
@@ -469,70 +577,121 @@ async function main(): Promise<void> {
 
   try {
     const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
+    containerInput = JSON.parse(stdinData) as ContainerInput;
+    currentTraceId = containerInput.traceId || 'unknown';
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+  let server: { url: string; close(): void } | null = null;
+  let client: OpencodeClient | null = null;
 
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
-
-  let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
-
-  // Build initial prompt (drain any pending IPC messages too)
-  let prompt = containerInput.prompt;
-  if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
-  }
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
-  }
-
-  // Query loop: run query → wait for IPC message → run new query → repeat
-  let resumeAt: string | undefined;
   try {
+    log('Starting OpenCode server...');
+    server = await createOpencodeServer('/workspace/group', containerInput);
+    client = createOpencodeClient({ baseUrl: server.url });
+
+    const llmConfig = applyModelOverride(parseLLMConfig());
+    const llmUrl = getBaseURLFromConfig(llmConfig);
+    const providerName = getProviderDisplayName(llmConfig);
+    log(`Using LLM provider: ${providerName}, model: ${llmConfig.model}`);
+
+    if (!llmUrl) {
+      const userError =
+        '❌ LLM configuration error: Could not determine base URL from provider config.\n\n' +
+        'Please ensure your NANOCLAW_LLM_CONFIG includes a valid baseURL in the provider options.';
+      log('LLM URL not found in config');
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: userError,
+      });
+      process.exit(1);
+    }
+
+    // Check LLM health before proceeding
+    log('Checking LLM connectivity...');
+    const health = await checkLLMHealth(llmUrl, 3, 2000);
+    if (!health.ok) {
+      const userError =
+        '❌ LLM server is currently unavailable.\n\n' +
+        'Please ensure your LLM server is running:\n' +
+        '1. For LM Studio: Open the application and load a model in Developer tab\n' +
+        '2. For Ollama: Run `ollama serve`\n' +
+        '3. For cloud APIs: Verify your API key and endpoint URL\n\n' +
+        `Technical details: ${health.error}`;
+
+      log(`LLM health check failed: ${health.error}`);
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: userError,
+      });
+      process.exit(1);
+    }
+
+    log(`LLM is ready with ${health.modelsAvailable} models available`);
+
+    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+    try {
+      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {}
+
+    // Prepare prompt from messages or legacy prompt
+    let prompt = containerInput.prompt;
+    if (containerInput.messages && containerInput.messages.length > 0) {
+      // Use the last message's content as the prompt for backward compatibility
+      const lastMessage =
+        containerInput.messages[containerInput.messages.length - 1];
+      const textContent = lastMessage.content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map((c) => c.text)
+        .join('\n');
+      prompt = textContent || containerInput.prompt;
+    }
+
+    if (containerInput.isScheduledTask) {
+      prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    }
+    const pending = drainIpcInput();
+    if (pending.length > 0) {
+      log(
+        `Draining ${pending.length} pending IPC messages into initial prompt`,
+      );
+      prompt += '\n' + pending.join('\n');
+    }
+
+    let sessionId = containerInput.sessionId;
+
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(`Starting query (session: ${sessionId || 'new'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
+      if (!client) {
+        throw new Error('Client not initialized');
       }
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
+      const queryResult = await runQuery(
+        client,
+        prompt,
+        containerInput.messages,
+        sessionId,
+        containerInput,
+      );
+      sessionId = queryResult.newSessionId;
+
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
-
       log('Query ended, waiting for next IPC message...');
 
-      // Wait for the next message or _close sentinel
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
@@ -541,17 +700,23 @@ async function main(): Promise<void> {
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
+      // Clear messages after first use (subsequent turns use IPC)
+      containerInput.messages = undefined;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
+    log(`Failed to initialize OpenCode: ${errorMessage}`);
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
-      error: errorMessage
+      error: `OpenCode initialization failed: ${errorMessage}`,
     });
     process.exit(1);
+  } finally {
+    if (server) {
+      log('Shutting down OpenCode server...');
+      server.close();
+    }
   }
 }
 

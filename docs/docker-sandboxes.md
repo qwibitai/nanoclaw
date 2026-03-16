@@ -1,5 +1,11 @@
 # Running NanoClaw in Docker Sandboxes (Manual Setup)
 
+> **⚠️ Experimental Feature**: This guide describes an experimental Docker Sandboxes setup that provides hypervisor-level isolation.
+>
+> - **Currently supported**: macOS (Apple Silicon), Windows (WSL2)
+> - **Linux support**: Not yet available (Docker Sandboxes requires Docker Desktop-specific features)
+> - **Status**: For most users, standard Docker or Apple Container setup (see main README) is recommended
+
 This guide walks through setting up NanoClaw inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
 
 ## Architecture
@@ -12,23 +18,24 @@ Host (macOS / Windows WSL)
     │   └── Container spawner → nested Docker daemon
     └── Docker-in-Docker
         └── nanoclaw-agent containers
-            └── Claude Agent SDK
+            └── OpenCode SDK
 ```
 
 Each agent runs in its own container, inside a micro VM that is fully isolated from your host. Two layers of isolation: per-agent containers + the VM boundary.
 
-The sandbox provides a MITM proxy at `host.docker.internal:3128` that handles network access and injects your Anthropic API key automatically.
+The sandbox provides a MITM proxy at `host.docker.internal:3128` that handles network access. Configure your LLM endpoint via environment variables (see Configuration section).
 
-> **Note:** This guide is based on a validated setup running on macOS (Apple Silicon) with WhatsApp. Other channels (Telegram, Slack, etc.) and environments (Windows WSL) may require additional proxy patches for their specific HTTP/WebSocket clients. The core patches (container runner, credential proxy, Dockerfile) apply universally — channel-specific proxy configuration varies.
+> **Note:** This guide is based on a validated setup running on macOS (Apple Silicon) with WhatsApp. Other channels (Telegram, Slack, etc.) and environments (Windows WSL) may require additional proxy patches for their specific HTTP/WebSocket clients. The core patches (container runner, Dockerfile) apply universally — channel-specific proxy configuration varies.
 
 ## Prerequisites
 
 - **Docker Desktop v4.40+** with Sandbox support
-- **Anthropic API key** (the sandbox proxy manages injection)
+- **LLM endpoint** (LM Studio recommended for local development, or cloud API key)
 - For **Telegram**: a bot token from [@BotFather](https://t.me/BotFather) and your chat ID
 - For **WhatsApp**: a phone with WhatsApp installed
 
 Verify sandbox support:
+
 ```bash
 docker sandbox version
 ```
@@ -57,6 +64,7 @@ docker sandbox network proxy shell-nanoclaw-workspace \
 Telegram does not need proxy bypass.
 
 Enter the sandbox:
+
 ```bash
 docker sandbox run shell-nanoclaw-workspace
 ```
@@ -166,19 +174,7 @@ In `src/container-runtime.ts`, the `cleanupOrphans()` function matches container
 // In cleanupOrphans(), filter out os.hostname() from the list of containers to stop
 ```
 
-### 4e. Credential proxy — route through MITM proxy
-
-In `src/credential-proxy.ts`, upstream API requests need to go through the sandbox proxy. Add `HttpsProxyAgent` to outbound requests:
-
-```typescript
-import { HttpsProxyAgent } from 'https-proxy-agent';
-
-const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
-const upstreamAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-// Pass upstreamAgent to https.request() options
-```
-
-### 4f. Setup script — proxy build args
+### 4e. Setup script — proxy build args
 
 Patch `setup/container.ts` to pass the same proxy `--build-arg` flags as `build.sh` (Step 4b).
 
@@ -204,7 +200,8 @@ npm run build
 cat > .env << EOF
 TELEGRAM_BOT_TOKEN=<your-token-from-botfather>
 ASSISTANT_NAME=nanoclaw
-ANTHROPIC_API_KEY=proxy-managed
+NANOCLAW_LLM_BASE_URL=http://host.docker.internal:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model
 EOF
 mkdir -p data/env && cp .env data/env/env
 
@@ -221,6 +218,7 @@ npx tsx setup/index.ts --step register \
 ```
 
 **To find your chat ID:** Send any message to your bot, then:
+
 ```bash
 curl -s --proxy $HTTPS_PROXY "https://api.telegram.org/bot<TOKEN>/getUpdates" | python3 -m json.tool
 ```
@@ -243,7 +241,8 @@ npm run build
 # Configure .env
 cat > .env << EOF
 ASSISTANT_NAME=nanoclaw
-ANTHROPIC_API_KEY=proxy-managed
+NANOCLAW_LLM_BASE_URL=http://host.docker.internal:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model
 EOF
 mkdir -p data/env && cp .env data/env/env
 
@@ -279,7 +278,7 @@ Apply both skills, patch both for proxy support, combine the `.env` variables, a
 npm start
 ```
 
-You don't need to set `ANTHROPIC_API_KEY` manually. The sandbox proxy intercepts requests and replaces `proxy-managed` with your real key automatically.
+Configure your LLM endpoint in `.env`. For local development with LM Studio running on the host, use `host.docker.internal` to reach it from inside the sandbox.
 
 ## Networking Details
 
@@ -288,7 +287,7 @@ You don't need to set `ANTHROPIC_API_KEY` manually. The sandbox proxy intercepts
 All traffic from the sandbox routes through the host proxy at `host.docker.internal:3128`:
 
 ```
-Agent container → DinD bridge → Sandbox VM → host.docker.internal:3128 → Host proxy → api.anthropic.com
+Agent container → DinD bridge → Sandbox VM → host.docker.internal:PORT → LLM endpoint (LM Studio on host, or cloud API)
 ```
 
 **"Bypass" does not mean traffic skips the proxy.** It means the proxy passes traffic through without MITM inspection. Node.js doesn't automatically use `HTTP_PROXY` env vars — you need explicit `HttpsProxyAgent` configuration in every HTTP/WebSocket client.
@@ -296,6 +295,7 @@ Agent container → DinD bridge → Sandbox VM → host.docker.internal:3128 →
 ### Shared paths for DinD mounts
 
 Only the workspace directory is available for Docker-in-Docker bind mounts. Paths outside the workspace fail with "path not shared":
+
 - `/dev/null` → replace with an empty file in the project dir
 - `/usr/local/share/ca-certificates/` → copy cert to project dir
 - `/home/agent/` → clone to workspace instead
@@ -307,11 +307,13 @@ The workspace is mounted via virtiofs. Git's pack file handling can corrupt over
 ## Troubleshooting
 
 ### npm install fails with SELF_SIGNED_CERT_IN_CHAIN
+
 ```bash
 npm config set strict-ssl false
 ```
 
 ### Container build fails with proxy errors
+
 ```bash
 docker build \
   --build-arg http_proxy=$http_proxy \
@@ -320,19 +322,25 @@ docker build \
 ```
 
 ### Agent containers fail with "path not shared"
+
 All bind-mounted paths must be under the workspace directory. Check:
+
 - Is NanoClaw cloned into the workspace? (not `/home/agent/`)
 - Is the CA cert copied to the project root?
 - Has the empty `.env` shadow file been created?
 
 ### Agent containers can't reach Anthropic API
+
 Verify proxy env vars are forwarded to agent containers. Check container logs for `HTTP_PROXY=http://host.docker.internal:3128`.
 
 ### WhatsApp error 405
+
 The version fetch is returning a stale version. Make sure the proxy-aware `fetchWaVersionViaProxy` patch is applied — it fetches `sw.js` through `HttpsProxyAgent` and parses `client_revision`.
 
 ### WhatsApp "Connection failed" immediately
+
 Proxy bypass not configured. From the **host**, run:
+
 ```bash
 docker sandbox network proxy <sandbox-name> \
   --bypass-host web.whatsapp.com \
@@ -341,17 +349,22 @@ docker sandbox network proxy <sandbox-name> \
 ```
 
 ### Telegram bot doesn't receive messages
+
 1. Check the grammy proxy patch is applied (look for `HttpsProxyAgent` in `src/channels/telegram.ts`)
 2. Check Group Privacy is disabled in @BotFather if using in groups
 
 ### Git clone fails with "inflate: data stream error"
+
 Clone to a non-workspace path first, then move:
+
 ```bash
 cd ~ && git clone https://github.com/qwibitai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
 ```
 
 ### WhatsApp QR code doesn't display
+
 Run the auth command interactively inside the sandbox (not piped through `docker sandbox exec`):
+
 ```bash
 docker sandbox run shell-nanoclaw-workspace
 # Then inside:

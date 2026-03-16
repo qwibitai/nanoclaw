@@ -1,0 +1,26 @@
+{
+  "name": "with-system-message",
+  "description": "Conversation including system context message",
+  "sequence": [
+    {
+      "id": "msg-001",
+      "role": "system",
+      "content": [
+        { "type": "text", "text": "You are a helpful assistant named Andy." }
+      ],
+      "timestamp": "2025-03-16T10:00:00.000Z"
+    },
+    {
+      "id": "msg-002",
+      "role": "user",
+      "content": [{ "type": "text", "text": "What is your name?" }],
+      "timestamp": "2025-03-16T10:00:05.000Z",
+      "sender_name": "TestUser"
+    }
+  ],
+  "expected": {
+    "outputCount": 1,
+    "sessionContinuity": true,
+    "allOutputsValid": true
+  }
+}

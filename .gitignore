@@ -35,4 +35,7 @@ groups/global/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# OMO
+.sisyphus/
+
 agents-sdk-docs

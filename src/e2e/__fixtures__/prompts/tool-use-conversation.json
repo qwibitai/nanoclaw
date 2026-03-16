@@ -1,0 +1,30 @@
+{
+  "name": "tool-use-conversation",
+  "description": "Conversation with tool requests and responses",
+  "sequence": [
+    {
+      "id": "msg-001",
+      "role": "user",
+      "content": [{ "type": "text", "text": "What time is it?" }],
+      "timestamp": "2025-03-16T10:00:00.000Z",
+      "sender_name": "TestUser"
+    },
+    {
+      "id": "msg-002",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "I'll check the current time for you."
+        }
+      ],
+      "timestamp": "2025-03-16T10:00:02.000Z"
+    }
+  ],
+  "expected": {
+    "outputCount": 1,
+    "sessionContinuity": true,
+    "allOutputsValid": true,
+    "validatesToolRequests": true
+  }
+}
