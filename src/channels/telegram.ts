@@ -1,3 +1,9 @@
+import { execFile } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { promisify } from 'util';
+
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -10,6 +16,64 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+const execFileAsync = promisify(execFile);
+
+/** Extensions that can be extracted to text via external tools. */
+const EXTRACTABLE_EXTS: Record<string, (filePath: string) => Promise<string>> =
+  {
+    '.pdf': extractPdfText,
+    '.docx': extractDocxText,
+  };
+
+async function extractPdfText(filePath: string): Promise<string> {
+  const { stdout } = await execFileAsync('pdftotext', [
+    '-layout',
+    filePath,
+    '-',
+  ]);
+  return stdout;
+}
+
+async function extractDocxText(filePath: string): Promise<string> {
+  // pandoc is optional; fall back gracefully if not installed
+  const { stdout } = await execFileAsync('pandoc', [
+    '-f',
+    'docx',
+    '-t',
+    'plain',
+    '--wrap=none',
+    filePath,
+  ]);
+  return stdout;
+}
+
+/**
+ * Download a Telegram file to a temp path, extract text, and clean up.
+ * Returns extracted text or null if extraction fails.
+ */
+async function extractDocumentText(
+  fileUrl: string,
+  fileName: string,
+): Promise<string | null> {
+  const ext = fileName.includes('.')
+    ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+    : '';
+  const extractor = EXTRACTABLE_EXTS[ext];
+  if (!extractor) return null;
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-doc-'));
+  const tmpFile = path.join(tmpDir, fileName);
+  try {
+    const resp = await fetch(fileUrl);
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(tmpFile, buf);
+    return await extractor(tmpFile);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
 
 // Bot pool for agent teams: send-only Api instances (no polling)
 const poolApis: Api[] = [];
@@ -46,14 +110,19 @@ export async function initBotPool(tokens: string[]): Promise<void> {
  * same sender in the same group always use the same bot.
  * On first assignment, renames the bot to match the sender's role.
  */
+/**
+ * Send a message via a pool bot assigned to the given sender name.
+ * Returns false if the pool bot can't reach the chat (e.g. 403 in DMs),
+ * so the caller can fall back to the main bot.
+ */
 export async function sendPoolMessage(
   chatId: string,
   text: string,
   sender: string,
   groupFolder: string,
-): Promise<void> {
+): Promise<boolean> {
   if (poolApis.length === 0) {
-    return;
+    return false;
   }
 
   const key = `${groupFolder}:${sender}`;
@@ -97,8 +166,21 @@ export async function sendPoolMessage(
       { chatId, sender, poolIndex: idx, length: text.length },
       'Pool message sent',
     );
-  } catch (err) {
+    return true;
+  } catch (err: unknown) {
+    const errorCode =
+      err && typeof err === 'object' && 'error_code' in err
+        ? (err as { error_code: number }).error_code
+        : 0;
+    if (errorCode === 403) {
+      logger.info(
+        { chatId, sender },
+        'Pool bot cannot reach chat, falling back to main bot',
+      );
+      return false;
+    }
     logger.error({ chatId, sender, err }, 'Failed to send pool message');
+    return false;
   }
 }
 
@@ -344,6 +426,34 @@ export class TelegramChannel implements Channel {
           }
         } catch (err) {
           logger.warn({ name, err }, 'Failed to download Telegram document');
+        }
+      }
+
+      // Try extracting text from binary documents (PDF, DOCX, etc.)
+      if (doc?.file_id && EXTRACTABLE_EXTS[ext]) {
+        try {
+          const file = await ctx.api.getFile(doc.file_id);
+          const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+          const extracted = await extractDocumentText(url, name);
+          if (extracted && extracted.trim().length > 0) {
+            const maxChars = 50_000;
+            const truncated =
+              extracted.length > maxChars
+                ? extracted.slice(0, maxChars) +
+                  `\n\n[Truncated — ${extracted.length} chars total]`
+                : extracted;
+            storeNonText(ctx, `[Document: ${name}]\n\n${truncated}`);
+            logger.info(
+              { name, chars: extracted.length },
+              'Telegram document extracted',
+            );
+            return;
+          }
+        } catch (err) {
+          logger.warn(
+            { name, err },
+            'Failed to extract Telegram document text',
+          );
         }
       }
 

@@ -183,18 +183,23 @@ end tell
 `;
 
   return new Promise((resolve) => {
-    execFile('osascript', ['-e', script], { timeout: 15000 }, (err, _stdout, stderr) => {
-      if (err) {
-        logger.warn({ err, to: params.to }, 'iMessage send failed');
-        resolve({
-          success: false,
-          message: `Failed to send: ${stderr || err.message}`,
-        });
-      } else {
-        logger.info({ to: params.to }, 'iMessage sent');
-        resolve({ success: true, message: `Message sent to ${params.to}` });
-      }
-    });
+    execFile(
+      'osascript',
+      ['-e', script],
+      { timeout: 15000 },
+      (err, _stdout, stderr) => {
+        if (err) {
+          logger.warn({ err, to: params.to }, 'iMessage send failed');
+          resolve({
+            success: false,
+            message: `Failed to send: ${stderr || err.message}`,
+          });
+        } else {
+          logger.info({ to: params.to }, 'iMessage sent');
+          resolve({ success: true, message: `Message sent to ${params.to}` });
+        }
+      },
+    );
   });
 }
 

@@ -91,12 +91,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.chatJid.startsWith('tg:') &&
                     TELEGRAM_BOT_POOL.length > 0
                   ) {
-                    await sendPoolMessage(
+                    const sent = await sendPoolMessage(
                       data.chatJid,
                       data.text,
                       data.sender,
                       sourceGroup,
                     );
+                    if (!sent) {
+                      // Pool bot can't reach this chat (e.g. DM) — fall back
+                      // to main bot with sender name prefixed
+                      const prefixed = `*${data.sender}:*\n${data.text}`;
+                      await deps.sendMessage(data.chatJid, prefixed);
+                    }
                   } else {
                     await deps.sendMessage(data.chatJid, data.text);
                   }
@@ -470,17 +476,18 @@ export async function processTaskIpc(
 
     default: {
       let handled = false;
-      if (
-        typeof data.type === 'string' &&
-        data.type.startsWith('imessage_')
-      ) {
+      if (typeof data.type === 'string' && data.type.startsWith('imessage_')) {
         handled = await handleImessageIpc(
           data as Record<string, unknown>,
           sourceGroup,
           isMain,
         );
       }
-      if (!handled && typeof data.type === 'string' && data.type.startsWith('x_')) {
+      if (
+        !handled &&
+        typeof data.type === 'string' &&
+        data.type.startsWith('x_')
+      ) {
         try {
           const modPath = [
             '..',
@@ -547,10 +554,19 @@ async function handleImessageIpc(
     return true;
   }
 
-  const resultsDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'imessage_results');
+  const resultsDir = path.join(
+    DATA_DIR,
+    'ipc',
+    sourceGroup,
+    'imessage_results',
+  );
   fs.mkdirSync(resultsDir, { recursive: true });
 
-  const writeResult = (result: { success: boolean; message: string; data?: unknown }) => {
+  const writeResult = (result: {
+    success: boolean;
+    message: string;
+    data?: unknown;
+  }) => {
     const resultFile = path.join(resultsDir, `${requestId}.json`);
     const tmpFile = `${resultFile}.tmp`;
     fs.writeFileSync(tmpFile, JSON.stringify(result));
@@ -558,12 +574,8 @@ async function handleImessageIpc(
   };
 
   try {
-    const {
-      imessageSearch,
-      imessageRead,
-      imessageSend,
-      imessageListContacts,
-    } = await import('./imessage-host.js');
+    const { imessageSearch, imessageRead, imessageSend, imessageListContacts } =
+      await import('./imessage-host.js');
 
     switch (data.type) {
       case 'imessage_search': {
@@ -602,7 +614,10 @@ async function handleImessageIpc(
         const to = data.to as string;
         const text = data.text as string;
         if (!to || !text) {
-          writeResult({ success: false, message: 'Missing to or text parameter' });
+          writeResult({
+            success: false,
+            message: 'Missing to or text parameter',
+          });
           break;
         }
         const sendResult = await imessageSend({ to, text });
