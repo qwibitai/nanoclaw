@@ -370,6 +370,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Send immediate acknowledgment so users know we received their message.
+  // Telegram typing indicators expire after 5s — not enough for container spawn.
+  const ackPrefix = targetCase ? `[case: ${targetCase.name}]\n` : '';
+  await channel
+    .sendMessage(chatJid, `${ackPrefix}⏳`)
+    .catch((err: unknown) =>
+      logger.warn({ chatJid, err }, 'Failed to send processing ack'),
+    );
+
   // Case-specific session key to isolate conversation context per case
   const sessionKey = targetCase ? `case:${targetCase.id}` : group.folder;
 
