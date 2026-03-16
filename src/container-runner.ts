@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -54,13 +55,14 @@ export interface ContainerOutput {
   error?: string;
 }
 
-interface VolumeMount {
+export interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
 }
 
-function buildVolumeMounts(
+/** @internal Exported for testing. */
+export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
 ): VolumeMount[] {
@@ -202,6 +204,33 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // MCP credential mounts: skill-configured directories needed by MCP servers.
+  // These bypass the additionalMounts security blocklist because they are set up
+  // by trusted skills (not by agents) and typically contain credential files
+  // (e.g. ~/.gmail-mcp) that would otherwise be blocked by DEFAULT_BLOCKED_PATTERNS.
+  if (group.containerConfig?.mcpCredentialMounts) {
+    for (const mcpMount of group.containerConfig.mcpCredentialMounts) {
+      const expandedPath = mcpMount.hostPath.startsWith('~/')
+        ? path.join(process.env.HOME || os.homedir(), mcpMount.hostPath.slice(2))
+        : path.resolve(mcpMount.hostPath);
+
+      if (!fs.existsSync(expandedPath)) {
+        logger.warn(
+          { hostPath: mcpMount.hostPath, expandedPath },
+          'MCP credential mount path does not exist, skipping',
+        );
+        continue;
+      }
+
+      const name = mcpMount.name || path.basename(expandedPath);
+      mounts.push({
+        hostPath: expandedPath,
+        containerPath: `/workspace/mcp-credentials/${name}`,
+        readonly: true,
+      });
+    }
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
