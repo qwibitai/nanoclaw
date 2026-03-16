@@ -180,16 +180,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Global shared mnemon memory (read-only)
-  const globalMnemonDir = path.join(GROUPS_DIR, 'global', '.mnemon');
-  if (fs.existsSync(globalMnemonDir)) {
-    mounts.push({
-      hostPath: globalMnemonDir,
-      containerPath: '/workspace/global/.mnemon',
-      readonly: true,
-    });
-  }
-
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
