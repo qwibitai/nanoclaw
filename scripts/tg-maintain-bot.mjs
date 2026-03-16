@@ -12,7 +12,11 @@
 import fs from 'fs';
 import path from 'path';
 
-const BOT_TOKEN = '8621132320:AAFcHZbPW-C3qROHKqww_K3_lHpXzoysNK4';
+const BOT_TOKEN = process.env.MAINTAIN_BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error('MAINTAIN_BOT_TOKEN not set');
+  process.exit(1);
+}
 const OWNER_CHAT_ID = 8656923396;
 const NC_DIR = process.env.HOME + '/nanoclaw';
 const TASKS_DIR = `${NC_DIR}/store/host-tasks`;

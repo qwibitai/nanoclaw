@@ -12,6 +12,7 @@ import {
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
+  GITHUB_TOKEN,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
@@ -252,6 +253,11 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // GitHub token for agents to interact with GitHub (optional)
+  if (GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${GITHUB_TOKEN}`);
   }
 
   // Runtime-specific args for host gateway resolution

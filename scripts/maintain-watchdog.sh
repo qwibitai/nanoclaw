@@ -9,6 +9,7 @@
 # 4. 通知（curl → Telegram）
 
 export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:$PATH"
+[ -f "$HOME/nanoclaw/.env" ] && export $(grep -E '^MAINTAIN_BOT_TOKEN=' "$HOME/nanoclaw/.env" | xargs)
 
 LOCKFILE="/tmp/nc-watchdog.lock"
 if ! shlock -f "$LOCKFILE" -p $$; then exit 0; fi
@@ -20,7 +21,7 @@ NC_LOG="$NC_DIR/logs/nanoclaw.log"
 NC_ERR="$NC_DIR/logs/nanoclaw.error.log"
 DB="$NC_DIR/store/messages.db"
 PORT=3001
-BOT_TOKEN="8621132320:AAFcHZbPW-C3qROHKqww_K3_lHpXzoysNK4"
+BOT_TOKEN="${MAINTAIN_BOT_TOKEN:-}"
 OWNER_CHAT_ID="8656923396"
 KANAE_JID="tg:-1003746091450"
 
@@ -145,7 +146,7 @@ if [ -f "$BOT_SCRIPT" ]; then
   fi
   if [ "$BOT_ALIVE" = false ]; then
     rm -f "$BOT_LOCK"
-    cd "$NC_DIR" && nohup node "$BOT_SCRIPT" >> "$NC_DIR/logs/maintain-bot.log" 2>&1 &
+    cd "$NC_DIR" && MAINTAIN_BOT_TOKEN="$BOT_TOKEN" nohup node "$BOT_SCRIPT" >> "$NC_DIR/logs/maintain-bot.log" 2>&1 &
     echo "$(date): Started maintain bot (PID: $!)" >> "$LOG"
   fi
 fi

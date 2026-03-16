@@ -13,6 +13,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # Claude Code 认证（cron 环境没有 shell 的环境变量）
 [ -f "$HOME/nanoclaw/.claude-env" ] && source "$HOME/nanoclaw/.claude-env" && export CLAUDE_CODE_OAUTH_TOKEN
+[ -f "$HOME/nanoclaw/.env" ] && export $(grep -E '^MAINTAIN_BOT_TOKEN=' "$HOME/nanoclaw/.env" | xargs)
 
 LOCKFILE="/tmp/nc-task-runner.lock"
 if ! shlock -f "$LOCKFILE" -p $$; then exit 0; fi
@@ -22,7 +23,7 @@ NC_DIR="$HOME/nanoclaw"
 TASKS_DIR="$NC_DIR/store/host-tasks"
 DONE_DIR="$NC_DIR/store/host-tasks-done"
 LOG="$NC_DIR/logs/task-runner.log"
-BOT_TOKEN="8621132320:AAFcHZbPW-C3qROHKqww_K3_lHpXzoysNK4"
+BOT_TOKEN="${MAINTAIN_BOT_TOKEN:-}"
 OWNER_CHAT_ID="8656923396"
 KANAE_JID="tg:-1003746091450"
 

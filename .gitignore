@@ -21,6 +21,7 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+.claude-env
 
 # Temp files
 .tmp-*
