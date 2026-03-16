@@ -79,6 +79,12 @@ export const SOLO_VAULT_PROJECT =
 export const SOLO_VAULT_ENV = process.env.SOLO_VAULT_ENV || 'production';
 export const SOLO_VAULT_TTL = 5 * 60 * 1000; // 5 minute cache TTL
 
+// RabbitMQ connection for cron-service subscription.
+// The cron-service at cron.jeffreykeyser.net publishes CronJobTriggered
+// events to the cron.jobs exchange. NanoClaw subscribes to receive triggers.
+export const RABBITMQ_URL =
+  process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

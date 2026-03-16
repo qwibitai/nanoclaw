@@ -42,6 +42,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
+import { startCronSubscriber, stopCronSubscriber } from './cron-subscriber.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -172,6 +173,7 @@ export async function initApp(): Promise<void> {
     shutdownSkillRegistry();
     proxyServer.close();
     if (skillServer) skillServer.close();
+    await stopCronSubscriber();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -301,13 +303,13 @@ export async function initApp(): Promise<void> {
   }
 
   // Start subsystems
-  startSchedulerLoop({
+  const schedulerDeps = {
     registeredGroups: () => state.registeredGroups,
     getSessions: () => state.sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
+    onProcess: (groupJid: string, proc: import('child_process').ChildProcess, containerName: string, groupFolder: string) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
-    sendMessage: async (jid, rawText) => {
+    sendMessage: async (jid: string, rawText: string) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
@@ -316,7 +318,11 @@ export async function initApp(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-  });
+  };
+  startSchedulerLoop(schedulerDeps);
+  startCronSubscriber(schedulerDeps).catch((err) =>
+    logger.error({ err }, 'Failed to start cron subscriber'),
+  );
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
