@@ -62,6 +62,7 @@ ExecStart=${nodePath} ${projectRoot}/dist/index.js
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
+KillMode=process
 Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
@@ -140,6 +141,16 @@ describe('systemd unit generation', () => {
     );
     expect(unit).toContain('Restart=always');
     expect(unit).toContain('RestartSec=5');
+  });
+
+  it('uses KillMode=process to preserve detached children', () => {
+    const unit = generateSystemdUnit(
+      '/usr/bin/node',
+      '/home/user/nanoclaw',
+      '/home/user',
+      false,
+    );
+    expect(unit).toContain('KillMode=process');
   });
 
   it('sets correct ExecStart', () => {
