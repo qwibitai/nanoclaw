@@ -13,20 +13,13 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/whatsapp_assistant/
 groups/main/*
 groups/global/*
+groups/whatsapp_assistant/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
-!groups/whatsapp_assistant/
-groups/whatsapp_assistant/*
-!groups/whatsapp_assistant/features/
-groups/whatsapp_assistant/features/*
-!groups/whatsapp_assistant/features/shopping-list/
-groups/whatsapp_assistant/features/shopping-list/*
-!groups/whatsapp_assistant/features/shopping-list/CLAUDE.shopping-list.md
-!groups/whatsapp_assistant/features/todo-list/
-groups/whatsapp_assistant/features/todo-list/*
-!groups/whatsapp_assistant/features/todo-list/CLAUDE.todo-list.md
+!groups/whatsapp_assistant/CLAUDE.md
 
 # Secrets
 *.keys.json
