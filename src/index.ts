@@ -491,7 +491,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     ) {
       errorMsg =
         '⚠️ Authentication error — API access denied. Aviad has been notified.';
-    } else if (errDetail.includes('timeout') || errDetail.includes('timed out')) {
+    } else if (
+      errDetail.includes('timeout') ||
+      errDetail.includes('timed out')
+    ) {
       errorMsg =
         '⚠️ Request timed out. The task may be too complex — try breaking it into smaller parts.';
     } else if (
@@ -499,8 +502,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       errDetail.includes('container') ||
       errDetail.includes('spawn')
     ) {
-      errorMsg =
-        '⚠️ Processing system unavailable. Aviad has been notified.';
+      errorMsg = '⚠️ Processing system unavailable. Aviad has been notified.';
     } else {
       errorMsg =
         '⚠️ Something went wrong processing your message. Will retry automatically.';
