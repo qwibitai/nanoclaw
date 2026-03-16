@@ -202,12 +202,24 @@ export function startCredentialProxy(
     'ANTHROPIC_BASE_URL',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const hasApiKey = !!secrets.ANTHROPIC_API_KEY;
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  const hasOauth = !!oauthToken || !!readCredentialsFile();
 
-  // Initialize token cache for OAuth mode
-  if (authMode === 'oauth') {
+  // Primary auth mode: API key if available, else OAuth
+  const authMode: AuthMode = hasApiKey ? 'api-key' : 'oauth';
+
+  // Fallback: if both are configured, OAuth backs up API key
+  const hasFallback = hasApiKey && hasOauth;
+  if (hasFallback) {
+    logger.info(
+      'Auth fallback enabled: API key (primary) + OAuth (backup)',
+    );
+  }
+
+  // Initialize OAuth token cache (needed for both primary OAuth and fallback)
+  if (hasOauth) {
     if (oauthToken?.startsWith('sk-ant-ort01-')) {
       // .env has a refresh token — set up cache to trigger refresh on first use
       tokenCache = {
@@ -224,7 +236,7 @@ export function startCredentialProxy(
         logger.info('OAuth configured from ~/.claude/.credentials.json');
       }
     }
-    // else: oauthToken is a static access token, use as-is (existing behavior)
+    // else: oauthToken is a static access token, use as-is
   }
 
   const upstreamUrl = new URL(
@@ -232,6 +244,11 @@ export function startCredentialProxy(
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
+
+  // Track consecutive API key failures for fallback switching
+  let apiKeyFailures = 0;
+  const API_KEY_FAILURE_THRESHOLD = 3;
+  let usingFallback = false;
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -251,15 +268,12 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        if (authMode === 'api-key') {
-          // API key mode: inject x-api-key on every request
-          delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-        } else {
+        // Determine which auth to use for this request
+        const useOauthForThisRequest =
+          authMode === 'oauth' || (hasFallback && usingFallback);
+
+        if (useOauthForThisRequest) {
           // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
             const token = await getValidAccessToken(oauthToken);
@@ -267,6 +281,10 @@ export function startCredentialProxy(
               headers['authorization'] = `Bearer ${token}`;
             }
           }
+        } else {
+          // API key mode: inject x-api-key on every request
+          delete headers['x-api-key'];
+          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         }
 
         const upstream = makeRequest(
@@ -278,6 +296,32 @@ export function startCredentialProxy(
             headers,
           } as RequestOptions,
           (upRes) => {
+            // Track auth failures for fallback switching
+            if (
+              hasFallback &&
+              !usingFallback &&
+              (upRes.statusCode === 401 || upRes.statusCode === 403)
+            ) {
+              apiKeyFailures++;
+              logger.warn(
+                { failures: apiKeyFailures, threshold: API_KEY_FAILURE_THRESHOLD },
+                'API key auth failed, tracking for fallback',
+              );
+              if (apiKeyFailures >= API_KEY_FAILURE_THRESHOLD) {
+                usingFallback = true;
+                logger.warn(
+                  'Switching to OAuth fallback after repeated API key failures',
+                );
+              }
+            } else if (
+              hasFallback &&
+              !usingFallback &&
+              upRes.statusCode &&
+              upRes.statusCode < 400
+            ) {
+              apiKeyFailures = 0; // reset on success
+            }
+
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
           },
@@ -300,7 +344,10 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      logger.info(
+        { port, host, authMode, hasFallback },
+        'Credential proxy started',
+      );
       resolve(server);
     });
 
@@ -308,7 +355,7 @@ export function startCredentialProxy(
   });
 }
 
-/** Detect which auth mode the host is configured for. */
+/** Detect which auth mode the host is configured for (primary mode). */
 export function detectAuthMode(): AuthMode {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
@@ -321,4 +368,19 @@ export function detectAuthMode(): AuthMode {
   // Check credentials file as fallback
   if (readCredentialsFile()) return 'oauth';
   return 'oauth';
+}
+
+/** Check if a fallback auth method is available. */
+export function hasAuthFallback(): boolean {
+  const secrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
+  const hasApiKey = !!secrets.ANTHROPIC_API_KEY;
+  const hasOauth =
+    !!secrets.CLAUDE_CODE_OAUTH_TOKEN ||
+    !!secrets.ANTHROPIC_AUTH_TOKEN ||
+    !!readCredentialsFile();
+  return hasApiKey && hasOauth;
 }

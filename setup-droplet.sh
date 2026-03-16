@@ -136,21 +136,56 @@ fi
 
 echo "  Data transfer complete ✓"
 
-# --- 4. Add resource limits for 2GB droplet ---
+# --- 4. Configure resources for 2GB droplet ---
 echo ""
-echo "[4/6] Configuring for 2GB droplet..."
+echo "[4/7] Configuring for 2GB droplet..."
 
 $SSH_CMD bash <<REMOTE_CONFIG
 set -euo pipefail
 
+# --- Swap setup (critical for 2GB droplets) ---
+# Without swap, Docker containers get OOM-killed almost immediately
+if [ ! -f /swapfile ]; then
+  echo "  Creating 2GB swap file..."
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "  Swap enabled (2GB) ✓"
+else
+  echo "  Swap already exists ✓"
+fi
+
+# Reduce swappiness so RAM is preferred over swap
+sysctl vm.swappiness=10 2>/dev/null || true
+grep -q 'vm.swappiness' /etc/sysctl.conf 2>/dev/null || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+
+echo "  Swap: \$(free -h | awk '/Swap/{print \$2}')"
+
 cd "${DEPLOY_PATH}"
 
-# Add MAX_CONCURRENT_CONTAINERS if not set
-if [ -f .env ] && ! grep -q '^MAX_CONCURRENT_CONTAINERS=' .env; then
-  echo "" >> .env
-  echo "# Limit concurrent containers for 2GB RAM droplet" >> .env
-  echo "MAX_CONCURRENT_CONTAINERS=2" >> .env
-  echo "  Set MAX_CONCURRENT_CONTAINERS=2 ✓"
+# --- VPS-optimized .env configuration ---
+if [ -f .env ]; then
+  # MAX_CONCURRENT_CONTAINERS: limit for 2GB RAM
+  if ! grep -q '^MAX_CONCURRENT_CONTAINERS=' .env; then
+    echo "" >> .env
+    echo "# VPS resource limits (2GB droplet)" >> .env
+    echo "MAX_CONCURRENT_CONTAINERS=2" >> .env
+    echo "  Set MAX_CONCURRENT_CONTAINERS=2 ✓"
+  fi
+
+  # CONTAINER_TIMEOUT: 10 min instead of 30 min
+  if ! grep -q '^CONTAINER_TIMEOUT=' .env; then
+    echo "CONTAINER_TIMEOUT=600000" >> .env
+    echo "  Set CONTAINER_TIMEOUT=600000 (10min) ✓"
+  fi
+
+  # IDLE_TIMEOUT: 5 min instead of 30 min to free memory faster
+  if ! grep -q '^IDLE_TIMEOUT=' .env; then
+    echo "IDLE_TIMEOUT=300000" >> .env
+    echo "  Set IDLE_TIMEOUT=300000 (5min) ✓"
+  fi
 fi
 
 # Create logs directory
@@ -161,7 +196,7 @@ REMOTE_CONFIG
 
 # --- 5. Run deploy.sh on droplet ---
 echo ""
-echo "[5/6] Running deployment..."
+echo "[5/7] Running deployment..."
 
 $SSH_CMD bash <<REMOTE_DEPLOY
 set -euo pipefail
@@ -169,9 +204,44 @@ cd "${DEPLOY_PATH}"
 bash deploy.sh
 REMOTE_DEPLOY
 
-# --- 6. Verify ---
+# --- 6. Test container connectivity ---
 echo ""
-echo "[6/6] Verifying deployment..."
+echo "[6/7] Testing container→host connectivity..."
+
+$SSH_CMD bash <<REMOTE_CONNECTIVITY
+set -euo pipefail
+
+# Verify containers can reach the host's credential proxy port
+PROXY_PORT=\$(grep '^CREDENTIAL_PROXY_PORT=' "${DEPLOY_PATH}/.env" 2>/dev/null | cut -d= -f2- || echo "3001")
+PROXY_PORT=\${PROXY_PORT:-3001}
+
+# Determine the expected host gateway address
+DOCKER0_IP=\$(ip -4 addr show docker0 2>/dev/null | grep -oP 'inet \K[\d.]+' || echo "")
+if [ -n "\$DOCKER0_IP" ]; then
+  HOST_GW="\$DOCKER0_IP"
+else
+  HOST_GW="172.17.0.1"
+fi
+
+echo "  Docker bridge IP: \${DOCKER0_IP:-not found (will use host-gateway)}"
+echo "  Expected proxy at: \${HOST_GW}:\${PROXY_PORT}"
+
+# Quick test: can a container resolve host.docker.internal?
+CONTAINER_TEST=\$(docker run --rm --add-host=host.docker.internal:host-gateway \
+  alpine:latest sh -c "getent hosts host.docker.internal 2>/dev/null | awk '{print \\\$1}'" 2>/dev/null || echo "")
+
+if [ -n "\$CONTAINER_TEST" ]; then
+  echo "  Container→host resolution: \$CONTAINER_TEST ✓"
+else
+  echo "  WARNING: Container cannot resolve host.docker.internal"
+  echo "  The credential proxy may not be reachable from containers."
+  echo "  Set CREDENTIAL_PROXY_HOST=0.0.0.0 in .env if issues persist."
+fi
+REMOTE_CONNECTIVITY
+
+# --- 7. Verify ---
+echo ""
+echo "[7/7] Verifying deployment..."
 
 $SSH_CMD bash <<'REMOTE_VERIFY'
 set -euo pipefail
