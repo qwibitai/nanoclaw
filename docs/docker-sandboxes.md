@@ -1,5 +1,11 @@
 # Running NanoClaw in Docker Sandboxes (Manual Setup)
 
+> **⚠️ Experimental Feature**: This guide describes an experimental Docker Sandboxes setup that provides hypervisor-level isolation.
+>
+> - **Currently supported**: macOS (Apple Silicon), Windows (WSL2)
+> - **Linux support**: Not yet available (Docker Sandboxes requires Docker Desktop-specific features)
+> - **Status**: For most users, standard Docker or Apple Container setup (see main README) is recommended
+
 This guide walks through setting up NanoClaw inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
 
 ## Architecture
