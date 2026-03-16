@@ -20,6 +20,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@jeffrey-keyser/message-contracts": "^1.5.1",
+    "@types/amqplib": "^0.10.8",
+    "amqplib": "^0.10.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "pino": "^9.6.0",

@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { ASSISTANT_NAME, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -10,8 +10,6 @@ import {
 } from './container-runner.js';
 import {
   getAllTasks,
-  getDueTasks,
-  getTaskById,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
@@ -75,7 +73,10 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
-async function runTask(
+/**
+ * Run a single scheduled task. Exported for use by the cron subscriber.
+ */
+export async function runScheduledTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
 ): Promise<void> {
@@ -242,45 +243,13 @@ async function runTask(
   updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
-let schedulerRunning = false;
-
-export function startSchedulerLoop(deps: SchedulerDependencies): void {
-  if (schedulerRunning) {
-    logger.debug('Scheduler loop already running, skipping duplicate start');
-    return;
-  }
-  schedulerRunning = true;
-  logger.info('Scheduler loop started');
-
-  const loop = async () => {
-    try {
-      const dueTasks = getDueTasks();
-      if (dueTasks.length > 0) {
-        logger.info({ count: dueTasks.length }, 'Found due tasks');
-      }
-
-      for (const task of dueTasks) {
-        // Re-check task status in case it was paused/cancelled
-        const currentTask = getTaskById(task.id);
-        if (!currentTask || currentTask.status !== 'active') {
-          continue;
-        }
-
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
-        );
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in scheduler loop');
-    }
-
-    setTimeout(loop, SCHEDULER_POLL_INTERVAL);
-  };
-
-  loop();
-}
-
-/** @internal - for tests only. */
-export function _resetSchedulerLoopForTests(): void {
-  schedulerRunning = false;
+/**
+ * @deprecated The SQLite polling loop has been replaced by the cron-service
+ * RabbitMQ subscription (see cron-subscriber.ts). This function is retained
+ * as a no-op fallback so existing call sites don't break during migration.
+ */
+export function startSchedulerLoop(_deps: SchedulerDependencies): void {
+  logger.info(
+    'SQLite polling loop disabled — schedule management delegated to cron-service',
+  );
 }
