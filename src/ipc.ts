@@ -110,8 +110,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   const isSelfTarget =
                     targetGroup && targetGroup.folder === sourceGroup;
 
-                  if (isSelfTarget) {
-                    // Self-targeted: store directly into DB so the message loop picks it up
+                  // Always store to DB so the target agent's message loop can pick it up
+                  // (Telegram bot-to-bot messages are invisible due to privacy settings)
+                  if (targetGroup) {
                     storeMessageDirect({
                       id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                       chat_jid: data.chatJid,
@@ -126,8 +127,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       { chatJid: data.chatJid, sourceGroup },
                       'IPC message stored to DB',
                     );
-                  } else {
-                    // Cross-group: send via Telegram so it appears in the target channel/topic
+                  }
+
+                  // Also send via Telegram when:
+                  // - message has a thread_id (needs topic routing)
+                  // - cross-group (message should be visible in target channel)
+                  if (resolvedThreadId != null || !isSelfTarget) {
                     await deps.sendMessage(
                       data.chatJid,
                       data.text,
@@ -135,7 +140,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       resolvedThreadId,
                     );
                     logger.info(
-                      { chatJid: data.chatJid, sourceGroup, threadId: resolvedThreadId },
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        threadId: resolvedThreadId,
+                      },
                       'IPC message sent to Telegram',
                     );
                   }

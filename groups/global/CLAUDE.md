@@ -135,11 +135,11 @@ Shinobu 是 main group，可以通过写 IPC JSON 文件发消息到任何已注
 ```bash
 # 发送消息到「异世界日常」Topic（忍群内）
 cat > /workspace/ipc/messages/$(date +%s)-kanban.json << 'IPCEOF'
-{"type":"message","chatJid":"tg:-1003863760557","text":"消息内容","sender":"shinobu","message_thread_id":778}
+{"type":"message","chatJid":"tg:-1003863760557","text":"消息内容","sender":"shinobu","message_thread_id":1}
 IPCEOF
 ```
 
-「异世界日常」Topic: 忍群 `tg:-1003863760557`，`message_thread_id: 778`
+「异世界日常」Topic: 忍群 `tg:-1003863760557`，`message_thread_id: 1`
 
 用途：晨报/周报等经用户确认后，发到「异世界日常」Topic 存档。
 
