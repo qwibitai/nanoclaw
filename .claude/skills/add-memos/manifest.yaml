@@ -1,0 +1,25 @@
+skill: memos
+version: 1.0.0
+description: "MemOS persistent memory backend — semantic search, auto-dedup, memory evolution"
+core_version: 0.1.0
+adds:
+  - src/memos-client.ts
+  - container/agent-runner/src/memos-mcp-stdio.ts
+  - scripts/migrate-memories-to-memos.ts
+modifies:
+  - src/config.ts
+  - src/index.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+  - .env.example
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - MEMOS_API_URL
+    - MEMOS_API_AUTH
+    - MEMOS_USER_ID
+    - MEMOS_CONTAINER_API_URL
+    - CONTAINER_NETWORK
+conflicts: []
+depends: []
+test: "npx vitest run .claude/skills/add-memos/tests/memos.test.ts"
