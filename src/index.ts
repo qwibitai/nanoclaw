@@ -382,7 +382,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Case-specific session key to isolate conversation context per case
   const sessionKey = targetCase ? `case:${targetCase.id}` : group.folder;
 
-  const output = await runAgent(
+  const agentResult = await runAgent(
     group,
     prompt,
     chatJid,
@@ -458,7 +458,64 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
-  if (output === 'error' || hadError) {
+  if (agentResult.status === 'error' || hadError) {
+    // Send mechanistic error notification — no LLM needed, pre-canned messages.
+    // Users must never be left in silence wondering if the system is broken.
+    const errDetail = (agentResult.errorDetail || '').toLowerCase();
+    let errorMsg: string;
+
+    if (
+      errDetail.includes('rate limit') ||
+      errDetail.includes('rate_limit') ||
+      errDetail.includes('429')
+    ) {
+      errorMsg =
+        '⚠️ API rate limit reached. Your message was received — will retry automatically.';
+    } else if (
+      errDetail.includes('budget') ||
+      errDetail.includes('billing') ||
+      errDetail.includes('insufficient') ||
+      errDetail.includes('credit') ||
+      errDetail.includes('payment') ||
+      errDetail.includes('quota')
+    ) {
+      errorMsg =
+        '⚠️ API budget/billing issue — unable to process requests. Aviad has been notified.';
+    } else if (
+      errDetail.includes('401') ||
+      errDetail.includes('403') ||
+      errDetail.includes('unauthorized') ||
+      errDetail.includes('forbidden') ||
+      errDetail.includes('authentication') ||
+      errDetail.includes('invalid.*key')
+    ) {
+      errorMsg =
+        '⚠️ Authentication error — API access denied. Aviad has been notified.';
+    } else if (errDetail.includes('timeout') || errDetail.includes('timed out')) {
+      errorMsg =
+        '⚠️ Request timed out. The task may be too complex — try breaking it into smaller parts.';
+    } else if (
+      errDetail.includes('docker') ||
+      errDetail.includes('container') ||
+      errDetail.includes('spawn')
+    ) {
+      errorMsg =
+        '⚠️ Processing system unavailable. Aviad has been notified.';
+    } else {
+      errorMsg =
+        '⚠️ Something went wrong processing your message. Will retry automatically.';
+    }
+
+    // Send error notification to user — this is mechanistic, no LLM needed
+    await channel
+      .sendMessage(chatJid, errorMsg)
+      .catch((sendErr: unknown) =>
+        logger.error(
+          { chatJid, sendErr },
+          'Failed to send error notification to user',
+        ),
+      );
+
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
@@ -469,7 +526,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
-      { group: group.name },
+      { group: group.name, errorDetail: agentResult.errorDetail },
       'Agent error, rolled back message cursor for retry',
     );
     return false;
@@ -485,7 +542,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
   targetCase?: Case,
   sessionKey?: string,
-): Promise<'success' | 'error'> {
+): Promise<{ status: 'success' | 'error'; errorDetail?: string }> {
   const isMain = group.isMain === true;
   const effectiveSessionKey = sessionKey || group.folder;
   const sessionId = sessions[effectiveSessionKey];
@@ -560,13 +617,16 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return 'error';
+      return { status: 'error', errorDetail: output.error || '' };
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return {
+      status: 'error',
+      errorDetail: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
