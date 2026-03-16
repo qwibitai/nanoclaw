@@ -333,6 +333,38 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- Simpsons Tools ---
+
+const SIMPSONS_RESULTS_DIR = path.join(IPC_DIR, 'simpsons_results');
+
+function waitForSimpsonsResult(requestId: string, maxWait = 30000): Promise<{ success: boolean; message: string }> {
+  const resultFile = path.join(SIMPSONS_RESULTS_DIR, `${requestId}.json`);
+  const pollInterval = 500;
+  let elapsed = 0;
+
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (fs.existsSync(resultFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          fs.unlinkSync(resultFile);
+          resolve(result);
+        } catch (err) {
+          resolve({ success: false, message: `Failed to read result: ${err}` });
+        }
+        return;
+      }
+      elapsed += pollInterval;
+      if (elapsed >= maxWait) {
+        resolve({ success: false, message: 'Request timed out' });
+        return;
+      }
+      setTimeout(poll, pollInterval);
+    };
+    poll();
+  });
+}
+
 server.tool(
   'run_simpsons',
   `Run a speckit simpsons command on a project in ~/Projects. This sets up the project with spec-kit, simpsons loops, global CLAUDE.md, constitution, and quality gates, then runs the specified command via Claude Code.
@@ -352,8 +384,10 @@ If the user did not provide an additional prompt, confirm if they want to pass a
     prompt: z.string().optional().describe('Additional context or instructions for the speckit command'),
   },
   async (args) => {
+    const requestId = `simpsons-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const data = {
       type: 'run_simpsons',
+      requestId,
       project: args.project,
       command: args.command,
       prompt: args.prompt || '',
@@ -364,8 +398,71 @@ If the user did not provide an additional prompt, confirm if they want to pass a
 
     writeIpcFile(TASKS_DIR, data);
 
+    const result = await waitForSimpsonsResult(requestId, 60000);
+    if (result.success) {
+      return {
+        content: [{ type: 'text' as const, text: `Simpsons ${args.command} on ${args.project} started.\nSession name: ${result.message}\n\nUse simpsons_get_output and simpsons_send_input with this session name to interact with it. Results will also be sent to the chat when complete.` }],
+      };
+    }
     return {
-      content: [{ type: 'text' as const, text: `Simpsons ${args.command} on ${args.project} has been queued. Results will be sent to the chat when complete.` }],
+      content: [{ type: 'text' as const, text: result.message }],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
+  'simpsons_get_output',
+  `Read the current output from a running simpsons tmux session. Use this to check on progress, see errors, or review what the speckit pipeline is doing.
+
+The session_name is returned when you call run_simpsons (format: "simpsons-{project}-{id}").`,
+  {
+    session_name: z.string().describe('The tmux session name (e.g., "simpsons-my-app-k3f9a2")'),
+    lines: z.number().optional().describe('Number of recent lines to return. Omit for full pane output.'),
+  },
+  async (args) => {
+    const requestId = `simpsons-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'simpsons_get_output',
+      requestId,
+      sessionName: args.session_name,
+      lines: args.lines,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await waitForSimpsonsResult(requestId);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+      isError: !result.success,
+    };
+  },
+);
+
+server.tool(
+  'simpsons_send_input',
+  `Send input text to a running simpsons tmux session. The text is sent followed by Enter. Use this to respond to prompts, answer questions, or provide input that the running Claude Code session is waiting for.
+
+The session_name is returned when you call run_simpsons (format: "simpsons-{project}-{id}").`,
+  {
+    session_name: z.string().describe('The tmux session name (e.g., "simpsons-my-app-k3f9a2")'),
+    text: z.string().describe('The text to send (Enter is appended automatically)'),
+  },
+  async (args) => {
+    const requestId = `simpsons-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'simpsons_send_input',
+      requestId,
+      sessionName: args.session_name,
+      text: args.text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await waitForSimpsonsResult(requestId);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+      isError: !result.success,
     };
   },
 );

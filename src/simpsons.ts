@@ -72,6 +72,11 @@ interface PersistedSession {
 // ---------------------------------------------------------------------------
 
 const activeSessions = new Map<string, ActiveSession>();
+
+/** Return a list of active simpsons session names. */
+export function getActiveSimpsonsSessionNames(): string[] {
+  return Array.from(activeSessions.keys());
+}
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let statusSendMessage: ((jid: string, text: string) => Promise<void>) | null =
   null;
@@ -197,21 +202,39 @@ async function reportStatus(): Promise<void> {
   }
 }
 
+/**
+ * Capture output from a tmux pane.
+ * @param sessionName - tmux session name
+ * @param lines - if provided, return only the last N non-empty lines
+ * @returns captured pane content, or empty string on failure
+ */
+export function captureTmuxPane(sessionName: string, lines?: number): string {
+  if (!tmuxSessionAlive(sessionName)) return '';
+
+  try {
+    const pane = execSync(
+      `tmux capture-pane -t ${shellQuote(sessionName)} -p -S -`,
+      { encoding: 'utf-8' },
+    );
+
+    if (lines === undefined) return pane;
+
+    const nonEmpty = pane.split('\n').filter((l) => l.trim().length > 0);
+    return nonEmpty.slice(-lines).join('\n');
+  } catch {
+    return '';
+  }
+}
+
 /** Capture the last non-empty line from the tmux pane to show current activity. */
 function getSessionActivity(sessionName: string): string {
   if (!tmuxSessionAlive(sessionName)) return 'session ended';
 
-  try {
-    const pane = execSync(
-      `tmux capture-pane -t ${shellQuote(sessionName)} -p`,
-      { encoding: 'utf-8' },
-    );
-    const lines = pane.split('\n').filter((l) => l.trim().length > 0);
-    const last = lines[lines.length - 1]?.trim() || '';
-    return last.length > 120 ? last.slice(0, 120) + '...' : last;
-  } catch {
-    return '';
-  }
+  const lastLine = captureTmuxPane(sessionName, 1);
+  if (!lastLine) return '';
+
+  const trimmed = lastLine.trim();
+  return trimmed.length > 120 ? trimmed.slice(0, 120) + '...' : trimmed;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,14 +345,32 @@ function pollAndFinalize(
 // ---------------------------------------------------------------------------
 
 export async function handleSimpsons(
-  data: { project: string; command: string; prompt?: string },
+  data: {
+    project: string;
+    command: string;
+    prompt?: string;
+    requestId?: string;
+    groupFolder?: string;
+  },
   chatJid: string,
   sendMessage: (jid: string, text: string) => Promise<void>,
 ): Promise<void> {
-  const { project, command, prompt } = data;
+  const {
+    project,
+    command,
+    prompt,
+    requestId,
+    groupFolder: callerGroup,
+  } = data;
   const projectDir = path.join(PROJECTS_DIR, project);
 
   if (!fs.existsSync(projectDir)) {
+    if (requestId && callerGroup) {
+      writeSimpsonsResult(DATA_DIR, callerGroup, requestId, {
+        success: false,
+        message: `Project "${project}" not found in ~/Projects`,
+      });
+    }
     await sendMessage(chatJid, `Project "${project}" not found in ~/Projects`);
     return;
   }
@@ -337,6 +378,12 @@ export async function handleSimpsons(
   const specCommand = COMMAND_MAP[command.toLowerCase()];
   if (!specCommand) {
     const available = Object.keys(COMMAND_MAP).join(', ');
+    if (requestId && callerGroup) {
+      writeSimpsonsResult(DATA_DIR, callerGroup, requestId, {
+        success: false,
+        message: `Unknown simpsons command: "${command}". Available: ${available}`,
+      });
+    }
     await sendMessage(
       chatJid,
       `Unknown simpsons command: "${command}". Available: ${available}`,
@@ -368,6 +415,14 @@ export async function handleSimpsons(
       startedAt: new Date(),
     });
     persistState();
+
+    // Return session name to the container agent if it provided a requestId
+    if (requestId && callerGroup) {
+      writeSimpsonsResult(DATA_DIR, callerGroup, requestId, {
+        success: true,
+        message: session.name,
+      });
+    }
 
     await sendMessage(
       chatJid,
@@ -945,3 +1000,125 @@ may be added, refined, or deprecated based on project needs and lessons learned.
 ${DELIMITER}
 
 <!-- Add project-specific standards below (language tooling, formatting, lint rules, etc.) -->`;
+
+// ---------------------------------------------------------------------------
+// IPC handlers for simpsons_get_output and simpsons_send_input
+// ---------------------------------------------------------------------------
+
+interface SimpsonsIpcResult {
+  success: boolean;
+  message: string;
+  data?: unknown;
+}
+
+function writeSimpsonsResult(
+  dataDir: string,
+  sourceGroup: string,
+  requestId: string,
+  result: SimpsonsIpcResult,
+): void {
+  const resultsDir = path.join(dataDir, 'ipc', sourceGroup, 'simpsons_results');
+  fs.mkdirSync(resultsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(resultsDir, `${requestId}.json`),
+    JSON.stringify(result),
+  );
+}
+
+/**
+ * Handle simpsons IPC messages (get_output, send_input).
+ * @returns true if message was handled, false if not a simpsons_ type
+ */
+export async function handleSimpsonsIpc(
+  data: Record<string, unknown>,
+  _sourceGroup: string,
+  _isMain: boolean,
+  dataDir: string,
+): Promise<boolean> {
+  const type = data.type as string;
+  const sourceGroup = _sourceGroup;
+
+  if (type !== 'simpsons_get_output' && type !== 'simpsons_send_input') {
+    return false;
+  }
+
+  const requestId = data.requestId as string;
+  if (!requestId) {
+    logger.warn({ type }, 'Simpsons IPC blocked: missing requestId');
+    return true;
+  }
+
+  const sessionName = data.sessionName as string;
+  if (!sessionName) {
+    writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+      success: false,
+      message: 'Missing sessionName',
+    });
+    return true;
+  }
+
+  // Verify the session belongs to this group (or caller is main)
+  const session = activeSessions.get(sessionName);
+  if (!session && !_isMain) {
+    writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+      success: false,
+      message: `Session "${sessionName}" not found`,
+    });
+    return true;
+  }
+
+  if (type === 'simpsons_get_output') {
+    const lines = data.lines as number | undefined;
+    const output = captureTmuxPane(sessionName, lines);
+
+    if (!output && !tmuxSessionAlive(sessionName)) {
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: false,
+        message: `Session "${sessionName}" is not running`,
+      });
+    } else {
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: true,
+        message: output || '(no output)',
+      });
+    }
+    return true;
+  }
+
+  if (type === 'simpsons_send_input') {
+    const text = data.text as string;
+    if (!text) {
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: false,
+        message: 'Missing text',
+      });
+      return true;
+    }
+
+    if (!tmuxSessionAlive(sessionName)) {
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: false,
+        message: `Session "${sessionName}" is not running`,
+      });
+      return true;
+    }
+
+    try {
+      execSync(
+        `tmux send-keys -t ${shellQuote(sessionName)} ${shellQuote(text)} Enter`,
+      );
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: true,
+        message: `Input sent to ${sessionName}`,
+      });
+    } catch (err) {
+      writeSimpsonsResult(dataDir, sourceGroup, requestId, {
+        success: false,
+        message: `Failed to send input: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+    return true;
+  }
+
+  return false;
+}

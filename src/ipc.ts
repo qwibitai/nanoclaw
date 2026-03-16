@@ -8,7 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { handleSimpsons } from './simpsons.js';
+import { handleSimpsons, handleSimpsonsIpc } from './simpsons.js';
 import { RegisteredGroup } from './types.js';
 import { handleDraftIpc } from './draft.js';
 
@@ -167,6 +167,7 @@ export async function processTaskIpc(
     chatJid?: string;
     targetJid?: string;
     // For run_simpsons
+    requestId?: string;
     project?: string;
     command?: string;
     // For register_group
@@ -462,6 +463,8 @@ export async function processTaskIpc(
             project: data.project,
             command: data.command,
             prompt: data.prompt || '',
+            requestId: data.requestId as string | undefined,
+            groupFolder: sourceGroup,
           },
           data.chatJid,
           deps.sendMessage,
@@ -487,12 +490,19 @@ export async function processTaskIpc(
 
     default: {
       // Try skill-specific IPC handlers
-      const handled = await handleDraftIpc(
-        data as Record<string, unknown>,
-        sourceGroup,
-        isMain,
-        DATA_DIR,
-      );
+      const handled =
+        (await handleSimpsonsIpc(
+          data as Record<string, unknown>,
+          sourceGroup,
+          isMain,
+          DATA_DIR,
+        )) ||
+        (await handleDraftIpc(
+          data as Record<string, unknown>,
+          sourceGroup,
+          isMain,
+          DATA_DIR,
+        ));
       if (!handled) {
         logger.warn({ type: data.type }, 'Unknown IPC task type');
       }
