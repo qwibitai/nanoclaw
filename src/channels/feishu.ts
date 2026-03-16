@@ -68,7 +68,12 @@ export class FeishuChannel implements Channel {
       domain: Lark.Domain.Feishu,
     });
 
-    // Fetch bot identity for @mention detection and is_from_me
+    // Fetch bot identity for @mention detection and is_from_me.
+    // The SDK path client.bot.v3.info.get() is auto-generated from the API spec
+    // and may not exist in all SDK versions. The try/catch ensures graceful
+    // degradation: if it fails, botOpenId stays empty and @mention detection
+    // falls back to not replacing placeholders (users can still trigger via
+    // direct @mention text). Verify against your SDK version at runtime.
     try {
       const botInfo = await (this.client as any).bot.v3.info.get();
       this.botOpenId = botInfo?.data?.bot?.open_id || '';
