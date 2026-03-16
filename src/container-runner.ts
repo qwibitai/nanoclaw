@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -254,14 +255,7 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
 ): string[] {
-  const args: string[] = [
-    'run',
-    '-i',
-    '--rm',
-    '--init',
-    '--name',
-    containerName,
-  ];
+  const args: string[] = ['run', '--rm', '--init', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -329,6 +323,21 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+
+  // Write input to a temp file and mount it into the container.
+  // Avoids piping via stdin which causes Docker to SIGTERM the container
+  // when the stdin pipe closes on certain Linux Docker versions.
+  const inputFile = path.join(
+    os.tmpdir(),
+    `nanoclaw-input-${containerName}.json`,
+  );
+  fs.writeFileSync(inputFile, JSON.stringify(input));
+  mounts.push({
+    hostPath: inputFile,
+    containerPath: '/tmp/input.json',
+    readonly: true,
+  });
+
   const containerArgs = buildContainerArgs(mounts, containerName);
 
   logger.debug(
@@ -359,7 +368,7 @@ export async function runContainerAgent(
 
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     onProcess(container, containerName);
@@ -368,9 +377,6 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
-
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -488,6 +494,11 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      try {
+        fs.unlinkSync(inputFile);
+      } catch {
+        /* already cleaned up */
+      }
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -683,6 +694,11 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      try {
+        fs.unlinkSync(inputFile);
+      } catch {
+        /* already cleaned up */
+      }
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',
