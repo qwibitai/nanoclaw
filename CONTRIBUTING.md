@@ -21,3 +21,18 @@ Every user should have clean and minimal code that does exactly what they need. 
 ### Testing
 
 Test your skill by running it on a fresh clone before submitting.
+
+### Local development assets
+
+`dev-agents/` mirrors the `.claude/` structure and is the place to add assets for developing `nanoclaw` itself:
+
+| `dev-agents/` path           | Installed to              |
+| ---------------------------- | ------------------------- |
+| `dev-agents/skills/dev-*/`   | `.claude/skills/dev-*/`   |
+| `dev-agents/commands/dev-*/` | `.claude/commands/dev-*/` |
+
+**Convention:** all items in `dev-agents/` must use the `dev-` prefix (e.g. `dev-my-skill`, `dev-my-command`).
+This prefix is how the gitignore rule `.claude/*/dev-*/` identifies installed-but-not-committed assets across all categories.
+
+Run `/setup-dev` to merge `dev-agents/` into `.claude/`.
+Then they will be available to use in the current repo.

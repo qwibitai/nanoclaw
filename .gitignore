@@ -35,4 +35,7 @@ groups/global/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# Dev assets (installed locally via /setup-dev, source lives in dev-agents/)
+.claude/*/dev-*/
+
 agents-sdk-docs
