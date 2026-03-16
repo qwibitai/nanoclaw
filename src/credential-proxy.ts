@@ -213,9 +213,7 @@ export function startCredentialProxy(
   // Fallback: if both are configured, OAuth backs up API key
   const hasFallback = hasApiKey && hasOauth;
   if (hasFallback) {
-    logger.info(
-      'Auth fallback enabled: API key (primary) + OAuth (backup)',
-    );
+    logger.info('Auth fallback enabled: API key (primary) + OAuth (backup)');
   }
 
   // Initialize OAuth token cache (needed for both primary OAuth and fallback)
@@ -304,7 +302,10 @@ export function startCredentialProxy(
             ) {
               apiKeyFailures++;
               logger.warn(
-                { failures: apiKeyFailures, threshold: API_KEY_FAILURE_THRESHOLD },
+                {
+                  failures: apiKeyFailures,
+                  threshold: API_KEY_FAILURE_THRESHOLD,
+                },
                 'API key auth failed, tracking for fallback',
               );
               if (apiKeyFailures >= API_KEY_FAILURE_THRESHOLD) {
