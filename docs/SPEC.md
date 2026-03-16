@@ -272,7 +272,7 @@ nanoclaw/
 │   └── container-runner.ts        # Spawns agents in containers
 │
 ├── container/
-│   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
+│   ├── Dockerfile                 # Container image (runs as 'node' user, includes OpenCode CLI)
 │   ├── build.sh                   # Build script for container image
 │   ├── agent-runner/              # Code that runs inside the container
 │   │   ├── package.json
@@ -480,13 +480,13 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 ## Session Management
 
-Sessions enable conversation continuity - Claude remembers what you talked about.
+Sessions enable conversation continuity - the assistant remembers what you talked about.
 
 ### How Sessions Work
 
 1. Each group has a session ID stored in SQLite (`sessions` table, keyed by `group_folder`)
 2. Session ID is passed to OpenCode SDK for conversation continuity
-3. Claude continues the conversation with full context
+3. The assistant continues the conversation with full context
 4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
 
 ---
@@ -526,9 +526,9 @@ Sessions enable conversation continuity - Claude remembers what you talked about
     └── mcpServers: nanoclaw (scheduler)
    │
    ▼
-8. Claude processes message:
-   ├── Reads CLAUDE.md files for context
-   └── Uses tools as needed (search, email, etc.)
+8. The agent processes message:
+    ├── Reads CLAUDE.md files for context
+    └── Uses tools as needed (search, email, etc.)
    │
    ▼
 9. Router prefixes response with assistant name and sends via the owning channel
@@ -541,7 +541,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 Messages must start with the trigger pattern (default: `@Andy`):
 
-- `@Andy what's the weather?` → ✅ Triggers Claude
+- `@Andy what's the weather?` → ✅ Triggers the assistant
 - `@andy help me` → ✅ Triggers (case insensitive)
 - `Hey @Andy` → ❌ Ignored (trigger not at start)
 - `What's up?` → ❌ Ignored (no trigger)
@@ -564,9 +564,9 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command                | Example                     | Effect         |
-| ---------------------- | --------------------------- | -------------- |
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| Command                | Example                     | Effect                |
+| ---------------------- | --------------------------- | --------------------- |
+| `@Assistant [message]` | `@Andy what's the weather?` | Talk to the assistant |
 
 ### Commands Available in Main Channel Only
 
@@ -603,14 +603,14 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 ```
 User: @Andy remind me every Monday at 9am to review the weekly metrics
 
-Claude: [calls mcp__nanoclaw__schedule_task]
-        {
-          "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
-          "schedule_type": "cron",
-          "schedule_value": "0 9 * * 1"
-        }
+Assistant: [calls mcp__nanoclaw__schedule_task]
+         {
+           "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
+           "schedule_type": "cron",
+           "schedule_value": "0 9 * * 1"
+         }
 
-Claude: Done! I'll remind you every Monday at 9am.
+Assistant: Done! I'll remind you every Monday at 9am.
 ```
 
 ### One-Time Tasks
@@ -618,12 +618,12 @@ Claude: Done! I'll remind you every Monday at 9am.
 ```
 User: @Andy at 5pm today, send me a summary of today's emails
 
-Claude: [calls mcp__nanoclaw__schedule_task]
-        {
-          "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
-          "schedule_type": "once",
-          "schedule_value": "2024-01-31T17:00:00Z"
-        }
+Assistant: [calls mcp__nanoclaw__schedule_task]
+         {
+           "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
+           "schedule_type": "once",
+           "schedule_value": "2024-01-31T17:00:00Z"
+         }
 ```
 
 ### Managing Tasks
@@ -755,7 +755,7 @@ All agents run inside containers (lightweight Linux VMs), providing:
 
 ### Prompt Injection Risk
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+WhatsApp messages could contain malicious instructions attempting to manipulate the assistant's behavior.
 
 **Mitigations:**
 
