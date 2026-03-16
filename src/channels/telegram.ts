@@ -1,0 +1,263 @@
+import { Telegraf } from 'telegraf';
+
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { updateChatName } from '../db.js';
+import { readEnvFile } from '../env.js';
+import { logger } from '../logger.js';
+import type { Channel, NewMessage } from '../types.js';
+
+import { registerChannel } from './registry.js';
+import type { ChannelOpts } from './registry.js';
+
+const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+
+export function createTelegramChannel(opts: ChannelOpts): Channel | null {
+  const env = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const token = env.TELEGRAM_BOT_TOKEN;
+
+  if (!token) {
+    logger.info('TELEGRAM_BOT_TOKEN not set — skipping Telegram channel');
+    return null;
+  }
+
+  const bot = new Telegraf(token);
+  let connected = false;
+
+  // Outgoing queue for messages sent while disconnected
+  const outgoingQueue: Array<{ jid: string; text: string }> = [];
+
+  // Thinking indicator messages: jid -> message_id
+  const thinkingMessages = new Map<string, number>();
+
+  function extractChatId(jid: string): string {
+    return jid.replace(/^telegram:/, '');
+  }
+
+  function resolveSenderName(from: {
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+    id: number;
+  }): string {
+    if (from.first_name) {
+      return from.last_name
+        ? `${from.first_name} ${from.last_name}`
+        : from.first_name;
+    }
+    return from.username || String(from.id);
+  }
+
+  async function flushQueue(): Promise<void> {
+    while (outgoingQueue.length > 0) {
+      const item = outgoingQueue.shift()!;
+      try {
+        await channel.sendMessage(item.jid, item.text);
+      } catch (err) {
+        logger.error({ err, jid: item.jid }, 'Failed to flush queued message');
+      }
+    }
+  }
+
+  async function syncChannelMetadata(): Promise<void> {
+    const groups = opts.registeredGroups();
+    for (const jid of Object.keys(groups)) {
+      if (!jid.startsWith('telegram:')) continue;
+      const chatId = extractChatId(jid);
+      try {
+        const chat = await bot.telegram.getChat(chatId);
+        if ('title' in chat && chat.title) {
+          updateChatName(jid, chat.title);
+          logger.debug(
+            { jid, title: chat.title },
+            'Synced Telegram group metadata',
+          );
+        }
+      } catch (err) {
+        logger.debug({ err, jid }, 'Failed to sync Telegram group metadata');
+      }
+    }
+  }
+
+  // Set up message handler
+  bot.on('message', (ctx) => {
+    const msg = ctx.message;
+
+    // Filter to text messages only
+    if (!('text' in msg) || !msg.text) return;
+
+    const chatId = String(msg.chat.id);
+    const jid = `telegram:${chatId}`;
+    const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+    const timestamp = new Date(msg.date * 1000).toISOString();
+
+    // Chat name: title for groups, sender name for DMs
+    const chatName =
+      isGroup && 'title' in msg.chat ? msg.chat.title : undefined;
+
+    // Always report metadata
+    opts.onChatMetadata(jid, timestamp, chatName, 'telegram', isGroup);
+
+    // Only deliver messages for registered groups
+    const group = opts.registeredGroups()[jid];
+    if (!group) return;
+
+    // Detect self-messages
+    const isFromMe = msg.from?.id === bot.botInfo?.id;
+
+    // Resolve sender
+    const from = msg.from || { id: 0 };
+    const senderName = resolveSenderName(
+      from as {
+        first_name?: string;
+        last_name?: string;
+        username?: string;
+        id: number;
+      },
+    );
+    const sender = from.username || String(from.id);
+
+    let content = msg.text;
+
+    // Handle /x command: strip prefix and prepend assistant name
+    if (content.startsWith('/x ') || content === '/x') {
+      const rest = content === '/x' ? '' : content.slice(3);
+      content = `@${ASSISTANT_NAME} ${rest}`.trimEnd();
+    }
+    // Handle @botusername mention translation
+    else if (
+      bot.botInfo?.username &&
+      content.includes(`@${bot.botInfo.username}`)
+    ) {
+      if (!TRIGGER_PATTERN.test(content)) {
+        content = content.replace(
+          new RegExp(`@${bot.botInfo.username}`, 'g'),
+          `@${ASSISTANT_NAME}`,
+        );
+        // If it doesn't start with the trigger after replacement, prepend it
+        if (!TRIGGER_PATTERN.test(content)) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+        }
+      }
+    }
+
+    // Check trigger pattern for groups that require it
+    const requiresTrigger =
+      group.requiresTrigger !== undefined ? group.requiresTrigger : isGroup;
+    if (requiresTrigger && !isFromMe && !TRIGGER_PATTERN.test(content)) {
+      // Still store the message but don't trigger the agent
+      const newMsg: NewMessage = {
+        id: String(msg.message_id),
+        chat_jid: jid,
+        sender,
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: isFromMe,
+        is_bot_message: isFromMe,
+      };
+      opts.onMessage(jid, newMsg);
+      return;
+    }
+
+    const newMsg: NewMessage = {
+      id: String(msg.message_id),
+      chat_jid: jid,
+      sender,
+      sender_name: senderName,
+      content,
+      timestamp,
+      is_from_me: isFromMe,
+      is_bot_message: isFromMe,
+    };
+
+    opts.onMessage(jid, newMsg);
+
+    // Show early thinking indicator for messages that will trigger the agent
+    if (!isFromMe && TRIGGER_PATTERN.test(content)) {
+      channel.setTyping?.(jid, true).catch((err) => {
+        logger.debug({ err, jid }, 'Failed to send thinking indicator');
+      });
+    }
+  });
+
+  const channel: Channel & {
+    setTyping: (jid: string, isTyping: boolean) => Promise<void>;
+    syncGroups: (force: boolean) => Promise<void>;
+  } = {
+    name: 'telegram',
+
+    async connect(): Promise<void> {
+      await bot.launch();
+      // bot.botInfo is populated after launch
+      logger.info(
+        { username: bot.botInfo?.username },
+        'Telegram bot connected',
+      );
+      connected = true;
+      await syncChannelMetadata();
+      await flushQueue();
+    },
+
+    async sendMessage(jid: string, text: string): Promise<void> {
+      if (!connected) {
+        outgoingQueue.push({ jid, text });
+        return;
+      }
+
+      const chatId = extractChatId(jid);
+
+      // Split long messages
+      if (text.length <= TELEGRAM_MAX_MESSAGE_LENGTH) {
+        await bot.telegram.sendMessage(chatId, text);
+      } else {
+        for (let i = 0; i < text.length; i += TELEGRAM_MAX_MESSAGE_LENGTH) {
+          const chunk = text.slice(i, i + TELEGRAM_MAX_MESSAGE_LENGTH);
+          await bot.telegram.sendMessage(chatId, chunk);
+        }
+      }
+    },
+
+    isConnected(): boolean {
+      return connected;
+    },
+
+    ownsJid(jid: string): boolean {
+      return jid.startsWith('telegram:');
+    },
+
+    async disconnect(): Promise<void> {
+      bot.stop();
+      connected = false;
+    },
+
+    async setTyping(jid: string, isTyping: boolean): Promise<void> {
+      const chatId = extractChatId(jid);
+      try {
+        if (isTyping) {
+          const sent = await bot.telegram.sendMessage(
+            chatId,
+            '\u{1F9E0} Thinking...',
+          );
+          thinkingMessages.set(jid, sent.message_id);
+        } else {
+          const messageId = thinkingMessages.get(jid);
+          if (messageId) {
+            await bot.telegram.deleteMessage(chatId, messageId);
+            thinkingMessages.delete(jid);
+          }
+        }
+      } catch (err) {
+        logger.debug({ err, jid, isTyping }, 'Thinking indicator error');
+      }
+    },
+
+    async syncGroups(_force: boolean): Promise<void> {
+      await syncChannelMetadata();
+    },
+  };
+
+  return channel;
+}
+
+// Self-register
+registerChannel('telegram', (opts) => createTelegramChannel(opts));
