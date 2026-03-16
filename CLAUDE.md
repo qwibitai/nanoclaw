@@ -83,6 +83,7 @@ NanoClaw (harness, public)              Verticals (private repos)
 | `/contribute-skill` | Build and submit a new skill to the NanoClaw ecosystem |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/kaizen` | Recursive process improvement — escalation framework (Level 1→2→3) |
 
 ## Dev Agent Policies (Kaizen)
 
@@ -98,7 +99,11 @@ These policies were learned from past mistakes. Follow them strictly.
 8. **Skill branches must stay clean.** A `skill/*` branch is for upstream contribution — it contains ONLY that skill's changes on top of upstream/main. NEVER merge our fork's main into a skill branch. To update a skill branch, cherry-pick only the relevant skill-related commits. Fixes go to main first, then cherry-pick to the skill branch.
 9. **Declare ALL dependencies.** Every `require()` or `import` must have a corresponding entry in the relevant `package.json`. Never assume a package is "globally available." Run `npm install` in a clean state and verify the code loads.
 10. **Prefer simpler dependency stacks.** Before adding wrapper/plugin packages, check if the base library can achieve the same with configuration. Fewer deps = fewer failure points.
-11. **Kaizen reflection on every fix-PR.** When a PR exists to fix a previous mistake, reflect on the root cause and propose a process improvement (new policy, test, or check) to prevent recurrence. Document the incident in the relevant policy entry. File future improvement proposals as issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen).
+11. **Recursive kaizen on every fix-PR.** See `.claude/skills/kaizen/SKILL.md` for the full framework. After every fix, assess:
+    - **What level is this fix?** Level 1 (instructions) → Level 2 (hooks/checks) → Level 3 (mechanistic code)
+    - **Has this type of failure happened before?** If yes, the previous level wasn't enough — escalate.
+    - **Affects humans directly?** → Must be Level 3 (humans should never wait on agent mistakes)
+    - CLAUDE.md instructions are Level 1 — necessary but not sufficient. When they fail, escalate to hooks (Level 2) or architectural enforcement (Level 3).
 
 ## Kaizen Backlog
 
