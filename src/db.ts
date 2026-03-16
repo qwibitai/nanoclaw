@@ -10,6 +10,8 @@ import {
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
+  UsageCategory,
+  UsageRecord,
 } from './types.js';
 
 let db: Database.Database;
@@ -82,6 +84,35 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS usage_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS api_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      source TEXT NOT NULL,
+      auth_mode TEXT NOT NULL,
+      model TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      duration_ms INTEGER,
+      duration_api_ms INTEGER,
+      num_turns INTEGER,
+      session_id TEXT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_usage_category ON api_usage(category);
+    CREATE INDEX IF NOT EXISTS idx_api_usage_timestamp ON api_usage(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_api_usage_group ON api_usage(group_folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -138,6 +169,31 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Add usage_category column to registered_groups (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN usage_category TEXT DEFAULT 'general'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Seed default usage categories if table is empty
+  const categoryCount = database
+    .prepare('SELECT COUNT(*) as count FROM usage_categories')
+    .get() as { count: number };
+  if (categoryCount.count === 0) {
+    const now = new Date().toISOString();
+    const seed = database.prepare(
+      'INSERT INTO usage_categories (id, name, description, created_at) VALUES (?, ?, ?, ?)',
+    );
+    seed.run('general', 'General', 'Default category for uncategorized usage', now);
+    seed.run('development', 'Development', 'Software development and coding tasks', now);
+    seed.run('research', 'Research', 'Web research and information gathering', now);
+    seed.run('communication', 'Communication', 'Customer emails, messages, and replies', now);
+    seed.run('automation', 'Automation', 'Scheduled tasks and automated workflows', now);
   }
 }
 
@@ -632,6 +688,145 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Usage tracking ---
+
+export function insertUsageRecord(record: UsageRecord): void {
+  db.prepare(
+    `INSERT INTO api_usage (group_folder, category, source, auth_mode, model,
+      input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+      cost_usd, duration_ms, duration_api_ms, num_turns, session_id, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+  ).run(
+    record.group_folder,
+    record.category,
+    record.source,
+    record.auth_mode,
+    record.model,
+    record.input_tokens,
+    record.output_tokens,
+    record.cache_read_tokens,
+    record.cache_create_tokens,
+    record.cost_usd,
+    record.duration_ms,
+    record.duration_api_ms,
+    record.num_turns,
+    record.session_id,
+  );
+}
+
+export function getUsageSummary(opts?: {
+  since?: string;
+  category?: string;
+  source?: string;
+  groupFolder?: string;
+  model?: string;
+}): Array<{
+  category: string;
+  source: string;
+  model: string | null;
+  auth_mode: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_create_tokens: number;
+  total_cost_usd: number;
+  request_count: number;
+}> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (opts?.since) {
+    conditions.push('timestamp >= ?');
+    params.push(opts.since);
+  }
+  if (opts?.category) {
+    conditions.push('category = ?');
+    params.push(opts.category);
+  }
+  if (opts?.source) {
+    conditions.push('source = ?');
+    params.push(opts.source);
+  }
+  if (opts?.groupFolder) {
+    conditions.push('group_folder = ?');
+    params.push(opts.groupFolder);
+  }
+  if (opts?.model) {
+    conditions.push('model = ?');
+    params.push(opts.model);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  return db
+    .prepare(
+      `SELECT category, source, model, auth_mode,
+        SUM(input_tokens) as total_input_tokens,
+        SUM(output_tokens) as total_output_tokens,
+        SUM(cache_read_tokens) as total_cache_read_tokens,
+        SUM(cache_create_tokens) as total_cache_create_tokens,
+        SUM(cost_usd) as total_cost_usd,
+        COUNT(*) as request_count
+      FROM api_usage ${where}
+      GROUP BY category, source, model, auth_mode
+      ORDER BY total_cost_usd DESC`,
+    )
+    .all(...params) as Array<{
+    category: string;
+    source: string;
+    model: string | null;
+    auth_mode: string;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cache_read_tokens: number;
+    total_cache_create_tokens: number;
+    total_cost_usd: number;
+    request_count: number;
+  }>;
+}
+
+export function getUsageCategories(): UsageCategory[] {
+  return db
+    .prepare('SELECT * FROM usage_categories ORDER BY name')
+    .all() as UsageCategory[];
+}
+
+export function setUsageCategory(
+  id: string,
+  name: string,
+  description?: string,
+): void {
+  db.prepare(
+    `INSERT INTO usage_categories (id, name, description, created_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description`,
+  ).run(id, name, description ?? null);
+}
+
+export function deleteUsageCategory(id: string): void {
+  if (id === 'general') return;
+  db.prepare(
+    `UPDATE registered_groups SET usage_category = 'general' WHERE usage_category = ?`,
+  ).run(id);
+  db.prepare('DELETE FROM usage_categories WHERE id = ?').run(id);
+}
+
+export function setGroupUsageCategory(
+  groupFolder: string,
+  categoryId: string,
+): void {
+  db.prepare(
+    'UPDATE registered_groups SET usage_category = ? WHERE folder = ?',
+  ).run(categoryId, groupFolder);
+}
+
+export function getGroupUsageCategory(groupFolder: string): string {
+  const row = db
+    .prepare('SELECT usage_category FROM registered_groups WHERE folder = ?')
+    .get(groupFolder) as { usage_category: string | null } | undefined;
+  return row?.usage_category || 'general';
 }
 
 // --- JSON migration ---

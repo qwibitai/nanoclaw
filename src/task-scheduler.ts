@@ -11,15 +11,18 @@ import {
 import {
   getAllTasks,
   getDueTasks,
+  getGroupUsageCategory,
   getTaskById,
+  insertUsageRecord,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+import { detectAuthMode } from './credential-proxy.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup, ScheduledTask } from './types.js';
+import { RegisteredGroup, ScheduledTask, UsageData } from './types.js';
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -73,6 +76,54 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+}
+
+function recordTaskUsage(
+  usage: UsageData,
+  groupFolder: string,
+  sessionId?: string,
+): void {
+  const category = getGroupUsageCategory(groupFolder);
+  const authMode = detectAuthMode();
+
+  const models = Object.keys(usage.modelUsage);
+  if (models.length === 1) {
+    const model = models[0];
+    const mu = usage.modelUsage[model];
+    insertUsageRecord({
+      group_folder: groupFolder,
+      category,
+      source: 'cron',
+      auth_mode: authMode,
+      model,
+      input_tokens: mu.inputTokens,
+      output_tokens: mu.outputTokens,
+      cache_read_tokens: mu.cacheReadInputTokens,
+      cache_create_tokens: mu.cacheCreationInputTokens,
+      cost_usd: usage.totalCostUsd,
+      duration_ms: usage.durationMs ?? null,
+      duration_api_ms: usage.durationApiMs ?? null,
+      num_turns: usage.numTurns ?? null,
+      session_id: sessionId ?? null,
+    });
+  } else {
+    insertUsageRecord({
+      group_folder: groupFolder,
+      category,
+      source: 'cron',
+      auth_mode: authMode,
+      model: models.length > 0 ? models.join(',') : null,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_tokens: usage.cacheReadTokens,
+      cache_create_tokens: usage.cacheCreateTokens,
+      cost_usd: usage.totalCostUsd,
+      duration_ms: usage.durationMs ?? null,
+      duration_api_ms: usage.durationApiMs ?? null,
+      num_turns: usage.numTurns ?? null,
+      session_id: sessionId ?? null,
+    });
+  }
 }
 
 async function runTask(
@@ -188,6 +239,13 @@ async function runTask(
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
+        }
+        if (streamedOutput.usage) {
+          try {
+            recordTaskUsage(streamedOutput.usage, task.group_folder, sessions[task.group_folder]);
+          } catch (err) {
+            logger.warn({ taskId: task.id, err }, 'Failed to record task usage');
+          }
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);

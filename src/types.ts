@@ -77,6 +77,52 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Usage tracking ---
+
+export interface UsageData {
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  numTurns?: number;
+  modelUsage: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadInputTokens: number;
+      cacheCreationInputTokens: number;
+    }
+  >;
+}
+
+export interface UsageRecord {
+  group_folder: string;
+  category: string;
+  source: string;
+  auth_mode: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_create_tokens: number;
+  cost_usd: number;
+  duration_ms: number | null;
+  duration_api_ms: number | null;
+  num_turns: number | null;
+  session_id: string | null;
+}
+
+export interface UsageCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
