@@ -2,7 +2,14 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, execSync, spawn } from 'child_process';
+import {
+  ChildProcess,
+  exec,
+  execFileSync,
+  execSync,
+  spawn,
+  spawnSync,
+} from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -368,16 +375,14 @@ export async function runContainerAgent(
 
   return new Promise((resolve) => {
     // Start container in detached mode — completely decouples the container
-    // lifecycle from NanoClaw's process tree. On some Linux/Docker versions,
-    // child docker CLI processes receive spurious SIGTERM, killing the container.
-    // Detached mode avoids this: the container runs as a Docker daemon process.
+    // lifecycle from NanoClaw's process tree.
+    // Uses execFileSync (no shell) with stdin closed to prevent Docker
+    // from interpreting pipe cleanup as a client disconnect signal.
     try {
-      execSync(
-        [CONTAINER_RUNTIME_BIN, ...containerArgs]
-          .map((a) => `"${a}"`)
-          .join(' '),
-        { stdio: 'pipe', timeout: 30000 },
-      );
+      execFileSync(CONTAINER_RUNTIME_BIN, containerArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30000,
+      });
     } catch (err) {
       try {
         fs.unlinkSync(inputFile);
