@@ -7,11 +7,17 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-export function startCredentialProxy(_port: number, _host = '127.0.0.1'): Promise<Server> {
+export function startCredentialProxy(
+  _port: number,
+  _host = '127.0.0.1',
+): Promise<Server> {
   logger.warn('Credential proxy is deprecated and has been removed');
   const http = require('http');
   const server = http.createServer(
-    (_req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
+    (
+      _req: import('http').IncomingMessage,
+      res: import('http').ServerResponse,
+    ) => {
       res.writeHead(410);
       res.end('Gone');
     },
