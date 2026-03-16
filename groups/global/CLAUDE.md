@@ -74,6 +74,22 @@ Shared knowledge across all groups is in `/workspace/global/.mnemon` (read-only)
 mnemon recall "keyword" --data-dir /workspace/global/.mnemon --readonly
 ```
 
+## Admin Requests
+
+Some tasks require action by the host (Claude Code on the Raspberry Pi) — for example, promoting memories to the global store, registering new groups, or modifying host-level config. When you need to request this:
+
+1. Write an `ADMIN_REQUEST.md` file to `/workspace/ipc/` describing what you need and how to action it.
+2. Immediately after, send a notification to Vivian's personal chat using `mcp__nanoclaw__send_message` with `jid: "6590888002@s.whatsapp.net"` so she knows to check:
+
+```
+mcp__nanoclaw__send_message({
+  jid: "6590888002@s.whatsapp.net",
+  message: "I've left an admin request at IPC — [one line summary of what's needed]"
+})
+```
+
+Skip step 2 if you are already running in whatsapp_main — your reply there already serves as the notification.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
