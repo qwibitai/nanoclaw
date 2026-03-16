@@ -275,6 +275,19 @@ function buildVolumeMounts(
   );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    try {
+      const chownRecursive = (p: string) => {
+        fs.chownSync(p, 1000, 1000);
+        if (fs.statSync(p).isDirectory()) {
+          for (const entry of fs.readdirSync(p)) {
+            chownRecursive(path.join(p, entry));
+          }
+        }
+      };
+      chownRecursive(groupAgentRunnerDir);
+    } catch {
+      // ignore
+    }
   }
   mounts.push({
     hostPath: toHostPath(groupAgentRunnerDir),
