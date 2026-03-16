@@ -570,13 +570,16 @@ function acquirePidLock(): void {
   // Check if another instance is already running
   if (fs.existsSync(lockFile)) {
     try {
-      const existingPid = parseInt(fs.readFileSync(lockFile, 'utf-8').trim(), 10);
+      const existingPid = parseInt(
+        fs.readFileSync(lockFile, 'utf-8').trim(),
+        10,
+      );
       if (!isNaN(existingPid)) {
         try {
           process.kill(existingPid, 0); // Check if process exists (doesn't send signal)
           logger.fatal(
             { existingPid, currentPid: process.pid, lockFile },
-            'Another NanoClaw instance is already running! Two instances will kill each other\'s containers. Stop the other instance first.',
+            "Another NanoClaw instance is already running! Two instances will kill each other's containers. Stop the other instance first.",
           );
           process.exit(1);
         } catch {
