@@ -242,9 +242,16 @@ async function runTask(
         }
         if (streamedOutput.usage) {
           try {
-            recordTaskUsage(streamedOutput.usage, task.group_folder, sessions[task.group_folder]);
+            recordTaskUsage(
+              streamedOutput.usage,
+              task.group_folder,
+              sessions[task.group_folder],
+            );
           } catch (err) {
-            logger.warn({ taskId: task.id, err }, 'Failed to record task usage');
+            logger.warn(
+              { taskId: task.id, err },
+              'Failed to record task usage',
+            );
           }
         }
         if (streamedOutput.status === 'success') {

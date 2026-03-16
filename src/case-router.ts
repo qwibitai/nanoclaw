@@ -111,10 +111,7 @@ Respond with JSON only (no markdown):
 // ---------------------------------------------------------------------------
 
 async function callHaiku(prompt: string): Promise<string> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-  ]);
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL']);
 
   const apiKey = secrets.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -161,7 +158,9 @@ async function callHaiku(prompt: string): Promise<string> {
             if (data.content?.[0]?.text) {
               resolve(data.content[0].text.trim());
             } else {
-              reject(new Error(`Unexpected Haiku response: ${JSON.stringify(data)}`));
+              reject(
+                new Error(`Unexpected Haiku response: ${JSON.stringify(data)}`),
+              );
             }
           } catch (err) {
             reject(err);

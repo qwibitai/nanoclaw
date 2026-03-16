@@ -207,7 +207,10 @@ function buildVolumeMounts(
   });
 
   // Case workspace mount: for dev cases, mount the worktree; for work cases, the scratch dir
-  if (caseInput?.caseWorkspacePath && fs.existsSync(caseInput.caseWorkspacePath)) {
+  if (
+    caseInput?.caseWorkspacePath &&
+    fs.existsSync(caseInput.caseWorkspacePath)
+  ) {
     mounts.push({
       hostPath: caseInput.caseWorkspacePath,
       containerPath: '/workspace/case',

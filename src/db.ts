@@ -201,13 +201,48 @@ function createSchema(database: Database.Database): void {
     const seed = database.prepare(
       'INSERT INTO usage_categories (id, name, description, created_at) VALUES (?, ?, ?, ?)',
     );
-    seed.run('general', 'General', 'Default category for uncategorized usage', now);
-    seed.run('development', 'Development', 'Software development and coding tasks', now);
-    seed.run('research', 'Research', 'Web research and information gathering', now);
-    seed.run('communication', 'Communication', 'Customer emails, messages, and replies', now);
-    seed.run('automation', 'Automation', 'Scheduled tasks and automated workflows', now);
-    seed.run('browser', 'Browser Use', 'Browser automation, web scraping, and browsing tasks', now);
-    seed.run('documents', 'Documents', 'PDF processing and document analysis', now);
+    seed.run(
+      'general',
+      'General',
+      'Default category for uncategorized usage',
+      now,
+    );
+    seed.run(
+      'development',
+      'Development',
+      'Software development and coding tasks',
+      now,
+    );
+    seed.run(
+      'research',
+      'Research',
+      'Web research and information gathering',
+      now,
+    );
+    seed.run(
+      'communication',
+      'Communication',
+      'Customer emails, messages, and replies',
+      now,
+    );
+    seed.run(
+      'automation',
+      'Automation',
+      'Scheduled tasks and automated workflows',
+      now,
+    );
+    seed.run(
+      'browser',
+      'Browser Use',
+      'Browser automation, web scraping, and browsing tasks',
+      now,
+    );
+    seed.run(
+      'documents',
+      'Documents',
+      'PDF processing and document analysis',
+      now,
+    );
   }
 }
 
@@ -775,7 +810,8 @@ export function getUsageSummary(opts?: {
     params.push(opts.model);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   return db
     .prepare(

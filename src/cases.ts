@@ -280,7 +280,11 @@ const WORKSPACES_DIR = path.join(DATA_DIR, 'case-workspaces');
 export function createCaseWorkspace(
   caseName: string,
   caseType: CaseType,
-): { workspacePath: string; worktreePath: string | null; branchName: string | null } {
+): {
+  workspacePath: string;
+  worktreePath: string | null;
+  branchName: string | null;
+} {
   if (caseType === 'dev') {
     return createWorktree(caseName);
   } else {
@@ -353,10 +357,10 @@ export function pruneCaseWorkspace(c: Case): void {
     // Clean up the branch if it was merged or no longer needed
     if (c.branch_name) {
       try {
-        execSync(
-          `git branch -d ${JSON.stringify(c.branch_name)}`,
-          { cwd: PROJECT_ROOT, stdio: 'pipe' },
-        );
+        execSync(`git branch -d ${JSON.stringify(c.branch_name)}`, {
+          cwd: PROJECT_ROOT,
+          stdio: 'pipe',
+        });
         logger.info({ caseId: c.id, branch: c.branch_name }, 'Branch deleted');
       } catch {
         // Branch not fully merged or doesn't exist — leave it

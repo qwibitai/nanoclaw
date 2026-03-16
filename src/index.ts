@@ -390,7 +390,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         );
 
         // Prefix with case name for tracking in Telegram/chat
-        if (targetCase && text && !text.startsWith(`[case: ${targetCase.name}]`)) {
+        if (
+          targetCase &&
+          text &&
+          !text.startsWith(`[case: ${targetCase.name}]`)
+        ) {
           text = `[case: ${targetCase.name}]\n${text}`;
           updateCase(targetCase.id, {
             last_message: text.slice(0, 200),
