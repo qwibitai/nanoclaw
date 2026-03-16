@@ -42,6 +42,13 @@ COPY agent-runner/package*.json ./
 # Install dependencies
 RUN npm install
 
+# Install better-sqlite3 for qsearch CLI (conversation search)
+RUN npm install better-sqlite3
+
+# Install qsearch CLI (per-group conversation search)
+COPY skills/search/qsearch /usr/local/bin/qsearch
+RUN chmod +x /usr/local/bin/qsearch
+
 # Copy source code
 COPY agent-runner/ ./
 

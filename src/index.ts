@@ -53,6 +53,11 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import {
+  exportMessage,
+  startSearchExporter,
+  stopSearchExporter,
+} from './search-exporter.js';
+import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -485,6 +490,7 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+  startSearchExporter();
   loadState();
   restoreRemoteControl();
 
@@ -497,6 +503,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    stopSearchExporter();
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -576,6 +583,12 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Real-time search index: export to group's search.db if registered
+      const group = registeredGroups[chatJid];
+      if (group) {
+        exportMessage(group.folder, msg);
+      }
     },
     onChatMetadata: (
       chatJid: string,
