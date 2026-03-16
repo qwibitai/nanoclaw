@@ -507,7 +507,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, containerName, timeoutMs, elapsed: Date.now() - startTime },
         'Container timeout, stopping gracefully',
       );
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
@@ -553,8 +553,17 @@ export async function runContainerAgent(
     container.on('close', () => {
       if (closeHandled) return;
       closeHandled = true;
+      const elapsed = Date.now() - startTime;
       clearTimeout(timeout);
       eventsProc.kill();
+
+      // Log whether close was expected (timeout/shutdown) or unexpected
+      if (!timedOut) {
+        logger.warn(
+          { group: group.name, containerName, elapsed, timedOut },
+          'Container close handler fired (not from timeout)',
+        );
+      }
 
       // Get actual container exit code (docker logs exit code is always 0/1)
       let code: number | null = null;

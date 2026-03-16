@@ -1,0 +1,30 @@
+# NanoClaw Agent Container — Minimal build (no apt-get, no npm install)
+# Pre-installs node_modules on host. Browser features disabled.
+
+FROM node:22-bookworm-slim
+
+# Ensure node user exists
+RUN id -u node 2>/dev/null || useradd -m -s /bin/bash node
+
+# Create app directory and copy agent-runner (with pre-installed node_modules)
+WORKDIR /app
+COPY agent-runner/ ./
+
+# Create workspace directories
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra \
+    /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Create entrypoint script
+RUN printf '#!/bin/bash\nset -e\ntrap '\''echo "[entrypoint] SIGTERM received at $(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.%%3NZ) (PID $$)" >&2'\'' TERM\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\nif [ ! -f /tmp/input.json ]; then\n  cat > /tmp/input.json\nfi\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Set ownership for non-root user
+RUN mkdir -p /tmp && chmod 1777 /tmp && mkdir -p /home/node && \
+    chown -R node:node /workspace /home/node && chmod 777 /home/node
+
+# Switch to non-root user
+USER node
+
+# Set working directory
+WORKDIR /workspace/group
+
+ENTRYPOINT ["/app/entrypoint.sh"]
