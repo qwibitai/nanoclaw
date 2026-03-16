@@ -17,14 +17,14 @@ Host (macOS / Windows WSL)
 
 Each agent runs in its own container, inside a micro VM that is fully isolated from your host. Two layers of isolation: per-agent containers + the VM boundary.
 
-The sandbox provides a MITM proxy at `host.docker.internal:3128` that handles network access and injects your Anthropic API key automatically.
+The sandbox provides a MITM proxy at `host.docker.internal:3128` that handles network access. Configure your LLM endpoint via environment variables (see Configuration section).
 
-> **Note:** This guide is based on a validated setup running on macOS (Apple Silicon) with WhatsApp. Other channels (Telegram, Slack, etc.) and environments (Windows WSL) may require additional proxy patches for their specific HTTP/WebSocket clients. The core patches (container runner, credential proxy, Dockerfile) apply universally — channel-specific proxy configuration varies.
+> **Note:** This guide is based on a validated setup running on macOS (Apple Silicon) with WhatsApp. Other channels (Telegram, Slack, etc.) and environments (Windows WSL) may require additional proxy patches for their specific HTTP/WebSocket clients. The core patches (container runner, Dockerfile) apply universally — channel-specific proxy configuration varies.
 
 ## Prerequisites
 
 - **Docker Desktop v4.40+** with Sandbox support
-- **Anthropic API key** (the sandbox proxy manages injection)
+- **LLM endpoint** (LM Studio recommended for local development, or cloud API key)
 - For **Telegram**: a bot token from [@BotFather](https://t.me/BotFather) and your chat ID
 - For **WhatsApp**: a phone with WhatsApp installed
 
@@ -168,19 +168,7 @@ In `src/container-runtime.ts`, the `cleanupOrphans()` function matches container
 // In cleanupOrphans(), filter out os.hostname() from the list of containers to stop
 ```
 
-### 4e. Credential proxy — route through MITM proxy
-
-In `src/credential-proxy.ts`, upstream API requests need to go through the sandbox proxy. Add `HttpsProxyAgent` to outbound requests:
-
-```typescript
-import { HttpsProxyAgent } from 'https-proxy-agent';
-
-const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
-const upstreamAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-// Pass upstreamAgent to https.request() options
-```
-
-### 4f. Setup script — proxy build args
+### 4e. Setup script — proxy build args
 
 Patch `setup/container.ts` to pass the same proxy `--build-arg` flags as `build.sh` (Step 4b).
 
@@ -206,7 +194,8 @@ npm run build
 cat > .env << EOF
 TELEGRAM_BOT_TOKEN=<your-token-from-botfather>
 ASSISTANT_NAME=nanoclaw
-ANTHROPIC_API_KEY=proxy-managed
+NANOCLAW_LLM_BASE_URL=http://host.docker.internal:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model
 EOF
 mkdir -p data/env && cp .env data/env/env
 
@@ -246,7 +235,8 @@ npm run build
 # Configure .env
 cat > .env << EOF
 ASSISTANT_NAME=nanoclaw
-ANTHROPIC_API_KEY=proxy-managed
+NANOCLAW_LLM_BASE_URL=http://host.docker.internal:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model
 EOF
 mkdir -p data/env && cp .env data/env/env
 
@@ -282,7 +272,7 @@ Apply both skills, patch both for proxy support, combine the `.env` variables, a
 npm start
 ```
 
-You don't need to set `ANTHROPIC_API_KEY` manually. The sandbox proxy intercepts requests and replaces `proxy-managed` with your real key automatically.
+Configure your LLM endpoint in `.env`. For local development with LM Studio running on the host, use `host.docker.internal` to reach it from inside the sandbox.
 
 ## Networking Details
 
@@ -291,7 +281,7 @@ You don't need to set `ANTHROPIC_API_KEY` manually. The sandbox proxy intercepts
 All traffic from the sandbox routes through the host proxy at `host.docker.internal:3128`:
 
 ```
-Agent container → DinD bridge → Sandbox VM → host.docker.internal:3128 → Host proxy → api.anthropic.com
+Agent container → DinD bridge → Sandbox VM → host.docker.internal:PORT → LLM endpoint (LM Studio on host, or cloud API)
 ```
 
 **"Bypass" does not mean traffic skips the proxy.** It means the proxy passes traffic through without MITM inspection. Node.js doesn't automatically use `HTTP_PROXY` env vars — you need explicit `HttpsProxyAgent` configuration in every HTTP/WebSocket client.
