@@ -42,6 +42,8 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 
 ## Quick Start
 
+### Container Mode (default — Docker + Claude Agent SDK)
+
 ```bash
 gh repo fork qwibitai/nanoclaw --clone
 cd nanoclaw
@@ -61,6 +63,38 @@ claude
 Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+
+### CLI Mode (no Docker required)
+
+NanoClaw can run without Docker by spawning a CLI tool directly on the host. This supports **Claude CLI** and **Cursor CLI** as agent backends.
+
+```bash
+gh repo fork qwibitai/nanoclaw --clone
+cd nanoclaw
+npm install
+```
+
+Create a `.env` file (see `.env.example`) and set the backend:
+
+```bash
+# Use Claude CLI as the agent backend
+AGENT_BACKEND=cli
+AGENT_CLI=claude
+```
+
+```bash
+# Or use Cursor CLI as the agent backend
+AGENT_BACKEND=cli
+AGENT_CLI=cursor
+```
+
+Then start NanoClaw:
+
+```bash
+npm run dev
+```
+
+> **CLI mode vs Container mode:** CLI mode is simpler (no Docker needed) and lets you choose your agent tool. Container mode provides full sandbox isolation where each agent runs in its own Linux container. You can switch between them at any time by changing `AGENT_BACKEND` in `.env`.
 
 ## Philosophy
 
@@ -142,18 +176,32 @@ Skills we'd like to see:
 
 ## Requirements
 
+**All modes:**
 - macOS or Linux
 - Node.js 20+
+
+**Container mode** (default):
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+
+**CLI mode** (no Docker):
+- [Claude Code](https://claude.ai/download) — when `AGENT_CLI=claude`
+- [Cursor](https://cursor.com) — when `AGENT_CLI=cursor`
 
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+                                ┌─ Container (Claude Agent SDK)  ── Docker isolation
+Channels --> SQLite --> Polling loop ──┤
+                                └─ CLI (claude / cursor)         ── Direct host execution
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. The `AGENT_BACKEND` setting controls how agents run:
+
+- **Container mode**: Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. A credential proxy injects API keys so containers never see real secrets.
+- **CLI mode**: Agents are spawned as CLI subprocesses on the host (`claude -p` or `cursor`). No Docker required. The CLI tool handles its own authentication. Session IDs are tracked for conversation continuity.
+
+Per-group message queue with concurrency control. IPC via filesystem.
 
 For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
@@ -163,10 +211,30 @@ Key files:
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
+- `src/container-runner.ts` - Spawns streaming agent containers (container mode)
+- `src/cli-runner.ts` - Spawns CLI agent processes (CLI mode)
+- `src/config.ts` - All configuration including `AGENT_BACKEND` and `AGENT_CLI`
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
+
+## CLI Mode Configuration
+
+All CLI settings are configured via environment variables in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_BACKEND` | `container` | `container` (Docker) or `cli` (direct CLI) |
+| `AGENT_CLI` | `claude` | Which CLI tool: `claude` or `cursor` |
+| `AGENT_CLI_COMMAND` | *(auto)* | Override the binary path (e.g., `/usr/local/bin/claude`) |
+| `AGENT_CLI_EXTRA_ARGS` | *(none)* | Extra CLI arguments, comma-separated (e.g., `--model,sonnet`) |
+| `CLI_TIMEOUT` | `600000` | Timeout in ms (default: 10 minutes) |
+
+**Claude CLI preset** uses `claude -p` with `--output-format stream-json` for streaming results and `--resume` for session continuity. Each group maintains its own session.
+
+**Cursor CLI preset** uses `cursor agent --message` by default. Override the command and arguments via `AGENT_CLI_COMMAND` and `AGENT_CLI_EXTRA_ARGS` to match your Cursor version.
+
+**Custom CLI tool:** Set `AGENT_CLI_COMMAND` to any executable that accepts a prompt and returns text on stdout. Pair with `AGENT_CLI_EXTRA_ARGS` for custom flags.
 
 ## FAQ
 
@@ -201,6 +269,14 @@ This allows you to use:
 - Custom model deployments with Anthropic-compatible APIs
 
 Note: The model must support the Anthropic API format for best compatibility.
+
+**Can I use Cursor instead of Claude Code?**
+
+Yes. Set `AGENT_BACKEND=cli` and `AGENT_CLI=cursor` in your `.env`. NanoClaw will spawn Cursor CLI instead of running Claude inside Docker containers. This means no Docker is required, but agents run on the host without container isolation. You can switch between `claude` and `cursor` at any time by changing `AGENT_CLI`.
+
+**What's the difference between container mode and CLI mode?**
+
+Container mode runs each agent in an isolated Docker container with its own filesystem — the agent can't see or modify anything outside its mounted directories. CLI mode spawns the agent directly on the host, which is simpler to set up but provides no sandbox isolation. Container mode also includes a credential proxy that prevents agents from seeing your API keys.
 
 **How do I debug issues?**
 

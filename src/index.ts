@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  AGENT_BACKEND,
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
@@ -9,6 +10,7 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { runCliAgent } from './cli-runner.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -310,21 +312,28 @@ async function runAgent(
       }
     : undefined;
 
+  const agentInput = {
+    prompt,
+    sessionId,
+    groupFolder: group.folder,
+    chatJid,
+    isMain,
+    assistantName: ASSISTANT_NAME,
+  };
+
+  const onProcess = (proc: import('child_process').ChildProcess, name: string) =>
+    queue.registerProcess(chatJid, proc, name, group.folder);
+
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: group.folder,
-        chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
-    );
+    const output =
+      AGENT_BACKEND === 'cli'
+        ? await runCliAgent(group, agentInput, onProcess, wrappedOnOutput)
+        : await runContainerAgent(
+            group,
+            agentInput,
+            onProcess,
+            wrappedOnOutput,
+          );
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
@@ -334,7 +343,7 @@ async function runAgent(
     if (output.status === 'error') {
       logger.error(
         { group: group.name, error: output.error },
-        'Container agent error',
+        `${AGENT_BACKEND} agent error`,
       );
       return 'error';
     }
@@ -471,22 +480,31 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  if (AGENT_BACKEND === 'container') {
+    ensureContainerSystemRunning();
+  } else {
+    logger.info({ backend: AGENT_BACKEND }, 'Using CLI agent backend — skipping container runtime check');
+  }
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
   restoreRemoteControl();
 
-  // Start credential proxy (containers route API calls through this)
-  const proxyServer = await startCredentialProxy(
-    CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
-  );
+  // Credential proxy is only needed for container mode (injects API keys into containers).
+  // In CLI mode, the CLI tool handles its own authentication.
+  let proxyServer: import('http').Server | null = null;
+  if (AGENT_BACKEND === 'container') {
+    proxyServer = await startCredentialProxy(
+      CREDENTIAL_PROXY_PORT,
+      PROXY_BIND_HOST,
+    );
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    proxyServer.close();
+    proxyServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

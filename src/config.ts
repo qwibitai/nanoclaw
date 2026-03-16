@@ -71,3 +71,23 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Agent backend: 'container' (Docker + Claude Agent SDK) or 'cli' (direct CLI invocation)
+export const AGENT_BACKEND = (process.env.AGENT_BACKEND || 'container') as
+  | 'container'
+  | 'cli';
+
+// Which CLI tool to use when AGENT_BACKEND=cli: 'claude' or 'cursor'
+export const AGENT_CLI = process.env.AGENT_CLI || 'claude';
+
+// Override the CLI command binary (e.g., a custom path to claude or cursor)
+export const AGENT_CLI_COMMAND = process.env.AGENT_CLI_COMMAND || '';
+
+// Override CLI arguments as a comma-separated string (e.g., "--model,sonnet,--verbose")
+export const AGENT_CLI_EXTRA_ARGS = process.env.AGENT_CLI_EXTRA_ARGS || '';
+
+// Timeout for CLI agent invocations (default: 10 minutes)
+export const CLI_TIMEOUT = parseInt(
+  process.env.CLI_TIMEOUT || '600000',
+  10,
+);
