@@ -74,12 +74,18 @@ export class TelegramChannel implements Channel {
       const existing = this.opts.registeredGroups()[chatJid];
       if (!existing) {
         const folder = `telegram_${chatId}`;
+        const trigger =
+          process.env.NANOCLAW_TRIGGER ?? `@${ASSISTANT_NAME}`;
+        const requiresTrigger =
+          process.env.NANOCLAW_REQUIRE_TRIGGER !== undefined
+            ? process.env.NANOCLAW_REQUIRE_TRIGGER !== 'false'
+            : true;
         this.opts.onRegisterGroup(chatJid, {
           name: chatName,
           folder,
-          trigger: `@${ASSISTANT_NAME}`,
+          trigger,
           added_at: new Date().toISOString(),
-          requiresTrigger: false,
+          requiresTrigger,
         });
         ctx.reply(
           `Chat ID: \`${chatJid}\`\nName: ${chatName}\nType: ${chatType}\n\n✅ Registered as *${chatName}* (folder: \`${folder}\`)`,
