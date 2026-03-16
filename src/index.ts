@@ -568,8 +568,13 @@ async function main(): Promise<void> {
   );
 
   // Start paper-search MCP server (academic paper search for Homura)
-  const paperSearchScript = path.join(process.cwd(), 'scripts', 'paper-search-mcp.sh');
-  let paperSearchProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  const paperSearchScript = path.join(
+    process.cwd(),
+    'scripts',
+    'paper-search-mcp.sh',
+  );
+  let paperSearchProc: ReturnType<typeof import('child_process').spawn> | null =
+    null;
   if (fs.existsSync(paperSearchScript)) {
     const { spawn: spawnProc } = await import('child_process');
     paperSearchProc = spawnProc('bash', [paperSearchScript], {
@@ -588,8 +593,13 @@ async function main(): Promise<void> {
   }
 
   // Start Google API proxy (wraps gws CLI for container access)
-  const googleProxyScript = path.join(process.cwd(), 'scripts', 'google-api-proxy.mjs');
-  let googleProxyProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  const googleProxyScript = path.join(
+    process.cwd(),
+    'scripts',
+    'google-api-proxy.mjs',
+  );
+  let googleProxyProc: ReturnType<typeof import('child_process').spawn> | null =
+    null;
   if (fs.existsSync(googleProxyScript)) {
     const { spawn: spawnProc } = await import('child_process');
     googleProxyProc = spawnProc('node', [googleProxyScript], {
@@ -608,8 +618,13 @@ async function main(): Promise<void> {
   }
 
   // Start Teller API proxy (mTLS proxy for container access to bank data)
-  const tellerProxyScript = path.join(process.cwd(), 'scripts', 'teller-api-proxy.mjs');
-  let tellerProxyProc: ReturnType<typeof import('child_process').spawn> | null = null;
+  const tellerProxyScript = path.join(
+    process.cwd(),
+    'scripts',
+    'teller-api-proxy.mjs',
+  );
+  let tellerProxyProc: ReturnType<typeof import('child_process').spawn> | null =
+    null;
   if (fs.existsSync(tellerProxyScript)) {
     const { spawn: spawnProc } = await import('child_process');
     tellerProxyProc = spawnProc('node', [tellerProxyScript], {
@@ -656,13 +671,25 @@ async function main(): Promise<void> {
 
       // 3. Stop MCP sidecar services
       if (paperSearchProc && !paperSearchProc.killed) {
-        try { paperSearchProc.kill(); } catch { /* ignore */ }
+        try {
+          paperSearchProc.kill();
+        } catch {
+          /* ignore */
+        }
       }
       if (googleProxyProc && !googleProxyProc.killed) {
-        try { googleProxyProc.kill(); } catch { /* ignore */ }
+        try {
+          googleProxyProc.kill();
+        } catch {
+          /* ignore */
+        }
       }
       if (tellerProxyProc && !tellerProxyProc.killed) {
-        try { tellerProxyProc.kill(); } catch { /* ignore */ }
+        try {
+          tellerProxyProc.kill();
+        } catch {
+          /* ignore */
+        }
       }
 
       // 4. Stop Telegram bots
@@ -673,8 +700,12 @@ async function main(): Promise<void> {
 
     process.exit(0);
   };
-  process.on('SIGTERM', () => { shutdown('SIGTERM'); });
-  process.on('SIGINT', () => { shutdown('SIGINT'); });
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM');
+  });
+  process.on('SIGINT', () => {
+    shutdown('SIGINT');
+  });
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {

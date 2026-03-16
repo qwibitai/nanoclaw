@@ -238,7 +238,10 @@ function buildContainerArgs(
   );
 
   // Point knowledge base scripts at host Ollama via the host gateway
-  args.push('-e', `OLLAMA_EMBED_URL=http://${CONTAINER_HOST_GATEWAY}:11434/api/embeddings`);
+  args.push(
+    '-e',
+    `OLLAMA_EMBED_URL=http://${CONTAINER_HOST_GATEWAY}:11434/api/embeddings`,
+  );
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
@@ -384,9 +387,14 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed)).catch((err) => {
-              logger.error({ group: group.name, err }, 'Error in streaming onOutput callback');
-            });
+            outputChain = outputChain
+              .then(() => onOutput(parsed))
+              .catch((err) => {
+                logger.error(
+                  { group: group.name, err },
+                  'Error in streaming onOutput callback',
+                );
+              });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -444,7 +452,11 @@ export async function runContainerAgent(
             { group: group.name, containerName, err },
             'Graceful stop failed, force killing',
           );
-          try { container.kill('SIGKILL'); } catch { /* process already dead */ }
+          try {
+            container.kill('SIGKILL');
+          } catch {
+            /* process already dead */
+          }
         }
       });
     };
@@ -485,13 +497,15 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.catch(() => {}).then(() => {
-            safeResolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          outputChain
+            .catch(() => {})
+            .then(() => {
+              safeResolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
             });
-          });
           return;
         }
 
@@ -589,17 +603,19 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.catch(() => {}).then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          safeResolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        outputChain
+          .catch(() => {})
+          .then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            safeResolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
           });
-        });
         return;
       }
 

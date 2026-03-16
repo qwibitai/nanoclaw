@@ -48,7 +48,10 @@ class TelegramMultiBotChannel implements Channel {
   private registeredGroups: () => Record<string, RegisteredGroup>;
   private connected = false;
 
-  constructor(opts: ChannelOpts, botConfigs: Array<{ folder: string; token: string }>) {
+  constructor(
+    opts: ChannelOpts,
+    botConfigs: Array<{ folder: string; token: string }>,
+  ) {
     this.onMessage = opts.onMessage;
     this.onChatMetadata = opts.onChatMetadata;
     this.registeredGroups = opts.registeredGroups;
@@ -83,7 +86,10 @@ class TelegramMultiBotChannel implements Channel {
       });
 
       instance.bot.catch((err) => {
-        logger.error({ folder, err: err.error }, `Telegram bot error (${folder})`);
+        logger.error(
+          { folder, err: err.error },
+          `Telegram bot error (${folder})`,
+        );
       });
 
       // Start polling (non-blocking)
@@ -101,7 +107,10 @@ class TelegramMultiBotChannel implements Channel {
       // bot.start() doesn't resolve until stopped, so we don't await it
       // Instead we just let it run in the background
       startPromise.catch((err) => {
-        logger.error({ folder, err }, `Telegram bot polling failed (${folder})`);
+        logger.error(
+          { folder, err },
+          `Telegram bot polling failed (${folder})`,
+        );
       });
     }
 
@@ -127,7 +136,10 @@ class TelegramMultiBotChannel implements Channel {
     }
   }
 
-  private async handleCallbackQuery(ctx: Context, folder: string): Promise<void> {
+  private async handleCallbackQuery(
+    ctx: Context,
+    folder: string,
+  ): Promise<void> {
     if (!ctx.callbackQuery) return;
 
     const cbq = ctx.callbackQuery;
@@ -193,7 +205,10 @@ class TelegramMultiBotChannel implements Channel {
     const folder = this.jidToFolder.get(jid);
     const instance = folder ? this.bots.get(folder) : undefined;
     if (!instance) {
-      logger.warn({ jid, callbackQueryId }, 'No bot found to answer callback query');
+      logger.warn(
+        { jid, callbackQueryId },
+        'No bot found to answer callback query',
+      );
       return;
     }
 
@@ -203,7 +218,10 @@ class TelegramMultiBotChannel implements Channel {
         show_alert: showAlert,
       });
     } catch (err) {
-      logger.error({ jid, callbackQueryId, err }, 'Failed to answer callback query');
+      logger.error(
+        { jid, callbackQueryId, err },
+        'Failed to answer callback query',
+      );
     }
   }
 
@@ -246,16 +264,13 @@ class TelegramMultiBotChannel implements Channel {
 
     const senderId = ctx.message.from?.id?.toString() || 'unknown';
     const senderName =
-      ctx.message.from?.first_name ||
-      ctx.message.from?.username ||
-      'Unknown';
+      ctx.message.from?.first_name || ctx.message.from?.username || 'Unknown';
     const chatName =
       ctx.chat.title ||
       ctx.chat.first_name ||
       ctx.chat.username ||
       `Chat ${chatId}`;
-    const isGroup =
-      ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
     const timestamp = new Date(ctx.message.date * 1000).toISOString();
     const msgId = ctx.message.message_id.toString();
 
@@ -374,7 +389,10 @@ class TelegramMultiBotChannel implements Channel {
         }
 
         if (!file.file_path) {
-          logger.warn({ folder, filename: item.filename }, 'No file_path from Telegram API');
+          logger.warn(
+            { folder, filename: item.filename },
+            'No file_path from Telegram API',
+          );
           continue;
         }
 
@@ -423,7 +441,12 @@ class TelegramMultiBotChannel implements Channel {
     return attachments;
   }
 
-  async sendMessage(jid: string, text: string, sender?: string, messageThreadId?: number): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    sender?: string,
+    messageThreadId?: number,
+  ): Promise<void> {
     const chatId = jid.replace('tg:', '');
 
     // If sender is specified, try to use the matching bot (lowercase sender = folder name)
@@ -482,7 +505,11 @@ class TelegramMultiBotChannel implements Channel {
         } catch (err: any) {
           const code = err?.error_code || err?.status;
           const isRetryable =
-            code === 504 || code === 502 || code === 429 || code === 503 || !code;
+            code === 504 ||
+            code === 502 ||
+            code === 429 ||
+            code === 503 ||
+            !code;
           if (isRetryable && attempt < maxRetries) {
             const delay = code === 429 ? 5000 : 2000 * attempt;
             logger.warn(
@@ -536,16 +563,22 @@ class TelegramMultiBotChannel implements Channel {
     return jid.startsWith('tg:');
   }
 
-  async setReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
     const chatId = jid.replace('tg:', '');
     const folder = this.jidToFolder.get(jid);
     const instance = folder ? this.bots.get(folder) : undefined;
     if (!instance) return;
 
     try {
-      await instance.bot.api.setMessageReaction(chatId, parseInt(messageId, 10), [
-        { type: 'emoji', emoji: emoji as any },
-      ]);
+      await instance.bot.api.setMessageReaction(
+        chatId,
+        parseInt(messageId, 10),
+        [{ type: 'emoji', emoji: emoji as any }],
+      );
     } catch {
       // Ignore reaction errors (unsupported emoji, permissions, etc.)
     }
@@ -598,7 +631,10 @@ function parseBotConfigs(): Array<{ folder: string; token: string }> | null {
       // Format: folder:botId:tokenPart → token is "botId:tokenPart"
       const firstColon = trimmed.indexOf(':');
       if (firstColon === -1) {
-        logger.warn({ entry: trimmed }, 'Invalid TELEGRAM_BOTS entry, expected folder:token');
+        logger.warn(
+          { entry: trimmed },
+          'Invalid TELEGRAM_BOTS entry, expected folder:token',
+        );
         continue;
       }
 

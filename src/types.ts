@@ -92,7 +92,12 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, sender?: string, messageThreadId?: number): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    sender?: string,
+    messageThreadId?: number,
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

@@ -21,7 +21,12 @@ const KB_VENV_PYTHON = path.join(
 );
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string, sender?: string, messageThreadId?: number) => Promise<void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    sender?: string,
+    messageThreadId?: number,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -90,8 +95,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  const threadId = data.message_thread_id != null ? Number(data.message_thread_id) : undefined;
-                  await deps.sendMessage(data.chatJid, data.text, data.sender, threadId);
+                  const threadId =
+                    data.message_thread_id != null
+                      ? Number(data.message_thread_id)
+                      : undefined;
+                  await deps.sendMessage(
+                    data.chatJid,
+                    data.text,
+                    data.sender,
+                    threadId,
+                  );
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -156,20 +169,31 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                   fs.writeFileSync(resultPath, result);
                 } catch (execErr: any) {
-                  const errMsg = execErr.stderr || execErr.message || String(execErr);
+                  const errMsg =
+                    execErr.stderr || execErr.message || String(execErr);
                   fs.writeFileSync(resultPath, `[ERROR] ${errMsg}`);
                   logger.error({ err: errMsg, sourceGroup }, 'KB query failed');
                 }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
-              logger.error({ file, sourceGroup, err }, 'Error processing KB query');
-              try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing KB query',
+              );
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                /* ignore */
+              }
             }
           }
         }
       } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading KB queries directory');
+        logger.error(
+          { err, sourceGroup },
+          'Error reading KB queries directory',
+        );
       }
 
       // Process tasks from this group's IPC directory

@@ -361,7 +361,11 @@ export class GroupQueue {
           new Promise<void>((resolve) => {
             const timer = setTimeout(() => {
               // Grace period expired, force kill
-              try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+              try {
+                proc.kill('SIGKILL');
+              } catch {
+                /* ignore */
+              }
               resolve();
             }, gracePeriodMs);
 
@@ -370,7 +374,11 @@ export class GroupQueue {
               resolve();
             });
 
-            try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+            try {
+              proc.kill('SIGTERM');
+            } catch {
+              /* ignore */
+            }
           }),
         );
       }
