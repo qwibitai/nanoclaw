@@ -600,12 +600,49 @@ export async function runContainerAgent(
         } catch {
           inspectData = 'inspect failed';
         }
+
+        // Identify external killer: check for other NanoClaw processes and
+        // Docker daemon logs around the time of the kill
+        let externalDiag = '';
+        try {
+          // Look for other NanoClaw/node processes (duplicate instances)
+          const procs = execSync(
+            `ps aux | grep -E 'nanoclaw|tsx.*index|node.*dist/index' | grep -v grep`,
+            { encoding: 'utf-8', timeout: 3000 },
+          ).trim();
+          externalDiag += `PROCESSES:\n${procs}\n`;
+        } catch {
+          externalDiag += 'PROCESSES: (none found)\n';
+        }
+        try {
+          // Docker daemon logs for this container (who issued the stop?)
+          const daemonLogs = execSync(
+            `journalctl -u docker --since '30s ago' --no-pager -n 20 2>/dev/null || echo 'journalctl unavailable'`,
+            { encoding: 'utf-8', timeout: 5000 },
+          ).trim();
+          externalDiag += `DOCKER_DAEMON_LOGS:\n${daemonLogs}\n`;
+        } catch {
+          externalDiag += 'DOCKER_DAEMON_LOGS: (unavailable)\n';
+        }
+        try {
+          // Check kernel OOM or cgroup kills
+          const dmesg = execSync(
+            `dmesg --time-format iso 2>/dev/null | tail -5 || dmesg | tail -5`,
+            { encoding: 'utf-8', timeout: 3000 },
+          ).trim();
+          externalDiag += `DMESG_TAIL:\n${dmesg}`;
+        } catch {
+          externalDiag += 'DMESG_TAIL: (unavailable)';
+        }
+
         logger.error(
           {
             group: group.name,
             containerName,
             dockerEvents: dockerEvents.trim(),
             inspectData,
+            externalDiag,
+            nanoclaw_pid: process.pid,
             duration: Date.now() - startTime,
           },
           `Container received signal (exit ${code}) — diagnostics attached`,

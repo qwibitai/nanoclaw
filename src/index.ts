@@ -555,7 +555,62 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Acquire a PID lock to prevent multiple NanoClaw instances from running
+ * simultaneously (which causes them to kill each other's containers).
+ */
+function acquirePidLock(): void {
+  const lockFile = path.join(
+    path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'),
+    'data',
+    'nanoclaw.pid',
+  );
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+
+  // Check if another instance is already running
+  if (fs.existsSync(lockFile)) {
+    try {
+      const existingPid = parseInt(fs.readFileSync(lockFile, 'utf-8').trim(), 10);
+      if (!isNaN(existingPid)) {
+        try {
+          process.kill(existingPid, 0); // Check if process exists (doesn't send signal)
+          logger.fatal(
+            { existingPid, currentPid: process.pid, lockFile },
+            'Another NanoClaw instance is already running! Two instances will kill each other\'s containers. Stop the other instance first.',
+          );
+          process.exit(1);
+        } catch {
+          // Process doesn't exist — stale lock file, safe to overwrite
+          logger.info(
+            { stalePid: existingPid },
+            'Removing stale PID lock from previous run',
+          );
+        }
+      }
+    } catch {
+      // Corrupt lock file, overwrite it
+    }
+  }
+
+  // Write our PID
+  fs.writeFileSync(lockFile, String(process.pid));
+
+  // Clean up on exit
+  const cleanLock = () => {
+    try {
+      const content = fs.readFileSync(lockFile, 'utf-8').trim();
+      if (content === String(process.pid)) {
+        fs.unlinkSync(lockFile);
+      }
+    } catch {
+      // ignore
+    }
+  };
+  process.on('exit', cleanLock);
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
