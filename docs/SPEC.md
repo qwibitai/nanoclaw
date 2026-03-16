@@ -394,33 +394,83 @@ Additional mounts appear at `/workspace/extra/{containerPath}` inside the contai
 
 ### LLM Configuration
 
-Configure your LLM endpoint in a `.env` file in the project root. NanoClaw uses OpenCode, which supports any OpenAI-compatible API.
+NanoClaw uses OpenCode SDK, which supports any OpenAI-compatible API. Configuration is passed from host to container via environment variables.
 
-**Option 1: Local LLM (Recommended for Privacy)**
+**Primary Method: JSON Configuration (Recommended)**
+
+Use `NANOCLAW_LLM_CONFIG` for full provider configuration:
+
+```bash
+# LM Studio (local)
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://localhost:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model-name"
+}'
+
+# Ollama (local)
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/llama3.1"
+}'
+
+# OpenRouter (cloud)
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "your-api-key"
+      }
+    }
+  },
+  "model": "openai-compatible/openai/gpt-4o-mini"
+}'
+```
+
+**Quick Model Override**
+
+Use `NANOCLAW_LLM_MODEL` to override just the model:
+
+```bash
+NANOCLAW_LLM_MODEL=openai-compatible/gpt-4-turbo
+```
+
+**Legacy Method: Individual Environment Variables**
+
+For simple setups, individual env vars are still supported:
 
 ```bash
 NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
 NANOCLAW_LLM_MODEL_ID=your-model-name
+NANOCLAW_LLM_API_KEY=not-needed
 ```
 
-For LM Studio, ensure the model is loaded and the server is running.
+**Configuration Details**
 
-**Option 2: Cloud/OpenAI-compatible Endpoint**
+- Config is validated at container startup
+- Health check URL is automatically derived from provider's `baseURL`
+- Model format: `providerType/modelName`
 
-```bash
-NANOCLAW_LLM_BASE_URL=https://api.openai.com/v1
-NANOCLAW_LLM_API_KEY=sk-...
-NANOCLAW_LLM_MODEL_ID=gpt-4
-```
-
-**Legacy: Anthropic API (Claude)**
+**Anthropic API (Legacy Support)**
 
 ```bash
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 ANTHROPIC_AUTH_TOKEN=sk-ant-...
 ```
-
-Only the authentication variables are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
 
 ### Changing the Assistant Name
 
