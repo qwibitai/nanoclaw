@@ -98,6 +98,12 @@ function setupLaunchd(
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- Defense-in-depth: if the XPC service wait (container-runtime.ts) fails
+         and NanoClaw exits immediately, launchd waits 30s before restarting
+         instead of the default 10s, preventing rapid crash loops that cause
+         OOM. See #1067. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
