@@ -214,4 +214,85 @@ describe('FeishuChannel', () => {
       expect(channel.isConnected()).toBe(false);
     });
   });
+
+  describe('inbound text messages', () => {
+    it('delivers text message for registered group', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ content: JSON.stringify({ text: 'Hello world' }) });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({
+          id: 'om_msg001',
+          chat_jid: 'feishu:oc_test123',
+          sender: 'ou_sender001',
+          sender_name: 'Test User',
+          content: 'Hello world',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          is_from_me: false,
+          is_bot_message: false,
+        }),
+      );
+    });
+
+    it('ignores messages from unregistered chats', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ chatId: 'oc_unknown999' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('tags bot messages with is_bot_message', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ senderType: 'app' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ is_bot_message: true }),
+      );
+    });
+
+    it('sets is_from_me when sender is the bot', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        senderOpenId: 'ou_bot123',
+        senderType: 'app',
+      });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ is_from_me: true, is_bot_message: true }),
+      );
+    });
+
+    it('converts create_time milliseconds to ISO timestamp', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ createTime: '1704067200000' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ timestamp: '2024-01-01T00:00:00.000Z' }),
+      );
+    });
+  });
 });

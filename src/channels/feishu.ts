@@ -76,8 +76,78 @@ export class FeishuChannel implements Channel {
     logger.info('Feishu: connected via WebSocket');
   }
 
-  private async handleMessage(_data: any): Promise<void> {
-    // Will be implemented in Task 6
+  private async handleMessage(data: any): Promise<void> {
+    const message = data.message;
+    const sender = data.sender;
+
+    const chatId = message.chat_id;
+    const chatType = message.chat_type;
+    const messageType = message.message_type;
+    const chatJid = `feishu:${chatId}`;
+    const senderId = sender.sender_id?.open_id || '';
+    const senderType = sender.sender_type;
+    const timestamp = new Date(parseInt(message.create_time)).toISOString();
+    const isGroup = chatType === 'group';
+
+    // Always emit metadata for chat discovery
+    this.opts.onChatMetadata(chatJid, timestamp, undefined, 'feishu', isGroup);
+
+    // Only process messages from registered groups
+    const group = this.opts.registeredGroups()[chatJid];
+    if (!group) {
+      logger.debug({ chatJid }, 'Message from unregistered Feishu chat');
+      return;
+    }
+
+    // Extract content based on message type
+    let content: string;
+    try {
+      if (messageType === 'text') {
+        const parsed = JSON.parse(message.content);
+        content = parsed.text || '';
+      } else {
+        content = `[Unsupported: ${messageType}]`;
+      }
+    } catch {
+      content = message.content || `[${messageType}]`;
+    }
+
+    // Resolve sender name
+    const senderName = await this.resolveSenderName(senderId);
+
+    this.opts.onMessage(chatJid, {
+      id: message.message_id,
+      chat_jid: chatJid,
+      sender: senderId,
+      sender_name: senderName,
+      content,
+      timestamp,
+      is_from_me: senderId === this.botOpenId,
+      is_bot_message: senderType !== 'user',
+    });
+
+    logger.info({ chatJid, sender: senderName }, 'Feishu message stored');
+  }
+
+  private async resolveSenderName(openId: string): Promise<string> {
+    if (!openId) return 'Unknown';
+
+    const cached = this.userNameCache.get(openId);
+    if (cached) return cached;
+
+    try {
+      const res = await this.client!.contact.v3.user.get({
+        path: { user_id: openId },
+        params: { user_id_type: 'open_id' },
+      } as any);
+      const name = (res as any)?.data?.user?.name || openId;
+      this.userNameCache.set(openId, name);
+      return name;
+    } catch (err) {
+      logger.warn({ openId, err }, 'Feishu: failed to resolve sender name');
+      this.userNameCache.set(openId, openId);
+      return openId;
+    }
   }
 
   async sendMessage(_jid: string, _text: string): Promise<void> {
