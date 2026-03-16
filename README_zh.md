@@ -205,13 +205,22 @@ Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 
 ```bash
 NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
 NANOCLAW_LLM_MODEL_ID=your-model-name
+NANOCLAW_LLM_API_KEY=your-api-key  # 可选：仅云服务需要
 ```
 
 这使您能够使用：
 
-- 通过 [LM Studio](https://lmstudio.ai) 运行的本地模型
-- 通过 [Ollama](https://ollama.ai) 以 OpenAI 兼容模式运行的本地模型
-- 兼容 OpenAI API 的云服务提供商（OpenRouter 等）
+- 通过 [LM Studio](https://lmstudio.ai) 运行的本地模型（无需 API key）
+- 通过 [Ollama](https://ollama.ai) 以 OpenAI 兼容模式运行的本地模型（无需 API key）
+- 兼容 OpenAI API 的云服务提供商（OpenRouter 等 - 需要 API key）
+
+**OpenRouter 配置示例：**
+
+```bash
+NANOCLAW_LLM_BASE_URL=https://openrouter.ai/api/v1
+NANOCLAW_LLM_MODEL_ID=anthropic/claude-3.5-sonnet
+NANOCLAW_LLM_API_KEY=sk-or-v1-...
+```
 
 为保持向后兼容，以下旧变量也受支持：
 

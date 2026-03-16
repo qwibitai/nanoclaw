@@ -321,11 +321,18 @@ async function createOpencodeServer(
     },
   };
 
+  const baseURL =
+    process.env.NANOCLAW_LLM_BASE_URL || 'http://host.docker.internal:1234/v1';
+  const apiKey = process.env.NANOCLAW_LLM_API_KEY || 'not-needed';
+
   const config = {
     provider: {
       'openai-compatible': {
         name: 'LM Studio',
-        api: 'http://host.docker.internal:1234/v1',
+        options: {
+          baseURL,
+          apiKey,
+        },
       },
     },
     model: `openai-compatible/${process.env.NANOCLAW_LLM_MODEL_ID || 'default'}`,
@@ -502,23 +509,25 @@ async function main(): Promise<void> {
     server = await createOpencodeServer('/workspace/group', containerInput);
     client = createOpencodeClient({ baseUrl: server.url });
 
-    const lmStudioUrl = 'http://host.docker.internal:1234/v1';
+    const lmStudioUrl =
+      process.env.NANOCLAW_LLM_BASE_URL ||
+      'http://host.docker.internal:1234/v1';
     const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
-    log(`Using LM Studio at ${lmStudioUrl}, model: ${modelId}`);
+    log(`Using LLM at ${lmStudioUrl}, model: ${modelId}`);
 
-    // Check LM Studio health before proceeding
-    log('Checking LM Studio connectivity...');
+    // Check LLM health before proceeding
+    log('Checking LLM connectivity...');
     const health = await checkLmStudioHealth(lmStudioUrl, 3, 2000);
     if (!health.ok) {
       const userError =
-        '❌ LM Studio is currently unavailable.\n\n' +
-        'Please ensure LM Studio is running and a model is loaded:\n' +
-        '1. Open LM Studio application\n' +
-        '2. Load a model in the Developer tab\n' +
-        '3. Start the local server (default port 1234)\n\n' +
+        '❌ LLM server is currently unavailable.\n\n' +
+        'Please ensure your LLM server is running:\n' +
+        '1. For LM Studio: Open the application and load a model in Developer tab\n' +
+        '2. For Ollama: Run `ollama serve`\n' +
+        '3. For cloud APIs: Verify your API key and endpoint URL\n\n' +
         `Technical details: ${health.error}`;
 
-      log(`LM Studio health check failed: ${health.error}`);
+      log(`LLM health check failed: ${health.error}`);
       writeOutput({
         status: 'error',
         result: null,
@@ -527,7 +536,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    log(`LM Studio is ready with ${health.modelsAvailable} models`);
+    log(`LLM is ready with ${health.modelsAvailable} models available`);
 
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     try {

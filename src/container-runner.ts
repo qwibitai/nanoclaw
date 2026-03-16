@@ -204,6 +204,23 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass LLM configuration to container
+  if (process.env.NANOCLAW_LLM_BASE_URL) {
+    args.push(
+      '-e',
+      `NANOCLAW_LLM_BASE_URL=${process.env.NANOCLAW_LLM_BASE_URL}`,
+    );
+  }
+  if (process.env.NANOCLAW_LLM_API_KEY) {
+    args.push('-e', `NANOCLAW_LLM_API_KEY=${process.env.NANOCLAW_LLM_API_KEY}`);
+  }
+  if (process.env.NANOCLAW_LLM_MODEL_ID) {
+    args.push(
+      '-e',
+      `NANOCLAW_LLM_MODEL_ID=${process.env.NANOCLAW_LLM_MODEL_ID}`,
+    );
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 

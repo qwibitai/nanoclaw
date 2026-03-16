@@ -238,13 +238,22 @@ Yes. NanoClaw works with any OpenAI-compatible LLM endpoint. Set these environme
 ```bash
 NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
 NANOCLAW_LLM_MODEL_ID=your-model-name
+NANOCLAW_LLM_API_KEY=your-api-key  # Optional: only needed for cloud providers
 ```
 
 This allows you to use:
 
-- Local models via [LM Studio](https://lmstudio.ai)
-- Local models via [Ollama](https://ollama.ai) with OpenAI compatibility mode
-- Cloud providers with OpenAI-compatible APIs (OpenRouter, etc.)
+- Local models via [LM Studio](https://lmstudio.ai) (no API key needed)
+- Local models via [Ollama](https://ollama.ai) with OpenAI compatibility mode (no API key needed)
+- Cloud providers with OpenAI-compatible APIs (OpenRouter, etc. - API key required)
+
+**Example for OpenRouter:**
+
+```bash
+NANOCLAW_LLM_BASE_URL=https://openrouter.ai/api/v1
+NANOCLAW_LLM_MODEL_ID=anthropic/claude-3.5-sonnet
+NANOCLAW_LLM_API_KEY=sk-or-v1-...
+```
 
 For legacy Anthropic API compatibility, these variables are also supported:
 
