@@ -59,6 +59,10 @@ export function readonlyMountArgs(
 
 /** Returns the shell command to stop a container by name. */
 export function stopContainer(name: string): string {
+  logger.debug(
+    { containerName: name, stack: new Error().stack?.split('\n').slice(1, 4) },
+    'stopContainer called',
+  );
   return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
 }
 

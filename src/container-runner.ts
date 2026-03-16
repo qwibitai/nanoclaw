@@ -544,7 +544,10 @@ export async function runContainerAgent(
       dockerEvents += data.toString();
     });
 
+    let closeHandled = false;
     container.on('close', () => {
+      if (closeHandled) return;
+      closeHandled = true;
       clearTimeout(timeout);
       eventsProc.kill();
 
@@ -562,8 +565,8 @@ export async function runContainerAgent(
         code = 1;
       }
 
-      // On unexpected SIGTERM (code 143), gather detailed diagnostics
-      if (code === 143) {
+      // On unexpected signal death (143=SIGTERM, 137=SIGKILL), gather diagnostics
+      if (code === 143 || code === 137) {
         try {
           inspectData = execSync(
             `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='` +
@@ -586,7 +589,7 @@ export async function runContainerAgent(
             inspectData,
             duration: Date.now() - startTime,
           },
-          'Container received SIGTERM (exit 143) — diagnostics attached',
+          `Container received signal (exit ${code}) — diagnostics attached`,
         );
       }
 
@@ -805,38 +808,21 @@ export async function runContainerAgent(
     });
 
     container.on('error', (err) => {
-      clearTimeout(timeout);
-      // Stop the detached container and clean up
-      try {
-        execSync(stopContainer(containerName), {
-          stdio: 'pipe',
-          timeout: 15000,
-        });
-      } catch {
-        /* container may not exist */
-      }
-      try {
-        execSync(`${CONTAINER_RUNTIME_BIN} rm ${containerName}`, {
-          stdio: 'pipe',
-          timeout: 5000,
-        });
-      } catch {
-        /* already removed */
-      }
-      try {
-        fs.unlinkSync(inputFile);
-      } catch {
-        /* already cleaned up */
-      }
-      logger.error(
+      // docker logs -f failed, but the container is running fine in detached
+      // mode. DON'T stop the container — fall back to docker wait to detect
+      // when it exits, then let the close handler run cleanup.
+      logger.warn(
         { group: group.name, containerName, error: err },
-        'Docker logs process error',
+        'Docker logs process error, falling back to docker wait',
       );
-      resolve({
-        status: 'error',
-        result: null,
-        error: `Docker logs error: ${err.message}`,
-      });
+      exec(
+        `${CONTAINER_RUNTIME_BIN} wait ${containerName}`,
+        { timeout: timeoutMs },
+        () => {
+          // Container finished — trigger close handler for normal cleanup
+          if (!closeHandled) container.emit('close');
+        },
+      );
     });
   });
 }
