@@ -31,6 +31,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/fix-tailscale-docker-routing` | Fix Docker containers losing internet when Tailscale exit node (e.g. Mullvad) is active |
 
 ## Development
 
