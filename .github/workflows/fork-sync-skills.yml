@@ -4,9 +4,9 @@ on:
   # Triggered by upstream repo via repository_dispatch
   repository_dispatch:
     types: [upstream-main-updated]
-  # Fallback: run on a schedule in case dispatch isn't configured
-  schedule:
-    - cron: '0 */6 * * *'  # every 6 hours
+  # Cron disabled — use workflow_dispatch or repository_dispatch instead
+  # schedule:
+  #   - cron: '0 */6 * * *'  # every 6 hours
   # Also run when fork's main is pushed directly
   push:
     branches: [main]
