@@ -386,6 +386,68 @@ From main group: shows all cases. From other groups: shows only that group's cas
 );
 
 server.tool(
+  'create_case',
+  `Create a new work case (isolated work item). Use this when the user asks you to do something that warrants tracking as a discrete piece of work — research, analysis, writing, multi-step tasks, etc.
+
+The case gets its own workspace and session, so subsequent messages routed to it have isolated context. Don't create cases for simple one-off questions.
+
+Case types:
+• "work" — Uses existing tooling for productive work (research, analysis, writing). Gets a scratch directory.
+• "dev" — Improves tooling/workflows to make future work better. Gets a git worktree. Use sparingly.`,
+  {
+    description: z.string().describe('Brief description of what this case is about (used to generate the case name)'),
+    case_type: z.enum(['work', 'dev']).default('work').describe('Type of case: work (default) or dev'),
+  },
+  async (args) => {
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const data = {
+      type: 'case_create',
+      description: args.description,
+      caseType: args.case_type || 'work',
+      chatJid,
+      initiator: 'agent',
+      groupFolder,
+      requestId,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    // Wait briefly for the host to process and write the result
+    const resultDir = path.join(IPC_DIR, 'case_results');
+    const resultFile = path.join(resultDir, `${requestId}.json`);
+
+    // Poll for result (host processes IPC files every ~1s)
+    for (let i = 0; i < 15; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        if (fs.existsSync(resultFile)) {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          fs.unlinkSync(resultFile);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Case created:\n  ID: ${result.id}\n  Name: ${result.name}\n  Workspace: ${result.workspace_path}\n\nThe case is now ACTIVE. Future messages about this topic will be routed to it.`,
+            }],
+          };
+        }
+      } catch {
+        // File might not exist yet, keep polling
+      }
+    }
+
+    // Timeout — the IPC was written, case will be created but we can't confirm
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Case creation requested for: "${args.description}". It should appear shortly in the active cases list.`,
+      }],
+    };
+  },
+);
+
+server.tool(
   'case_mark_done',
   `Mark the current case as done. You MUST include:
 1. A conclusion summarizing what was accomplished
