@@ -19,8 +19,7 @@ export interface FeishuChannelOpts {
 
 /** Extract plain text from a Feishu "post" rich-text content object. */
 function extractPostText(content: any): string {
-  const locale =
-    content.zh_cn || content[Object.keys(content)[0]];
+  const locale = content.zh_cn || content[Object.keys(content)[0]];
   if (!locale) return '[Post]';
 
   const parts: string[] = [];
@@ -205,8 +204,31 @@ export class FeishuChannel implements Channel {
     }
   }
 
-  async sendMessage(_jid: string, _text: string): Promise<void> {
-    throw new Error('Not implemented');
+  async sendMessage(jid: string, text: string): Promise<void> {
+    if (!this.client) {
+      logger.warn('Feishu client not initialized');
+      return;
+    }
+
+    try {
+      const chatId = jid.replace(/^feishu:/, '');
+      const MAX_LENGTH = 4096;
+
+      for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        await this.client.im.v1.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: text.slice(i, i + MAX_LENGTH) }),
+          },
+        } as any);
+      }
+
+      logger.info({ jid, length: text.length }, 'Feishu message sent');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Feishu message');
+    }
   }
 
   isConnected(): boolean {

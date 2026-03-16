@@ -463,7 +463,10 @@ describe('FeishuChannel', () => {
       const channel = new FeishuChannel('id', 'secret', opts);
       await channel.connect();
 
-      const event = createMessageEvent({ messageType: 'sticker', content: '{}' });
+      const event = createMessageEvent({
+        messageType: 'sticker',
+        content: '{}',
+      });
       await triggerEvent('im.message.receive_v1', event);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -477,13 +480,162 @@ describe('FeishuChannel', () => {
       const channel = new FeishuChannel('id', 'secret', opts);
       await channel.connect();
 
-      const event = createMessageEvent({ messageType: 'share_chat', content: '{}' });
+      const event = createMessageEvent({
+        messageType: 'share_chat',
+        content: '{}',
+      });
       await triggerEvent('im.message.receive_v1', event);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'feishu:oc_test123',
         expect.objectContaining({ content: '[Unsupported: share_chat]' }),
       );
+    });
+  });
+
+  describe('sendMessage', () => {
+    it('sends a text message via API', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      await channel.sendMessage('feishu:oc_test123', 'Hello');
+
+      expect(sdkRef.messageCreate).toHaveBeenCalledWith({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: 'oc_test123',
+          msg_type: 'text',
+          content: JSON.stringify({ text: 'Hello' }),
+        },
+      });
+    });
+
+    it('splits long messages into 4096-char chunks', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const longText = 'x'.repeat(5000);
+      await channel.sendMessage('feishu:oc_test123', longText);
+
+      expect(sdkRef.messageCreate).toHaveBeenCalledTimes(2);
+      expect(sdkRef.messageCreate).toHaveBeenNthCalledWith(1, {
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: 'oc_test123',
+          msg_type: 'text',
+          content: JSON.stringify({ text: 'x'.repeat(4096) }),
+        },
+      });
+      expect(sdkRef.messageCreate).toHaveBeenNthCalledWith(2, {
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: 'oc_test123',
+          msg_type: 'text',
+          content: JSON.stringify({ text: 'x'.repeat(904) }),
+        },
+      });
+    });
+
+    it('handles send failure gracefully', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      sdkRef.messageCreate.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(
+        channel.sendMessage('feishu:oc_test123', 'Will fail'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('sender_name resolution', () => {
+    it('resolves name via API on first lookup', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({});
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(sdkRef.userGet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { user_id: 'ou_sender001' },
+          params: { user_id_type: 'open_id' },
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ sender_name: 'Test User' }),
+      );
+    });
+
+    it('uses cache on repeated lookups', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event1 = createMessageEvent({ messageId: 'om_1' });
+      const event2 = createMessageEvent({ messageId: 'om_2' });
+      await triggerEvent('im.message.receive_v1', event1);
+      await triggerEvent('im.message.receive_v1', event2);
+
+      expect(sdkRef.userGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to open_id when API fails', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      sdkRef.userGet.mockRejectedValueOnce(new Error('Permission denied'));
+
+      const event = createMessageEvent({});
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ sender_name: 'ou_sender001' }),
+      );
+    });
+  });
+
+  describe('chat metadata', () => {
+    it('emits metadata for registered group messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({});
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onChatMetadata).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        '2024-01-01T00:00:00.000Z',
+        undefined,
+        'feishu',
+        true,
+      );
+    });
+
+    it('emits metadata for unregistered chats (enables discovery)', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ chatId: 'oc_unknown999' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onChatMetadata).toHaveBeenCalledWith(
+        'feishu:oc_unknown999',
+        '2024-01-01T00:00:00.000Z',
+        undefined,
+        'feishu',
+        true,
+      );
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
   });
 });
