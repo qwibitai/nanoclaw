@@ -6,6 +6,8 @@ import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import os from 'os';
+
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
@@ -198,6 +200,25 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Global user directories — available to all groups
+  const homeDir = os.homedir();
+  const projectsDir = path.join(homeDir, 'Projects');
+  if (fs.existsSync(projectsDir)) {
+    mounts.push({
+      hostPath: projectsDir,
+      containerPath: '/workspace/projects',
+      readonly: false,
+    });
+  }
+  const obsidianDir = path.join(homeDir, 'Obsidian');
+  if (fs.existsSync(obsidianDir)) {
+    mounts.push({
+      hostPath: obsidianDir,
+      containerPath: '/workspace/obsidian',
+      readonly: false,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash setup.sh)",
+      "Bash(npx tsx:*)",
+      "Bash(brew install:*)",
+      "Bash(sudo mkdir:*)",
+      "Bash(docker:*)",
+      "Bash(open:*)",
+      "Bash(git remote:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(npm install:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm run:*)",
+      "Bash(launchctl list:*)",
+      "Bash(find:*)"
+    ]
+  }
+}

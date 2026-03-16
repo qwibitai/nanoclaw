@@ -8,6 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { handleSimpsons } from './simpsons.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -164,6 +165,9 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For run_simpsons
+    project?: string;
+    command?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -445,6 +449,37 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'run_simpsons':
+      if (data.project && data.command && data.chatJid) {
+        // Fire-and-forget: runs async in background, sends results via sendMessage
+        handleSimpsons(
+          {
+            project: data.project,
+            command: data.command,
+            prompt: data.prompt || '',
+          },
+          data.chatJid,
+          deps.sendMessage,
+        ).catch((err) => {
+          logger.error(
+            { err, project: data.project },
+            'Simpsons command failed',
+          );
+          deps
+            .sendMessage(
+              data.chatJid!,
+              `Simpsons command failed: ${err instanceof Error ? err.message : String(err)}`,
+            )
+            .catch(() => {});
+        });
+      } else {
+        logger.warn(
+          { data },
+          'Invalid run_simpsons request - missing project, command, or chatJid',
         );
       }
       break;

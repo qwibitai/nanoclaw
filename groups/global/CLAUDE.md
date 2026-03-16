@@ -38,6 +38,10 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+You also have access to:
+- `/workspace/projects/` — the user's ~/Projects directory (read-write). Browse, read, and edit project files directly.
+- `/workspace/obsidian/` — the user's Obsidian vault (read-write). Search, read, and create notes.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
@@ -46,6 +50,24 @@ When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
+
+## Simpsons (Speckit)
+
+When users mention "simpsons" or ask to run speckit commands on a project, use the `run_simpsons` tool.
+
+Parse from the user's message:
+• *Project name* — directory name under ~/Projects (e.g., "story-kit", "my-app")
+• *Command* — specify, pipeline, implement/ralph, clarify/homer, analyze/lisa
+• *Prompt* — any additional context they provide
+
+If the speckit command is unclear, ask the user to clarify which command they want (specify, pipeline, implement, clarify, analyze).
+
+If the user did not provide an additional prompt, ask if they want to pass any context to the command or leave it blank.
+
+Examples:
+• "have the simpsons specify in story-kit that I want a gallery view" → run_simpsons(project: "story-kit", command: "specify", prompt: "gallery view of entity images")
+• "run the simpsons pipeline on my-app to add a todo list" → run_simpsons(project: "my-app", command: "pipeline", prompt: "add a todo list")
+• "have ralph implement in story-kit" → run_simpsons(project: "story-kit", command: "implement")
 
 ## Message Formatting
 

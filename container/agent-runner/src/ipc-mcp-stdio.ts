@@ -333,6 +333,43 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'run_simpsons',
+  `Run a speckit simpsons command on a project in ~/Projects. This sets up the project with spec-kit, simpsons loops, global CLAUDE.md, constitution, and quality gates, then runs the specified command via Claude Code.
+
+Available commands:
+• specify - Start a new specification
+• pipeline - Run the full speckit pipeline (specify → clarify → analyze → implement)
+• implement / ralph - Run Ralph (implementation phase)
+• clarify / homer - Run Homer (clarification phase)
+• analyze / lisa - Run Lisa (analysis phase)
+
+If the user's command is unclear, ask for clarification before calling this tool.
+If the user did not provide an additional prompt, confirm if they want to pass anything or leave it blank.`,
+  {
+    project: z.string().describe('Project directory name under ~/Projects (e.g., "story-kit", "my-app")'),
+    command: z.string().describe('Speckit command: specify, pipeline, implement, ralph, clarify, homer, analyze, lisa'),
+    prompt: z.string().optional().describe('Additional context or instructions for the speckit command'),
+  },
+  async (args) => {
+    const data = {
+      type: 'run_simpsons',
+      project: args.project,
+      command: args.command,
+      prompt: args.prompt || '',
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Simpsons ${args.command} on ${args.project} has been queued. Results will be sent to the chat when complete.` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
