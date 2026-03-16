@@ -97,6 +97,8 @@ vi.mock('child_process', async () => {
   };
 });
 
+import fs from 'fs';
+import { spawn } from 'child_process';
 import {
   buildVolumeMounts,
   runContainerAgent,
@@ -127,6 +129,101 @@ function emitOutputMarker(
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
+
+describe('global CLAUDE.md mount', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function getSpawnArgs(): string[] {
+    const calls = vi.mocked(spawn).mock.calls;
+    return calls[calls.length - 1][1] as string[];
+  }
+
+  it('mounts global dir read-only for non-main groups when it exists', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      if (String(p).endsWith('/global')) return true;
+      return false;
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: false },
+      () => {},
+    );
+
+    // Let it spawn
+    await vi.advanceTimersByTimeAsync(10);
+
+    const args = getSpawnArgs();
+    const globalMountIdx = args.findIndex(
+      (a) => typeof a === 'string' && a.includes('/global') && a.includes('/workspace/global'),
+    );
+    expect(globalMountIdx).toBeGreaterThan(-1);
+    // Should be read-only (bind mount with ro)
+    const mountArg = args[globalMountIdx];
+    expect(mountArg).toContain(':ro');
+
+    // Clean up
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('mounts global dir read-only for main groups when it exists', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      if (String(p).endsWith('/global')) return true;
+      return false;
+    });
+
+    const resultPromise = runContainerAgent(
+      { ...testGroup, isMain: true },
+      { ...testInput, isMain: true },
+      () => {},
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const args = getSpawnArgs();
+    const globalMountIdx = args.findIndex(
+      (a) => typeof a === 'string' && a.includes('/global') && a.includes('/workspace/global'),
+    );
+    expect(globalMountIdx).toBeGreaterThan(-1);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('skips global mount when directory does not exist', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: false },
+      () => {},
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const args = getSpawnArgs();
+    const hasGlobalMount = args.some(
+      (a) => typeof a === 'string' && a.includes('/workspace/global'),
+    );
+    expect(hasGlobalMount).toBe(false);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
 
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {

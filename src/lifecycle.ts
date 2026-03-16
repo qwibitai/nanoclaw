@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, CREDENTIAL_PROXY_PORT } from './config.js';
+import { ASSISTANT_NAME, CREDENTIAL_PROXY_PORT, GROUPS_DIR } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import { initSecrets } from './env.js';
 import './channels/index.js';
@@ -152,6 +152,10 @@ function ensureContainerSystemRunning(): void {
 export async function initApp(): Promise<void> {
   await initSecrets();
   ensureContainerSystemRunning();
+
+  // Ensure global shared context directory exists (groups/global/CLAUDE.md)
+  fs.mkdirSync(path.join(GROUPS_DIR, 'global'), { recursive: true });
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
