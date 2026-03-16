@@ -314,17 +314,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           'Message routed to case',
         );
       } else if (routeResult.suggestNew) {
-        const caseList = routableCases
-          .map((c) => `  - ${c.name} (${c.status})`)
-          .join('\n');
-        await channel.sendMessage(
-          chatJid,
-          `This doesn't seem to match any active case:\n${caseList}\n\nIs this a new case? Reply with a brief description to create one, or specify which case this belongs to.`,
+        // No matching case — let the agent process without case context.
+        // The agent has the create_case tool and can decide whether to
+        // create a new case or handle it as a one-off.
+        logger.info(
+          { confidence: routeResult.confidence, reason: routeResult.reason },
+          'No case match, routing to agent without case context',
         );
-        lastAgentTimestamp[chatJid] =
-          missedMessages[missedMessages.length - 1].timestamp;
-        saveState();
-        return true;
       }
     } else if (routableCases.length === 1) {
       targetCase = routableCases[0];

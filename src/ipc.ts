@@ -4,7 +4,16 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { getCaseById, updateCase, suggestDevCase } from './cases.js';
+import {
+  createCaseWorkspace,
+  generateCaseId,
+  generateCaseName,
+  getCaseById,
+  insertCase,
+  suggestDevCase,
+  updateCase,
+} from './cases.js';
+import type { Case } from './cases.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -526,6 +535,90 @@ export async function processTaskIpc(
         }
       }
       break;
+
+    case 'case_create': {
+      const d = data as unknown as {
+        description: string;
+        caseType?: string;
+        chatJid?: string;
+        initiator?: string;
+      };
+      if (!d.description) {
+        logger.warn({ sourceGroup }, 'case_create missing description');
+        break;
+      }
+      const caseType = d.caseType === 'dev' ? 'dev' : 'work';
+      const id = generateCaseId();
+      const name = generateCaseName(d.description);
+      const now = new Date().toISOString();
+
+      // Resolve chatJid: use provided value, or find from registered groups
+      const resolvedChatJid =
+        d.chatJid ||
+        Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === sourceGroup,
+        )?.[0] ||
+        '';
+
+      const { workspacePath, worktreePath, branchName } =
+        createCaseWorkspace(name, caseType);
+
+      const newCase: Case = {
+        id,
+        group_folder: sourceGroup,
+        chat_jid: resolvedChatJid,
+        name,
+        description: d.description,
+        type: caseType,
+        status: 'active',
+        blocked_on: null,
+        worktree_path: worktreePath,
+        workspace_path: workspacePath,
+        branch_name: branchName,
+        initiator: d.initiator || 'agent',
+        initiator_channel: null,
+        last_message: null,
+        last_activity_at: now,
+        conclusion: null,
+        created_at: now,
+        done_at: null,
+        reviewed_at: null,
+        pruned_at: null,
+        total_cost_usd: 0,
+        token_source: null,
+        time_spent_ms: 0,
+      };
+
+      insertCase(newCase);
+      logger.info(
+        { caseId: id, name, caseType, sourceGroup },
+        'Case created via IPC',
+      );
+
+      // Write result file so the MCP tool can read it back
+      const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'case_results');
+      fs.mkdirSync(resultDir, { recursive: true });
+      const resultFile = (data as Record<string, unknown>).requestId
+        ? `${(data as Record<string, unknown>).requestId}.json`
+        : `${id}.json`;
+      fs.writeFileSync(
+        path.join(resultDir, resultFile),
+        JSON.stringify({ id, name, workspace_path: workspacePath }),
+      );
+
+      // Notify user
+      if (resolvedChatJid) {
+        deps
+          .sendMessage(
+            resolvedChatJid,
+            `📋 New ${caseType} case created: ${name}\n${d.description.slice(0, 200)}`,
+          )
+          .catch(() => {
+            /* non-critical */
+          });
+      }
+      break;
+    }
 
     case 'case_suggest_dev':
       if (
