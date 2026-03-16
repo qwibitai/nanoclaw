@@ -95,6 +95,52 @@ These policies were learned from past mistakes. Follow them strictly.
 5. **Put durable knowledge in CLAUDE.md and docs/, not just local memory.** `~/.claude/` memory is local to one machine and not synced to git. Any knowledge that future agents need must be in repo files.
 6. **Work agents get read-only tools.** They can USE tools but not modify them. Dev agents modify in worktrees.
 
+## Post-Merge: Deploy & Maintenance Policy
+
+After merging to main, classify the change and follow the appropriate procedure. **Leads (Aviad/Liraz) MUST be notified** via Telegram at every stage.
+
+### Change classification
+
+| Change type | Action needed | Downtime |
+|------------|--------------|----------|
+| CLAUDE.md, docs/ | None — read on next conversation | Zero |
+| Vertical repo (tools, workflows) | None — mounted live into containers | Zero |
+| `src/` code | `npm run build` + service restart | ~10s |
+| `container/Dockerfile` or `agent-runner/` | `./container/build.sh` then restart | Build: 1-5min (zero), restart: ~10s |
+| `package.json` deps | `npm install` + build + restart | ~10s |
+
+### Procedure for restart-required changes
+
+```
+1. CLASSIFY — what action is needed?
+2. NOTIFY leads BEFORE starting:
+   "🔧 Maintenance: [what changed]. Building now, will restart when ready (~Xmin)."
+3. BUILD while still running (zero downtime during build):
+   - npm install (if deps changed)
+   - npm run build (if src/ changed)
+   - ./container/build.sh (if Dockerfile changed)
+4. If build FAILS → DO NOT restart. Report:
+   "❌ Build failed: [error]. Still running previous version."
+   Stop and investigate.
+5. If build SUCCEEDS → report:
+   "🔧 Build done. Restarting now (~10s downtime)."
+   Then restart the service.
+6. Verify health — can the service respond to messages?
+7. Report completion:
+   "✅ Maintenance complete. New capabilities: [list]."
+   OR "❌ Restart failed: [error]. Investigating."
+```
+
+### For zero-downtime changes
+
+Notify only: "✅ Updated [what]. Active on next conversation, no restart needed."
+
+### Critical rules
+
+- **Build BEFORE restart** — never restart with an untested build
+- **Never leave leads uninformed** — they must know if the system is down or degraded
+- **If anything fails, keep running on the old version** — availability > new features
+
 ## Development
 
 Run commands directly—don't tell the user to run them.
