@@ -94,7 +94,8 @@ These policies were learned from past mistakes. Follow them strictly.
 4. **Ask "harness or vertical?"** before writing any code. Domain-specific code (workflows, tools, business data) belongs in the vertical repo. Infrastructure code (channels, routing, containers) belongs here.
 5. **Put durable knowledge in CLAUDE.md and docs/, not just local memory.** `~/.claude/` memory is local to one machine and not synced to git. Any knowledge that future agents need must be in repo files.
 6. **Work agents get read-only tools.** They can USE tools but not modify them. Dev agents modify in worktrees.
-7. **Skill branches must stay clean.** A `skill/*` branch is for upstream contribution — it contains ONLY that skill's changes on top of upstream/main. NEVER merge our fork's main into a skill branch. To update a skill branch, cherry-pick only the relevant skill-related commits. Fixes go to main first, then cherry-pick to the skill branch.
+7. **Never claim something is fixed without testing.** Write the fix, TEST it (run the actual tool, verify the actual behavior), THEN commit. "It should work" is not a test. If you can't test locally, say so explicitly — don't pretend the fix is verified. For browser automation: run the script and verify login succeeds before merging.
+8. **Skill branches must stay clean.** A `skill/*` branch is for upstream contribution — it contains ONLY that skill's changes on top of upstream/main. NEVER merge our fork's main into a skill branch. To update a skill branch, cherry-pick only the relevant skill-related commits. Fixes go to main first, then cherry-pick to the skill branch.
 
 ## Post-Merge: Deploy & Maintenance Policy
 
