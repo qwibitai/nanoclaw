@@ -594,6 +594,35 @@ async function main(): Promise<void> {
     );
   }
 
+  // /draft command handler — generate thesis drafts with Obsidian enrichment
+  async function handleDraftCommand(
+    chatJid: string,
+    msg: NewMessage,
+    content: string,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+
+    // Build Obsidian context so the agent can find related notes
+    const ipcDir = resolveGroupIpcPath(group.folder);
+    await buildObsidianContext(content, ipcDir).catch((err) =>
+      logger.warn({ err }, 'Failed to build obsidian context for draft (non-fatal)'),
+    );
+
+    // Store the message with trigger prefix + draft markers so the agent
+    // is triggered and knows to run the draft workflow
+    const enrichedContent = `@${ASSISTANT_NAME} [DRAFT_REQUEST]\n${content}\n[/DRAFT_REQUEST]`;
+    storeMessage({ ...msg, content: enrichedContent });
+
+    // Force-enqueue so the message loop picks it up immediately
+    queue.enqueueMessageCheck(chatJid);
+
+    logger.info(
+      { group: group.name, chatJid },
+      '/draft: thesis draft request queued',
+    );
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -626,6 +655,19 @@ async function main(): Promise<void> {
             '(Process the most recent voice transcription or conversation as a note)',
         ).catch((err) =>
           logger.error({ err, chatJid }, '/obsidian command error'),
+        );
+        return;
+      }
+
+      // /draft — generate thesis drafts for blog and social media
+      if (trimmed === '/draft' || trimmed.startsWith('/draft ')) {
+        const draftContent = trimmed.replace(/^\/draft\s*/, '').trim();
+        handleDraftCommand(
+          chatJid,
+          msg,
+          draftContent || '(No topic specified — ask the user what they want to draft)',
+        ).catch((err) =>
+          logger.error({ err, chatJid }, '/draft command error'),
         );
         return;
       }

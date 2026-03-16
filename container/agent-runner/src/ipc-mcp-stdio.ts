@@ -370,6 +370,113 @@ If the user did not provide an additional prompt, confirm if they want to pass a
   },
 );
 
+// --- Draft Skill Tools ---
+
+const DRAFT_RESULTS_DIR = path.join(IPC_DIR, 'draft_results');
+
+function waitForDraftResult(requestId: string, maxWait = 120000): Promise<{ success: boolean; message: string }> {
+  const resultFile = path.join(DRAFT_RESULTS_DIR, `${requestId}.json`);
+  const pollInterval = 1000;
+  let elapsed = 0;
+
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (fs.existsSync(resultFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          fs.unlinkSync(resultFile);
+          resolve(result);
+        } catch (err) {
+          resolve({ success: false, message: `Failed to read result: ${err}` });
+        }
+        return;
+      }
+      elapsed += pollInterval;
+      if (elapsed >= maxWait) {
+        resolve({ success: false, message: 'Request timed out' });
+        return;
+      }
+      setTimeout(poll, pollInterval);
+    };
+    poll();
+  });
+}
+
+server.tool(
+  'draft_git_push',
+  `Commit and push a thesis draft directory in the huynh.io blog repo to GitHub. Main group only.
+
+After creating thesis files in /workspace/projects/pj/huynh.io/{directory}/, call this tool to commit and push them.`,
+  {
+    directory: z.string().describe('The thesis directory name (e.g., "20260316-spec-driven-dev")'),
+    commit_message: z.string().optional().describe('Custom commit message. Defaults to "draft: {directory}"'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can push drafts.' }],
+        isError: true,
+      };
+    }
+
+    const requestId = `draft-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'draft_git_push',
+      requestId,
+      directory: args.directory,
+      commitMessage: args.commit_message || `draft: ${args.directory}`,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await waitForDraftResult(requestId);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+      isError: !result.success,
+    };
+  },
+);
+
+server.tool(
+  'draft_x_save',
+  `Save a tweet as a draft on X (Twitter). Does NOT publish — only saves to X Drafts. Main group only.
+
+Use this after generating the tweet text in the thesis workflow.`,
+  {
+    content: z.string().max(280).describe('The tweet content to save as draft (max 280 characters)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can save X drafts.' }],
+        isError: true,
+      };
+    }
+
+    if (args.content.length > 280) {
+      return {
+        content: [{ type: 'text' as const, text: `Tweet exceeds 280 character limit (current: ${args.content.length})` }],
+        isError: true,
+      };
+    }
+
+    const requestId = `draft-x-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'draft_x_save',
+      requestId,
+      content: args.content,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await waitForDraftResult(requestId);
+    return {
+      content: [{ type: 'text' as const, text: result.message }],
+      isError: !result.success,
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
