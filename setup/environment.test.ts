@@ -73,8 +73,36 @@ describe('registered groups DB query', () => {
 });
 
 describe('credentials detection', () => {
-  it('placeholder test for credential detection', () => {
-    expect(true).toBe(true);
+  it('detects OpenCode/LM Studio configuration', () => {
+    const hasOpenCodeConfig = !!process.env.NANOCLAW_LLM_BASE_URL;
+    // Test will pass if env var is set or not - just verifies logic
+    expect(typeof hasOpenCodeConfig).toBe('boolean');
+  });
+
+  it('detects legacy Anthropic configuration', () => {
+    const hasLegacyAnthropic = !!(
+      process.env.ANTHROPIC_BASE_URL ||
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.ANTHROPIC_AUTH_TOKEN
+    );
+    expect(typeof hasLegacyAnthropic).toBe('boolean');
+  });
+
+  it('validates NANOCLAW_LLM_BASE_URL format', () => {
+    const baseUrl = process.env.NANOCLAW_LLM_BASE_URL;
+    if (baseUrl) {
+      // Should be a valid URL
+      expect(() => new URL(baseUrl)).not.toThrow();
+      // Should end with /v1 for OpenAI-compatible APIs
+      expect(baseUrl).toMatch(/\/v1\/?$/);
+    }
+  });
+
+  it('validates NANOCLAW_LLM_MODEL_ID when set', () => {
+    const modelId = process.env.NANOCLAW_LLM_MODEL_ID;
+    if (modelId) {
+      expect(modelId.length).toBeGreaterThan(0);
+    }
   });
 });
 

@@ -1,0 +1,18 @@
+{
+  "name": "simple-user-message",
+  "description": "Single user message expecting one assistant response",
+  "sequence": [
+    {
+      "id": "msg-001",
+      "role": "user",
+      "content": [{ "type": "text", "text": "Hello, how are you?" }],
+      "timestamp": "2025-03-16T10:00:00.000Z",
+      "sender_name": "TestUser"
+    }
+  ],
+  "expected": {
+    "outputCount": 1,
+    "sessionContinuity": true,
+    "allOutputsValid": true
+  }
+}

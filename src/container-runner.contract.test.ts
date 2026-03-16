@@ -102,6 +102,7 @@ const testInput = {
   groupFolder: 'test-group',
   chatJid: 'test@g.us',
   isMain: false,
+  traceId: 'test-trace-123',
 };
 
 /**

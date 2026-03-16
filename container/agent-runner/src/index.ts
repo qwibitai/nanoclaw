@@ -4,14 +4,28 @@ import path from 'path';
 import { createOpencodeClient } from '@opencode-ai/sdk';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'attachment'; filename: string; mimeType: string; size: number };
+
+interface StructuredMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: ContentBlock[];
+  timestamp: string;
+  sender_name?: string;
+}
+
 interface ContainerInput {
   prompt: string;
+  messages?: StructuredMessage[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  traceId: string;
 }
 
 interface ContainerOutput {
@@ -23,6 +37,11 @@ interface ContainerOutput {
 
 interface IpcMessage {
   type: 'message';
+  text: string;
+}
+
+interface OpenCodePart {
+  type: 'text';
   text: string;
 }
 
@@ -39,8 +58,10 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_END_MARKER);
 }
 
+let currentTraceId: string = 'unknown';
+
 function log(message: string): void {
-  console.error(`[agent-runner] ${message}`);
+  console.error(`[agent-runner] [${currentTraceId}] ${message}`);
 }
 
 async function readStdin(): Promise<string> {
@@ -131,6 +152,27 @@ function extractResponseText(parts: unknown[]): string {
   return textParts.join('');
 }
 
+/**
+ * Convert structured messages to OpenCode parts format.
+ * Falls back to legacy prompt if messages not provided.
+ */
+function messagesToOpenCodeParts(
+  messages: StructuredMessage[] | undefined,
+  legacyPrompt: string,
+): Array<{ role: string; parts: OpenCodePart[] }> {
+  // Fallback to legacy prompt if messages not provided
+  if (!messages || messages.length === 0) {
+    return [{ role: 'user', parts: [{ type: 'text', text: legacyPrompt }] }];
+  }
+
+  return messages.map((m) => ({
+    role: m.role,
+    parts: m.content
+      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+      .map((c) => ({ type: 'text', text: c.text })),
+  }));
+}
+
 async function waitForAssistantResponse(
   client: OpencodeClient,
   sessionId: string,
@@ -188,12 +230,96 @@ async function waitForAssistantResponse(
   return { text: '', success: false };
 }
 
+interface LmStudioHealthResult {
+  ok: boolean;
+  error?: string;
+  modelsAvailable?: number;
+}
+
+async function checkLmStudioHealth(
+  url: string,
+  maxRetries: number = 3,
+  retryDelayMs: number = 2000,
+): Promise<LmStudioHealthResult> {
+  let lastError: string = '';
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(`${url}/models`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}: ${response.statusText}`;
+        log(`LM Studio health check attempt ${attempt} failed: ${lastError}`);
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        }
+        continue;
+      }
+
+      const data = (await response.json()) as { data?: Array<{ id: string }> };
+      const modelsAvailable = data.data?.length ?? 0;
+
+      if (modelsAvailable === 0) {
+        lastError = 'No models available in LM Studio';
+        log(`LM Studio health check attempt ${attempt}: ${lastError}`);
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        }
+        continue;
+      }
+
+      log(`LM Studio is healthy with ${modelsAvailable} models available`);
+      return { ok: true, modelsAvailable };
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        lastError = 'Connection timeout (5s)';
+      } else {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+      log(`LM Studio health check attempt ${attempt} failed: ${lastError}`);
+
+      if (attempt < maxRetries) {
+        log(`Retrying in ${retryDelayMs}ms...`);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    error: `LM Studio is not responding after ${maxRetries} attempts. Last error: ${lastError}`,
+  };
+}
+
 async function createOpencodeServer(
   directory: string,
+  containerInput: ContainerInput,
 ): Promise<{ url: string; close(): void }> {
   const hostname = '127.0.0.1';
   const port = 4096;
   const timeout = 10000;
+
+  // Build MCP server configuration for NanoClaw IPC
+  const mcpServerConfig = {
+    nanoclaw: {
+      type: 'stdio' as const,
+      command: 'node',
+      args: ['/opt/nanoclaw/ipc-mcp-stdio.js'],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
 
   const config = {
     provider: {
@@ -203,6 +329,7 @@ async function createOpencodeServer(
       },
     },
     model: `openai-compatible/${process.env.NANOCLAW_LLM_MODEL_ID || 'default'}`,
+    mcp: mcpServerConfig,
   };
 
   const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
@@ -261,6 +388,7 @@ async function createOpencodeServer(
 async function runQuery(
   client: OpencodeClient,
   prompt: string,
+  messages: StructuredMessage[] | undefined,
   sessionId: string | undefined,
   containerInput: ContainerInput,
 ): Promise<{ newSessionId: string; closedDuringQuery: boolean }> {
@@ -302,12 +430,19 @@ async function runQuery(
 
   try {
     const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
+    const opencodeMessages = messagesToOpenCodeParts(messages, prompt);
 
-    log(`Sending prompt to session ${currentSessionId}...`);
+    log(
+      `Sending ${opencodeMessages.length} messages to session ${currentSessionId}...`,
+    );
+
+    // For now, send the last message as the prompt
+    // TODO: When OpenCode SDK supports conversation history, send all messages
+    const lastMessage = opencodeMessages[opencodeMessages.length - 1];
     const promptResponse = await client.session.prompt({
       path: { id: currentSessionId },
       body: {
-        parts: [{ type: 'text', text: prompt }],
+        parts: lastMessage.parts,
         model: { providerID: 'openai-compatible', modelID: modelId },
       },
     });
@@ -348,6 +483,7 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData) as ContainerInput;
+    currentTraceId = containerInput.traceId || 'unknown';
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
@@ -363,19 +499,54 @@ async function main(): Promise<void> {
 
   try {
     log('Starting OpenCode server...');
-    server = await createOpencodeServer('/workspace/group');
+    server = await createOpencodeServer('/workspace/group', containerInput);
     client = createOpencodeClient({ baseUrl: server.url });
 
     const lmStudioUrl = 'http://host.docker.internal:1234/v1';
     const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
     log(`Using LM Studio at ${lmStudioUrl}, model: ${modelId}`);
 
+    // Check LM Studio health before proceeding
+    log('Checking LM Studio connectivity...');
+    const health = await checkLmStudioHealth(lmStudioUrl, 3, 2000);
+    if (!health.ok) {
+      const userError =
+        '❌ LM Studio is currently unavailable.\n\n' +
+        'Please ensure LM Studio is running and a model is loaded:\n' +
+        '1. Open LM Studio application\n' +
+        '2. Load a model in the Developer tab\n' +
+        '3. Start the local server (default port 1234)\n\n' +
+        `Technical details: ${health.error}`;
+
+      log(`LM Studio health check failed: ${health.error}`);
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: userError,
+      });
+      process.exit(1);
+    }
+
+    log(`LM Studio is ready with ${health.modelsAvailable} models`);
+
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     try {
       fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
     } catch {}
 
+    // Prepare prompt from messages or legacy prompt
     let prompt = containerInput.prompt;
+    if (containerInput.messages && containerInput.messages.length > 0) {
+      // Use the last message's content as the prompt for backward compatibility
+      const lastMessage =
+        containerInput.messages[containerInput.messages.length - 1];
+      const textContent = lastMessage.content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map((c) => c.text)
+        .join('\n');
+      prompt = textContent || containerInput.prompt;
+    }
+
     if (containerInput.isScheduledTask) {
       prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
     }
@@ -399,6 +570,7 @@ async function main(): Promise<void> {
       const queryResult = await runQuery(
         client,
         prompt,
+        containerInput.messages,
         sessionId,
         containerInput,
       );
@@ -419,6 +591,8 @@ async function main(): Promise<void> {
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
+      // Clear messages after first use (subsequent turns use IPC)
+      containerInput.messages = undefined;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

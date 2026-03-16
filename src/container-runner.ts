@@ -24,20 +24,25 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, StructuredMessage } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 export interface ContainerInput {
+  /** @deprecated Kept for backward compatibility. Use `messages` instead. */
   prompt: string;
+  /** Structured message schema for OpenCode runner. Preferred over `prompt`. */
+  messages?: StructuredMessage[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  /** Unique trace ID for this invocation, used for distributed tracing */
+  traceId: string;
 }
 
 export interface ContainerOutput {
@@ -244,6 +249,7 @@ export async function runContainerAgent(
   logger.debug(
     {
       group: group.name,
+      traceId: input.traceId,
       containerName,
       mounts: mounts.map(
         (m) =>
@@ -257,6 +263,7 @@ export async function runContainerAgent(
   logger.info(
     {
       group: group.name,
+      traceId: input.traceId,
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
@@ -331,7 +338,7 @@ export async function runContainerAgent(
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
-              { group: group.name, error: err },
+              { group: group.name, traceId: input.traceId, error: err },
               'Failed to parse streamed output chunk',
             );
           }
@@ -371,13 +378,13 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, traceId: input.traceId, containerName },
         'Container timeout, stopping gracefully',
       );
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn(
-            { group: group.name, containerName, err },
+            { group: group.name, traceId: input.traceId, containerName, err },
             'Graceful stop failed, force killing',
           );
           container.kill('SIGKILL');
@@ -405,6 +412,7 @@ export async function runContainerAgent(
           [
             `=== Container Run Log (TIMEOUT) ===`,
             `Timestamp: ${new Date().toISOString()}`,
+            `TraceId: ${input.traceId}`,
             `Group: ${group.name}`,
             `Container: ${containerName}`,
             `Duration: ${duration}ms`,
@@ -418,7 +426,13 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            {
+              group: group.name,
+              traceId: input.traceId,
+              containerName,
+              duration,
+              code,
+            },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -432,7 +446,13 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          {
+            group: group.name,
+            traceId: input.traceId,
+            containerName,
+            duration,
+            code,
+          },
           'Container timed out with no output',
         );
 
@@ -452,6 +472,7 @@ export async function runContainerAgent(
       const logLines = [
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
+        `TraceId: ${input.traceId}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
@@ -506,6 +527,7 @@ export async function runContainerAgent(
         logger.error(
           {
             group: group.name,
+            traceId: input.traceId,
             code,
             duration,
             stderr,
@@ -527,7 +549,12 @@ export async function runContainerAgent(
       if (onOutput) {
         outputChain.then(() => {
           logger.info(
-            { group: group.name, duration, newSessionId },
+            {
+              group: group.name,
+              traceId: input.traceId,
+              duration,
+              newSessionId,
+            },
             'Container completed (streaming mode)',
           );
           resolve({
@@ -561,6 +588,7 @@ export async function runContainerAgent(
         logger.info(
           {
             group: group.name,
+            traceId: input.traceId,
             duration,
             status: output.status,
             hasResult: !!output.result,
@@ -573,6 +601,7 @@ export async function runContainerAgent(
         logger.error(
           {
             group: group.name,
+            traceId: input.traceId,
             stdout,
             stderr,
             error: err,
@@ -591,7 +620,12 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(
-        { group: group.name, containerName, error: err },
+        {
+          group: group.name,
+          traceId: input.traceId,
+          containerName,
+          error: err,
+        },
         'Container spawn error',
       );
       resolve({

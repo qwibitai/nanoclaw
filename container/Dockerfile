@@ -48,6 +48,11 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Build MCP server and install to known location
+RUN mkdir -p /opt/nanoclaw && \
+    npx tsc src/ipc-mcp-stdio.ts --outDir /opt/nanoclaw --module NodeNext --moduleResolution NodeNext --esModuleInterop --target ES2022 && \
+    ln -s /app/node_modules /opt/nanoclaw/node_modules
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 

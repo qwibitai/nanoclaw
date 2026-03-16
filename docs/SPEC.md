@@ -1,6 +1,6 @@
 # NanoClaw Specification
 
-A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
+A personal AI assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution. Powered by OpenCode with any OpenAI-compatible LLM.
 
 ---
 
@@ -73,20 +73,21 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 
 ### Technology Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
-| Message Storage | SQLite (better-sqlite3) | Store messages for polling |
-| Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
-| Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
-| Runtime | Node.js 20+ | Host process for routing and scheduling |
+| Component          | Technology                                    | Purpose                                   |
+| ------------------ | --------------------------------------------- | ----------------------------------------- |
+| Channel System     | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup         |
+| Message Storage    | SQLite (better-sqlite3)                       | Store messages for polling                |
+| Container Runtime  | Containers (Linux VMs)                        | Isolated environments for agent execution |
+| Agent              | OpenCode SDK                                  | Run agents with tools and MCP servers     |
+| LLM Backend        | Any OpenAI-compatible API (LM Studio, etc.)   | Language model inference                  |
+| Browser Automation | agent-browser + Chromium                      | Web interaction and screenshots           |
+| Runtime            | Node.js 20+                                   | Host process for routing and scheduling   |
 
 ---
 
 ## Architecture: Channel System
 
-The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a [Claude Code skill](https://code.claude.com/docs/en/skills) that adds the channel code to your fork. Channels self-register at startup; installed channels with missing credentials emit a WARN log and are skipped.
+The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a skill that adds the channel code to your fork. Channels self-register at startup; installed channels with missing credentials emit a WARN log and are skipped.
 
 ### System Diagram
 
@@ -183,7 +184,9 @@ Channels self-register using a barrel-import pattern:
    // src/channels/whatsapp.ts
    import { registerChannel, ChannelOpts } from './registry.js';
 
-   export class WhatsAppChannel implements Channel { /* ... */ }
+   export class WhatsAppChannel implements Channel {
+     /* ... */
+   }
 
    registerChannel('whatsapp', (opts: ChannelOpts) => {
      // Return null if credentials are missing
@@ -215,13 +218,13 @@ Channels self-register using a barrel-import pattern:
 
 ### Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/channels/registry.ts` | Channel factory registry |
-| `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
-| `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
-| `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
-| `src/router.ts` | Finds the owning channel for a JID, formats messages |
+| File                       | Purpose                                                 |
+| -------------------------- | ------------------------------------------------------- |
+| `src/channels/registry.ts` | Channel factory registry                                |
+| `src/channels/index.ts`    | Barrel imports that trigger channel self-registration   |
+| `src/types.ts`             | `Channel` interface, `ChannelOpts`, message types       |
+| `src/index.ts`             | Orchestrator — instantiates channels, runs message loop |
+| `src/router.ts`            | Finds the owning channel for a JID, formats messages    |
 
 ### Adding a New Channel
 
@@ -342,11 +345,18 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 // Container configuration
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
+export const CONTAINER_IMAGE =
+  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const CONTAINER_TIMEOUT = parseInt(
+  process.env.CONTAINER_TIMEOUT || '1800000',
+  10,
+); // 30min default
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
-export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
+export const MAX_CONCURRENT_CONTAINERS = Math.max(
+  1,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+);
 
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 ```
@@ -358,16 +368,16 @@ export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 Groups can have additional directories mounted via `containerConfig` in the SQLite `registered_groups` table (stored as JSON in the `container_config` column). Example registration:
 
 ```typescript
-setRegisteredGroup("1234567890@g.us", {
-  name: "Dev Team",
-  folder: "whatsapp_dev-team",
-  trigger: "@Andy",
+setRegisteredGroup('1234567890@g.us', {
+  name: 'Dev Team',
+  folder: 'whatsapp_dev-team',
+  trigger: '@Andy',
   added_at: new Date().toISOString(),
   containerConfig: {
     additionalMounts: [
       {
-        hostPath: "~/projects/webapp",
-        containerPath: "webapp",
+        hostPath: '~/projects/webapp',
+        containerPath: 'webapp',
         readonly: false,
       },
     ],
@@ -382,22 +392,35 @@ Additional mounts appear at `/workspace/extra/{containerPath}` inside the contai
 
 **Mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix may not work on all runtimes).
 
-### Claude Authentication
+### LLM Configuration
 
-Configure authentication in a `.env` file in the project root. Two options:
+Configure your LLM endpoint in a `.env` file in the project root. NanoClaw uses OpenCode, which supports any OpenAI-compatible API.
 
-**Option 1: Claude Subscription (OAuth token)**
+**Option 1: Local LLM (Recommended for Privacy)**
+
 ```bash
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-```
-The token can be extracted from `~/.claude/.credentials.json` if you're logged in to Claude Code.
-
-**Option 2: Pay-per-use API Key**
-```bash
-ANTHROPIC_API_KEY=sk-ant-api03-...
+NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
+NANOCLAW_LLM_MODEL_ID=your-model-name
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
+For LM Studio, ensure the model is loaded and the server is running.
+
+**Option 2: Cloud/OpenAI-compatible Endpoint**
+
+```bash
+NANOCLAW_LLM_BASE_URL=https://api.openai.com/v1
+NANOCLAW_LLM_API_KEY=sk-...
+NANOCLAW_LLM_MODEL_ID=gpt-4
+```
+
+**Legacy: Anthropic API (Claude)**
+
+```bash
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+ANTHROPIC_AUTH_TOKEN=sk-ant-...
+```
+
+Only the authentication variables are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
 
 ### Changing the Assistant Name
 
@@ -408,12 +431,14 @@ ASSISTANT_NAME=Bot npm start
 ```
 
 Or edit the default in `src/config.ts`. This changes:
+
 - The trigger pattern (messages must start with `@YourName`)
 - The response prefix (`YourName:` added automatically)
 
 ### Placeholder Values in launchd
 
 Files with `{{PLACEHOLDER}}` values need to be configured:
+
 - `{{PROJECT_ROOT}}` - Absolute path to your nanoclaw installation
 - `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
 - `{{HOME}}` - User's home directory
@@ -426,17 +451,17 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 ### Memory Hierarchy
 
-| Level | Location | Read By | Written By | Purpose |
-|-------|----------|---------|------------|---------|
-| **Global** | `groups/CLAUDE.md` | All groups | Main only | Preferences, facts, context shared across all conversations |
-| **Group** | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory |
-| **Files** | `groups/{name}/*.md` | That group | That group | Notes, research, documents created during conversation |
+| Level      | Location                  | Read By    | Written By | Purpose                                                     |
+| ---------- | ------------------------- | ---------- | ---------- | ----------------------------------------------------------- |
+| **Global** | `groups/CLAUDE.md`        | All groups | Main only  | Preferences, facts, context shared across all conversations |
+| **Group**  | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory                 |
+| **Files**  | `groups/{name}/*.md`      | That group | That group | Notes, research, documents created during conversation      |
 
 ### How Memory Works
 
 1. **Agent Context Loading**
    - Agent runs with `cwd` set to `groups/{group-name}/`
-   - Claude Agent SDK with `settingSources: ['project']` automatically loads:
+   - OpenCode SDK loads CLAUDE.md files from the project hierarchy:
      - `../CLAUDE.md` (parent directory = global memory)
      - `./CLAUDE.md` (current directory = group memory)
 
@@ -460,7 +485,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 ### How Sessions Work
 
 1. Each group has a session ID stored in SQLite (`sessions` table, keyed by `group_folder`)
-2. Session ID is passed to Claude Agent SDK's `resume` option
+2. Session ID is passed to OpenCode SDK for conversation continuity
 3. Claude continues the conversation with full context
 4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
 
@@ -494,11 +519,11 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    └── Build prompt with full conversation context
    │
    ▼
-7. Router invokes Claude Agent SDK:
-   ├── cwd: groups/{group-name}/
-   ├── prompt: conversation history + current message
-   ├── resume: session_id (for continuity)
-   └── mcpServers: nanoclaw (scheduler)
+7. Router invokes OpenCode agent:
+    ├── cwd: groups/{group-name}/
+    ├── prompt: conversation history + current message
+    ├── session_id: for continuity
+    └── mcpServers: nanoclaw (scheduler)
    │
    ▼
 8. Claude processes message:
@@ -515,6 +540,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 ### Trigger Word Matching
 
 Messages must start with the trigger pattern (default: `@Andy`):
+
 - `@Andy what's the weather?` → ✅ Triggers Claude
 - `@andy help me` → ✅ Triggers (case insensitive)
 - `Hey @Andy` → ❌ Ignored (trigger not at start)
@@ -538,18 +564,18 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 ### Commands Available in Any Group
 
-| Command | Example | Effect |
-|---------|---------|--------|
+| Command                | Example                     | Effect         |
+| ---------------------- | --------------------------- | -------------- |
 | `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
 
 ### Commands Available in Main Channel Only
 
-| Command | Example | Effect |
-|---------|---------|--------|
-| `@Assistant add group "Name"` | `@Andy add group "Family Chat"` | Register a new group |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"` | Unregister a group |
-| `@Assistant list groups` | `@Andy list groups` | Show registered groups |
-| `@Assistant remember [fact]` | `@Andy remember I prefer dark mode` | Add to global memory |
+| Command                          | Example                             | Effect                 |
+| -------------------------------- | ----------------------------------- | ---------------------- |
+| `@Assistant add group "Name"`    | `@Andy add group "Family Chat"`     | Register a new group   |
+| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"`    | Unregister a group     |
+| `@Assistant list groups`         | `@Andy list groups`                 | Show registered groups |
+| `@Assistant remember [fact]`     | `@Andy remember I prefer dark mode` | Add to global memory   |
 
 ---
 
@@ -566,11 +592,11 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 
 ### Schedule Types
 
-| Type | Value Format | Example |
-|------|--------------|---------|
-| `cron` | Cron expression | `0 9 * * 1` (Mondays at 9am) |
-| `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | ISO timestamp | `2024-12-25T09:00:00Z` |
+| Type       | Value Format    | Example                      |
+| ---------- | --------------- | ---------------------------- |
+| `cron`     | Cron expression | `0 9 * * 1` (Mondays at 9am) |
+| `interval` | Milliseconds    | `3600000` (every hour)       |
+| `once`     | ISO timestamp   | `2024-12-25T09:00:00Z`       |
 
 ### Creating a Task
 
@@ -603,12 +629,14 @@ Claude: [calls mcp__nanoclaw__schedule_task]
 ### Managing Tasks
 
 From any group:
+
 - `@Andy list my scheduled tasks` - View tasks for this group
 - `@Andy pause task [id]` - Pause a task
 - `@Andy resume task [id]` - Resume a paused task
 - `@Andy cancel task [id]` - Delete a task
 
 From main channel:
+
 - `@Andy list all tasks` - View tasks from all groups
 - `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
 
@@ -641,6 +669,7 @@ NanoClaw runs as a single macOS launchd service.
 ### Startup Sequence
 
 When NanoClaw starts, it:
+
 1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
 2. Initializes the SQLite database (migrates from JSON files if they exist)
 3. Loads state from SQLite (registered groups, sessions, router state)
@@ -655,6 +684,7 @@ When NanoClaw starts, it:
 ### Service: com.nanoclaw
 
 **launchd/com.nanoclaw.plist:**
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "...">
@@ -716,6 +746,7 @@ tail -f logs/nanoclaw.log
 ### Container Isolation
 
 All agents run inside containers (lightweight Linux VMs), providing:
+
 - **Filesystem isolation**: Agents can only access mounted directories
 - **Safe Bash access**: Commands run inside the container, not on your Mac
 - **Network isolation**: Can be configured per-container if needed
@@ -727,14 +758,16 @@ All agents run inside containers (lightweight Linux VMs), providing:
 WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
 
 **Mitigations:**
+
 - Container isolation limits blast radius
 - Only registered groups are processed
 - Trigger word required (reduces accidental processing)
 - Agents can only access their group's mounted directories
 - Main can configure additional directories per group
-- Claude's built-in safety training
+- LLM safety training (varies by model)
 
 **Recommendations:**
+
 - Only register trusted groups
 - Review additional directory mounts carefully
 - Review scheduled tasks periodically
@@ -742,14 +775,15 @@ WhatsApp messages could contain malicious instructions attempting to manipulate 
 
 ### Credential Storage
 
-| Credential | Storage Location | Notes |
-|------------|------------------|-------|
-| Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/ | Auto-created, persists ~20 days |
+| Credential       | Storage Location               | Notes                                               |
+| ---------------- | ------------------------------ | --------------------------------------------------- |
+| LLM API Auth     | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
+| WhatsApp Session | store/auth/                    | Auto-created, persists ~20 days                     |
 
 ### File Permissions
 
 The groups/ folder contains personal memory and should be protected:
+
 ```bash
 chmod 700 groups/
 ```
@@ -760,15 +794,15 @@ chmod 700 groups/
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| No response to messages | Service not running | Check `launchctl list | grep nanoclaw` |
-| "Claude Code process exited with code 1" | Container runtime failed to start | Check logs; NanoClaw auto-starts container runtime but may fail |
-| "Claude Code process exited with code 1" | Session mount path wrong | Ensure mount is to `/home/node/.claude/` not `/root/.claude/` |
-| Session not continuing | Session ID not saved | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
-| Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
-| "QR code expired" | WhatsApp session expired | Delete store/auth/ and restart |
-| "No groups registered" | Haven't added groups | Use `@Andy add group "Name"` in main |
+| Issue                              | Cause                             | Solution                                                                                 |
+| ---------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------- | -------------- |
+| No response to messages            | Service not running               | Check `launchctl list                                                                    | grep nanoclaw` |
+| "Agent process exited with code 1" | Container runtime failed to start | Check logs; NanoClaw auto-starts container runtime but may fail                          |
+| "Agent process exited with code 1" | Session mount path wrong          | Ensure mount is to `/home/node/.claude/` not `/root/.claude/`                            |
+| Session not continuing             | Session ID not saved              | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"`                       |
+| Session not continuing             | Mount path mismatch               | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
+| "QR code expired"                  | WhatsApp session expired          | Delete store/auth/ and restart                                                           |
+| "No groups registered"             | Haven't added groups              | Use `@Andy add group "Name"` in main                                                     |
 
 ### Log Location
 
@@ -778,6 +812,7 @@ chmod 700 groups/
 ### Debug Mode
 
 Run manually for verbose output:
+
 ```bash
 npm run dev
 # or

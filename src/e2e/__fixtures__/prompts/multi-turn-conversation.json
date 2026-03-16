@@ -1,0 +1,33 @@
+{
+  "name": "multi-turn-conversation",
+  "description": "Multiple user messages with expected responses for each",
+  "sequence": [
+    {
+      "id": "msg-001",
+      "role": "user",
+      "content": [{ "type": "text", "text": "What is the capital of France?" }],
+      "timestamp": "2025-03-16T10:00:00.000Z",
+      "sender_name": "TestUser"
+    },
+    {
+      "id": "msg-002",
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "The capital of France is Paris." }
+      ],
+      "timestamp": "2025-03-16T10:00:05.000Z"
+    },
+    {
+      "id": "msg-003",
+      "role": "user",
+      "content": [{ "type": "text", "text": "What about Spain?" }],
+      "timestamp": "2025-03-16T10:00:10.000Z",
+      "sender_name": "TestUser"
+    }
+  ],
+  "expected": {
+    "outputCount": 2,
+    "sessionContinuity": true,
+    "allOutputsValid": true
+  }
+}

@@ -53,6 +53,33 @@ export interface NewMessage {
   is_bot_message?: boolean;
 }
 
+// --- Structured Message Schema for OpenCode Runner ---
+
+/**
+ * Content block types for structured messages.
+ * Reserved for future expansion (attachments, images, etc.)
+ */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'attachment'; filename: string; mimeType: string; size: number };
+
+/**
+ * Structured message format for the OpenCode runner.
+ * Replaces the XML-ish prompt contract with a stable, replayable schema.
+ */
+export interface StructuredMessage {
+  /** Stable unique identifier for replay harness */
+  id: string;
+  /** Message role for conversation context */
+  role: 'user' | 'assistant' | 'system';
+  /** Content blocks (currently text, reserved for attachments) */
+  content: ContentBlock[];
+  /** ISO timestamp for ordering and replay */
+  timestamp: string;
+  /** Optional sender information */
+  sender_name?: string;
+}
+
 export interface ScheduledTask {
   id: string;
   group_folder: string;

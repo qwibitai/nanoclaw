@@ -39,6 +39,7 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { getSafeSessionId } from './session-validation.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -57,6 +58,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { lmStudioCircuitBreaker } from './circuit-breaker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -262,14 +264,43 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+function generateTraceId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 8);
+  return `${timestamp}-${random}`;
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
+  const traceId = generateTraceId();
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = getSafeSessionId(sessions, group.folder);
+
+  if (!sessionId && sessions[group.folder]) {
+    logger.warn(
+      { group: group.name, folder: group.folder, traceId },
+      'Invalid session ID found in memory, will create new OpenCode session',
+    );
+  }
+
+  // Check circuit breaker before invoking container
+  const cbStats = lmStudioCircuitBreaker.getStats();
+  if (cbStats.state === 'OPEN') {
+    const remainingMs = (cbStats.nextAttempt ?? Date.now()) - Date.now();
+    logger.warn(
+      {
+        group: group.name,
+        traceId,
+        retryAfterSec: Math.ceil(remainingMs / 1000),
+      },
+      'LM Studio circuit breaker is OPEN, skipping invocation',
+    );
+    return 'error';
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -307,6 +338,11 @@ async function runAgent(
       }
     : undefined;
 
+  logger.info(
+    { group: group.name, traceId, hasSession: !!sessionId, isMain },
+    'Starting agent invocation',
+  );
+
   try {
     const output = await runContainerAgent(
       group,
@@ -317,6 +353,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        traceId,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -330,15 +367,26 @@ async function runAgent(
 
     if (output.status === 'error') {
       logger.error(
-        { group: group.name, error: output.error },
+        { group: group.name, traceId, error: output.error },
         'Container agent error',
+      );
+      // Track failures for circuit breaker
+      lmStudioCircuitBreaker.forceOpen(
+        `Container error: ${output.error?.slice(0, 100)}`,
       );
       return 'error';
     }
 
+    logger.info(
+      { group: group.name, traceId },
+      'Agent invocation completed successfully',
+    );
     return 'success';
   } catch (err) {
-    logger.error({ group: group.name, err }, 'Agent error');
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logger.error({ group: group.name, traceId, err }, 'Agent error');
+    // Track failures for circuit breaker
+    lmStudioCircuitBreaker.forceOpen(`Exception: ${errorMsg.slice(0, 100)}`);
     return 'error';
   }
 }

@@ -96,7 +96,34 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  const credentials = 'skipped';
+  // 3. Check LLM credentials (OpenCode/LM Studio)
+  const llmEnvVars = readEnvFile([
+    'NANOCLAW_LLM_BASE_URL',
+    'NANOCLAW_LLM_MODEL_ID',
+    'NANOCLAW_LLM_API_KEY',
+    // Legacy Anthropic support
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+  ]);
+
+  const hasOpenCodeConfig = !!(
+    process.env.NANOCLAW_LLM_BASE_URL || llmEnvVars.NANOCLAW_LLM_BASE_URL
+  );
+  const hasLegacyAnthropic = !!(
+    process.env.ANTHROPIC_BASE_URL ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN ||
+    llmEnvVars.ANTHROPIC_BASE_URL ||
+    llmEnvVars.ANTHROPIC_API_KEY ||
+    llmEnvVars.ANTHROPIC_AUTH_TOKEN
+  );
+
+  const credentials = hasOpenCodeConfig
+    ? 'configured'
+    : hasLegacyAnthropic
+      ? 'legacy-anthropic'
+      : 'missing';
 
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
@@ -158,8 +185,12 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   // Determine overall status
+  const hasCredentials = credentials !== 'missing';
   const status =
-    service === 'running' && anyChannelConfigured && registeredGroups > 0
+    service === 'running' &&
+    anyChannelConfigured &&
+    registeredGroups > 0 &&
+    hasCredentials
       ? 'success'
       : 'failed';
 

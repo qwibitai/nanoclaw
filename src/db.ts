@@ -11,6 +11,7 @@ import {
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
+import { isValidSessionId, sanitizeSessionId } from './session-validation.js';
 
 let db: Database.Database;
 
@@ -517,10 +518,17 @@ export function getSession(groupFolder: string): string | undefined {
   const row = db
     .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
     .get(groupFolder) as { session_id: string } | undefined;
-  return row?.session_id;
+  return sanitizeSessionId(row?.session_id, groupFolder);
 }
 
 export function setSession(groupFolder: string, sessionId: string): void {
+  if (!isValidSessionId(sessionId)) {
+    logger.warn(
+      { groupFolder, sessionId },
+      'Attempted to store invalid session ID, skipping',
+    );
+    return;
+  }
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
@@ -532,7 +540,15 @@ export function getAllSessions(): Record<string, string> {
     .all() as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
-    result[row.group_folder] = row.session_id;
+    const validSession = sanitizeSessionId(row.session_id, row.group_folder);
+    if (validSession) {
+      result[row.group_folder] = validSession;
+    } else {
+      logger.warn(
+        { groupFolder: row.group_folder, sessionId: row.session_id },
+        'Invalid session ID found in database, will create new session on next run',
+      );
+    }
   }
   return result;
 }

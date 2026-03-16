@@ -1,0 +1,19 @@
+{
+  "name": "session-continuity-test",
+  "description": "Test that session ID persists across multiple outputs",
+  "sequence": [
+    {
+      "id": "msg-001",
+      "role": "user",
+      "content": [{ "type": "text", "text": "Start a new session" }],
+      "timestamp": "2025-03-16T10:00:00.000Z",
+      "sender_name": "TestUser"
+    }
+  ],
+  "expected": {
+    "outputCount": 1,
+    "sessionContinuity": true,
+    "allOutputsValid": true,
+    "newSessionIdGenerated": true
+  }
+}
