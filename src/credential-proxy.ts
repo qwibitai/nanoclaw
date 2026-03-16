@@ -78,11 +78,14 @@ export function readCredentialsFile(): TokenCache | null {
   return null;
 }
 
+const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+
 function refreshAccessToken(refreshToken: string): Promise<TokenCache> {
   const url = new URL(OAUTH_TOKEN_ENDPOINT);
   const bodyStr = JSON.stringify({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
+    client_id: OAUTH_CLIENT_ID,
   });
 
   return new Promise((resolve, reject) => {
