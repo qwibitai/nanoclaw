@@ -593,8 +593,7 @@ async function main(): Promise<void> {
     await channel.connect();
   }
   if (channels.length === 0) {
-    logger.fatal('No channels connected');
-    process.exit(1);
+    logger.warn('No channels connected — running headless (scheduler + IPC only)');
   }
 
   // Start subsystems (independently of connection handler)
@@ -617,7 +616,10 @@ async function main(): Promise<void> {
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot send message (headless mode?)');
+        return Promise.resolve();
+      }
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
