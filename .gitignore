@@ -24,6 +24,7 @@ groups/whatsapp_assistant/*
 # Secrets
 *.keys.json
 .env
+*.pem
 
 # Temp files
 .tmp-*
