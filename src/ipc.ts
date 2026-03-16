@@ -102,24 +102,43 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   const threadId =
-                    data.message_thread_id != null
-                      ? Number(data.message_thread_id)
-                      : undefined;
-                  // Store directly into DB so the message loop picks it up
-                  storeMessageDirect({
-                    id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    chat_jid: data.chatJid,
-                    sender: data.sender || sourceGroup,
-                    sender_name: data.sender || sourceGroup,
-                    content: data.text,
-                    timestamp: new Date().toISOString(),
-                    is_from_me: false,
-                    is_bot_message: false,
-                  });
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message stored to DB',
-                  );
+                    data.message_thread_id ??
+                    data.extra?.message_thread_id ??
+                    undefined;
+                  const resolvedThreadId =
+                    threadId != null ? Number(threadId) : undefined;
+                  const isSelfTarget =
+                    targetGroup && targetGroup.folder === sourceGroup;
+
+                  if (isSelfTarget) {
+                    // Self-targeted: store directly into DB so the message loop picks it up
+                    storeMessageDirect({
+                      id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      chat_jid: data.chatJid,
+                      sender: data.sender || sourceGroup,
+                      sender_name: data.sender || sourceGroup,
+                      content: data.text,
+                      timestamp: new Date().toISOString(),
+                      is_from_me: false,
+                      is_bot_message: false,
+                    });
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message stored to DB',
+                    );
+                  } else {
+                    // Cross-group: send via Telegram so it appears in the target channel/topic
+                    await deps.sendMessage(
+                      data.chatJid,
+                      data.text,
+                      data.sender,
+                      resolvedThreadId,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup, threadId: resolvedThreadId },
+                      'IPC message sent to Telegram',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
