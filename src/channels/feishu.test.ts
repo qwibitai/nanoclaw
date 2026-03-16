@@ -362,4 +362,128 @@ describe('FeishuChannel', () => {
       );
     });
   });
+
+  describe('non-text messages', () => {
+    it('returns [Image] placeholder for image messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        messageType: 'image',
+        content: JSON.stringify({ image_key: 'img_xxx' }),
+      });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[Image]' }),
+      );
+    });
+
+    it('extracts plain text from post rich-text messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const postContent = {
+        zh_cn: {
+          title: 'My Title',
+          content: [
+            [
+              { tag: 'text', text: 'Hello ' },
+              { tag: 'a', text: 'link', href: 'https://example.com' },
+            ],
+            [
+              { tag: 'at', user_id: 'ou_xxx' },
+              { tag: 'text', text: ' world' },
+            ],
+          ],
+        },
+      };
+
+      const event = createMessageEvent({
+        messageType: 'post',
+        content: JSON.stringify(postContent),
+      });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({
+          content: 'My Title\nHello link\n@ou_xxx world',
+        }),
+      );
+    });
+
+    it('returns [File] for file messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ messageType: 'file', content: '{}' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[File]' }),
+      );
+    });
+
+    it('returns [Audio] for audio messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ messageType: 'audio', content: '{}' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[Audio]' }),
+      );
+    });
+
+    it('returns [Video] for media messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ messageType: 'media', content: '{}' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[Video]' }),
+      );
+    });
+
+    it('returns [Sticker] for sticker messages', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ messageType: 'sticker', content: '{}' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[Sticker]' }),
+      );
+    });
+
+    it('returns [Unsupported: share_chat] for unknown types', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('id', 'secret', opts);
+      await channel.connect();
+
+      const event = createMessageEvent({ messageType: 'share_chat', content: '{}' });
+      await triggerEvent('im.message.receive_v1', event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'feishu:oc_test123',
+        expect.objectContaining({ content: '[Unsupported: share_chat]' }),
+      );
+    });
+  });
 });

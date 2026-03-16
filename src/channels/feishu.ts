@@ -17,6 +17,32 @@ export interface FeishuChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/** Extract plain text from a Feishu "post" rich-text content object. */
+function extractPostText(content: any): string {
+  const locale =
+    content.zh_cn || content[Object.keys(content)[0]];
+  if (!locale) return '[Post]';
+
+  const parts: string[] = [];
+  if (locale.title) parts.push(locale.title);
+
+  if (Array.isArray(locale.content)) {
+    for (const line of locale.content) {
+      if (!Array.isArray(line)) continue;
+      const lineText = line
+        .map((seg: any) => {
+          if (seg.tag === 'text' || seg.tag === 'a') return seg.text || '';
+          if (seg.tag === 'at') return `@${seg.user_id || 'user'}`;
+          return '';
+        })
+        .join('');
+      parts.push(lineText);
+    }
+  }
+
+  return parts.join('\n') || '[Post]';
+}
+
 export class FeishuChannel implements Channel {
   name = 'feishu';
 
@@ -105,6 +131,19 @@ export class FeishuChannel implements Channel {
       if (messageType === 'text') {
         const parsed = JSON.parse(message.content);
         content = parsed.text || '';
+      } else if (messageType === 'post') {
+        const parsed = JSON.parse(message.content);
+        content = extractPostText(parsed);
+      } else if (messageType === 'image') {
+        content = '[Image]';
+      } else if (messageType === 'file') {
+        content = '[File]';
+      } else if (messageType === 'audio') {
+        content = '[Audio]';
+      } else if (messageType === 'media') {
+        content = '[Video]';
+      } else if (messageType === 'sticker') {
+        content = '[Sticker]';
       } else {
         content = `[Unsupported: ${messageType}]`;
       }
