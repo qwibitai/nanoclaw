@@ -44,6 +44,7 @@ export interface ContainerInput {
   assistantName?: string;
   secrets?: Record<string, string>;
   envKeys?: string[];
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
 export interface ContainerOutput {
