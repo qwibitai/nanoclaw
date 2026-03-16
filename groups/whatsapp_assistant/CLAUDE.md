@@ -80,7 +80,7 @@ If the repo isn't cloned yet:
 git clone https://github.com/jcham/jaime-todo-1.git /workspace/group/features/todo-list/repo
 ```
 
-Otherwise, always `git pull` before making changes.
+Otherwise, always `git pull` before reading or modifying any todo files — even for read-only requests like "what are my todos?".
 
 After every change: `git add -A && git commit -m "<short description>" && git push`.
 
