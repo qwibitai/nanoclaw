@@ -1,1 +1,15 @@
-{}
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/verify-before-stop.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
