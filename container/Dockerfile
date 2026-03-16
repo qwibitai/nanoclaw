@@ -36,6 +36,7 @@ RUN mkdir -p /tmp && chmod 1777 /tmp && mkdir -p /home/node && chown -R node:nod
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
+ENV HOME=/home/node
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

@@ -13,7 +13,7 @@ echo "============================================"
 echo ""
 
 # --- 1. Check prerequisites ---
-echo "[1/7] Checking prerequisites..."
+echo "[1/8] Checking prerequisites..."
 
 # Node.js
 if ! command -v node &>/dev/null; then
@@ -52,7 +52,7 @@ fi
 
 # --- 2. Check .env ---
 echo ""
-echo "[2/7] Checking configuration..."
+echo "[2/8] Checking configuration..."
 
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
   echo "ERROR: .env file not found. Create it with at least:"
@@ -86,7 +86,7 @@ fi
 
 # --- 3. Install dependencies ---
 echo ""
-echo "[3/7] Installing dependencies..."
+echo "[3/8] Installing dependencies..."
 
 NPM_FLAGS=""
 if [ "$(id -u)" -eq 0 ]; then
@@ -107,13 +107,13 @@ fi
 
 # --- 4. Build TypeScript ---
 echo ""
-echo "[4/7] Building TypeScript..."
+echo "[4/8] Building TypeScript..."
 npm run build
 echo "  Build complete ✓"
 
 # --- 5. Build agent container ---
 echo ""
-echo "[5/7] Building agent container..."
+echo "[5/8] Building agent container..."
 
 # Always rebuild to ensure image matches current code
 # (a stale/broken image from a failed build won't self-heal otherwise)

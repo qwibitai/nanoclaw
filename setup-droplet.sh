@@ -25,7 +25,7 @@ echo "  Repo:     ${REPO_URL}"
 echo ""
 
 # --- 0. Verify SSH connectivity ---
-echo "[0/6] Testing SSH connection..."
+echo "[0/7] Testing SSH connection..."
 if ! $SSH_CMD "echo 'SSH OK'" 2>/dev/null; then
   echo "ERROR: Cannot SSH into ${DROPLET_USER}@${DROPLET_IP}"
   echo "  Ensure your SSH key is added to the droplet."
@@ -35,7 +35,7 @@ echo "  SSH connection ✓"
 
 # --- 1. Install prerequisites ---
 echo ""
-echo "[1/6] Installing prerequisites on droplet..."
+echo "[1/7] Installing prerequisites on droplet..."
 
 $SSH_CMD bash <<'REMOTE_SETUP'
 set -euo pipefail
@@ -71,7 +71,7 @@ REMOTE_SETUP
 
 # --- 2. Clean old content and clone repo ---
 echo ""
-echo "[2/6] Setting up project on droplet..."
+echo "[2/7] Setting up project on droplet..."
 
 $SSH_CMD bash <<REMOTE_CLONE
 set -euo pipefail
@@ -93,7 +93,7 @@ REMOTE_CLONE
 
 # --- 3. Transfer persistent data ---
 echo ""
-echo "[3/6] Transferring persistent data..."
+echo "[3/7] Transferring persistent data..."
 
 # .env file
 if [ -f "${LOCAL_PROJECT}/.env" ]; then
