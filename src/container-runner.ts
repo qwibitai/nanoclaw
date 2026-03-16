@@ -369,6 +369,7 @@ export async function runContainerAgent(
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
 
     onProcess(container, containerName);
