@@ -200,34 +200,93 @@ Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 
 
 **我可以使用第三方或开源模型吗？**
 
-可以。NanoClaw 支持任何兼容 OpenAI API 的模型端点。在 `.env` 文件中设置以下环境变量：
+可以。NanoClaw 通过灵活的 JSON 配置系统支持任何兼容 OpenAI API 的模型端点。
+
+**主要方式：JSON 配置（推荐）**
+
+设置 `NANOCLAW_LLM_CONFIG` 环境变量，使用 JSON 对象指定提供商和模型：
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model-name"
+}'
+```
+
+您也可以使用 `NANOCLAW_LLM_MODEL` 仅覆盖模型名称：
+
+```bash
+NANOCLAW_LLM_MODEL=openai-compatible/llama3.1
+```
+
+**配置示例**
+
+LM Studio（本地）：
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model"
+}'
+```
+
+Ollama（本地）：
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:11434/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/llama3.1"
+}'
+```
+
+OpenRouter（云端）：
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "your-api-key"
+      }
+    }
+  },
+  "model": "openai-compatible/openai/gpt-4o-mini"
+}'
+```
+
+**传统方式：环境变量**
+
+为保持向后兼容，您仍可使用独立的环境变量：
 
 ```bash
 NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
 NANOCLAW_LLM_MODEL_ID=your-model-name
-NANOCLAW_LLM_API_KEY=your-api-key  # 可选：仅云服务需要
+NANOCLAW_LLM_API_KEY=your-api-key
 ```
 
-这使您能够使用：
-
-- 通过 [LM Studio](https://lmstudio.ai) 运行的本地模型（无需 API key）
-- 通过 [Ollama](https://ollama.ai) 以 OpenAI 兼容模式运行的本地模型（无需 API key）
-- 兼容 OpenAI API 的云服务提供商（OpenRouter 等 - 需要 API key）
-
-**OpenRouter 配置示例：**
-
-```bash
-NANOCLAW_LLM_BASE_URL=https://openrouter.ai/api/v1
-NANOCLAW_LLM_MODEL_ID=anthropic/claude-3.5-sonnet
-NANOCLAW_LLM_API_KEY=sk-or-v1-...
-```
-
-为保持向后兼容，以下旧变量也受支持：
-
-```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
-```
+如果未设置 `NANOCLAW_LLM_CONFIG`，这些变量将被自动用于构建提供商配置。
 
 **我该如何调试问题？**
 

@@ -230,17 +230,114 @@ async function waitForAssistantResponse(
   return { text: '', success: false };
 }
 
-interface LmStudioHealthResult {
+interface LLMHealthResult {
   ok: boolean;
   error?: string;
   modelsAvailable?: number;
 }
 
-async function checkLmStudioHealth(
+interface LLMConfig {
+  provider: Record<
+    string,
+    { name?: string; options: { baseURL: string; apiKey: string } }
+  >;
+  model: string;
+}
+
+/**
+ * Parse LLM configuration from environment variables.
+ * Supports NANOCLAW_LLM_CONFIG (JSON) with fallback to legacy env vars.
+ */
+function parseLLMConfig(): LLMConfig {
+  // 1. Try NANOCLAW_LLM_CONFIG first
+  const configJson = process.env.NANOCLAW_LLM_CONFIG;
+  if (configJson) {
+    try {
+      const cfg = JSON.parse(configJson) as LLMConfig;
+      // Validate basic structure
+      if (!cfg.provider || typeof cfg.provider !== 'object') {
+        throw new Error('NANOCLAW_LLM_CONFIG must have provider object');
+      }
+      if (!cfg.model || typeof cfg.model !== 'string') {
+        throw new Error('NANOCLAW_LLM_CONFIG must have model string');
+      }
+      return cfg;
+    } catch (e) {
+      throw new Error(
+        `Invalid NANOCLAW_LLM_CONFIG: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  // 2. Synthesize from legacy env vars
+  const baseURL =
+    process.env.NANOCLAW_LLM_BASE_URL || 'http://host.docker.internal:1234/v1';
+  const apiKey = process.env.NANOCLAW_LLM_API_KEY || 'not-needed';
+  const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
+
+  return {
+    provider: {
+      'openai-compatible': {
+        options: { baseURL, apiKey },
+      },
+    },
+    model: `openai-compatible/${modelId}`,
+  };
+}
+
+/**
+ * Apply optional model override from NANOCLAW_LLM_MODEL.
+ */
+function applyModelOverride(cfg: LLMConfig): LLMConfig {
+  const override = process.env.NANOCLAW_LLM_MODEL;
+  if (!override) return cfg;
+
+  // If override contains '/', use as-is; otherwise prefix with provider type
+  if (override.includes('/')) {
+    cfg.model = override;
+  } else {
+    // Extract provider type from existing model
+    const providerType = cfg.model.split('/')[0];
+    cfg.model = `${providerType}/${override}`;
+  }
+  return cfg;
+}
+
+/**
+ * Extract the base URL from the provider configuration.
+ * Uses the provider type from the model string to find the matching provider config.
+ */
+function getBaseURLFromConfig(cfg: LLMConfig): string | null {
+  const providerType = cfg.model.split('/')[0];
+  const provider = cfg.provider[providerType];
+  if (provider?.options?.baseURL) {
+    return provider.options.baseURL;
+  }
+  // Fallback: try any provider if only one exists
+  const providerKeys = Object.keys(cfg.provider);
+  if (providerKeys.length === 1) {
+    const singleProvider = cfg.provider[providerKeys[0]];
+    if (singleProvider?.options?.baseURL) {
+      return singleProvider.options.baseURL;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get display name for the provider (for logging).
+ */
+function getProviderDisplayName(cfg: LLMConfig): string {
+  const providerType = cfg.model.split('/')[0];
+  const provider = cfg.provider[providerType];
+  return provider?.name || providerType;
+}
+
+async function checkLLMHealth(
   url: string,
   maxRetries: number = 3,
   retryDelayMs: number = 2000,
-): Promise<LmStudioHealthResult> {
+): Promise<LLMHealthResult> {
   let lastError: string = '';
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -257,7 +354,7 @@ async function checkLmStudioHealth(
 
       if (!response.ok) {
         lastError = `HTTP ${response.status}: ${response.statusText}`;
-        log(`LM Studio health check attempt ${attempt} failed: ${lastError}`);
+        log(`LLM health check attempt ${attempt} failed: ${lastError}`);
         if (attempt < maxRetries) {
           await new Promise((r) => setTimeout(r, retryDelayMs));
         }
@@ -268,15 +365,15 @@ async function checkLmStudioHealth(
       const modelsAvailable = data.data?.length ?? 0;
 
       if (modelsAvailable === 0) {
-        lastError = 'No models available in LM Studio';
-        log(`LM Studio health check attempt ${attempt}: ${lastError}`);
+        lastError = 'No models available';
+        log(`LLM health check attempt ${attempt}: ${lastError}`);
         if (attempt < maxRetries) {
           await new Promise((r) => setTimeout(r, retryDelayMs));
         }
         continue;
       }
 
-      log(`LM Studio is healthy with ${modelsAvailable} models available`);
+      log(`LLM is healthy with ${modelsAvailable} models available`);
       return { ok: true, modelsAvailable };
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -284,7 +381,7 @@ async function checkLmStudioHealth(
       } else {
         lastError = err instanceof Error ? err.message : String(err);
       }
-      log(`LM Studio health check attempt ${attempt} failed: ${lastError}`);
+      log(`LLM health check attempt ${attempt} failed: ${lastError}`);
 
       if (attempt < maxRetries) {
         log(`Retrying in ${retryDelayMs}ms...`);
@@ -295,7 +392,7 @@ async function checkLmStudioHealth(
 
   return {
     ok: false,
-    error: `LM Studio is not responding after ${maxRetries} attempts. Last error: ${lastError}`,
+    error: `LLM server is not responding after ${maxRetries} attempts. Last error: ${lastError}`,
   };
 }
 
@@ -321,21 +418,11 @@ async function createOpencodeServer(
     },
   };
 
-  const baseURL =
-    process.env.NANOCLAW_LLM_BASE_URL || 'http://host.docker.internal:1234/v1';
-  const apiKey = process.env.NANOCLAW_LLM_API_KEY || 'not-needed';
+  const llmConfig = applyModelOverride(parseLLMConfig());
 
   const config = {
-    provider: {
-      'openai-compatible': {
-        name: 'LM Studio',
-        options: {
-          baseURL,
-          apiKey,
-        },
-      },
-    },
-    model: `openai-compatible/${process.env.NANOCLAW_LLM_MODEL_ID || 'default'}`,
+    provider: llmConfig.provider,
+    model: llmConfig.model,
     mcp: mcpServerConfig,
   };
 
@@ -436,21 +523,22 @@ async function runQuery(
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
   try {
-    const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
+    const llmConfig = applyModelOverride(parseLLMConfig());
+    const modelParts = llmConfig.model.split('/');
+    const providerId = modelParts[0] || 'openai-compatible';
+    const modelId = modelParts.slice(1).join('/') || 'default';
     const opencodeMessages = messagesToOpenCodeParts(messages, prompt);
 
     log(
       `Sending ${opencodeMessages.length} messages to session ${currentSessionId}...`,
     );
 
-    // For now, send the last message as the prompt
-    // TODO: When OpenCode SDK supports conversation history, send all messages
     const lastMessage = opencodeMessages[opencodeMessages.length - 1];
     const promptResponse = await client.session.prompt({
       path: { id: currentSessionId },
       body: {
         parts: lastMessage.parts,
-        model: { providerID: 'openai-compatible', modelID: modelId },
+        model: { providerID: providerId, modelID: modelId },
       },
     });
 
@@ -509,15 +597,27 @@ async function main(): Promise<void> {
     server = await createOpencodeServer('/workspace/group', containerInput);
     client = createOpencodeClient({ baseUrl: server.url });
 
-    const lmStudioUrl =
-      process.env.NANOCLAW_LLM_BASE_URL ||
-      'http://host.docker.internal:1234/v1';
-    const modelId = process.env.NANOCLAW_LLM_MODEL_ID || 'default';
-    log(`Using LLM at ${lmStudioUrl}, model: ${modelId}`);
+    const llmConfig = applyModelOverride(parseLLMConfig());
+    const llmUrl = getBaseURLFromConfig(llmConfig);
+    const providerName = getProviderDisplayName(llmConfig);
+    log(`Using LLM provider: ${providerName}, model: ${llmConfig.model}`);
+
+    if (!llmUrl) {
+      const userError =
+        '❌ LLM configuration error: Could not determine base URL from provider config.\n\n' +
+        'Please ensure your NANOCLAW_LLM_CONFIG includes a valid baseURL in the provider options.';
+      log('LLM URL not found in config');
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: userError,
+      });
+      process.exit(1);
+    }
 
     // Check LLM health before proceeding
     log('Checking LLM connectivity...');
-    const health = await checkLmStudioHealth(lmStudioUrl, 3, 2000);
+    const health = await checkLLMHealth(llmUrl, 3, 2000);
     if (!health.ok) {
       const userError =
         '❌ LLM server is currently unavailable.\n\n' +

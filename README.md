@@ -233,34 +233,93 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw works with any OpenAI-compatible LLM endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw works with any OpenAI-compatible LLM endpoint via a flexible JSON configuration system.
+
+**Primary Method: JSON Configuration (Recommended)**
+
+Set `NANOCLAW_LLM_CONFIG` with a JSON object specifying your provider and model:
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model-name"
+}'
+```
+
+You can also override just the model with `NANOCLAW_LLM_MODEL`:
+
+```bash
+NANOCLAW_LLM_MODEL=openai-compatible/llama3.1
+```
+
+**Examples**
+
+LM Studio (local):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:1234/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/your-model"
+}'
+```
+
+Ollama (local):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "http://host.docker.internal:11434/v1",
+        "apiKey": "not-needed"
+      }
+    }
+  },
+  "model": "openai-compatible/llama3.1"
+}'
+```
+
+OpenRouter (cloud):
+
+```bash
+NANOCLAW_LLM_CONFIG='{
+  "provider": {
+    "openai-compatible": {
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "your-api-key"
+      }
+    }
+  },
+  "model": "openai-compatible/openai/gpt-4o-mini"
+}'
+```
+
+**Legacy Method: Environment Variables**
+
+For backward compatibility, you can still use individual environment variables:
 
 ```bash
 NANOCLAW_LLM_BASE_URL=http://localhost:1234/v1
 NANOCLAW_LLM_MODEL_ID=your-model-name
-NANOCLAW_LLM_API_KEY=your-api-key  # Optional: only needed for cloud providers
+NANOCLAW_LLM_API_KEY=your-api-key
 ```
 
-This allows you to use:
-
-- Local models via [LM Studio](https://lmstudio.ai) (no API key needed)
-- Local models via [Ollama](https://ollama.ai) with OpenAI compatibility mode (no API key needed)
-- Cloud providers with OpenAI-compatible APIs (OpenRouter, etc. - API key required)
-
-**Example for OpenRouter:**
-
-```bash
-NANOCLAW_LLM_BASE_URL=https://openrouter.ai/api/v1
-NANOCLAW_LLM_MODEL_ID=anthropic/claude-3.5-sonnet
-NANOCLAW_LLM_API_KEY=sk-or-v1-...
-```
-
-For legacy Anthropic API compatibility, these variables are also supported:
-
-```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
-```
+If `NANOCLAW_LLM_CONFIG` is not set, these variables will be used to construct the provider configuration automatically.
 
 **How do I debug issues?**
 
