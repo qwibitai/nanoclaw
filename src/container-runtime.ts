@@ -103,22 +103,43 @@ export function ensureContainerRuntimeRunning(): void {
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(
+    // Stop running containers
+    const running = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
-    const orphans = output.trim().split('\n').filter(Boolean);
-    for (const name of orphans) {
+    const runningNames = running.trim().split('\n').filter(Boolean);
+    for (const name of runningNames) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
       } catch {
         /* already stopped */
       }
     }
-    if (orphans.length > 0) {
+    if (runningNames.length > 0) {
       logger.info(
-        { count: orphans.length, names: orphans },
+        { count: runningNames.length, names: runningNames },
         'Stopped orphaned containers',
+      );
+    }
+
+    // Remove stopped containers (detached mode doesn't use --rm)
+    const stopped = execSync(
+      `${CONTAINER_RUNTIME_BIN} ps -a --filter name=nanoclaw- --filter status=exited --format '{{.Names}}'`,
+      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+    );
+    const stoppedNames = stopped.trim().split('\n').filter(Boolean);
+    for (const name of stoppedNames) {
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} rm ${name}`, { stdio: 'pipe' });
+      } catch {
+        /* already removed */
+      }
+    }
+    if (stoppedNames.length > 0) {
+      logger.info(
+        { count: stoppedNames.length },
+        'Removed stopped containers',
       );
     }
   } catch (err) {

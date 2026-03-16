@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -255,7 +255,7 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
 ): string[] {
-  const args: string[] = ['run', '--rm', '--init', '--name', containerName];
+  const args: string[] = ['run', '-d', '--init', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -367,10 +367,39 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    });
+    // Start container in detached mode — completely decouples the container
+    // lifecycle from NanoClaw's process tree. On some Linux/Docker versions,
+    // child docker CLI processes receive spurious SIGTERM, killing the container.
+    // Detached mode avoids this: the container runs as a Docker daemon process.
+    try {
+      execSync(
+        [CONTAINER_RUNTIME_BIN, ...containerArgs].map((a) => `"${a}"`).join(' '),
+        { stdio: 'pipe', timeout: 30000 },
+      );
+    } catch (err) {
+      try {
+        fs.unlinkSync(inputFile);
+      } catch {
+        /* already cleaned up */
+      }
+      logger.error(
+        { group: group.name, containerName, error: err },
+        'Failed to start container in detached mode',
+      );
+      resolve({
+        status: 'error',
+        result: null,
+        error: `Failed to start container: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return;
+    }
+
+    // Follow container output via docker logs
+    const container = spawn(
+      CONTAINER_RUNTIME_BIN,
+      ['logs', '-f', containerName],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
 
     onProcess(container, containerName);
 
@@ -480,7 +509,9 @@ export async function runContainerAgent(
             { group: group.name, containerName, err },
             'Graceful stop failed, force killing',
           );
-          container.kill('SIGKILL');
+          exec(`${CONTAINER_RUNTIME_BIN} kill ${containerName}`, {
+            timeout: 5000,
+          });
         }
       });
     };
@@ -493,13 +524,37 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    container.on('close', (code) => {
+    container.on('close', () => {
       clearTimeout(timeout);
+
+      // Get actual container exit code (docker logs exit code is always 0/1)
+      let code: number | null = null;
+      try {
+        const raw = execSync(
+          `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='{{.State.ExitCode}}'`,
+          { encoding: 'utf-8', timeout: 5000 },
+        ).trim();
+        code = parseInt(raw.replace(/'/g, ''), 10);
+        if (isNaN(code)) code = 1;
+      } catch {
+        code = 1;
+      }
+
+      // Clean up container and temp files
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} rm ${containerName}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+        });
+      } catch {
+        /* container may already be removed */
+      }
       try {
         fs.unlinkSync(inputFile);
       } catch {
         /* already cleaned up */
       }
+
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -695,6 +750,20 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      // Stop the detached container and clean up
+      try {
+        execSync(stopContainer(containerName), { stdio: 'pipe', timeout: 15000 });
+      } catch {
+        /* container may not exist */
+      }
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} rm ${containerName}`, {
+          stdio: 'pipe',
+          timeout: 5000,
+        });
+      } catch {
+        /* already removed */
+      }
       try {
         fs.unlinkSync(inputFile);
       } catch {
@@ -702,12 +771,12 @@ export async function runContainerAgent(
       }
       logger.error(
         { group: group.name, containerName, error: err },
-        'Container spawn error',
+        'Docker logs process error',
       );
       resolve({
         status: 'error',
         result: null,
-        error: `Container spawn error: ${err.message}`,
+        error: `Docker logs error: ${err.message}`,
       });
     });
   });

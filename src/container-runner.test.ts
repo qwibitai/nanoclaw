@@ -73,7 +73,7 @@ function createFakeProcess() {
 
 let fakeProc: ReturnType<typeof createFakeProcess>;
 
-// Mock child_process.spawn
+// Mock child_process
 vi.mock('child_process', async () => {
   const actual =
     await vi.importActual<typeof import('child_process')>('child_process');
@@ -86,6 +86,14 @@ vi.mock('child_process', async () => {
         return new EventEmitter();
       },
     ),
+    execSync: vi.fn((cmd: string) => {
+      // docker run -d returns container ID
+      if (typeof cmd === 'string' && cmd.includes('run')) return 'abc123\n';
+      // docker inspect returns exit code
+      if (typeof cmd === 'string' && cmd.includes('inspect')) return '0';
+      // docker rm succeeds silently
+      return '';
+    }),
   };
 });
 
