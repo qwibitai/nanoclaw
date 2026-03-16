@@ -1,0 +1,94 @@
+# NanoClaw Agent Container — Standalone VPS build
+# Does not require nanoclaw-base image (builds everything from scratch)
+# Usage: docker build -f Dockerfile.vps -t nanoclaw-agent:latest .
+
+FROM node:22-bookworm-slim
+
+# Install system dependencies for Playwright/Chromium and general tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    ca-certificates \
+    git \
+    sqlite3 \
+    # Chromium dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    libwayland-client0 \
+    fonts-liberation \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright Chromium
+RUN npx playwright install chromium 2>/dev/null || true
+
+# Make chromium accessible to non-root node user.
+# Playwright installs to /root/.cache/ which node (uid 1000) can't read.
+RUN chmod -R o+rX /root/.cache/ms-playwright 2>/dev/null || true && \
+    chmod o+rx /root /root/.cache 2>/dev/null || true
+
+# Detect installed chromium path and persist as ENV vars + profile script.
+# The entrypoint sources /etc/profile.d/playwright.sh before running the agent.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN CHROME_PATH=$(find /root/.cache/ms-playwright -name "chrome" -type f 2>/dev/null | head -1 || echo "") && \
+    if [ -n "$CHROME_PATH" ]; then \
+      echo "export AGENT_BROWSER_EXECUTABLE_PATH=$CHROME_PATH" > /etc/profile.d/playwright.sh && \
+      echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$CHROME_PATH" >> /etc/profile.d/playwright.sh && \
+      echo "Found Chromium at: $CHROME_PATH"; \
+    else \
+      echo "WARNING: Chromium not found, browser features will not work"; \
+    fi
+
+# Ensure node user exists
+RUN id -u node 2>/dev/null || useradd -m -s /bin/bash node
+
+# Create app directory and copy agent-runner
+WORKDIR /app
+COPY agent-runner/ ./
+
+# Install agent-runner dependencies (don't suppress stderr — surface build errors)
+RUN npm ci --ignore-scripts || npm install
+
+# Pre-compile TypeScript at build time (saves 30s+ on every container startup)
+# Save a content hash of src/ so the entrypoint can detect real modifications
+# (timestamps are unreliable because container-runner syncs src/ with fresh timestamps)
+RUN npx tsc --outDir /app/dist && \
+    ln -s /app/node_modules /app/dist/node_modules && \
+    find /app/src -type f -name '*.ts' -exec md5sum {} + | sort | md5sum | cut -d' ' -f1 > /app/dist/.src-hash
+
+# Create workspace directories
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra \
+    /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Create entrypoint script — sources Playwright env vars, uses pre-compiled dist
+# Compares content hashes (not timestamps) to detect real source modifications,
+# because container-runner.ts always syncs agent-runner src with fresh timestamps.
+RUN printf '#!/bin/bash\nset -e\n[ -f /etc/profile.d/playwright.sh ] && . /etc/profile.d/playwright.sh\ntrap '\''echo "[entrypoint] SIGTERM received at $(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.%%3NZ) (PID $$)" >&2'\'' TERM\n\n# Compare content hash to detect real src modifications (not just timestamp changes)\nBUILD_HASH=$(cat /app/dist/.src-hash 2>/dev/null || echo "")\nCURRENT_HASH=$(find /app/src -type f -name "*.ts" -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d" " -f1)\nif [ -z "$BUILD_HASH" ] || [ "$BUILD_HASH" != "$CURRENT_HASH" ]; then\n  echo "[entrypoint] Agent-runner source modified, recompiling..." >&2\n  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\n  ln -s /app/node_modules /tmp/dist/node_modules\nelse\n  ln -sf /app/dist /tmp/dist\nfi\n\nif [ ! -f /tmp/input.json ]; then\n  cat > /tmp/input.json\nfi\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Set ownership for non-root user
+RUN mkdir -p /tmp && chmod 1777 /tmp && mkdir -p /home/node && \
+    chown -R node:node /workspace /home/node && chmod 777 /home/node
+
+# Switch to non-root user
+USER node
+ENV HOME=/home/node
+
+# Set working directory
+WORKDIR /workspace/group
+
+# Entry point reads JSON from stdin, outputs JSON to stdout
+ENTRYPOINT ["/app/entrypoint.sh"]

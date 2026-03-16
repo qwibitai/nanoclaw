@@ -2,8 +2,16 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import {
+  ChildProcess,
+  exec,
+  execFileSync,
+  execSync,
+  spawn,
+  spawnSync,
+} from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -254,7 +262,7 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
 ): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '-d', '--init', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -322,6 +330,21 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+
+  // Write input to a temp file and mount it into the container.
+  // Avoids piping via stdin which causes Docker to SIGTERM the container
+  // when the stdin pipe closes on certain Linux Docker versions.
+  const inputFile = path.join(
+    os.tmpdir(),
+    `nanoclaw-input-${containerName}.json`,
+  );
+  fs.writeFileSync(inputFile, JSON.stringify(input));
+  mounts.push({
+    hostPath: inputFile,
+    containerPath: '/tmp/input.json',
+    readonly: true,
+  });
+
   const containerArgs = buildContainerArgs(mounts, containerName);
 
   logger.debug(
@@ -351,9 +374,39 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // Start container in detached mode — completely decouples the container
+    // lifecycle from NanoClaw's process tree.
+    // Uses execFileSync (no shell) with stdin closed to prevent Docker
+    // from interpreting pipe cleanup as a client disconnect signal.
+    try {
+      execFileSync(CONTAINER_RUNTIME_BIN, containerArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30000,
+      });
+    } catch (err) {
+      try {
+        fs.unlinkSync(inputFile);
+      } catch {
+        /* already cleaned up */
+      }
+      logger.error(
+        { group: group.name, containerName, error: err },
+        'Failed to start container in detached mode',
+      );
+      resolve({
+        status: 'error',
+        result: null,
+        error: `Failed to start container: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return;
+    }
+
+    // Follow container output via docker logs
+    const container = spawn(
+      CONTAINER_RUNTIME_BIN,
+      ['logs', '-f', containerName],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
 
     onProcess(container, containerName);
 
@@ -361,9 +414,6 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
-
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -457,7 +507,12 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        {
+          group: group.name,
+          containerName,
+          timeoutMs,
+          elapsed: Date.now() - startTime,
+        },
         'Container timeout, stopping gracefully',
       );
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
@@ -466,7 +521,9 @@ export async function runContainerAgent(
             { group: group.name, containerName, err },
             'Graceful stop failed, force killing',
           );
-          container.kill('SIGKILL');
+          exec(`${CONTAINER_RUNTIME_BIN} kill ${containerName}`, {
+            timeout: 5000,
+          });
         }
       });
     };
@@ -479,8 +536,134 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    container.on('close', (code) => {
+    // Monitor container lifecycle events so we can identify WHO sends SIGTERM.
+    // This runs in the background and is killed when the container exits.
+    const eventsProc = spawn(
+      CONTAINER_RUNTIME_BIN,
+      [
+        'events',
+        '--filter',
+        `container=${containerName}`,
+        '--format',
+        '{{.Time}} {{.Action}} {{json .Actor.Attributes}}',
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    let dockerEvents = '';
+    eventsProc.stdout.on('data', (data) => {
+      dockerEvents += data.toString();
+    });
+
+    let closeHandled = false;
+    container.on('close', () => {
+      if (closeHandled) return;
+      closeHandled = true;
+      const elapsed = Date.now() - startTime;
       clearTimeout(timeout);
+      eventsProc.kill();
+
+      // Log whether close was expected (timeout/shutdown) or unexpected
+      if (!timedOut) {
+        logger.warn(
+          { group: group.name, containerName, elapsed, timedOut },
+          'Container close handler fired (not from timeout)',
+        );
+      }
+
+      // Get actual container exit code (docker logs exit code is always 0/1)
+      let code: number | null = null;
+      let inspectData = '';
+      try {
+        const raw = execSync(
+          `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='{{.State.ExitCode}}'`,
+          { encoding: 'utf-8', timeout: 5000 },
+        ).trim();
+        code = parseInt(raw.replace(/'/g, ''), 10);
+        if (isNaN(code)) code = 1;
+      } catch {
+        code = 1;
+      }
+
+      // On unexpected signal death (143=SIGTERM, 137=SIGKILL), gather diagnostics
+      if (code === 143 || code === 137) {
+        try {
+          inspectData = execSync(
+            `${CONTAINER_RUNTIME_BIN} inspect ${containerName} --format='` +
+              `OOMKilled={{.State.OOMKilled}} ` +
+              `StartedAt={{.State.StartedAt}} ` +
+              `FinishedAt={{.State.FinishedAt}} ` +
+              `ExitCode={{.State.ExitCode}} ` +
+              `Error={{.State.Error}} ` +
+              `Pid={{.State.Pid}}'`,
+            { encoding: 'utf-8', timeout: 5000 },
+          ).trim();
+        } catch {
+          inspectData = 'inspect failed';
+        }
+
+        // Identify external killer: check for other NanoClaw processes and
+        // Docker daemon logs around the time of the kill
+        let externalDiag = '';
+        try {
+          // Look for other NanoClaw/node processes (duplicate instances)
+          const procs = execSync(
+            `ps aux | grep -E 'nanoclaw|tsx.*index|node.*dist/index' | grep -v grep`,
+            { encoding: 'utf-8', timeout: 3000 },
+          ).trim();
+          externalDiag += `PROCESSES:\n${procs}\n`;
+        } catch {
+          externalDiag += 'PROCESSES: (none found)\n';
+        }
+        try {
+          // Docker daemon logs for this container (who issued the stop?)
+          const daemonLogs = execSync(
+            `journalctl -u docker --since '30s ago' --no-pager -n 20 2>/dev/null || echo 'journalctl unavailable'`,
+            { encoding: 'utf-8', timeout: 5000 },
+          ).trim();
+          externalDiag += `DOCKER_DAEMON_LOGS:\n${daemonLogs}\n`;
+        } catch {
+          externalDiag += 'DOCKER_DAEMON_LOGS: (unavailable)\n';
+        }
+        try {
+          // Check kernel OOM or cgroup kills
+          const dmesg = execSync(
+            `dmesg --time-format iso 2>/dev/null | tail -5 || dmesg | tail -5`,
+            { encoding: 'utf-8', timeout: 3000 },
+          ).trim();
+          externalDiag += `DMESG_TAIL:\n${dmesg}`;
+        } catch {
+          externalDiag += 'DMESG_TAIL: (unavailable)';
+        }
+
+        logger.error(
+          {
+            group: group.name,
+            containerName,
+            dockerEvents: dockerEvents.trim(),
+            inspectData,
+            externalDiag,
+            nanoclaw_pid: process.pid,
+            duration: Date.now() - startTime,
+          },
+          `Container received signal (exit ${code}) — diagnostics attached`,
+        );
+      }
+
+      // Clean up container and temp files
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} rm ${containerName}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+        });
+      } catch {
+        /* container may already be removed */
+      }
+      try {
+        fs.unlinkSync(inputFile);
+      } catch {
+        /* already cleaned up */
+      }
+
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -570,6 +753,12 @@ export async function runContainerAgent(
           ``,
           `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
           stdout,
+          ``,
+          `=== Docker Events ===`,
+          dockerEvents.trim() || '(none captured)',
+          ``,
+          `=== Container Inspect ===`,
+          inspectData || '(not collected)',
         );
       } else {
         logLines.push(
@@ -675,16 +864,21 @@ export async function runContainerAgent(
     });
 
     container.on('error', (err) => {
-      clearTimeout(timeout);
-      logger.error(
+      // docker logs -f failed, but the container is running fine in detached
+      // mode. DON'T stop the container — fall back to docker wait to detect
+      // when it exits, then let the close handler run cleanup.
+      logger.warn(
         { group: group.name, containerName, error: err },
-        'Container spawn error',
+        'Docker logs process error, falling back to docker wait',
       );
-      resolve({
-        status: 'error',
-        result: null,
-        error: `Container spawn error: ${err.message}`,
-      });
+      exec(
+        `${CONTAINER_RUNTIME_BIN} wait ${containerName}`,
+        { timeout: timeoutMs },
+        () => {
+          // Container finished — trigger close handler for normal cleanup
+          if (!closeHandled) container.emit('close');
+        },
+      );
     });
   });
 }

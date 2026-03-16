@@ -44,6 +44,7 @@ vi.mock('fs', async () => {
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
       cpSync: vi.fn(),
+      unlinkSync: vi.fn(),
     },
   };
 });
@@ -72,7 +73,7 @@ function createFakeProcess() {
 
 let fakeProc: ReturnType<typeof createFakeProcess>;
 
-// Mock child_process.spawn
+// Mock child_process
 vi.mock('child_process', async () => {
   const actual =
     await vi.importActual<typeof import('child_process')>('child_process');
@@ -85,6 +86,22 @@ vi.mock('child_process', async () => {
         return new EventEmitter();
       },
     ),
+    execFileSync: vi.fn((file: string, args?: string[]) => {
+      const joined = [file, ...(args || [])].join(' ');
+      // docker run -d returns container ID
+      if (joined.includes('run')) return Buffer.from('abc123\n');
+      // docker inspect returns exit code
+      if (joined.includes('inspect')) return Buffer.from('0');
+      return Buffer.from('');
+    }),
+    execSync: vi.fn((cmd: string) => {
+      // docker run -d returns container ID
+      if (typeof cmd === 'string' && cmd.includes('run')) return 'abc123\n';
+      // docker inspect returns exit code
+      if (typeof cmd === 'string' && cmd.includes('inspect')) return '0';
+      // docker rm succeeds silently
+      return '';
+    }),
   };
 });
 

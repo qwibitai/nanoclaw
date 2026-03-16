@@ -108,6 +108,25 @@ Key paths inside the container:
 
 ---
 
+## VPS Deployment
+
+NanoClaw is installed at `/home/user/GenTech_Agency` on the DigitalOcean VPS (GenTech-Agency).
+- Systemd service: `nanoclaw` (user-level)
+- Working directory: `/home/user/GenTech_Agency`
+- Data directory: `/opt/gentech` (used for docker volume mounts)
+- Multiple copies exist: `/home/user/GenTech_Agency`, `/opt/gentech`, `/root/GenTech_Agency`
+
+Deploy commands:
+```bash
+cd /home/user/GenTech_Agency
+git pull origin <branch>
+npm run build
+./container/build.sh
+systemctl --user restart nanoclaw
+```
+
+---
+
 ## Managing Groups
 
 ### Finding Available Groups

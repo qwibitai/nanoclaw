@@ -13,7 +13,7 @@ echo "============================================"
 echo ""
 
 # --- 1. Check prerequisites ---
-echo "[1/7] Checking prerequisites..."
+echo "[1/8] Checking prerequisites..."
 
 # Node.js
 if ! command -v node &>/dev/null; then
@@ -52,7 +52,7 @@ fi
 
 # --- 2. Check .env ---
 echo ""
-echo "[2/7] Checking configuration..."
+echo "[2/8] Checking configuration..."
 
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
   echo "ERROR: .env file not found. Create it with at least:"
@@ -86,7 +86,7 @@ fi
 
 # --- 3. Install dependencies ---
 echo ""
-echo "[3/7] Installing dependencies..."
+echo "[3/8] Installing dependencies..."
 
 NPM_FLAGS=""
 if [ "$(id -u)" -eq 0 ]; then
@@ -107,24 +107,63 @@ fi
 
 # --- 4. Build TypeScript ---
 echo ""
-echo "[4/7] Building TypeScript..."
+echo "[4/8] Building TypeScript..."
 npm run build
 echo "  Build complete ✓"
 
 # --- 5. Build agent container ---
 echo ""
-echo "[5/7] Building agent container..."
+echo "[5/8] Building agent container..."
 
-if docker image inspect nanoclaw-agent:latest &>/dev/null; then
-  echo "  Container image already exists, skipping (run ./container/build.sh to rebuild)"
+# Always rebuild to ensure image matches current code
+# (a stale/broken image from a failed build won't self-heal otherwise)
+bash "$PROJECT_ROOT/container/build.sh"
+echo "  Container image built ✓"
+
+# --- 6. Test container→host connectivity ---
+echo ""
+echo "[6/8] Testing container→host connectivity..."
+
+# Only test on Linux (VPS) where networking is different from Docker Desktop
+if [ "$(uname)" = "Linux" ]; then
+  PROXY_PORT=$(grep '^CREDENTIAL_PROXY_PORT=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2- || echo "3001")
+  PROXY_PORT=${PROXY_PORT:-3001}
+
+  # Check docker0 bridge exists
+  DOCKER0_IP=$(ip -4 addr show docker0 2>/dev/null | grep -oP 'inet \K[\d.]+' || echo "")
+  if [ -n "$DOCKER0_IP" ]; then
+    echo "  Docker bridge IP: $DOCKER0_IP ✓"
+  else
+    echo "  Docker bridge not found (normal for some setups)"
+  fi
+
+  # Test host.docker.internal resolution from inside a container
+  HOST_RESOLVE=$(docker run --rm --add-host=host.docker.internal:host-gateway \
+    alpine:latest sh -c 'getent hosts host.docker.internal 2>/dev/null | head -1' 2>/dev/null || echo "")
+  if [ -n "$HOST_RESOLVE" ]; then
+    echo "  Container→host resolution: ${HOST_RESOLVE%% *} ✓"
+  else
+    echo "  WARNING: host.docker.internal not resolvable from containers"
+    echo "  Containers may not reach credential proxy."
+    echo "  Try: CREDENTIAL_PROXY_HOST=0.0.0.0 in .env"
+  fi
+
+  # Check swap (critical for <=2GB RAM)
+  SWAP_TOTAL=$(free -m | awk '/Swap/{print $2}')
+  if [ "${SWAP_TOTAL:-0}" -lt 512 ]; then
+    echo ""
+    echo "  WARNING: Swap is ${SWAP_TOTAL:-0}MB — containers may get OOM-killed."
+    echo "  Create swap: fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
+  else
+    echo "  Swap: ${SWAP_TOTAL}MB ✓"
+  fi
 else
-  bash "$PROJECT_ROOT/container/build.sh"
-  echo "  Container image built ✓"
+  echo "  Skipped (Docker Desktop handles networking)"
 fi
 
-# --- 6. Test Telegram connectivity ---
+# --- 7. Test Telegram connectivity ---
 echo ""
-echo "[6/7] Testing Telegram connectivity..."
+echo "[7/8] Testing Telegram connectivity..."
 
 TELEGRAM_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' "$PROJECT_ROOT/.env" | cut -d= -f2-)
 if [ -n "$TELEGRAM_TOKEN" ]; then
@@ -140,9 +179,9 @@ else
   echo "  Skipped (no token)"
 fi
 
-# --- 7. Set up and start service ---
+# --- 8. Set up and start service ---
 echo ""
-echo "[7/7] Setting up service..."
+echo "[8/8] Setting up service..."
 
 # Kill any existing nanoclaw processes
 pkill -f "$PROJECT_ROOT/dist/index.js" 2>/dev/null || true
