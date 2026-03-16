@@ -378,12 +378,39 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Case-specific session key to isolate conversation context per case
   const sessionKey = targetCase ? `case:${targetCase.id}` : group.folder;
 
+  // L3 mechanistic progress: send "still working" if agent is silent too long.
+  // Users must never stare at ⏳ wondering if the system is broken.
+  let progressTimer: ReturnType<typeof setTimeout> | null = null;
+  let extendedTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearProgressTimers = () => {
+    if (progressTimer) clearTimeout(progressTimer);
+    if (extendedTimer) clearTimeout(extendedTimer);
+    progressTimer = null;
+    extendedTimer = null;
+  };
+  progressTimer = setTimeout(() => {
+    channel
+      .sendMessage(chatJid, `${ackPrefix}⏳ Still working on your request...`)
+      .catch(() => {});
+    extendedTimer = setTimeout(() => {
+      channel
+        .sendMessage(
+          chatJid,
+          `${ackPrefix}⏳ This is taking longer than expected, still working...`,
+        )
+        .catch(() => {});
+    }, 90_000); // 2min after the first progress (30s + 90s = 2min total)
+  }, 30_000);
+
   const agentResult = await runAgent(
     group,
     prompt,
     chatJid,
     async (result) => {
       if (result.result) {
+        // Agent produced output — clear progress timers
+        clearProgressTimers();
+
         const raw =
           typeof result.result === 'string'
             ? result.result
@@ -441,6 +468,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     sessionKey,
   );
 
+  clearProgressTimers();
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
