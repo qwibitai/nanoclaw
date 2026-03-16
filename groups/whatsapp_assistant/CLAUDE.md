@@ -86,7 +86,11 @@ After every change: `git add -A && git commit -m "<short description>" && git pu
 
 ## File Structure
 
-The repo has one `.md` file per context (e.g. `jaime-personal.md`, `jaime-work.md`).
+The repo has one `.md` file per context (e.g. `jaime-personal.md`, `jaime-work.md`). There is also `jaime-icebox.md` for items that were considered but will not be pursued — sectioned by topic.
+
+## Context Tracking
+
+Within a conversation, remember which context (personal or work) the user is focused on. Default to personal unless the user says otherwise. Apply that context to all reads and edits until they switch. Only look in `jaime-icebox.md` if the user explicitly asks, or if something can't be found in any other file.
 
 ## Document Structure
 
@@ -98,6 +102,8 @@ The repo has one `.md` file per context (e.g. `jaime-personal.md`, `jaime-work.m
 
 - Active item: normal bullet `- item`
 - Completed item: strikethrough `- ~~item~~`
+
+**Ordering rule**: Struck-through items always appear at the **bottom** of their section. Whenever you strike through an item or encounter a section where struck-through items are not at the bottom, move them down (preserving their relative order among themselves).
 
 **Cleanup rule**: Use `git log` to find when an item was first struck through. If it has been struck through for **more than 1 month**, delete it entirely (including its sub-items). Otherwise leave it in place.
 
