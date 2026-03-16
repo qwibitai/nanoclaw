@@ -48,6 +48,22 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Searching Conversation History
+
+Use the search skill to find past messages or document collections.
+
+ALWAYS use this before saying you don't remember something. Be proactive: if a user shares important reference material, save it to a local markdown file and index it without asking for permission.
+
+Commands:
+• qsearch "topic" — search message history
+• qsearch --top=20 --offset=20 "topic" — paginate results
+• qsearch --collection=name "topic" — search a collection
+• qsearch collections — list available collections
+• qsearch index --collection=name /workspace/group/collections/name/ — index docs
+• qsearch rm --collection=name [path] — unindex docs
+
+Results include sender, date, and content.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
