@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'http';
 import type { AddressInfo } from 'net';
+import fs from 'fs';
 
 const mockEnv: Record<string, string> = {};
 vi.mock('./env.js', () => ({
@@ -11,7 +12,11 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy, _resetTokenCache } from './credential-proxy.js';
+import {
+  startCredentialProxy,
+  _resetTokenCache,
+  readCredentialsFile,
+} from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -190,5 +195,121 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('uses credentials file when no OAuth token in .env', async () => {
+    const credData = {
+      claudeAiOauth: {
+        accessToken: 'sk-ant-oat01-from-creds-file',
+        refreshToken: 'sk-ant-ort01-refresh',
+        expiresAt: Date.now() + 3600_000,
+      },
+    };
+    const spy = vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(credData));
+
+    proxyPort = await startProxy({});
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer sk-ant-oat01-from-creds-file',
+    );
+
+    spy.mockRestore();
+  });
+
+  it('static access token in .env takes precedence over credentials file', async () => {
+    const credData = {
+      claudeAiOauth: {
+        accessToken: 'sk-ant-oat01-from-creds-file',
+        refreshToken: 'sk-ant-ort01-refresh',
+        expiresAt: Date.now() + 3600_000,
+      },
+    };
+    const spy = vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(credData));
+
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-from-env',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    // Static access token from .env used directly, not credentials file
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer sk-ant-oat01-from-env',
+    );
+
+    spy.mockRestore();
+  });
+});
+
+describe('readCredentialsFile', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns token cache from valid credentials file', () => {
+    const credData = {
+      claudeAiOauth: {
+        accessToken: 'sk-ant-oat01-test-access',
+        refreshToken: 'sk-ant-ort01-test-refresh',
+        expiresAt: 1700000000000,
+      },
+    };
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(credData));
+
+    const result = readCredentialsFile();
+    expect(result).toEqual({
+      accessToken: 'sk-ant-oat01-test-access',
+      refreshToken: 'sk-ant-ort01-test-refresh',
+      expiresAt: 1700000000000,
+    });
+  });
+
+  it('returns null when credentials file does not exist', () => {
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const result = readCredentialsFile();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when credentials file is missing required fields', () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(
+      JSON.stringify({ claudeAiOauth: { accessToken: 'token' } }),
+    );
+
+    const result = readCredentialsFile();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when credentials file has no claudeAiOauth', () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify({ other: {} }));
+
+    const result = readCredentialsFile();
+    expect(result).toBeNull();
   });
 });
