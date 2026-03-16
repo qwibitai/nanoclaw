@@ -318,6 +318,23 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Extra mounts from NANOCLAW_EXTRA_MOUNTS env var
+  // Format: "hostpath:containerpath:ro,hostpath2:containerpath2:rw"
+  const extraMountsEnv = process.env.NANOCLAW_EXTRA_MOUNTS;
+  if (extraMountsEnv) {
+    for (const entry of extraMountsEnv.split(',')) {
+      const parts = entry.trim().split(':');
+      if (parts.length < 2) continue;
+      const hostPath = parts[0];
+      const containerPath = parts[1];
+      const mode = parts[2]?.toLowerCase();
+      const readonly = mode === 'ro';
+      if (hostPath && containerPath) {
+        mounts.push({ hostPath, containerPath, readonly });
+      }
+    }
+  }
+
   return mounts;
 }
 
