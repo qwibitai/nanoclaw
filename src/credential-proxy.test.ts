@@ -205,7 +205,9 @@ describe('credential-proxy', () => {
         expiresAt: Date.now() + 3600_000,
       },
     };
-    const spy = vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(credData));
+    const spy = vi
+      .spyOn(fs, 'readFileSync')
+      .mockReturnValue(JSON.stringify(credData));
 
     proxyPort = await startProxy({});
 
@@ -237,7 +239,9 @@ describe('credential-proxy', () => {
         expiresAt: Date.now() + 3600_000,
       },
     };
-    const spy = vi.spyOn(fs, 'readFileSync').mockReturnValue(JSON.stringify(credData));
+    const spy = vi
+      .spyOn(fs, 'readFileSync')
+      .mockReturnValue(JSON.stringify(credData));
 
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-from-env',
