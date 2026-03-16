@@ -120,31 +120,13 @@ git merge memos/main || {
 }
 ```
 
-This merges in skill instruction files under `.claude/skills/add-memos/`. The actual source files must be copied into place from the skill's `add/` and `modify/` directories:
+This merges the MemOS integration code directly into place:
+- `src/memos-client.ts` — HTTP client for MemOS search/add with graceful degradation
+- `container/agent-runner/src/memos-mcp-stdio.ts` — MCP server giving agents `search_memories`, `add_memory`, `chat` tools
+- `scripts/migrate-memories-to-memos.ts` — One-time migration tool for existing data
+- Modified: `src/config.ts`, `src/index.ts`, `src/container-runner.ts`, `container/agent-runner/src/index.ts`, `.env.example`
 
-**Copy new files:**
-```bash
-cp .claude/skills/add-memos/add/src/memos-client.ts src/memos-client.ts
-cp .claude/skills/add-memos/add/container/agent-runner/src/memos-mcp-stdio.ts container/agent-runner/src/memos-mcp-stdio.ts
-mkdir -p scripts
-cp .claude/skills/add-memos/add/scripts/migrate-memories-to-memos.ts scripts/migrate-memories-to-memos.ts
-```
-
-**Apply modified files (these are complete replacement files, not patches):**
-```bash
-cp .claude/skills/add-memos/modify/src/config.ts src/config.ts
-cp .claude/skills/add-memos/modify/src/index.ts src/index.ts
-cp .claude/skills/add-memos/modify/src/container-runner.ts src/container-runner.ts
-cp .claude/skills/add-memos/modify/container/agent-runner/src/index.ts container/agent-runner/src/index.ts
-cp .claude/skills/add-memos/modify/.env.example .env.example
-```
-
-If conflicts arise, read the intent files in `.claude/skills/add-memos/modify/` for guidance:
-- `src/config.ts.intent.md`
-- `src/index.ts.intent.md`
-- `src/container-runner.ts.intent.md`
-- `container/agent-runner/src/index.ts.intent.md`
-- `.env.example.intent.md`
+If the merge reports conflicts, resolve them manually — the MemOS changes add new imports, new code blocks, and new config exports without removing existing functionality.
 
 ### Fix relativity threshold (Issue 1)
 
