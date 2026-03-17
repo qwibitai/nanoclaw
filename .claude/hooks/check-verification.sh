@@ -1,12 +1,11 @@
 #!/bin/bash
-# check-verification.sh — Level 2 kaizen enforcement (Issue #10)
-# Intercepts `gh pr create` to ensure the PR body contains a Verification
-# section with concrete success criteria. Also checks `gh pr merge` to
-# remind about post-deploy verification.
+# check-verification.sh — Advisory early warning (Issue #10)
+# Warns when PR body lacks a Verification section with concrete success criteria.
+# Also reminds about post-deploy verification on merge.
+# Real enforcement is in CI (pr-policy job in .github/workflows/ci.yml).
 #
 # Runs as PreToolUse hook on Bash tool calls.
-# Exit 0 = allow (with advisory on stderr)
-# JSON with permissionDecision deny = block
+# Always exits 0 (advisory only — never blocks).
 
 source "$(dirname "$0")/lib/parse-command.sh"
 
@@ -39,31 +38,14 @@ if [ "$IS_CREATE" = true ]; then
   fi
 
   if [ "$HAS_VERIFICATION" = false ]; then
-    MSG="⚠️  Missing Verification section in PR body (CLAUDE.md post-merge policy).
-
-Every PR must include a Verification section with:
-1. **Concrete success criteria** — what specific behavior proves this works?
-2. **How to verify** — exact commands or steps to run after deploy
-3. **Expected outcome** — what does success look like?
-
-Example:
-  ## Verification
-  - [ ] Run \`npm run build\` — should complete without errors
-  - [ ] Send a test message in Telegram — agent should respond within 30s
-  - [ ] Check \`systemctl --user status nanoclaw\` — should show active
-
-Add a Verification section to your PR body before creating."
-
-    jq -n \
-      --arg reason "$MSG" \
-      '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: $reason
-        }
-      }'
-    exit 0
+    echo "⚠️  Missing Verification section in PR body (CLAUDE.md post-merge policy)." >&2
+    echo "" >&2
+    echo "Every PR must include a Verification section with:" >&2
+    echo "1. Concrete success criteria" >&2
+    echo "2. How to verify (commands or steps)" >&2
+    echo "3. Expected outcome" >&2
+    echo "" >&2
+    echo "CI pr-policy check will block merge if this is missing." >&2
   fi
 fi
 

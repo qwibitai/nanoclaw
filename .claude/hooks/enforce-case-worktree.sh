@@ -1,10 +1,10 @@
 #!/bin/bash
-# enforce-case-worktree.sh — Level 2 kaizen enforcement
-# Blocks git commit/push if not running inside a git worktree.
-# Runs as PreToolUse hook on Bash tool calls.
+# enforce-case-worktree.sh — Advisory early warning
+# Warns when git commit/push is attempted outside a worktree.
+# Real enforcement is in git hooks (.husky/pre-commit, .husky/pre-push).
 #
-# Exit 0 = allow
-# JSON with permissionDecision deny = block
+# Runs as PreToolUse hook on Bash tool calls.
+# Always exits 0 (advisory only — never blocks).
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -21,16 +21,9 @@ if [ -n "$GIT_DIR" ] && [ -n "$GIT_COMMON" ] && [ "$GIT_DIR" != "$GIT_COMMON" ];
   exit 0
 fi
 
-# Block: committing/pushing outside a worktree
+# Advisory warning (git hooks will enforce the real block)
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-jq -n \
-  --arg branch "$BRANCH" \
-  --arg reason "Dev work must happen in a worktree, not on '$BRANCH' in the main checkout. Use claude-wt to launch in an isolated worktree." \
-  '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: $reason
-    }
-  }'
+echo "⚠️  You're about to commit/push on '$BRANCH' in the main checkout." >&2
+echo "   Git pre-commit/pre-push hooks will block this." >&2
+echo "   Use a worktree for dev work (claude-wt or git worktree add)." >&2
 exit 0

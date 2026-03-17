@@ -27,3 +27,101 @@ jobs:
 
       - name: Tests
         run: npx vitest run
+
+  pr-policy:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check test coverage for changed source files
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          # Get changed source files (exclude tests, config, docs, hooks, container agent-runner)
+          CHANGED_SRC=$(git diff --name-only "$BASE"..."$HEAD" -- \
+            '*.ts' '*.js' '*.tsx' '*.jsx' | \
+            grep -vE '(\.(test|spec)\.|__tests__|\.config\.|vitest\.|CLAUDE\.md|\.claude/|container/agent-runner/|\.husky/)' || true)
+
+          if [ -z "$CHANGED_SRC" ]; then
+            echo "No source files changed — skipping test coverage check."
+            exit 0
+          fi
+
+          # Get changed test files
+          CHANGED_TESTS=$(git diff --name-only "$BASE"..."$HEAD" -- \
+            '*.ts' '*.js' '*.tsx' '*.jsx' | \
+            grep -E '\.(test|spec)\.(ts|js|tsx|jsx)$' || true)
+
+          SRC_COUNT=$(echo "$CHANGED_SRC" | wc -l)
+
+          # Check each source file for a corresponding test change
+          UNCOVERED=""
+          while IFS= read -r src_file; do
+            [ -z "$src_file" ] && continue
+            basename=$(basename "$src_file" | sed 's/\.\(ts\|js\|tsx\|jsx\)$//')
+
+            FOUND=false
+            if [ -n "$CHANGED_TESTS" ]; then
+              # Match: exact test file, prefixed test file, or __tests__ directory
+              if echo "$CHANGED_TESTS" | grep -qE "(${basename}[\.-](test|spec)\.|${basename}-[a-z0-9-]+\.(test|spec)\.|$(dirname "$src_file")/__tests__/)"; then
+                FOUND=true
+              fi
+
+              # Check if any changed test imports this source file
+              if [ "$FOUND" = false ]; then
+                while IFS= read -r test_file; do
+                  [ -z "$test_file" ] && continue
+                  [ ! -f "$test_file" ] && continue
+                  if grep -qE "from ['\"].*/${basename}(\.js)?['\"]" "$test_file" 2>/dev/null; then
+                    FOUND=true
+                    break
+                  fi
+                done <<< "$CHANGED_TESTS"
+              fi
+            fi
+
+            if [ "$FOUND" = false ]; then
+              UNCOVERED="${UNCOVERED}  - ${src_file}\n"
+            fi
+          done <<< "$CHANGED_SRC"
+
+          if [ -z "$UNCOVERED" ]; then
+            echo "Test coverage check passed: $SRC_COUNT source file(s) all have corresponding test changes."
+            exit 0
+          fi
+
+          echo "::error::Test coverage policy: $SRC_COUNT source file(s) changed but these have NO corresponding test changes:"
+          echo -e "$UNCOVERED"
+          echo ""
+          echo "Before merging, ensure:"
+          echo "  1. Unit tests cover the actual changes"
+          echo "  2. If no tests exist for a module, write them"
+          echo "  3. Or document why tests aren't needed in the PR description"
+          exit 1
+
+      - name: Check PR body has verification section
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -qiE '(##\s*Verification|##\s*Test\s+plan|Success\s+criteria)'; then
+            echo "Verification section found in PR body."
+            exit 0
+          fi
+
+          echo "::error::Missing Verification section in PR body."
+          echo ""
+          echo "Every PR must include a Verification section with:"
+          echo "  1. Concrete success criteria"
+          echo "  2. How to verify (commands or steps)"
+          echo "  3. Expected outcome"
+          echo ""
+          echo "Example:"
+          echo "  ## Verification"
+          echo "  - [ ] Run npm run build — completes without errors"
+          echo "  - [ ] Send test message — agent responds within 30s"
+          exit 1

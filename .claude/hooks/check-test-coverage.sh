@@ -1,11 +1,10 @@
 #!/bin/bash
-# check-test-coverage.sh — Level 2 kaizen enforcement (Issue #8)
-# Intercepts `gh pr create` and `gh pr merge` to verify that changed source
-# files have corresponding test coverage changes.
+# check-test-coverage.sh — Advisory early warning (Issue #8)
+# Warns when changed source files lack corresponding test coverage changes.
+# Real enforcement is in CI (pr-policy job in .github/workflows/ci.yml).
 #
 # Runs as PreToolUse hook on Bash tool calls.
-# Exit 0 = allow (with advisory output on stderr)
-# JSON with permissionDecision deny = block
+# Always exits 0 (advisory only — never blocks).
 
 source "$(dirname "$0")/lib/parse-command.sh"
 
@@ -107,22 +106,13 @@ Before proceeding, ensure:
 
 This check prevents the 'all tests pass but none test the fix' pattern."
 
+# Advisory warning for both create and merge (CI enforces the real gate)
+echo "$MSG" >&2
+echo "" >&2
 if [ "$IS_MERGE" = true ]; then
-  # Block merge if tests are missing
-  jq -n \
-    --arg reason "$MSG" \
-    '{
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: $reason
-      }
-    }'
+  echo "⚠️  CI pr-policy check will block merge if tests are missing." >&2
 else
-  # For PR creation: advisory warning (don't block, but make it loud)
-  echo "$MSG" >&2
-  echo "" >&2
-  echo "💡 Consider adding tests before creating the PR, or document why tests aren't needed in the PR description." >&2
+  echo "💡 Consider adding tests before creating the PR. CI will check this." >&2
 fi
 
 exit 0
