@@ -1,6 +1,6 @@
 # Tasks: Obsidian Journal Folder, Audio Linking, and QMD Note Linking
 
-**Input**: Design documents from `/specs/001-obsidian-journal-audio-linking/`
+**Input**: Design documents from `/specs/001-feat-obsidian-journal-audio-linking/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, quickstart.md
 
 **Tests**: Tests are included per plan.md (Test-First per constitution). The spec requests tests for journal entry formatting, audio filename generation, and date resolution.
@@ -120,7 +120,7 @@
 
 - [ ] T020 [P] Run full test suite, type checking, and linting (`npm test && npm run typecheck && npm run build`)
 - [ ] T021 [P] Clear stale agent-runner copies and rebuild container (`rm -rf data/sessions/*/agent-runner-src/ && ./container/build.sh`)
-- [ ] T022 Run quickstart.md end-to-end validation (send text message with trigger phrase, voice message, addendum voice message, and non-trigger message per specs/001-obsidian-journal-audio-linking/quickstart.md)
+- [ ] T022 Run quickstart.md end-to-end validation (send text message with trigger phrase, voice message, addendum voice message, and non-trigger message per specs/001-feat-obsidian-journal-audio-linking/quickstart.md)
 
 ---
 

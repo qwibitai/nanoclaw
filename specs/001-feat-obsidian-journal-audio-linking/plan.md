@@ -1,7 +1,7 @@
 # Implementation Plan: Obsidian Journal Folder, Audio Linking, and QMD Note Linking
 
-**Branch**: `001-obsidian-journal-audio-linking` | **Date**: 2026-03-17 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/001-obsidian-journal-audio-linking/spec.md`
+**Branch**: `001-feat-obsidian-journal-audio-linking` | **Date**: 2026-03-17 | **Spec**: [spec.md](spec.md)
+**Input**: Feature specification from `/specs/001-feat-obsidian-journal-audio-linking/spec.md`
 
 ## Summary
 
@@ -40,7 +40,7 @@ Update the NanoClaw Obsidian integration so that daily notes are placed in a `Jo
 ### Documentation (this feature)
 
 ```text
-specs/001-obsidian-journal-audio-linking/
+specs/001-feat-obsidian-journal-audio-linking/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output

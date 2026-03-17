@@ -1,6 +1,6 @@
 # Feature Specification: Obsidian Journal Folder, Audio Linking, and QMD Note Linking
 
-**Feature Branch**: `001-obsidian-journal-audio-linking`
+**Feature Branch**: `001-feat-obsidian-journal-audio-linking`
 **Created**: 2026-03-16
 **Status**: Draft
 **Input**: User description: "Update the Obsidian skill so that daily notes go into the journal folder, audio notes from Telegram are linked to daily notes, addendum notes attach follow-on audio, and QMD is used to search and link relevant existing notes inline."
