@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -76,16 +77,11 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // Note: Apple Container only supports directory bind mounts, not file mounts,
+    // so we cannot shadow .env with /dev/null as Docker would allow.
+    // This is safe: the container's ANTHROPIC_API_KEY env var is set to 'placeholder'
+    // and ANTHROPIC_BASE_URL points to the credential proxy, so the real key in
+    // .env is never reachable even if the agent reads the file.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -237,6 +233,12 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass model override if configured (e.g. ANTHROPIC_MODEL=qwen3.5-plus in .env)
+  const { ANTHROPIC_MODEL: model } = readEnvFile(['ANTHROPIC_MODEL']);
+  if (model) {
+    args.push('-e', `ANTHROPIC_MODEL=${model}`);
   }
 
   // Runtime-specific args for host gateway resolution
