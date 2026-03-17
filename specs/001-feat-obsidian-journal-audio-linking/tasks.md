@@ -31,7 +31,7 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T002 [P] Write test for timestamp-based audio filename generation (`YYYY-MM-DD-HHMMSS.ogg` from a Date) in src/obsidian.test.ts
+- [x] T002 [P] Write test for timestamp-based audio filename generation (`YYYY-MM-DD-HHMMSS.ogg` from a Date) in src/obsidian.test.ts
 - [ ] T003 [P] Write test for `saveAudioToVault()` accepting a `Date` parameter and producing timestamp-named files in src/obsidian.test.ts
 
 ### Implementation for Foundational Phase

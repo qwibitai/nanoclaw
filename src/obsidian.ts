@@ -145,6 +145,16 @@ function normalizeTag(tag: string): string {
 }
 
 /**
+ * Generate a timestamp-based audio filename from a Date.
+ * Format: YYYY-MM-DD-HHMMSS.ogg (UTC)
+ * Stub: will be implemented in T004.
+ */
+export function generateAudioFilename(_timestamp: Date): string {
+  // TODO(T004): implement timestamp-based filename generation
+  return 'voice-stub.ogg';
+}
+
+/**
  * Save an audio buffer to the vault's attachments directory.
  * Returns the filename (relative to vault) for embedding.
  */
