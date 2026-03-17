@@ -92,7 +92,7 @@ export class GroupQueue {
 
     const state = this.getGroup(groupJid);
 
-    // Prevent double-queuing: check both pending and currently-running task
+    // 重複エンキューを防止: 実行中および保留中のタスクの両方を確認
     if (state.runningTaskId === taskId) {
       logger.debug({ groupJid, taskId }, 'Task already running, skipping');
       return;
@@ -123,7 +123,7 @@ export class GroupQueue {
       return;
     }
 
-    // Run immediately
+    // 即座に実行
     this.runTask(groupJid, { id: taskId, groupJid, fn }).catch((err) =>
       logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
     );
@@ -142,8 +142,8 @@ export class GroupQueue {
   }
 
   /**
-   * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks are pending, preempt the idle container immediately.
+   * コンテナをアイドル待機状態（作業が終了し、IPC 入力を待っている状態）としてマークします。
+   * 保留中のタスクがある場合は、即座にアイドルコンテナを終了させます。
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
@@ -154,14 +154,14 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * IPC ファイルを介して、アクティブなコンテナに追撃メッセージを送信します。
+   * メッセージが書き込まれた場合は true、アクティブなコンテナがない場合は false を返します。
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
-    state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    state.idleWaiting = false; // エージェントが作業を受け取ろうとしているため、アイドル状態ではなくなる
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -178,7 +178,7 @@ export class GroupQueue {
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * 終了センチネルを書き込むことで、アクティブなコンテナに終了の合図を送ります。
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
@@ -189,7 +189,7 @@ export class GroupQueue {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
-      // ignore
+      // 無視
     }
   }
 
@@ -288,7 +288,7 @@ export class GroupQueue {
 
     const state = this.getGroup(groupJid);
 
-    // Tasks first (they won't be re-discovered from SQLite like messages)
+    // タスクを優先（メッセージのように SQLite から再取得されないため）
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
       this.runTask(groupJid, task).catch((err) =>
@@ -300,7 +300,7 @@ export class GroupQueue {
       return;
     }
 
-    // Then pending messages
+    // 次に保留中のメッセージ
     if (state.pendingMessages) {
       this.runForGroup(groupJid, 'drain').catch((err) =>
         logger.error(
@@ -311,7 +311,7 @@ export class GroupQueue {
       return;
     }
 
-    // Nothing pending for this group; check if other groups are waiting for a slot
+    // このグループに保留中のものはない。他のグループがスロットを待っていないか確認
     this.drainWaiting();
   }
 
@@ -323,7 +323,7 @@ export class GroupQueue {
       const nextJid = this.waitingGroups.shift()!;
       const state = this.getGroup(nextJid);
 
-      // Prioritize tasks over messages
+      // メッセージよりタスクを優先
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
         this.runTask(nextJid, task).catch((err) =>
@@ -340,16 +340,17 @@ export class GroupQueue {
           ),
         );
       }
-      // If neither pending, skip this group
+      // いずれも保留されていない場合は、このグループをスキップ
     }
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
+    // アクティブなコンテナの数をカウントするが、強制終了はしない。
+    // アイドルタイムアウトまたはコンテナタイムアウトにより、自発的に終了する。
+    // --rm フラグにより、終了時にクリーンアップされる。
+    // これにより、WhatsApp の再接続による再起動が、作業中のエージェントを殺すのを防ぐ。
     const activeContainers: string[] = [];
     for (const [jid, state] of this.groups) {
       if (state.process && !state.process.killed && state.containerName) {
