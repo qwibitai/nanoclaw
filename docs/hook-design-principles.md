@@ -1,3 +1,77 @@
+# Autonomous Guardrailed Dev Workflow
+
+How NanoClaw dev agents work autonomously with quality enforcement at every step. The agent completes the full cycle — worktree, code, test, PR, review, merge, sync — without human intervention. Hooks enforce quality gates that the agent cannot bypass.
+
+## The Full Dev Cycle
+
+```
+SessionStart
+  │  check-wip.sh warns about in-progress work
+  ▼
+Worktree Creation
+  │  enforce-case-worktree.sh blocks commits outside worktrees
+  │  enforce-worktree-writes.sh blocks edits to main checkout
+  ▼
+Development
+  │  check-dirty-files.sh tracks uncommitted changes
+  │  check-verification.sh enforces path tracing before fixes
+  ▼
+Testing & Commit
+  │  check-test-coverage.sh blocks merges without tests
+  │  verify-before-stop.sh blocks stop if TypeScript doesn't compile / tests fail
+  ▼
+PR Creation (gh pr create)
+  │  pr-review-loop.sh (PostToolUse) writes STATUS=needs_review
+  │  enforce-pr-review-stop.sh (Stop) blocks agent from finishing
+  │  enforce-pr-review.sh (PreToolUse/Bash) blocks non-review commands
+  │  enforce-pr-review-tools.sh (PreToolUse/Edit|Write|Agent) blocks edits
+  │  ─── agent is FORCED to run gh pr diff and complete review ───
+  │  Up to 4 rounds of review. If issues remain → escalate to human.
+  ▼
+Merge (autonomous)
+  │  gh pr merge --auto --squash --delete-branch
+  │  Wait for CI (gh run watch / gh pr checks --watch)
+  │  Verify state=MERGED
+  │  If CI fails → fix, push (auto-merge retries automatically)
+  │  If branch behind → merge main, push (auto-merge retries)
+  ▼
+Post-Merge
+  │  Sync main: git fetch origin main && git merge origin/main
+  │  kaizen-reflect.sh (PostToolUse) prompts for process improvement
+  │  check-cleanup-on-stop.sh verifies worktree cleanup
+  ▼
+Done
+```
+
+Every arrow is enforced by hooks. The agent cannot skip steps — hooks block tool calls, block stopping, and funnel the agent through the correct path. The only escape is escalation to a human after max retries.
+
+## Hook Enforcement Levels
+
+| Level | Mechanism | Durability | Example |
+|-------|-----------|-----------|---------|
+| 0 | Claude's training | Unreliable | "Always review PRs" |
+| 1 | CLAUDE.md instructions | Fragile — agent can forget | "After gh pr create, run gh pr diff" |
+| 2 | PostToolUse hooks | Advisory — agent can ignore | pr-review-loop.sh outputs checklist |
+| 3 | PreToolUse + Stop hooks | Enforced — agent cannot bypass | enforce-pr-review-stop.sh blocks stopping |
+
+**Level 3 is the only reliable enforcement.** Levels 0-2 are useful for context but must never be the sole mechanism for anything important. If an instruction matters, it must be backed by a Level 3 hook.
+
+## Merge Workflow (Autonomous)
+
+Branch protection has `strict: true` status checks. Auto-merge is enabled. The agent handles the full merge loop:
+
+1. **Queue**: `gh pr merge <url> --repo Garsson-io/nanoclaw --squash --delete-branch --auto`
+2. **Wait**: `gh pr checks <url> --repo Garsson-io/nanoclaw --watch` or `gh run watch <id>`
+3. **Verify**: `gh pr view <url> --json state --jq .state` → expect `MERGED`
+4. **Sync**: `git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge origin/main --no-edit`
+
+**Failure handling** (agent does this autonomously, no human needed):
+- **CI fails**: fix the issue, commit, push. Auto-merge stays queued, CI re-runs.
+- **Branch behind main**: `git fetch origin main && git merge origin/main --no-edit && git push`. CI re-runs, auto-merge retries.
+- **Auto-merge not completing**: check `gh pr view --json mergeStateStatus` and fix.
+
+**Do NOT ask the user** for merge issues — handle them. Only escalate after multiple failed retries with different root causes.
+
 # Hook Design Principles
 
 Principles learned from 10+ incidents of review hooks breaking. These are hard-won invariants — violating any of them leads to enforcement gaps.
