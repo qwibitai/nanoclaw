@@ -1,17 +1,17 @@
 /**
- * NanoClaw Agent Runner
- * Runs inside a container, receives config via stdin, outputs result to stdout
+ * NanoClaw エージェントランナー
+ * コンテナ内で実行され、標準入力から設定を受け取り、結果を標準出力に出力します。
  *
- * Input protocol:
- *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ * 入力プロトコル:
+ *   標準入力: ContainerInput JSON 全体（EOF まで読み込み）
+ *   IPC:     追撃メッセージ。/workspace/ipc/input/ に JSON ファイルとして書き込まれる。
+ *            ファイル形式: {type:"message", text:"..."}.json — ポーリングして消費される。
+ *            センチネル: /workspace/ipc/input/_close — セッション終了の合図。
  *
- * Stdout protocol:
- *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
- *   Multiple results may be emitted (one per agent teams result).
- *   Final marker after loop ends signals completion.
+ * 標準出力プロトコル:
+ *   各結果は OUTPUT_START_MARKER / OUTPUT_END_MARKER のペアでラップされる。
+ *   複数の結果が出力される場合がある（エージェントチームの結果ごとに 1 つ）。
+ *   ループ終了後の最終マーカーが完了の合図。
  */
 
 import fs from 'fs';
@@ -59,8 +59,8 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
 /**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
+ * SDK にユーザーメッセージをストリーミングするためのプッシュベースの非同期イテラブル。
+ * end() が呼び出されるまでイテラブルを維持し、isSingleUserTurn を防止します。
  */
 class MessageStream {
   private queue: SDKUserMessage[] = [];
@@ -122,7 +122,7 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
   const indexPath = path.join(projectDir, 'sessions-index.json');
 
   if (!fs.existsSync(indexPath)) {
-    log(`Sessions index not found at ${indexPath}`);
+    log(`セッションインデックスが見つかりません: ${indexPath}`);
     return null;
   }
 
@@ -133,14 +133,14 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
       return entry.summary;
     }
   } catch (err) {
-    log(`Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`);
+    log(`セッションインデックスの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return null;
 }
 
 /**
- * Archive the full transcript to conversations/ before compaction.
+ * コンパクション（要約）の前に、全履歴を conversations/ にアーカイブします。
  */
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -149,7 +149,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
     const sessionId = preCompact.session_id;
 
     if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
+      log('アーカイブするための履歴が見つかりません');
       return {};
     }
 
@@ -158,7 +158,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const messages = parseTranscript(content);
 
       if (messages.length === 0) {
-        log('No messages to archive');
+        log('アーカイブするメッセージがありません');
         return {};
       }
 
@@ -175,9 +175,9 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
       fs.writeFileSync(filePath, markdown);
 
-      log(`Archived conversation to ${filePath}`);
+      log(`会話を ${filePath} にアーカイブしました`);
     } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
+      log(`履歴のアーカイブに失敗しました: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     return {};
@@ -259,19 +259,19 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Check for _close sentinel.
+ * _close センチネルを確認します。
  */
 function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* 無視 */ }
     return true;
   }
   return false;
 }
 
 /**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
+ * 保留中のすべての IPC 入力メッセージを吸い出します。
+ * 見つかったメッセージの配列、または空の配列を返します。
  */
 function drainIpcInput(): string[] {
   try {
@@ -290,20 +290,20 @@ function drainIpcInput(): string[] {
           messages.push(data.text);
         }
       } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        log(`入力ファイル ${file} の処理に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+        try { fs.unlinkSync(filePath); } catch { /* 無視 */ }
       }
     }
     return messages;
   } catch (err) {
-    log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
+    log(`IPC 吸い出しエラー: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
 
 /**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * 新しい IPC メッセージまたは _close センチネルを待ちます。
+ * メッセージを単一の文字列として返します。_close の場合は null を返します。
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
@@ -324,10 +324,10 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
- * Run a single query and stream results via writeOutput.
- * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
- * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
+ * 単一のクエリを実行し、結果を writeOutput 経由でストリーミングします。
+ * MessageStream (AsyncIterable) を使用して isSingleUserTurn=false を維持し、
+ * エージェントチームのサブエージェントが完了まで実行されるようにします。
+ * また、クエリ実行中に IPC メッセージをストリームにパイプします。
  */
 async function runQuery(
   prompt: string,
@@ -340,13 +340,13 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // クエリ実行中に追撃メッセージと _close センチネルを求めて IPC をポーリング
   let ipcPolling = true;
   let closedDuringQuery = false;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
+      log('クエリ実行中にクローズセンチネルを検出しました。ストリームを終了します');
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
@@ -354,7 +354,7 @@ async function runQuery(
     }
     const messages = drainIpcInput();
     for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
+      log(`実行中のクエリに IPC メッセージをパイプ中 (${text.length} 文字)`);
       stream.push(text);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
@@ -366,15 +366,15 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
+  // グローバルメモリ（CLAUDE.md）を追加のシステムコンテキストとしてロード（全グループで共有）
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // /workspace/extra/* にマウントされた追加ディレクトリを検出
+  // これらは SDK に渡され、配下の CLAUDE.md ファイルが自動的にロードされます
   const extraDirs: string[] = [];
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
@@ -386,7 +386,7 @@ async function runQuery(
     }
   }
   if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
+    log(`追加ディレクトリ: ${extraDirs.join(', ')}`);
   }
 
   for await (const message of query({
@@ -431,7 +431,7 @@ async function runQuery(
   })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    log(`[メッセージ #${messageCount}] type=${msgType}`);
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
@@ -439,18 +439,18 @@ async function runQuery(
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
+      log(`セッション初期化完了: ${newSessionId}`);
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
       const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      log(`タスク通知: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      log(`結果 #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -460,7 +460,7 @@ async function runQuery(
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+  log(`クエリ終了。メッセージ数: ${messageCount}, 結果数: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
@@ -470,19 +470,19 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
-    log(`Received input for group: ${containerInput.groupFolder}`);
+    try { fs.unlinkSync('/tmp/input.json'); } catch { /* 存在しない可能性あり */ }
+    log(`グループ用の入力を受信しました: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
       status: 'error',
       result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      error: `入力のパースに失敗しました: ${err instanceof Error ? err.message : String(err)}`
     });
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
+  // 認証情報はホストの認証情報プロキシによって ANTHROPIC_BASE_URL 経由で注入されます。
+  // コンテナ環境には本物のシークレットは存在しません。
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -491,25 +491,25 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  // 以前のコンテナ実行から残っている古い _close センチネルをクリーンアップ
+  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* 無視 */ }
 
-  // Build initial prompt (drain any pending IPC messages too)
+  // 初期プロンプトを構築（保留中の IPC メッセージも吸い出す）
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    prompt = `[定期実行タスク - 以下のメッセージは自動的に送信されたものであり、ユーザーやグループから直接送信されたものではありません。]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+    log(`${pending.length} 件の保留中 IPC メッセージを初期プロンプトに統合します`);
     prompt += '\n' + pending.join('\n');
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // クエリループ: クエリ実行 → IPC メッセージ待機 → 新しいクエリ実行 → 繰り返し
   let resumeAt: string | undefined;
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(`クエリを開始します (セッション: ${sessionId || '新規'}, resumeAt: ${resumeAt || '最新'})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
@@ -519,32 +519,32 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
+      // クエリ実行中に _close が消費された場合は即座に終了。
+      // セッション更新マーカーを出力しないでください（ホストのアイドルタイマーがリセットされ、
+      // 次の _close まで 30 分の遅延が発生するため）。
       if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log('クエリ実行中にクローズセンチネルが消費されました。終了します');
         break;
       }
 
-      // Emit session update so host can track it
+      // ホストが追跡できるようにセッション更新を出力
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
-      log('Query ended, waiting for next IPC message...');
+      log('クエリが終了しました。次の IPC メッセージを待機中...');
 
-      // Wait for the next message or _close sentinel
+      // 次のメッセージまたは _close センチネルを待機
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log('クローズセンチネルを受信しました。終了します');
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      log(`新しいメッセージを受信しました (${nextMessage.length} 文字)。新しいクエリを開始します`);
       prompt = nextMessage;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
+    log(`エージェントエラー: ${errorMessage}`);
     writeOutput({
       status: 'error',
       result: null,
