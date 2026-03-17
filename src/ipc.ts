@@ -947,6 +947,7 @@ export async function processTaskIpc(
     case 'case_create': {
       const d = data as unknown as {
         description: string;
+        context?: string;
         shortName?: string;
         caseType?: string;
         chatJid?: string;
@@ -1002,11 +1003,14 @@ export async function processTaskIpc(
       let githubIssue = d.githubIssue ?? null;
       let issueUrl: string | null = null;
       if (caseType === 'dev' && !githubIssue) {
+        const issueBody = d.context
+          ? `## TL;DR\n\n${d.description}\n\n---\n\n## Details\n\n${d.context}\n\n---\n\n*Auto-created by dev case \`${name}\`*`
+          : `${d.description}\n\n---\n*Auto-created by dev case \`${name}\`*`;
         const issueResult = await createGitHubIssue({
           owner: DEV_CASE_ISSUE_REPO.owner,
           repo: DEV_CASE_ISSUE_REPO.repo,
-          title: name,
-          body: `${d.description}\n\n---\n*Auto-created by dev case \`${name}\`*`,
+          title: d.description,
+          body: issueBody,
           labels: ['kaizen'],
         });
         if (issueResult.success && issueResult.issueNumber) {

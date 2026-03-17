@@ -44,7 +44,7 @@ NanoClaw (harness, public)              Verticals (private repos)
 | Harness infrastructure | This repo | `src/`, `container/`, skills |
 
 **Rules:**
-- **NEVER install packages on the host** — system deps go in Dockerfiles, npm deps in package.json
+- **NEVER install system packages on the host** (no `sudo apt install`) — system deps go in Dockerfiles. npm deps go in the relevant `package.json` and are installed via `npm install`
 - **Domain-specific code goes in the vertical repo**, not here
 - **Verticals are mounted into containers** at `/workspace/extra/{name}/`
 - **Work agents** get read-only tools, read-write data. **Dev agents** modify code in worktrees.
@@ -91,7 +91,7 @@ NanoClaw (harness, public)              Verticals (private repos)
 These policies were learned from past mistakes. Follow them strictly.
 
 1. **Architecture decisions require explicit approval.** When choosing where code lives, what dependencies to use, or what tools to install — present options with tradeoffs and ask Aviad before proceeding. Don't assume.
-2. **NEVER install packages on the host machine.** System deps go in Dockerfiles. npm deps go in project package.json. The container is the runtime environment, not the host.
+2. **NEVER install system packages on the host machine** (no `sudo apt install`). System deps go in Dockerfiles. npm deps go in the relevant `package.json` and are installed via `npm install` (the root `postinstall` script also installs `container/agent-runner` deps for host-side type-checking).
 3. **Research before installing.** Check existing NanoClaw skills first (some may already solve the problem). Search for modern, agent-compatible, container-friendly tools. Don't impulsively install the first package that comes to mind — evaluate alternatives. Present findings before proceeding.
 4. **Ask "harness or vertical?"** before writing any code. Domain-specific code (workflows, tools, business data) belongs in the vertical repo. Infrastructure code (channels, routing, containers) belongs here.
 5. **Put durable knowledge in CLAUDE.md and docs/, not just local memory.** `~/.claude/` memory is local to one machine and not synced to git. Any knowledge that future agents need must be in repo files.
@@ -242,6 +242,7 @@ Tables: `messages`, `chats`, `cases`, `sessions`, `api_usage`, `usage_categories
 Run commands directly—don't tell the user to run them.
 
 ```bash
+npm install          # Install deps (also installs container/agent-runner deps via postinstall)
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container

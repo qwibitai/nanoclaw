@@ -278,11 +278,12 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
       deps,
     );
 
-    // GitHub issue should be created with kaizen label
+    // GitHub issue should be created with description as title and kaizen label
     expect(mockedCreateGitHubIssue).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'Garsson-io',
         repo: 'kaizen',
+        title: 'Fix the broken widget',
         labels: ['kaizen'],
       }),
     );
@@ -294,6 +295,67 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
         type: 'dev',
       }),
     );
+  });
+
+  test('dev case with context structures GitHub issue body', async () => {
+    mockedCreateGitHubIssue.mockResolvedValue({
+      success: true,
+      issueUrl: 'https://github.com/Garsson-io/kaizen/issues/55',
+      issueNumber: 55,
+    });
+
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Always present category options in selection questions',
+        context:
+          'Nir asked: when the agent asks the customer to choose a material, it should list the options instead of asking open-ended questions.\n\nRules:\n- If ≤5 options: list all\n- If >5: show 3 + ellipsis',
+        caseType: 'dev',
+        chatJid: 'tg:111',
+        requestId: 'req-dev-ctx',
+      } as any,
+      'telegram_main',
+      true,
+      deps,
+    );
+
+    const call = mockedCreateGitHubIssue.mock.calls[0][0];
+    expect(call.title).toBe(
+      'Always present category options in selection questions',
+    );
+    expect(call.body).toContain('## TL;DR');
+    expect(call.body).toContain(
+      'Always present category options in selection questions',
+    );
+    expect(call.body).toContain('## Details');
+    expect(call.body).toContain('Nir asked');
+    expect(call.body).toContain('≤5 options');
+  });
+
+  test('dev case without context uses simple body format', async () => {
+    mockedCreateGitHubIssue.mockResolvedValue({
+      success: true,
+      issueUrl: 'https://github.com/Garsson-io/kaizen/issues/56',
+      issueNumber: 56,
+    });
+
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Fix the broken widget',
+        caseType: 'dev',
+        chatJid: 'tg:111',
+        requestId: 'req-dev-no-ctx',
+      } as any,
+      'telegram_main',
+      true,
+      deps,
+    );
+
+    const call = mockedCreateGitHubIssue.mock.calls[0][0];
+    expect(call.body).not.toContain('## TL;DR');
+    expect(call.body).toContain('Fix the broken widget');
+    expect(call.body).toContain('Auto-created by dev case');
   });
 
   test('dev case includes issue URL in result file', async () => {

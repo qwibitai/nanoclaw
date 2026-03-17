@@ -639,6 +639,12 @@ Case types:
       .describe(
         'Brief description of what this case is about (shown in case status)',
       ),
+    context: z
+      .string()
+      .optional()
+      .describe(
+        'Rich context for the GitHub issue. For dev cases, this MUST include: (1) the original user messages that triggered this case (close to verbatim, abridged if very long), and (2) any relevant details, requirements, or constraints discussed. This becomes the body of the GitHub issue — without it, the issue will lack critical context. For work cases this is optional.',
+      ),
     case_type: z
       .enum(['work', 'dev'])
       .default('work')
@@ -651,6 +657,7 @@ Case types:
       type: 'case_create',
       shortName: args.short_name,
       description: args.description,
+      context: args.context,
       caseType: args.case_type || 'work',
       chatJid,
       initiator: 'agent',
