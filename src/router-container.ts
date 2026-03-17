@@ -254,6 +254,14 @@ async function runRouterContainer(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let settled = false;
+
+    const settle = (outcome: 'resolve' | 'reject', value?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (outcome === 'resolve') resolve();
+      else reject(value);
+    };
 
     // Write input and close stdin
     container.stdin.write(JSON.stringify(containerInput));
@@ -285,18 +293,24 @@ async function runRouterContainer(
       setTimeout(() => {
         if (!container.killed) container.kill('SIGKILL');
       }, 5000);
+      // Force-reject after grace period if 'close' event never fires.
+      // Without this, a zombie container blocks the message queue forever.
+      setTimeout(() => {
+        settle('reject', new Error('Router container timed out'));
+      }, 10_000);
     }, ROUTER_TIMEOUT_MS);
 
     container.on('close', (code) => {
       clearTimeout(timeout);
 
       if (timedOut) {
-        reject(new Error('Router container timed out'));
+        settle('reject', new Error('Router container timed out'));
         return;
       }
 
       if (code !== 0) {
-        reject(
+        settle(
+          'reject',
           new Error(
             `Router container exited with code ${code}: ${stderr.slice(-500)}`,
           ),
@@ -306,12 +320,15 @@ async function runRouterContainer(
 
       // Container exited successfully — the route_decision MCP tool
       // wrote the result to an IPC file. Resolve so the caller can read it.
-      resolve();
+      settle('resolve');
     });
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      reject(new Error(`Router container spawn error: ${err.message}`));
+      settle(
+        'reject',
+        new Error(`Router container spawn error: ${err.message}`),
+      );
     });
   });
 }

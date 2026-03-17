@@ -35,10 +35,12 @@ STATE_DIR="${STATE_DIR:-/tmp/.pr-review-state}"
 # likely from a crashed/abandoned session — and should not block.
 MAX_STATE_AGE="${MAX_STATE_AGE:-7200}"  # 2 hours
 
-# Check if any state file has STATUS=needs_review (and is not stale)
+# Check if any state file has STATUS=needs_review for the CURRENT branch (and is not stale).
+# Only blocks the agent that owns the PR, not agents in other worktrees.
 find_needs_review() {
-  local now
+  local now current_branch
   now=$(date +%s)
+  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   for f in "$STATE_DIR"/*; do
     [ -f "$f" ] || continue
     # Skip stale state files
@@ -46,6 +48,12 @@ find_needs_review() {
     mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "0")
     local age=$(( now - mtime ))
     if [ "$age" -gt "$MAX_STATE_AGE" ]; then
+      continue
+    fi
+    # Skip state files from other branches (prevents cross-worktree blocking)
+    local file_branch
+    file_branch=$(grep -E '^BRANCH=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ -n "$file_branch" ] && [ -n "$current_branch" ] && [ "$file_branch" != "$current_branch" ]; then
       continue
     fi
     local status

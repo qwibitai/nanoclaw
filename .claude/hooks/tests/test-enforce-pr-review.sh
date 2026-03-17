@@ -17,13 +17,15 @@ teardown() {
 }
 
 # Helper: create a state file with given status
+# Optional 4th arg: branch name (defaults to current branch)
 create_state() {
   local pr_url="$1"
   local round="$2"
   local status="$3"
+  local branch="${4:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'main')}"
   local filename
   filename=$(echo "$pr_url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')
-  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\n' "$pr_url" "$round" "$status" > "$STATE_DIR/$filename"
+  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
 }
 
 # Helper: run the PreToolUse hook with a command
@@ -268,25 +270,59 @@ else
 fi
 
 echo ""
-echo "=== Multiple state files: only needs_review triggers gate ==="
+echo "=== Multiple state files: only needs_review on current branch triggers gate ==="
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 
 setup
-create_state "https://github.com/Garsson-io/nanoclaw/pull/40" "2" "passed"
-create_state "https://github.com/Garsson-io/garsson-prints/pull/5" "1" "needs_review"
+create_state "https://github.com/Garsson-io/nanoclaw/pull/40" "2" "passed" "$CURRENT_BRANCH"
+create_state "https://github.com/Garsson-io/garsson-prints/pull/5" "1" "needs_review" "$CURRENT_BRANCH"
 
-# INVARIANT: Gate activates if ANY state file has needs_review
-# SUT: enforce-pr-review.sh with mixed state files
+# INVARIANT: Gate activates if a state file on the current branch has needs_review
+# SUT: enforce-pr-review.sh with mixed state files on same branch
 OUTPUT=$(run_gate "npm test")
 if is_denied "$OUTPUT"; then
-  echo "  PASS: gate active when one of multiple PRs needs review"
+  echo "  PASS: gate active when one of multiple PRs needs review (same branch)"
   ((PASS++))
 else
-  echo "  FAIL: gate NOT active despite needs_review state"
+  echo "  FAIL: gate NOT active despite needs_review state on current branch"
   ((FAIL++))
 fi
 
 REASON=$(echo "$OUTPUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
 assert_contains "deny references the correct PR" "garsson-prints/pull/5" "$REASON"
+
+echo ""
+echo "=== Cross-worktree isolation: other branch's review does not block ==="
+
+setup
+create_state "https://github.com/Garsson-io/nanoclaw/pull/54" "1" "needs_review" "wt/other-worktree-branch"
+
+# INVARIANT: A needs_review state from a different branch does NOT block the current branch
+# SUT: enforce-pr-review.sh branch filtering
+OUTPUT=$(run_gate "npm test")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: other branch's needs_review does not block current branch"
+  ((PASS++))
+else
+  echo "  FAIL: other branch's needs_review is blocking current branch"
+  ((FAIL++))
+fi
+
+# INVARIANT: Legacy state files without BRANCH= field still block (backwards compatibility)
+# SUT: enforce-pr-review.sh with missing branch field
+setup
+local_file="$STATE_DIR/Garsson-io_nanoclaw_99"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/99\nROUND=1\nSTATUS=needs_review\n' > "$local_file"
+
+OUTPUT=$(run_gate "npm test")
+if is_denied "$OUTPUT"; then
+  echo "  PASS: legacy state file (no BRANCH) still blocks"
+  ((PASS++))
+else
+  echo "  FAIL: legacy state file (no BRANCH) did NOT block"
+  ((FAIL++))
+fi
 
 echo ""
 echo "=== Stale state files are ignored ==="

@@ -116,9 +116,11 @@ write_state() {
   local url="$1"
   local round="$2"
   local status="$3"
-  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\n' "$url" "$round" "$status" > "$STATE_FILE"
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$url" "$round" "$status" "$branch" > "$STATE_FILE"
   chmod 600 "$STATE_FILE" 2>/dev/null
-  echo "[$(date -Iseconds)] write_state | file=$STATE_FILE round=$round status=$status" >> "$DEBUG_LOG"
+  echo "[$(date -Iseconds)] write_state | file=$STATE_FILE round=$round status=$status branch=$branch" >> "$DEBUG_LOG"
 }
 
 # Clean up state file

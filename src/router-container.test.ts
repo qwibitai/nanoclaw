@@ -294,6 +294,69 @@ describe('routeMessage', () => {
   });
 
   /**
+   * INVARIANT: Router timeout rejects even if 'close' event never fires (zombie container)
+   * SUT: runRouterContainer force-reject safety net
+   * VERIFICATION: Promise rejects within grace period when container ignores SIGTERM/SIGKILL
+   */
+  it('force-rejects when container does not emit close after timeout', async () => {
+    vi.useFakeTimers();
+
+    const mockProc = createMockProcess();
+    // Make kill() a no-op — container stays alive, never emits 'close'
+    mockProc.kill = vi.fn();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const { routeMessage } = await import('./router-container.js');
+    const request = makeRouterRequest();
+
+    // Attach .catch immediately to prevent unhandled rejection
+    const routePromise = routeMessage(request).catch((err: Error) => err);
+
+    // Advance past the 60s timeout + 10s force-reject grace period
+    await vi.advanceTimersByTimeAsync(70_000);
+
+    const result = await routePromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('timed out');
+
+    vi.useRealTimers();
+  });
+
+  /**
+   * INVARIANT: When close fires after timeout, promise still rejects (no hang)
+   * SUT: runRouterContainer settle guard
+   * VERIFICATION: Double-settle is safe — first rejection wins
+   */
+  it('handles close event after timeout without error', async () => {
+    vi.useFakeTimers();
+
+    const mockProc = createMockProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const { routeMessage } = await import('./router-container.js');
+    const request = makeRouterRequest();
+
+    // Attach .catch immediately to prevent unhandled rejection
+    const routePromise = routeMessage(request).catch((err: Error) => err);
+
+    // Advance past timeout — triggers kill + force-reject timer
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // Now close fires (container finally died) — should be safely ignored
+    mockProc.emit('close', 137);
+
+    // Advance past force-reject timer
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Should still reject with timeout error (first settlement wins)
+    const result = await routePromise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('timed out');
+
+    vi.useRealTimers();
+  });
+
+  /**
    * INVARIANT: Router container error is propagated as rejection
    * SUT: routeMessage error handling
    * VERIFICATION: Container spawn errors are caught and re-thrown
