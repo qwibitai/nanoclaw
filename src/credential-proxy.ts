@@ -5,10 +5,11 @@
  *
  * Two auth modes:
  *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
+ *   OAuth:    At startup, proxy exchanges the OAuth token for a temporary
  *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ *             The cached API key is then injected on /v1/ requests
+ *             (same as API key mode). The proxy also replaces Authorization
+ *             headers for containers that do their own exchange.
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -21,6 +22,62 @@ export type AuthMode = 'api-key' | 'oauth';
 
 export interface ProxyConfig {
   authMode: AuthMode;
+}
+
+/** Exchange an OAuth token for a temporary API key. */
+export async function exchangeOAuthToken(
+  oauthToken: string,
+  upstreamUrl: URL,
+): Promise<string> {
+  const isHttps = upstreamUrl.protocol === 'https:';
+  const makeReq = isHttps ? httpsRequest : httpRequest;
+  const body = JSON.stringify({});
+
+  return new Promise((resolve, reject) => {
+    const req = makeReq(
+      {
+        hostname: upstreamUrl.hostname,
+        port: upstreamUrl.port || (isHttps ? 443 : 80),
+        path: '/api/oauth/claude_cli/create_api_key',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${oauthToken}`,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      } as RequestOptions,
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(Buffer.concat(chunks).toString());
+            // The response may use "api_key" or "key"
+            const apiKey = data.api_key || data.key;
+            if (apiKey) {
+              resolve(apiKey);
+            } else {
+              reject(
+                new Error(
+                  `OAuth exchange: no api_key in response: ${JSON.stringify(data)}`,
+                ),
+              );
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    );
+
+    req.on('error', reject);
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('OAuth exchange request timeout'));
+    });
+    req.write(body);
+    req.end();
+  });
 }
 
 export function startCredentialProxy(
@@ -44,6 +101,9 @@ export function startCredentialProxy(
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
+  // Cached API key from OAuth exchange (set at startup in OAuth mode)
+  let cachedApiKey: string | undefined;
+
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -66,11 +126,15 @@ export function startCredentialProxy(
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+        } else if (cachedApiKey && req.url?.startsWith('/v1/')) {
+          // OAuth mode with cached API key: inject like API key mode
+          delete headers['x-api-key'];
+          headers['x-api-key'] = cachedApiKey;
+          // Remove any placeholder Authorization header
+          delete headers['authorization'];
         } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
+          // OAuth mode without cached key, or non-/v1/ requests (e.g. exchange):
+          // replace placeholder Bearer token with the real one
           if (headers['authorization']) {
             delete headers['authorization'];
             if (oauthToken) {
@@ -109,8 +173,21 @@ export function startCredentialProxy(
       });
     });
 
-    server.listen(port, host, () => {
+    server.listen(port, host, async () => {
       logger.info({ port, host, authMode }, 'Credential proxy started');
+
+      if (authMode === 'oauth' && oauthToken) {
+        try {
+          cachedApiKey = await exchangeOAuthToken(oauthToken, upstreamUrl);
+          logger.info('OAuth token exchanged for temporary API key');
+        } catch (err) {
+          logger.warn(
+            { err },
+            'OAuth token exchange failed — containers can still do their own exchange',
+          );
+        }
+      }
+
       resolve(server);
     });
 
