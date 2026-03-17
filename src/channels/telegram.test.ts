@@ -295,16 +295,38 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('skips command messages (starting with /)', async () => {
+    it('skips native bot commands (/chatid, /ping)', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createTextCtx({ text: '/start' });
-      await triggerTextMessage(ctx);
+      for (const cmd of ['/chatid', '/ping', '/chatid@my_bot', '/ping@my_bot']) {
+        vi.clearAllMocks();
+        await triggerTextMessage(createTextCtx({ text: cmd }));
+        expect(opts.onMessage).not.toHaveBeenCalled();
+      }
+    });
 
-      expect(opts.onMessage).not.toHaveBeenCalled();
-      expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    it('forwards non-native slash commands to onMessage (e.g. /remote-control)', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Plain command
+      await triggerTextMessage(createTextCtx({ text: '/remote-control' }));
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '/remote-control' }),
+      );
+
+      vi.clearAllMocks();
+
+      // With @bot_username suffix (Telegram appends this in group chats)
+      await triggerTextMessage(createTextCtx({ text: '/remote-control@my_bot' }));
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '/remote-control' }),
+      );
     });
 
     it('extracts sender name from first_name', async () => {
