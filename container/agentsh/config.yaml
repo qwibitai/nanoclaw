@@ -83,8 +83,18 @@ threat_feeds:
       format: hostfile
 
 sandbox:
-  env_inject:
-    BASH_ENV: "/usr/lib/agentsh/bash_startup.sh"
+  # Note: BASH_ENV env_inject is intentionally omitted. The bash_startup.sh
+  # script disables builtins via `enable -n` which isn't available in all
+  # bash builds.
+
+  # Seccomp-notif based execve interception — intercepts execve() calls from
+  # all child processes spawned within agentsh sessions. When a process calls
+  # execve(), the kernel pauses it and notifies the agentsh server, which
+  # evaluates the command against policy rules. This works within Docker's
+  # default security model (no extra capabilities needed).
+  seccomp:
+    execve:
+      enabled: true
 
 health:
   path: "/health"

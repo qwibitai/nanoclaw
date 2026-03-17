@@ -218,6 +218,10 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // agentsh uses seccomp-notif to intercept execve() calls in child processes,
+  // evaluating each command against the security policy. This works within
+  // Docker's default security model without extra capabilities.
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 

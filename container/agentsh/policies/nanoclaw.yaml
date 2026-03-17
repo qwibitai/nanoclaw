@@ -455,6 +455,19 @@ network_rules:
 
 command_rules:
   # ---------------------------------------------------------------------------
+  # Shell interpreters — must be allowed so the transparent command wrapper
+  # check passes. The actual security comes from transparent unwrapping:
+  # agentsh evaluates the INNER command (ls, git, rm, etc.) against rules,
+  # not just the shell wrapper. Both must pass — most restrictive wins.
+  - name: allow-shell-interpreters
+    description: Shell interpreters (transparent unwrapping evaluates inner commands)
+    commands:
+      - bash
+      - bash.real
+      - sh
+      - dash
+    decision: allow
+
   # Safe read-only commands — standard Unix utilities for file inspection,
   # text processing, and environment queries
   # ---------------------------------------------------------------------------
@@ -546,10 +559,22 @@ command_rules:
       - agentsh-shell-shim
     decision: allow
 
+  # Block rm -rf BEFORE allowing rm — first match wins, so this must come
+  # first to prevent recursive force-delete from matching the allow rule below.
+  - name: block-rm-recursive-force
+    description: Block recursive force delete
+    commands:
+      - rm
+    args_patterns:
+      - ".*-rf.*"
+      - ".*-fr.*"
+    decision: deny
+    message: "Recursive force delete blocked. Remove files individually."
+
   # File operations — cp, mv, rm, etc. are needed for normal agent work.
-  # rm -rf is blocked separately below to prevent mass deletion.
+  # rm -rf is blocked by the rule above (which fires first due to args match).
   - name: allow-file-ops
-    description: File operations (rm -rf blocked separately)
+    description: File operations
     commands:
       - cp
       - mv
@@ -564,18 +589,6 @@ command_rules:
   # Blocked operations — dangerous commands that should never be needed
   # by a coding agent
   # ---------------------------------------------------------------------------
-
-  # Block rm -rf specifically. Individual file removal is allowed above,
-  # but recursive force-delete can destroy entire directory trees.
-  - name: block-rm-recursive-force
-    description: Block recursive force delete
-    commands:
-      - rm
-    args_patterns:
-      - ".*-rf.*"
-      - ".*-fr.*"
-    decision: deny
-    message: "Recursive force delete blocked. Remove files individually."
 
   # System administration commands — the agent runs as non-root in a container,
   # but blocking these adds defense-in-depth
