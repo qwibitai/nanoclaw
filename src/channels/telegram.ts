@@ -229,7 +229,8 @@ export class TelegramChannel implements Channel {
         const file = await ctx.getFile();
         const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
         const buffer = await this.downloadFile(url);
-        const result = await transcribeBuffer(buffer);
+        const messageTimestamp = new Date(ctx.message.date * 1000);
+        const result = await transcribeBuffer(buffer, { messageTimestamp });
         if (result) {
           content = `[Voice: ${result.transcript.trim()}]`;
           if (result.audioFile) {
