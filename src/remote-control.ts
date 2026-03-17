@@ -31,7 +31,7 @@ function clearState(): void {
   try {
     fs.unlinkSync(STATE_FILE);
   } catch {
-    // ignore
+    // 無視
   }
 }
 
@@ -45,8 +45,8 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Restore session from disk on startup.
- * If the process is still alive, adopt it. Otherwise, clean up.
+ * 起動時にディスクからセッションを復元します。
+ * プロセスがまだ生きている場合はそれを採用し、そうでなければクリーンアップします。
  */
 export function restoreRemoteControl(): void {
   let data: string;
@@ -76,12 +76,12 @@ export function getActiveSession(): RemoteControlSession | null {
   return activeSession;
 }
 
-/** @internal — exported for testing only */
+/** @internal — テスト用のみにエクスポート */
 export function _resetForTesting(): void {
   activeSession = null;
 }
 
-/** @internal — exported for testing only */
+/** @internal — テスト用のみにエクスポート */
 export function _getStateFilePath(): string {
   return STATE_FILE;
 }
@@ -92,17 +92,17 @@ export async function startRemoteControl(
   cwd: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   if (activeSession) {
-    // Verify the process is still alive
+    // プロセスがまだ生きているか確認
     if (isProcessAlive(activeSession.pid)) {
       return { ok: true, url: activeSession.url };
     }
-    // Process died — clean up and start a new one
+    // プロセスが終了している — クリーンアップして新しく開始
     activeSession = null;
     clearState();
   }
 
-  // Redirect stdout/stderr to files so the process has no pipes to the parent.
-  // This prevents SIGPIPE when NanoClaw restarts.
+  // stdout/stderr をファイルにリダイレクトし、親プロセスとのパイプをなくす。
+  // これにより、NanoClaw が再起動した際の SIGPIPE を防ぐ。
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const stdoutFd = fs.openSync(STDOUT_FILE, 'w');
   const stderrFd = fs.openSync(STDERR_FILE, 'w');
@@ -120,17 +120,17 @@ export async function startRemoteControl(
     return { ok: false, error: `Failed to start: ${err.message}` };
   }
 
-  // Auto-accept the "Enable Remote Control?" prompt
+  // "Enable Remote Control?" プロンプトに自動で 'y' を入力
   if (proc.stdin) {
     proc.stdin.write('y\n');
     proc.stdin.end();
   }
 
-  // Close FDs in the parent — the child inherited copies
+  // 親プロセス側の FD を閉じる — 子プロセスはコピーを継承している
   fs.closeSync(stdoutFd);
   fs.closeSync(stderrFd);
 
-  // Fully detach from parent
+  // 親プロセスから完全に切り離す
   proc.unref();
 
   const pid = proc.pid;
@@ -138,23 +138,23 @@ export async function startRemoteControl(
     return { ok: false, error: 'Failed to get process PID' };
   }
 
-  // Poll the stdout file for the URL
+  // stdout ファイルをポーリングして URL を取得
   return new Promise((resolve) => {
     const startTime = Date.now();
 
     const poll = () => {
-      // Check if process died
+      // プロセスが終了していないか確認
       if (!isProcessAlive(pid)) {
         resolve({ ok: false, error: 'Process exited before producing URL' });
         return;
       }
 
-      // Check for URL in stdout file
+      // stdout ファイルから URL を探す
       let content = '';
       try {
         content = fs.readFileSync(STDOUT_FILE, 'utf-8');
       } catch {
-        // File might not have content yet
+        // ファイルにまだ内容がない可能性がある
       }
 
       const match = content.match(URL_REGEX);
@@ -177,7 +177,7 @@ export async function startRemoteControl(
         return;
       }
 
-      // Timeout check
+      // タイムアウトチェック
       if (Date.now() - startTime >= URL_TIMEOUT_MS) {
         try {
           process.kill(-pid, 'SIGTERM');
@@ -185,7 +185,7 @@ export async function startRemoteControl(
           try {
             process.kill(pid, 'SIGTERM');
           } catch {
-            // already dead
+            // すでに終了している
           }
         }
         resolve({
@@ -215,7 +215,7 @@ export function stopRemoteControl():
   try {
     process.kill(pid, 'SIGTERM');
   } catch {
-    // already dead
+    // すでに終了している
   }
   activeSession = null;
   clearState();
