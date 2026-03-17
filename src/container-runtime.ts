@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 
+import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
 /** The container runtime binary name. */
@@ -21,7 +22,23 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
  *   falling back to 0.0.0.0 if the interface isn't found.
  */
 export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+  process.env.CREDENTIAL_PROXY_HOST ||
+  readEnvFile(['CREDENTIAL_PROXY_HOST']).CREDENTIAL_PROXY_HOST ||
+  detectProxyBindHost();
+
+/** Detect Docker Desktop by checking the server name from `docker info`. */
+function isDockerDesktop(): boolean {
+  try {
+    const name = execSync('docker info --format "{{.Name}}"', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000,
+    }).trim();
+    return name.toLowerCase().includes('docker-desktop');
+  } catch {
+    return false;
+  }
+}
 
 function detectProxyBindHost(): string {
   if (os.platform() === 'darwin') return '127.0.0.1';
@@ -29,6 +46,13 @@ function detectProxyBindHost(): string {
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
   if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
+
+  // Docker Desktop on Linux runs a VM like macOS — host.docker.internal
+  // routes to host loopback, so bind to 127.0.0.1.
+  if (os.platform() === 'linux' && isDockerDesktop()) {
+    logger.info('Docker Desktop detected on Linux, binding proxy to 127.0.0.1');
+    return '127.0.0.1';
+  }
 
   // Bare-metal Linux (VPS): bind to the docker0 bridge IP so containers
   // can reach the proxy via host.docker.internal.
