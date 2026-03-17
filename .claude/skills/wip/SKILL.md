@@ -37,6 +37,12 @@ git branch --no-merged main
 git branch --merged main | grep -v '^\*\|main$'
 ```
 
+### 5. Active Cases with Kaizen Issue Links
+Check the cases SQLite database for active/backlog cases linked to GitHub issues:
+```bash
+sqlite3 data/nanoclaw.db "SELECT name, status, github_issue FROM cases WHERE github_issue IS NOT NULL AND status IN ('suggested','backlog','active','blocked') ORDER BY github_issue"
+```
+
 ## Output Format
 
 Present a concise summary table:
@@ -59,6 +65,11 @@ Present a concise summary table:
 
 ### Cleanup Candidates
 - branch-name (already merged, can delete)
+
+### Kaizen Issues with Active Cases
+| Kaizen # | Case | Status |
+|----------|------|--------|
+| #N       | YYMMDD-HHMM-case-name | active/backlog/blocked |
 ```
 
 If any section has zero items, still show it with "None" to confirm it was checked.
