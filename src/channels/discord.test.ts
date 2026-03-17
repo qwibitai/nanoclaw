@@ -12,6 +12,7 @@ vi.mock("../env.js", () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock("../config.js", () => ({
   ASSISTANT_NAME: "Andy",
   TRIGGER_PATTERN: /^@Andy\b/i,
+  CHANNEL_CONNECT_TIMEOUT: 30000,
 }));
 
 // Mock logger
@@ -57,6 +58,10 @@ vi.mock("../service-control.js", () => ({
 type Handler = (...args: any[]) => any;
 
 const clientRef = vi.hoisted(() => ({ current: null as any }));
+const loginBehaviorRef = vi.hoisted(() => ({
+  behavior: "ready" as "ready" | "hang" | "error" | "reject",
+  error: undefined as Error | undefined,
+}));
 
 vi.mock("discord.js", () => {
   const Events = {
@@ -93,8 +98,23 @@ vi.mock("discord.js", () => {
     }
 
     async login(_token: string) {
+      const behavior = loginBehaviorRef.behavior;
+      if (behavior === "reject") {
+        throw loginBehaviorRef.error || new Error("Login rejected");
+      }
+      if (behavior === "error") {
+        const errorHandlers = this.eventHandlers.get("error") || [];
+        for (const h of errorHandlers) {
+          h(loginBehaviorRef.error || new Error("Discord error"));
+        }
+        return;
+      }
+      if (behavior === "hang") {
+        // Never fire ready — simulates API hang
+        return;
+      }
+      // Default: "ready"
       this._ready = true;
-      // Fire the ready event
       const readyHandlers = this.eventHandlers.get("ready") || [];
       for (const h of readyHandlers) {
         h({ user: this.user });
@@ -223,6 +243,8 @@ async function triggerMessage(message: any) {
 describe("DiscordChannel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loginBehaviorRef.behavior = "ready";
+    loginBehaviorRef.error = undefined;
   });
 
   afterEach(() => {
@@ -268,6 +290,79 @@ describe("DiscordChannel", () => {
       const channel = new DiscordChannel("test-token", opts);
 
       expect(channel.isConnected()).toBe(false);
+    });
+
+    it("connect() rejects after timeout when Discord API hangs", async () => {
+      vi.useFakeTimers();
+      loginBehaviorRef.behavior = "hang";
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      const connectPromise = channel.connect();
+      // Attach handler before advancing timers to prevent unhandled rejection
+      const result = connectPromise.then(
+        () => null,
+        (err: Error) => err,
+      );
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      const err = await result;
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toBe("Discord login timed out after 30000ms");
+      vi.useRealTimers();
+    });
+
+    it("connect() destroys client on timeout", async () => {
+      vi.useFakeTimers();
+      loginBehaviorRef.behavior = "hang";
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      const connectPromise = channel.connect();
+      connectPromise.catch(() => {});
+
+      const destroySpy = vi.spyOn(currentClient(), "destroy");
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(destroySpy).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("connect() rejects on Discord error event during login", async () => {
+      loginBehaviorRef.behavior = "error";
+      loginBehaviorRef.error = new Error("Authentication failed");
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+
+      await expect(channel.connect()).rejects.toThrow("Authentication failed");
+    });
+
+    it("connect() rejects when login() itself throws", async () => {
+      loginBehaviorRef.behavior = "reject";
+      loginBehaviorRef.error = new Error("Invalid token format");
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+
+      await expect(channel.connect()).rejects.toThrow("Invalid token format");
+    });
+
+    it("connect() clears timeout on successful login", async () => {
+      vi.useFakeTimers();
+      loginBehaviorRef.behavior = "ready";
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      expect(channel.isConnected()).toBe(true);
+
+      // Advancing past timeout should not cause issues
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(channel.isConnected()).toBe(true);
+      vi.useRealTimers();
     });
   });
 

@@ -8,7 +8,7 @@ import {
   TextChannel,
 } from "discord.js";
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from "../config.js";
+import { ASSISTANT_NAME, CHANNEL_CONNECT_TIMEOUT, TRIGGER_PATTERN } from "../config.js";
 import { readEnvFile } from "../env.js";
 import { logger } from "../logger.js";
 import { getRestartPlan, restartNanoClawService } from "../service-control.js";
@@ -173,7 +173,26 @@ export class DiscordChannel implements Channel {
       logger.error({ err: err.message }, "Discord client error");
     });
 
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        if (err) {
+          this.client?.destroy();
+          reject(err);
+        } else {
+          resolve();
+        }
+      };
+
+      timeout = setTimeout(() => {
+        finish(new Error(`Discord login timed out after ${CHANNEL_CONNECT_TIMEOUT}ms`));
+      }, CHANNEL_CONNECT_TIMEOUT);
+
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
@@ -181,10 +200,16 @@ export class DiscordChannel implements Channel {
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
         console.log(`  Use /chatid command or check channel IDs in Discord settings\n`);
-        resolve();
+        finish();
       });
 
-      this.client!.login(this.botToken);
+      this.client!.once(Events.Error, (err) => {
+        finish(err);
+      });
+
+      this.client!.login(this.botToken).catch((err: Error) => {
+        finish(err);
+      });
     });
   }
 

@@ -209,7 +209,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
 
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
-After=network.target
+After=network.target docker.service
 
 [Service]
 Type=simple

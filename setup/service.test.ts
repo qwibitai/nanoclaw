@@ -50,7 +50,7 @@ function generateSystemdUnit(
 ): string {
   return `[Unit]
 Description=NanoClaw Personal Assistant
-After=network.target
+After=network.target docker.service
 
 [Service]
 Type=simple

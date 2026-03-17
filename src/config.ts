@@ -41,6 +41,7 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, "store");
 export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
 export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
 
+export const CHANNEL_CONNECT_TIMEOUT = parseInt(process.env.CHANNEL_CONNECT_TIMEOUT || "30000", 10);
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "nanoclaw-agent:latest";
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || "1800000", 10);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
