@@ -1135,6 +1135,52 @@ export async function cleanupThreadWorkspace(
     // ignore readdir errors
   }
 
+  // Rescue non-git content created or modified by the agent in the worktree.
+  // Git worktrees are already rescued above; symlinks already point to persistent
+  // storage. This catches new directories (e.g. plans/), new files, and copied
+  // directories (conversations/, threads/) that may have new entries.
+  try {
+    const gitWorktreeNames = new Set(
+      findGitWorktrees(worktreeBase).map(({ name }) => name),
+    );
+    for (const entry of fs.readdirSync(worktreeBase, { withFileTypes: true })) {
+      if (entry.name === 'CLAUDE.md') continue; // already merged above
+      if (gitWorktreeNames.has(entry.name)) continue; // already rescued
+
+      const srcEntry = path.join(worktreeBase, entry.name);
+      const dstEntry = path.join(groupDir, entry.name);
+
+      // Skip symlinks — they already point to the persistent group folder
+      try {
+        if (fs.lstatSync(srcEntry).isSymbolicLink()) continue;
+      } catch {
+        continue;
+      }
+
+      try {
+        if (entry.isDirectory()) {
+          // Merge: copy new/modified files into existing group dir
+          fs.cpSync(srcEntry, dstEntry, { recursive: true, force: false });
+        } else {
+          // Copy file if it doesn't exist in group dir, or if worktree version is newer
+          if (!fs.existsSync(dstEntry)) {
+            fs.cpSync(srcEntry, dstEntry);
+          } else {
+            const srcMtime = fs.statSync(srcEntry).mtimeMs;
+            const dstMtime = fs.statSync(dstEntry).mtimeMs;
+            if (srcMtime > dstMtime) {
+              fs.cpSync(srcEntry, dstEntry);
+            }
+          }
+        }
+      } catch {
+        // best-effort — never block cleanup
+      }
+    }
+  } catch {
+    // best-effort
+  }
+
   // Remove worktree directory
   try {
     fs.rmSync(worktreeBase, { recursive: true, force: true });
@@ -1285,6 +1331,48 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
           );
         } catch {
           /* best-effort cache + rescue */
+        }
+
+        // Rescue non-git content (same logic as cleanupThreadWorkspace)
+        if (fs.existsSync(groupDir)) {
+          try {
+            const gitWtNames = new Set(
+              findGitWorktrees(tdPath).map(({ name }) => name),
+            );
+            for (const entry of fs.readdirSync(tdPath, {
+              withFileTypes: true,
+            })) {
+              if (entry.name === 'CLAUDE.md') continue;
+              if (gitWtNames.has(entry.name)) continue;
+              const srcEntry = path.join(tdPath, entry.name);
+              const dstEntry = path.join(groupDir, entry.name);
+              try {
+                if (fs.lstatSync(srcEntry).isSymbolicLink()) continue;
+              } catch {
+                continue;
+              }
+              try {
+                if (entry.isDirectory()) {
+                  fs.cpSync(srcEntry, dstEntry, {
+                    recursive: true,
+                    force: false,
+                  });
+                } else if (!fs.existsSync(dstEntry)) {
+                  fs.cpSync(srcEntry, dstEntry);
+                } else {
+                  const srcMtime = fs.statSync(srcEntry).mtimeMs;
+                  const dstMtime = fs.statSync(dstEntry).mtimeMs;
+                  if (srcMtime > dstMtime) {
+                    fs.cpSync(srcEntry, dstEntry);
+                  }
+                }
+              } catch {
+                /* best-effort */
+              }
+            }
+          } catch {
+            /* best-effort */
+          }
         }
 
         try {
@@ -1509,64 +1597,10 @@ function buildVolumeMounts(
     }
   }
 
-  // Sync skills, agents, and hooks from external plugin (e.g. davekim917/bootstrap)
+  // Mount external plugin directory (e.g. davekim917/bootstrap) read-only.
+  // The SDK loads skills, agents, and hooks via the `plugins` option in agent-runner
+  // so no manual file sync is needed — just the mount for hook script execution.
   if (fs.existsSync(PLUGIN_DIR)) {
-    // Skills: plugin has skills/{category}/{skill-name}/SKILL.md — flatten into .claude/skills/
-    const pluginSkillsDir = path.join(PLUGIN_DIR, 'skills');
-    if (fs.existsSync(pluginSkillsDir)) {
-      for (const category of fs.readdirSync(pluginSkillsDir)) {
-        const categoryDir = path.join(pluginSkillsDir, category);
-        if (!fs.statSync(categoryDir).isDirectory()) continue;
-        for (const skill of fs.readdirSync(categoryDir)) {
-          const skillSrc = path.join(categoryDir, skill);
-          if (!fs.statSync(skillSrc).isDirectory()) continue;
-          // Skip non-skill directories (e.g. 'shared')
-          if (!fs.existsSync(path.join(skillSrc, 'SKILL.md'))) continue;
-          fs.cpSync(skillSrc, path.join(skillsDst, skill), {
-            recursive: true,
-          });
-        }
-      }
-    }
-
-    // Agents: plugin has agents/*.md — sync into .claude/agents/
-    const pluginAgentsDir = path.join(PLUGIN_DIR, 'agents');
-    if (fs.existsSync(pluginAgentsDir)) {
-      const agentsDst = path.join(groupSessionsDir, 'agents');
-      fs.mkdirSync(agentsDst, { recursive: true });
-      for (const agentFile of fs.readdirSync(pluginAgentsDir)) {
-        if (!agentFile.endsWith('.md')) continue;
-        fs.copyFileSync(
-          path.join(pluginAgentsDir, agentFile),
-          path.join(agentsDst, agentFile),
-        );
-      }
-    }
-
-    // Hooks: merge plugin hooks.json into settings.json so Claude Code
-    // loads them via settingSources: ['user']. Also set CLAUDE_PLUGIN_ROOT
-    // so ${CLAUDE_PLUGIN_ROOT} references in hook commands resolve correctly.
-    const pluginHooksJson = path.join(PLUGIN_DIR, 'hooks', 'hooks.json');
-    if (fs.existsSync(pluginHooksJson)) {
-      try {
-        const pluginHooks = JSON.parse(
-          fs.readFileSync(pluginHooksJson, 'utf-8'),
-        );
-        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
-        settings.hooks = pluginHooks;
-        fs.writeFileSync(
-          settingsFile,
-          JSON.stringify(settings, null, 2) + '\n',
-        );
-      } catch (err) {
-        logger.warn(
-          { error: err, path: pluginHooksJson },
-          'Failed to merge plugin hooks into settings',
-        );
-      }
-    }
-
-    // Mount plugin directory read-only so hook scripts can execute inside container
     mounts.push({
       hostPath: PLUGIN_DIR,
       containerPath: '/workspace/plugin',

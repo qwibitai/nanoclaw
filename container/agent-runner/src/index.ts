@@ -827,6 +827,24 @@ function buildPromptContent(
 }
 
 /**
+ * Discover SDK plugins from /workspace/plugin/plugins/.
+ * Each subdirectory with a .claude-plugin/plugin.json is a valid plugin.
+ */
+function discoverPlugins(): Array<{ type: 'local'; path: string }> {
+  const pluginsDir = '/workspace/plugin/plugins';
+  if (!fs.existsSync(pluginsDir)) return [];
+  const plugins: Array<{ type: 'local'; path: string }> = [];
+  for (const entry of fs.readdirSync(pluginsDir)) {
+    const pluginPath = path.join(pluginsDir, entry);
+    if (!fs.statSync(pluginPath).isDirectory()) continue;
+    if (fs.existsSync(path.join(pluginPath, '.claude-plugin', 'plugin.json'))) {
+      plugins.push({ type: 'local', path: pluginPath });
+    }
+  }
+  return plugins;
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -839,6 +857,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   systemPromptOption: { type: 'preset'; preset: 'claude_code'; append: string } | undefined,
+  plugins: Array<{ type: 'local'; path: string }>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
@@ -921,6 +940,7 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: buildMcpServers(containerInput, mcpServerPath),
+      ...(plugins.length > 0 ? { plugins } : {}),
       ...(effort ? { effort } : {}),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName, containerInput.threadId)] }],
@@ -1026,6 +1046,12 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
+  // Discover SDK plugins from mounted bootstrap directory
+  const plugins = discoverPlugins();
+  if (plugins.length > 0) {
+    log(`Discovered ${plugins.length} plugin(s): ${plugins.map(p => path.basename(p.path)).join(', ')}`);
+  }
+
   // Build systemPrompt once — chatJid and global CLAUDE.md are invariant for the container lifetime.
   // channelFormatting is placed AFTER globalClaudeMd so it overrides the WA/Telegram formatting
   // rule in global CLAUDE.md for Slack/Discord groups. This also ensures globalContext:false groups
@@ -1092,6 +1118,7 @@ async function main(): Promise<void> {
           permissionMode: 'bypassPermissions' as const,
           allowDangerouslySkipPermissions: true,
           settingSources: ['project', 'user'] as const,
+          ...(plugins.length > 0 ? { plugins } : {}),
           hooks: {
             PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
           },
@@ -1178,7 +1205,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, systemPromptOption, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
