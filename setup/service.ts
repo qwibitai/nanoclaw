@@ -1,8 +1,8 @@
 /**
- * Step: service — Generate and load service manager config.
- * Replaces 08-setup-service.sh
+ * ステップ: service — サービスマネージャーの設定を生成してロードします。
+ * 08-setup-service.sh を置き換えるものです。
  *
- * Fixes: Root→system systemd, WSL nohup fallback, no `|| true` swallowing errors.
+ * 修正点: Root→system systemd, WSL での nohup フォールバック, エラーを握りつぶす `|| true` の排除。
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -26,18 +26,18 @@ export async function run(_args: string[]): Promise<void> {
   const nodePath = getNodePath();
   const homeDir = os.homedir();
 
-  logger.info({ platform, nodePath, projectRoot }, 'Setting up service');
+  logger.info({ platform, nodePath, projectRoot }, 'サービスのセットアップ中');
 
-  // Build first
-  logger.info('Building TypeScript');
+  // 最初にビルドを実行
+  logger.info('TypeScript をビルド中');
   try {
     execSync('npm run build', {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    logger.info('Build succeeded');
+    logger.info('ビルド成功');
   } catch {
-    logger.error('Build failed');
+    logger.error('ビルド失敗');
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
       NODE_PATH: nodePath,
@@ -113,24 +113,24 @@ function setupLaunchd(
 </plist>`;
 
   fs.writeFileSync(plistPath, plist);
-  logger.info({ plistPath }, 'Wrote launchd plist');
+  logger.info({ plistPath }, 'launchd plist を書き込みました');
 
   try {
     execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
       stdio: 'ignore',
     });
-    logger.info('launchctl load succeeded');
+    logger.info('launchctl load 成功');
   } catch {
-    logger.warn('launchctl load failed (may already be loaded)');
+    logger.warn('launchctl load 失敗 (既にロードされている可能性があります)');
   }
 
-  // Verify
+  // 検証
   let serviceLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
     serviceLoaded = output.includes('com.nanoclaw');
   } catch {
-    // launchctl list failed
+    // launchctl list 失敗
   }
 
   emitStatus('SETUP_SERVICE', {
@@ -154,34 +154,34 @@ function setupLinux(
   if (serviceManager === 'systemd') {
     setupSystemd(projectRoot, nodePath, homeDir);
   } else {
-    // WSL without systemd or other Linux without systemd
+    // systemd のない WSL または他の Linux
     setupNohupFallback(projectRoot, nodePath, homeDir);
   }
 }
 
 /**
- * Kill any orphaned nanoclaw node processes left from previous runs or debugging.
- * Prevents connection conflicts when two instances connect to the same channel simultaneously.
+ * 以前の実行やデバッグから残っている孤立した nanoclaw node プロセスを終了します。
+ * 2 つのインスタンスが同時に同じチャネルに接続することによる接続競合を防ぎます。
  */
 function killOrphanedProcesses(projectRoot: string): void {
   try {
     execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
       stdio: 'ignore',
     });
-    logger.info('Stopped any orphaned nanoclaw processes');
+    logger.info('孤立した nanoclaw プロセスを停止しました');
   } catch {
-    // pkill not available or no orphans
+    // pkill が利用不可、または孤立プロセスなし
   }
 }
 
 /**
- * Detect stale docker group membership in the user systemd session.
+ * ユーザーの systemd セッションにおける古い docker グループ メンバーシップを検出します。
  *
- * When a user is added to the docker group mid-session, the user systemd
- * daemon (user@UID.service) keeps the old group list from login time.
- * Docker works in the terminal but not in the service context.
+ * セッションの途中でユーザーが docker グループに追加された場合、ユーザーの systemd デーモン
+ * (user@UID.service) はログイン時の古いグループリストを保持し続けます。
+ * ターミナルでは Docker が動作しても、サービスコンテキストでは動作しない状態になります。
  *
- * Only relevant on Linux with user-level systemd (not root, not macOS, not WSL nohup).
+ * ユーザーレベルの systemd を使用する Linux でのみ関連します（root、macOS、WSL nohup は対象外）。
  */
 function checkDockerGroupStale(): boolean {
   try {
@@ -189,14 +189,14 @@ function checkDockerGroupStale(): boolean {
       stdio: 'pipe',
       timeout: 10000,
     });
-    return false; // Docker works from systemd session
+    return false; // systemd セッションから Docker が動作する
   } catch {
-    // Check if docker works from the current shell (to distinguish stale group vs broken docker)
+    // 現在のシェルから Docker が動作するか確認（古いグループ設定か Docker 自体の故障かを区別）
     try {
       execSync('docker info', { stdio: 'pipe', timeout: 5000 });
-      return true; // Works in shell but not systemd session → stale group
+      return true; // シェルでは動作するが systemd セッションでは動作しない → グループ設定が古い
     } catch {
-      return false; // Docker itself is not working, different issue
+      return false; // Docker 自体が動作していない、別の問題
     }
   }
 }
@@ -208,21 +208,21 @@ function setupSystemd(
 ): void {
   const runningAsRoot = isRoot();
 
-  // Root uses system-level service, non-root uses user-level
+  // Root はシステムレベルのサービスを使用し、非 Root はユーザーレベルを使用
   let unitPath: string;
   let systemctlPrefix: string;
 
   if (runningAsRoot) {
     unitPath = '/etc/systemd/system/nanoclaw.service';
     systemctlPrefix = 'systemctl';
-    logger.info('Running as root — installing system-level systemd unit');
+    logger.info('root として実行中 — システムレベルの systemd ユニットをインストールします');
   } else {
-    // Check if user-level systemd session is available
+    // ユーザーレベルの systemd セッションが利用可能か確認
     try {
       execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch {
       logger.warn(
-        'systemd user session not available — falling back to nohup wrapper',
+        'systemd ユーザーセッションが利用不可 — nohup ラッパーにフォールバックします',
       );
       setupNohupFallback(projectRoot, nodePath, homeDir);
       return;
@@ -253,45 +253,45 @@ StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   fs.writeFileSync(unitPath, unit);
-  logger.info({ unitPath }, 'Wrote systemd unit');
+  logger.info({ unitPath }, 'systemd ユニットを書き込みました');
 
-  // Detect stale docker group before starting (user systemd only)
+  // 開始前に古い docker グループ設定を検出 (ユーザー systemd のみ)
   const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
   if (dockerGroupStale) {
     logger.warn(
-      'Docker group not active in systemd session — user was likely added to docker group mid-session',
+      'systemd セッションで docker グループが有効ではありません — セッション中にユーザーが docker グループに追加された可能性があります',
     );
   }
 
-  // Kill orphaned nanoclaw processes to avoid channel connection conflicts
+  // チャネル接続の競合を避けるため、孤立した nanoclaw プロセスを終了
   killOrphanedProcesses(projectRoot);
 
-  // Enable and start
+  // 有効化して開始
   try {
     execSync(`${systemctlPrefix} daemon-reload`, { stdio: 'ignore' });
   } catch (err) {
-    logger.error({ err }, 'systemctl daemon-reload failed');
+    logger.error({ err }, 'systemctl daemon-reload 失敗');
   }
 
   try {
     execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: 'ignore' });
   } catch (err) {
-    logger.error({ err }, 'systemctl enable failed');
+    logger.error({ err }, 'systemctl enable 失敗');
   }
 
   try {
     execSync(`${systemctlPrefix} start nanoclaw`, { stdio: 'ignore' });
   } catch (err) {
-    logger.error({ err }, 'systemctl start failed');
+    logger.error({ err }, 'systemctl start 失敗');
   }
 
-  // Verify
+  // 検証
   let serviceLoaded = false;
   try {
     execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: 'ignore' });
     serviceLoaded = true;
   } catch {
-    // Not active
+    // アクティブではない
   }
 
   emitStatus('SETUP_SERVICE', {
@@ -311,43 +311,43 @@ function setupNohupFallback(
   nodePath: string,
   homeDir: string,
 ): void {
-  logger.warn('No systemd detected — generating nohup wrapper script');
+  logger.warn('systemd が検出されませんでした — nohup ラッパースクリプトを生成します');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
   const pidFile = path.join(projectRoot, 'nanoclaw.pid');
 
   const lines = [
     '#!/bin/bash',
-    '# start-nanoclaw.sh — Start NanoClaw without systemd',
-    `# To stop: kill \\$(cat ${pidFile})`,
+    '# start-nanoclaw.sh — systemd なしで NanoClaw を起動',
+    `# 停止方法: kill \\$(cat ${pidFile})`,
     '',
     'set -euo pipefail',
     '',
     `cd ${JSON.stringify(projectRoot)}`,
     '',
-    '# Stop existing instance if running',
+    '# 実行中の既存インスタンスがあれば停止',
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
     `  OLD_PID=$(cat ${JSON.stringify(pidFile)} 2>/dev/null || echo "")`,
     '  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then',
-    '    echo "Stopping existing NanoClaw (PID $OLD_PID)..."',
+    '    echo "既存の NanoClaw (PID $OLD_PID) を停止中..."',
     '    kill "$OLD_PID" 2>/dev/null || true',
     '    sleep 2',
     '  fi',
     'fi',
     '',
-    'echo "Starting NanoClaw..."',
+    'echo "NanoClaw を起動中..."',
     `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
     `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
     `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
     '',
     `echo $! > ${JSON.stringify(pidFile)}`,
-    'echo "NanoClaw started (PID $!)"',
-    `echo "Logs: tail -f ${projectRoot}/logs/nanoclaw.log"`,
+    'echo "NanoClaw が起動しました (PID $!)"',
+    `echo "ログ: tail -f ${projectRoot}/logs/nanoclaw.log"`,
   ];
   const wrapper = lines.join('\n') + '\n';
 
   fs.writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
-  logger.info({ wrapperPath }, 'Wrote nohup wrapper script');
+  logger.info({ wrapperPath }, 'nohup ラッパースクリプトを書き込みました');
 
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: 'nohup',
