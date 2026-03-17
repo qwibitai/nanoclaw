@@ -1,0 +1,348 @@
+/**
+ * Router Container Manager
+ *
+ * Manages a persistent router container that uses Claude to route messages
+ * to the appropriate case. The router runs as a regular container with a
+ * special prompt — it receives routing requests as stdin and returns
+ * JSON routing decisions.
+ *
+ * For Phase 1, each routing request spawns a lightweight one-shot container.
+ * The container uses Haiku-class model for fast, cheap routing decisions.
+ * Future phases may keep a persistent container alive between requests.
+ */
+import { ChildProcess, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
+import {
+  CONTAINER_IMAGE,
+  CONTAINER_MAX_OUTPUT_SIZE,
+  CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
+  TIMEZONE,
+} from './config.js';
+import {
+  CONTAINER_HOST_GATEWAY,
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  readonlyMountArgs,
+} from './container-runtime.js';
+import { detectAuthMode } from './credential-proxy.js';
+import { logger } from './logger.js';
+import { buildRouterPrompt } from './router-prompt.js';
+import { RouterRequest, RouterResponse } from './router-types.js';
+
+// Sentinel markers for robust output parsing (must match agent-runner)
+const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+const ROUTER_TIMEOUT_MS = 30_000; // 30 seconds for router decisions
+const ROUTER_GROUP_FOLDER = '__router__';
+
+/**
+ * Route a message using the container-based router.
+ * Spawns a one-shot container that runs the Claude agent SDK with a routing prompt.
+ * Returns a RouterResponse with the routing decision.
+ */
+export async function routeMessage(
+  request: RouterRequest,
+): Promise<RouterResponse> {
+  const prompt = buildRouterPrompt(request);
+
+  logger.debug(
+    {
+      requestId: request.requestId,
+      caseCount: request.cases.length,
+      sender: request.senderName,
+    },
+    'Routing message via container',
+  );
+
+  try {
+    const result = await runRouterContainer(prompt, request.requestId);
+    const response = parseRouterResponse(result, request.requestId);
+
+    logger.info(
+      {
+        requestId: request.requestId,
+        decision: response.decision,
+        caseId: response.caseId,
+        confidence: response.confidence,
+      },
+      'Router decision',
+    );
+
+    return response;
+  } catch (err) {
+    logger.error(
+      { requestId: request.requestId, err },
+      'Router container failed',
+    );
+    throw err;
+  }
+}
+
+/**
+ * Parse the container's text output into a RouterResponse.
+ * Tries to extract JSON from the result text.
+ */
+export function parseRouterResponse(
+  resultText: string,
+  requestId: string,
+): RouterResponse {
+  // Try to find JSON in the output — the agent might wrap it in text
+  const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error(`Router returned no JSON: ${resultText.slice(0, 200)}`);
+  }
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  return {
+    requestId: parsed.requestId || requestId,
+    decision: parsed.decision || 'suggest_new',
+    caseId: parsed.caseId,
+    caseName: parsed.caseName,
+    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+    reason: parsed.reason || '',
+    directAnswer: parsed.directAnswer,
+    model: parsed.model,
+  };
+}
+
+/**
+ * Run a one-shot router container and return the result text.
+ * The container runs the agent-runner with a routing prompt.
+ */
+async function runRouterContainer(
+  prompt: string,
+  requestId: string,
+): Promise<string> {
+  const projectRoot = process.cwd();
+
+  // Prepare minimal IPC directory for the router
+  const routerIpcDir = path.join(DATA_DIR, 'ipc', ROUTER_GROUP_FOLDER);
+  fs.mkdirSync(path.join(routerIpcDir, 'input'), { recursive: true });
+
+  // Write _close sentinel so the agent-runner exits after the first query
+  // (don't keep it alive waiting for IPC messages)
+  fs.writeFileSync(path.join(routerIpcDir, 'input', '_close'), '');
+
+  // Prepare router group directory (minimal — just needs to exist)
+  const routerGroupDir = path.join(DATA_DIR, 'router-group');
+  fs.mkdirSync(routerGroupDir, { recursive: true });
+
+  // Prepare router sessions directory
+  const routerSessionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    ROUTER_GROUP_FOLDER,
+    '.claude',
+  );
+  fs.mkdirSync(routerSessionsDir, { recursive: true });
+
+  // Settings to disable memory/teams features for router
+  const settingsFile = path.join(routerSessionsDir, 'settings.json');
+  if (!fs.existsSync(settingsFile)) {
+    fs.writeFileSync(settingsFile, JSON.stringify({ env: {} }, null, 2) + '\n');
+  }
+
+  // Copy agent-runner source for the router
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const routerAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    ROUTER_GROUP_FOLDER,
+    'agent-runner-src',
+  );
+  if (fs.existsSync(agentRunnerSrc)) {
+    fs.cpSync(agentRunnerSrc, routerAgentRunnerDir, { recursive: true });
+  }
+
+  // Build container args — minimal mounts, no group folders
+  const containerName = `nanoclaw-router-${Date.now()}`;
+  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  args.push('-e', `TZ=${TIMEZONE}`);
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Agent-runner env vars it expects
+  args.push('-e', `NANOCLAW_CHAT_JID=__router__`);
+  args.push('-e', `NANOCLAW_GROUP_FOLDER=${ROUTER_GROUP_FOLDER}`);
+  args.push('-e', `NANOCLAW_IS_MAIN=false`);
+
+  args.push(...hostGatewayArgs());
+
+  // Run as host user for file access
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/node');
+  }
+
+  // Minimal mounts:
+  // 1. Router group dir as /workspace/group (agent-runner expects this)
+  args.push('-v', `${routerGroupDir}:/workspace/group`);
+
+  // 2. Router IPC dir
+  args.push('-v', `${routerIpcDir}:/workspace/ipc`);
+
+  // 3. Agent-runner source
+  args.push('-v', `${routerAgentRunnerDir}:/app/src`);
+
+  // 4. Router sessions (.claude)
+  args.push('-v', `${routerSessionsDir}:/home/node/.claude`);
+
+  args.push(CONTAINER_IMAGE);
+
+  // Build the container input JSON (same protocol as regular containers)
+  const containerInput = {
+    prompt,
+    groupFolder: ROUTER_GROUP_FOLDER,
+    chatJid: '__router__',
+    isMain: false,
+    isScheduledTask: false,
+  };
+
+  return new Promise((resolve, reject) => {
+    const container = spawn(CONTAINER_RUNTIME_BIN, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    // Write input and close stdin
+    container.stdin.write(JSON.stringify(containerInput));
+    container.stdin.end();
+
+    container.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      if (stdout.length < CONTAINER_MAX_OUTPUT_SIZE) {
+        stdout += chunk;
+      }
+    });
+
+    container.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      if (stderr.length < CONTAINER_MAX_OUTPUT_SIZE) {
+        stderr += chunk;
+      }
+      // Log stderr for debugging
+      const lines = chunk.trim().split('\n');
+      for (const line of lines) {
+        if (line) logger.debug({ container: 'router' }, line);
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      logger.error({ requestId, containerName }, 'Router container timeout');
+      container.kill('SIGTERM');
+      setTimeout(() => {
+        if (!container.killed) container.kill('SIGKILL');
+      }, 5000);
+    }, ROUTER_TIMEOUT_MS);
+
+    container.on('close', (code) => {
+      clearTimeout(timeout);
+
+      if (timedOut) {
+        reject(new Error('Router container timed out'));
+        return;
+      }
+
+      if (code !== 0) {
+        reject(
+          new Error(
+            `Router container exited with code ${code}: ${stderr.slice(-500)}`,
+          ),
+        );
+        return;
+      }
+
+      // Extract result from OUTPUT_START/END markers
+      const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
+      const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+
+      if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+        reject(
+          new Error(
+            `Router container produced no parseable output: ${stdout.slice(-500)}`,
+          ),
+        );
+        return;
+      }
+
+      const jsonStr = stdout
+        .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+        .trim();
+
+      try {
+        const output = JSON.parse(jsonStr);
+        if (output.status === 'error') {
+          reject(new Error(`Router agent error: ${output.error || 'unknown'}`));
+          return;
+        }
+        resolve(output.result || '');
+      } catch (err) {
+        reject(
+          new Error(
+            `Failed to parse router output: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      }
+    });
+
+    container.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`Router container spawn error: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Stop any running router containers (cleanup on shutdown).
+ */
+export async function stopRouterContainer(): Promise<void> {
+  // The one-shot router containers self-cleanup (--rm flag),
+  // but we stop any that might be in-flight during shutdown.
+  try {
+    const { execSync } = await import('child_process');
+    const output = execSync(
+      `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw-router- --format '{{.Names}}'`,
+      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+    );
+    const containers = output.trim().split('\n').filter(Boolean);
+    for (const name of containers) {
+      try {
+        execSync(`${CONTAINER_RUNTIME_BIN} stop ${name}`, {
+          stdio: 'pipe',
+          timeout: 5000,
+        });
+        logger.info({ containerName: name }, 'Stopped router container');
+      } catch {
+        // Already stopped
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to stop router containers');
+  }
+}
