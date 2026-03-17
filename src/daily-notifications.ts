@@ -98,12 +98,8 @@ async function fetchGithubMergedPRs(
 
   // Build unified query list: --owner for orgs, --repo for specific repos
   const queries = [
-    ...watchGithub
-      .filter((s) => !s.includes('/'))
-      .map((s) => ['--owner', s]),
-    ...watchGithub
-      .filter((s) => s.includes('/'))
-      .map((s) => ['--repo', s]),
+    ...watchGithub.filter((s) => !s.includes('/')).map((s) => ['--owner', s]),
+    ...watchGithub.filter((s) => s.includes('/')).map((s) => ['--repo', s]),
   ];
 
   const settled = await Promise.allSettled(
@@ -179,11 +175,7 @@ export async function sendDailySummaries(
       try {
         const tokenKey = resolveGithubTokenKey(config?.tools);
         const ghToken = envTokens[tokenKey] || envTokens['GITHUB_TOKEN'];
-        const allPRs = await fetchGithubMergedPRs(
-          watchGithub,
-          since,
-          ghToken,
-        );
+        const allPRs = await fetchGithubMergedPRs(watchGithub, since, ghToken);
         // Filter out PRs already in ship_log (agent-created work)
         const shippedUrls = new Set(
           shipped.map((s) => s.pr_url).filter(Boolean),

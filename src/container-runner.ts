@@ -1889,9 +1889,13 @@ function buildVolumeMounts(
           const configContent = fs
             .readFileSync(origConfig, 'utf-8')
             .replace(homePattern, '/home/node/.snowflake/');
-          fs.writeFileSync(path.join(stagingDir, 'config.toml'), configContent, {
-            mode: 0o600,
-          });
+          fs.writeFileSync(
+            path.join(stagingDir, 'config.toml'),
+            configContent,
+            {
+              mode: 0o600,
+            },
+          );
         }
 
         // Copy only key files referenced in the (possibly filtered) connections.toml,
