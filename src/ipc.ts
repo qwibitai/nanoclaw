@@ -27,6 +27,14 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  /** Optional channel-aware send for pool bots (e.g. Telegram swarm).
+   *  Returns true if handled, false to fall back to sendMessage. */
+  sendPoolMessage?: (
+    jid: string,
+    text: string,
+    sender: string,
+    groupFolder: string,
+  ) => Promise<boolean>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -37,6 +45,43 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+}
+
+/** Dispatch an IPC message, routing through pool bots when a sender is present. */
+export async function dispatchIpcMessage(
+  data: { chatJid: string; text: string; sender?: string },
+  sourceGroup: string,
+  isMain: boolean,
+  deps: IpcDeps,
+): Promise<'sent' | 'unauthorized'> {
+  const registeredGroups = deps.registeredGroups();
+  const targetGroup = registeredGroups[data.chatJid];
+  if (!isMain && !(targetGroup && targetGroup.folder === sourceGroup)) {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC message attempt blocked',
+    );
+    return 'unauthorized';
+  }
+
+  if (data.sender && deps.sendPoolMessage) {
+    const sent = await deps.sendPoolMessage(
+      data.chatJid,
+      data.text,
+      data.sender,
+      sourceGroup,
+    );
+    if (!sent) {
+      await deps.sendMessage(data.chatJid, data.text);
+    }
+  } else {
+    await deps.sendMessage(data.chatJid, data.text);
+  }
+  logger.info(
+    { chatJid: data.chatJid, sourceGroup, sender: data.sender },
+    'IPC message sent',
+  );
+  return 'sent';
 }
 
 let ipcWatcherRunning = false;
@@ -89,23 +134,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
-                  );
-                }
+                await dispatchIpcMessage(data, sourceGroup, isMain, deps);
               }
               fs.unlinkSync(filePath);
             } catch (err) {

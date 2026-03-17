@@ -41,6 +41,145 @@ async function sendTelegramMessage(
   }
 }
 
+/**
+ * Split long messages at the 4096-char Telegram limit and send each chunk.
+ * Shared between TelegramChannel.sendMessage() and BotPool.send().
+ */
+async function sendWithSplit(
+  api: { sendMessage: Api['sendMessage'] },
+  chatId: string | number,
+  text: string,
+): Promise<void> {
+  const numericId =
+    typeof chatId === 'string' ? chatId.replace(/^tg:/, '') : chatId;
+  const MAX_LENGTH = 4096;
+  if (text.length <= MAX_LENGTH) {
+    await sendTelegramMessage(api, numericId, text);
+  } else {
+    for (let i = 0; i < text.length; i += MAX_LENGTH) {
+      await sendTelegramMessage(api, numericId, text.slice(i, i + MAX_LENGTH));
+    }
+  }
+}
+
+export interface BotPoolDeps {
+  createApi: (token: string) => Api;
+  renameDelayMs: number;
+}
+
+const DEFAULT_DEPS: BotPoolDeps = {
+  createApi: (token: string) => new Api(token),
+  // Telegram rate-limits setMyName; wait after rename so the new name
+  // is visible before the first message arrives in the chat.
+  renameDelayMs: 2000,
+};
+
+// NOTE: setMyName is a global Telegram API operation — it changes the bot's
+// display name for ALL chats, not per-chat. When the same bot is assigned to
+// different senders across groups (via round-robin wrap), its name will flip
+// between roles. This is a Telegram API limitation, not a bug.
+export class BotPool {
+  private apis: Api[] = [];
+  private senderMap = new Map<string, number>();
+  private nextIndex = 0;
+  private deps: BotPoolDeps;
+
+  constructor(deps: Partial<BotPoolDeps> = {}) {
+    this.deps = { ...DEFAULT_DEPS, ...deps };
+  }
+
+  async init(tokens: string[]): Promise<void> {
+    for (const token of tokens) {
+      try {
+        const api = this.deps.createApi(token);
+        const me = await api.getMe();
+        this.apis.push(api);
+        logger.info(
+          { username: me.username, id: me.id, poolSize: this.apis.length },
+          'Pool bot initialized',
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to initialize pool bot');
+      }
+    }
+    if (this.apis.length > 0) {
+      logger.info({ count: this.apis.length }, 'Telegram bot pool ready');
+    }
+  }
+
+  async send(
+    chatId: string,
+    text: string,
+    sender: string,
+    groupFolder: string,
+  ): Promise<boolean> {
+    if (this.apis.length === 0) {
+      return false; // Signal caller to use fallback
+    }
+
+    const key = `${groupFolder}:${sender}`;
+    let idx = this.senderMap.get(key);
+    if (idx === undefined) {
+      idx = this.nextIndex % this.apis.length;
+      this.nextIndex++;
+      this.senderMap.set(key, idx);
+      try {
+        await this.apis[idx].setMyName(sender);
+        if (this.deps.renameDelayMs > 0) {
+          await new Promise((r) => setTimeout(r, this.deps.renameDelayMs));
+        }
+        logger.info(
+          { sender, groupFolder, poolIndex: idx },
+          'Assigned and renamed pool bot',
+        );
+      } catch (err) {
+        logger.warn(
+          { sender, err },
+          'Failed to rename pool bot (sending anyway)',
+        );
+      }
+    }
+
+    const api = this.apis[idx];
+    await sendWithSplit(api, chatId, text);
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
+    return true;
+  }
+
+  get size(): number {
+    return this.apis.length;
+  }
+
+  getAssignment(sender: string, groupFolder: string): number | undefined {
+    return this.senderMap.get(`${groupFolder}:${sender}`);
+  }
+
+  reset(): void {
+    this.apis = [];
+    this.senderMap.clear();
+    this.nextIndex = 0;
+  }
+}
+
+// Singleton instance and convenience functions
+export const botPool = new BotPool();
+
+export async function initBotPool(tokens: string[]): Promise<void> {
+  await botPool.init(tokens);
+}
+
+export async function sendPoolMessage(
+  chatId: string,
+  text: string,
+  sender: string,
+  groupFolder: string,
+): Promise<boolean> {
+  return botPool.send(chatId, text, sender, groupFolder);
+}
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -244,21 +383,7 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
-
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
-            this.bot.api,
-            numericId,
-            text.slice(i, i + MAX_LENGTH),
-          );
-        }
-      }
+      await sendWithSplit(this.bot.api, jid, text);
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
