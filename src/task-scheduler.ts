@@ -22,9 +22,9 @@ import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
- * Compute the next run time for a recurring task, anchored to the
- * task's scheduled time rather than Date.now() to prevent cumulative
- * drift on interval-based tasks.
+ * 定期実行タスクの次回の実行時間を計算します。
+ * インターバルベースのタスクで累積的なドリフトを防ぐため、
+ * Date.now() ではなくタスクの予定時刻を基準にします。
  *
  * Co-authored-by: @community-pr-601
  */
@@ -43,15 +43,15 @@ export function computeNextRun(task: ScheduledTask): string | null {
   if (task.schedule_type === 'interval') {
     const ms = parseInt(task.schedule_value, 10);
     if (!ms || ms <= 0) {
-      // Guard against malformed interval that would cause an infinite loop
+      // 無限ループを引き起こす可能性のある不正なインターバル値をガードします
       logger.warn(
         { taskId: task.id, value: task.schedule_value },
         'Invalid interval value',
       );
       return new Date(now + 60_000).toISOString();
     }
-    // Anchor to the scheduled time, not now, to prevent drift.
-    // Skip past any missed intervals so we always land in the future.
+    // ドリフトを防ぐため、現在時刻ではなく予定時刻を基準にします。
+    // 常に未来の時刻になるよう、逃したインターバルはスキップします。
     let next = new Date(task.next_run!).getTime() + ms;
     while (next <= now) {
       next += ms;
@@ -85,7 +85,7 @@ async function runTask(
     groupDir = resolveGroupFolderPath(task.group_folder);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    // Stop retry churn for malformed legacy rows.
+    // 不正な古い行によるリトライの繰り返しを停止します。
     updateTask(task.id, { status: 'paused' });
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder, error },
@@ -129,7 +129,7 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
+  // コンテナが読み取るためのタスクスナップショットを更新します（グループでフィルタリング）
   const isMain = group.isMain === true;
   const tasks = getAllTasks();
   writeTasksSnapshot(
@@ -149,19 +149,19 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
+  // グループコンテキストモードの場合、グループの現在のセッションを使用します
   const sessions = deps.getSessions();
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
-  // After the task produces a result, close the container promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
-  // query loop to time out. A short delay handles any final MCP calls.
+  // タスクが結果を出力した後、速やかにコンテナを閉じます。
+  // タスクはシングルターン（1往復）であり、クエリループがタイムアウトするまで
+  // IDLE_TIMEOUT (30分) を待つ必要はありません。短い遅延で最終的な MCP コールを処理します。
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleClose = () => {
-    if (closeTimer) return; // already scheduled
+    if (closeTimer) return; // すでにスケジュール済み
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
       deps.queue.closeStdin(task.chat_jid);
@@ -185,13 +185,13 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
+          // 結果をユーザーに転送します（sendMessage がフォーマットを処理します）
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          scheduleClose(); // 結果が null の場合（IPC のみのタスクなど）でも速やかに閉じます
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -204,7 +204,7 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
+      // 結果は上記のストリーミングコールバック経由ですでにユーザーに転送されています
       result = output.result;
     }
 
@@ -256,7 +256,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       }
 
       for (const task of dueTasks) {
-        // Re-check task status in case it was paused/cancelled
+        // タスクが一時停止またはキャンセルされた場合に備えて、タスクの状態を再確認します
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
@@ -276,7 +276,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   loop();
 }
 
-/** @internal - for tests only. */
+/** @internal - テスト用のみ。 */
 export function _resetSchedulerLoopForTests(): void {
   schedulerRunning = false;
 }
