@@ -242,7 +242,9 @@ export async function indexPdf(
         success: false,
         pageCount: 0,
         fallbackText,
-        error: fallbackText ? 'Could not determine page count' : 'All extraction failed',
+        error: fallbackText
+          ? 'Could not determine page count'
+          : 'All extraction failed',
       };
     }
 
@@ -327,7 +329,8 @@ export async function indexPdf(
         [scriptPath, filePath],
         {
           env: {
-            ...process.env,
+            PATH: process.env.PATH || '/usr/bin:/bin',
+            HOME: process.env.HOME || '',
             ANTHROPIC_BASE_URL: `http://localhost:${CREDENTIAL_PROXY_PORT}`,
             ANTHROPIC_API_KEY: 'placeholder',
           },

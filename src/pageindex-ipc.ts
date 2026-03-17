@@ -56,7 +56,7 @@ export async function handlePageindexIpc(
         const startPage = data.startPage as number | undefined;
         const endPage = data.endPage as number | undefined;
 
-        if (!pdfPath || !startPage || !endPage) {
+        if (!pdfPath || startPage == null || endPage == null) {
           writeResult({
             success: false,
             error: 'Missing required fields: pdfPath, startPage, endPage',
@@ -141,10 +141,7 @@ export async function handlePageindexIpc(
         return false;
     }
 
-    logger.info(
-      { type, requestId, sourceGroup },
-      'pageindex IPC handled',
-    );
+    logger.info({ type, requestId, sourceGroup }, 'pageindex IPC handled');
     return true;
   } catch (err) {
     logger.error({ err, type, requestId }, 'pageindex IPC error');

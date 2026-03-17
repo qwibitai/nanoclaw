@@ -240,7 +240,10 @@ function buildContainerArgs(
   // Pass SimpleMem memory URL if configured
   const simpleMemUrl = process.env.SIMPLEMEM_URL;
   if (simpleMemUrl) {
-    args.push('-e', `SIMPLEMEM_URL=${simpleMemUrl.replace('localhost', CONTAINER_HOST_GATEWAY)}`);
+    args.push(
+      '-e',
+      `SIMPLEMEM_URL=${simpleMemUrl.replaceAll('localhost', CONTAINER_HOST_GATEWAY)}`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution
