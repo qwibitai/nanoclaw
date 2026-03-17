@@ -17,6 +17,7 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import { initBotPool, sendPoolMessage } from './channels/telegram.js';
+import { sendResponse, SendResponseDeps } from './send-response.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -327,6 +328,16 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+function makeResponseDeps(channel: Channel): SendResponseDeps {
+  return {
+    sendMessage: (jid, text) => channel.sendMessage(jid, text),
+    sendPoolMessage:
+      TELEGRAM_BOT_POOL.length > 0
+        ? (jid, text, sender, gf) => sendPoolMessage(jid, text, sender, gf)
+        : undefined,
+  };
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -428,7 +439,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           if (routerResponse.directAnswer) {
             const formatted = formatOutbound(routerResponse.directAnswer);
             if (formatted) {
-              await channel.sendMessage(chatJid, formatted);
+              await sendResponse(
+                chatJid,
+                formatted,
+                group.folder,
+                ASSISTANT_NAME,
+                makeResponseDeps(channel),
+              );
             }
           }
           lastAgentTimestamp[chatJid] =
@@ -586,7 +603,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
 
         if (text) {
-          await channel.sendMessage(chatJid, text);
+          await sendResponse(
+            chatJid,
+            text,
+            group.folder,
+            ASSISTANT_NAME,
+            makeResponseDeps(channel),
+          );
           outputSentToUser = true;
         }
         resetIdleTimer();
@@ -684,14 +707,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     // Send error notification to user — this is mechanistic, no LLM needed
-    await channel
-      .sendMessage(chatJid, errorMsg)
-      .catch((sendErr: unknown) =>
-        logger.error(
-          { chatJid, sendErr },
-          'Failed to send error notification to user',
-        ),
-      );
+    await sendResponse(
+      chatJid,
+      errorMsg,
+      group.folder,
+      ASSISTANT_NAME,
+      makeResponseDeps(channel),
+    ).catch((sendErr: unknown) =>
+      logger.error(
+        { chatJid, sendErr },
+        'Failed to send error notification to user',
+      ),
+    );
 
     if (outputSentToUser) {
       logger.warn(
