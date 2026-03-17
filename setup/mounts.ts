@@ -6,9 +6,23 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+import { AllowedRoot } from '../src/types.js';
 import { logger } from '../src/logger.js';
 import { isRoot } from './platform.js';
 import { emitStatus } from './status.js';
+
+/**
+ * Normalize allowedRoots entries: accept plain strings (e.g. "/home/user/Work")
+ * and convert them to the AllowedRoot object shape that mount-security.ts expects.
+ */
+function normalizeAllowedRoots(roots: unknown[]): AllowedRoot[] {
+  return roots.map((root) => {
+    if (typeof root === 'string') {
+      return { path: root, allowReadWrite: true };
+    }
+    return root as AllowedRoot;
+  });
+}
 
 function parseArgs(args: string[]): { empty: boolean; json: string } {
   let empty = false;
@@ -67,6 +81,9 @@ export async function run(args: string[]): Promise<void> {
       return; // unreachable but satisfies TS
     }
 
+    if (Array.isArray(parsed.allowedRoots)) {
+      parsed.allowedRoots = normalizeAllowedRoots(parsed.allowedRoots);
+    }
     fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
     allowedRoots = Array.isArray(parsed.allowedRoots)
       ? parsed.allowedRoots.length
@@ -93,6 +110,9 @@ export async function run(args: string[]): Promise<void> {
       return;
     }
 
+    if (Array.isArray(parsed.allowedRoots)) {
+      parsed.allowedRoots = normalizeAllowedRoots(parsed.allowedRoots);
+    }
     fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
     allowedRoots = Array.isArray(parsed.allowedRoots)
       ? parsed.allowedRoots.length
