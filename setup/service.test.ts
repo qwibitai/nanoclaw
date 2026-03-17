@@ -48,23 +48,35 @@ function generateSystemdUnit(
   homeDir: string,
   isSystem: boolean,
 ): string {
-  return `[Unit]
-Description=NanoClaw Personal Assistant
-After=network.target docker.service
+  const dockerWaitCmd = `/bin/sh -c 'for i in $(seq 1 30); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; echo "Docker not reachable after 60s" >&2; exit 1'`;
 
-[Service]
-Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
-WorkingDirectory=${projectRoot}
-Restart=always
-RestartSec=5
-Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
-StandardOutput=append:${projectRoot}/logs/nanoclaw.log
-StandardError=append:${projectRoot}/logs/nanoclaw.error.log
+  const unitLines = ["[Unit]", "Description=NanoClaw Personal Assistant"];
+  if (isSystem) {
+    unitLines.push("After=network.target docker.service");
+    unitLines.push("Requires=docker.service");
+  } else {
+    unitLines.push("After=network.target");
+  }
 
-[Install]
-WantedBy=${isSystem ? "multi-user.target" : "default.target"}`;
+  unitLines.push("");
+  unitLines.push("[Service]");
+  unitLines.push("Type=simple");
+  if (!isSystem) {
+    unitLines.push(`ExecStartPre=${dockerWaitCmd}`);
+  }
+  unitLines.push(`ExecStart=${nodePath} ${projectRoot}/dist/index.js`);
+  unitLines.push(`WorkingDirectory=${projectRoot}`);
+  unitLines.push("Restart=always");
+  unitLines.push("RestartSec=5");
+  unitLines.push(`Environment=HOME=${homeDir}`);
+  unitLines.push(`Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`);
+  unitLines.push(`StandardOutput=append:${projectRoot}/logs/nanoclaw.log`);
+  unitLines.push(`StandardError=append:${projectRoot}/logs/nanoclaw.error.log`);
+  unitLines.push("");
+  unitLines.push("[Install]");
+  unitLines.push(`WantedBy=${isSystem ? "multi-user.target" : "default.target"}`);
+
+  return unitLines.join("\n");
 }
 
 describe("plist generation", () => {
@@ -110,6 +122,28 @@ describe("systemd unit generation", () => {
   it("sets correct ExecStart", () => {
     const unit = generateSystemdUnit("/usr/bin/node", "/srv/nanoclaw", "/home/user", false);
     expect(unit).toContain("ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js");
+  });
+
+  it("system unit requires docker.service", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", true);
+    expect(unit).toContain("Requires=docker.service");
+    expect(unit).toContain("After=network.target docker.service");
+  });
+
+  it("user unit does not reference docker.service", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", false);
+    expect(unit).not.toContain("docker.service");
+  });
+
+  it("user unit has ExecStartPre that waits for Docker", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", false);
+    expect(unit).toContain("ExecStartPre=");
+    expect(unit).toContain("docker info");
+  });
+
+  it("system unit does not have ExecStartPre", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", true);
+    expect(unit).not.toContain("ExecStartPre=");
   });
 });
 
