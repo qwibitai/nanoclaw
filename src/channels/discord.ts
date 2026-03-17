@@ -307,8 +307,7 @@ export class DiscordChannel implements Channel {
     });
 
     // Handle button clicks and slash commands.
-    // Review/Simplify/Deploy are restricted to #nanoclaw-dev and its threads.
-    // Merge button works from any channel.
+    // Deploy is restricted to #nanoclaw-dev and its threads.
     const deployChannelId = '1480411210183610418';
     this.client.on(Events.InteractionCreate, async (interaction) => {
       const parentId = DiscordChannel.getInteractionParentId(interaction);
@@ -319,15 +318,7 @@ export class DiscordChannel implements Channel {
         if (interaction.isButton()) {
           const btn = interaction as ButtonInteraction;
           if (btn.customId.startsWith('merge:')) {
-            // Merge works from any channel
             await this.handleMergeButton(btn);
-          } else if (isNanoclawChannel) {
-            // Review/Simplify restricted to nanoclaw-dev
-            if (btn.customId.startsWith('review-merge:')) {
-              await this.handleReviewMergeButton(btn);
-            } else if (btn.customId.startsWith('simplify-merge:')) {
-              await this.handleSimplifyMergeButton(btn);
-            }
           }
         } else if (interaction.isChatInputCommand() && isNanoclawChannel) {
           if (interaction.commandName === 'deploy') {
@@ -756,35 +747,14 @@ export class DiscordChannel implements Channel {
   private static PR_URL_RE =
     /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
 
-  /** Build PR action buttons if the text contains a GitHub PR URL.
-   * NanoClaw PRs get Review & Merge + Simplify & Merge + Merge.
-   * All other PRs get only a Merge button. */
+  /** Build PR action buttons if the text contains a GitHub PR URL. */
   private buildPrButtons(
     text: string,
   ): ActionRowBuilder<ButtonBuilder>[] | undefined {
     const match = text.match(DiscordChannel.PR_URL_RE);
     if (!match) return undefined;
-    // Discord customId max is 100 chars; "review-merge:" prefix is 13 chars
-    if (match[0].length > 87) return undefined;
-    const isNanoclawPr = /\/nanoclaw\/pull\//.test(match[0]);
-    if (isNanoclawPr) {
-      return [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`review-merge:${match[0]}`)
-            .setLabel('Review & Merge')
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId(`simplify-merge:${match[0]}`)
-            .setLabel('Simplify & Merge')
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId(`merge:${match[0]}`)
-            .setLabel('Merge')
-            .setStyle(ButtonStyle.Secondary),
-        ),
-      ];
-    }
+    // Discord customId max is 100 chars; "merge:" prefix is 6 chars
+    if (match[0].length > 94) return undefined;
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -911,39 +881,6 @@ export class DiscordChannel implements Channel {
     } catch (err) {
       logger.error({ err }, 'Failed to register Discord slash commands');
     }
-  }
-
-  /** Review & Merge: inject a message that triggers /review-swarm + /simplify + merge. */
-  private async handleReviewMergeButton(
-    interaction: ButtonInteraction,
-  ): Promise<void> {
-    const prUrl = interaction.customId.replace('review-merge:', '');
-    await interaction.deferReply();
-
-    const prompt =
-      `Review and merge ${prUrl}:\n` +
-      `1. Run /review-swarm on the PR diff — fix any critical findings\n` +
-      `2. Run /simplify on changed files — fix any code quality issues\n` +
-      `3. If both pass clean, merge with \`gh pr merge ${prUrl} --squash --delete-branch\``;
-
-    this.injectMessage(interaction, prompt);
-    await interaction.editReply('Starting review pipeline...');
-  }
-
-  /** Simplify & Merge: run /simplify then merge (no review swarm). */
-  private async handleSimplifyMergeButton(
-    interaction: ButtonInteraction,
-  ): Promise<void> {
-    const prUrl = interaction.customId.replace('simplify-merge:', '');
-    await interaction.deferReply();
-
-    const prompt =
-      `Simplify and merge ${prUrl}:\n` +
-      `1. Run /simplify on the PR changed files — fix any code quality issues\n` +
-      `2. If clean, merge with \`gh pr merge ${prUrl} --squash --delete-branch\``;
-
-    this.injectMessage(interaction, prompt);
-    await interaction.editReply('Starting simplify pipeline...');
   }
 
   /** Merge: merge the PR directly via gh CLI. */
