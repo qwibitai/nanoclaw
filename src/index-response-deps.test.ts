@@ -128,6 +128,10 @@ vi.mock('./github-issues.js', () => ({
 vi.mock('./usage.js', () => ({
   recordUsage: vi.fn(),
 }));
+vi.mock('./group-folder.js', () => ({
+  cleanupStaleUploads: vi.fn(),
+  resolveGroupFolderPath: vi.fn((f: string) => `/tmp/groups/${f}`),
+}));
 
 import { makeResponseDeps } from './index.js';
 import type { Channel } from './types.js';
