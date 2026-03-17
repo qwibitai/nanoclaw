@@ -159,11 +159,13 @@ Review the PR against each question below. Be honest and thorough.
 **Testability & Correctness:**
 - Is it designed for testability? What would make it more testable and more correct?
 - Do the tests need harness, simulator, hypothesis, fixtures?
+- Does the feature have a powerful testing harness that lets it test itself thoroughly? Reuse and extend existing test harnesses rather than building from scratch.
 - Does it have clear INVARIANTS and SUT?
 - Did you smoke test it (actually ran it)?
 
-**Code Quality:**
+**Code Quality & Refactoring:**
 - Does it need DRYing up? More reuse? Refactoring?
+- Does this feature touch ugly, convoluted code? Giant files with sprawling functions? Take time to refactor and leave the code in a better place than you found it. Continual improvement is the heartblood of this system.
 
 **Purpose & Impact:**
 - Is the PR achieving its intended purpose? Is the intended purpose clear?
