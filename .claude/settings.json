@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/hooks/review-pr-on-create.sh",
+            "command": "./.claude/hooks/pr-review-loop.sh",
             "timeout": 10
           },
           {
