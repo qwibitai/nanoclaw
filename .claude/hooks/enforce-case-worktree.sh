@@ -14,23 +14,18 @@ if ! echo "$COMMAND" | grep -qE '^\s*git\s+(commit|push)'; then
   exit 0
 fi
 
-# Get current branch
+# Allow if running inside a git worktree
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+GIT_COMMON=$(git rev-parse --git-common-dir 2>/dev/null)
+if [ -n "$GIT_DIR" ] && [ -n "$GIT_COMMON" ] && [ "$GIT_DIR" != "$GIT_COMMON" ]; then
+  exit 0
+fi
+
+# Block: committing/pushing outside a worktree
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-
-# Allow: case branches, skill branches, explicit feature branches, worktree nonces
-if echo "$BRANCH" | grep -qE '^(case/|skill/|260[0-9]{3}-|feat/|wt/)'; then
-  exit 0
-fi
-
-# Allow: detached HEAD (e.g., during rebase)
-if [ "$BRANCH" = "HEAD" ]; then
-  exit 0
-fi
-
-# Block: committing/pushing on main or unrecognized branches
 jq -n \
   --arg branch "$BRANCH" \
-  --arg reason "Dev work must happen in a worktree, not on '$BRANCH'. Use claude-wt to launch in an isolated worktree, or create a branch (case/*, skill/*, feat/*, wt/*, YYMMDD-*)." \
+  --arg reason "Dev work must happen in a worktree, not on '$BRANCH' in the main checkout. Use claude-wt to launch in an isolated worktree." \
   '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
