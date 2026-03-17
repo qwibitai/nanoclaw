@@ -307,14 +307,28 @@ This is a fork of `qwibitai/nanoclaw`. Remotes:
 
 ## Merging PRs
 
-Branch protection has `strict: true` status checks — the PR branch must be current with main at merge time. When `gh pr merge` fails with "base branch policy prohibits the merge", **use `--auto`** to queue the merge for when requirements are met. Do NOT ask the user — just add `--auto` and move on. The `gh` CLI tells you this in its error message; follow its suggestion.
+Branch protection has `strict: true` status checks. Auto-merge is enabled. The agent handles the full merge loop autonomously — do NOT ask the user unless something is genuinely broken after retries.
 
 ```bash
-# Standard merge command (always use --auto with --squash):
+# Step 1: Queue auto-merge (non-blocking — GitHub merges when CI passes + branch is current)
 gh pr merge <url> --repo Garsson-io/nanoclaw --squash --delete-branch --auto
+
+# Step 2: Wait for CI
+gh run watch <run-id> --repo Garsson-io/nanoclaw --exit-status
+
+# Step 3: Verify merge completed
+gh pr view <url> --repo Garsson-io/nanoclaw --json state --jq .state
+# Expected: "MERGED"
+
+# Step 4: Sync main
+git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge origin/main --no-edit
 ```
 
-If `--auto` isn't sufficient (e.g., branch is behind), merge main into the branch first, push, then re-run with `--auto`. The PR review Stop hook enforces this — it will block you from stopping until the review loop completes, which includes the merge step.
+**If CI fails**: fix the issue, commit, push. Auto-merge stays queued — CI re-runs automatically. Go back to step 2.
+
+**If branch is behind main**: `git fetch origin main && git merge origin/main --no-edit && git push`. CI re-runs, auto-merge retries. Go back to step 2.
+
+**If state is not MERGED after CI passes**: check `gh pr view --json mergeStateStatus` for the reason and fix it. This is rare — usually means another PR merged during your CI run and `strict` requires re-running. Push triggers a new CI run and auto-merge retries.
 
 ## Container Build Cache
 
