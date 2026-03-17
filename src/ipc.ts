@@ -1080,12 +1080,17 @@ export async function processTaskIpc(
         }),
       );
 
-      // Notify user
-      if (resolvedChatJid) {
+      // Notify user — dev cases notify main group, work cases notify source group
+      const notifyJid =
+        caseType === 'dev'
+          ? Object.entries(registeredGroups).find(([, g]) => g.isMain)?.[0] ||
+            resolvedChatJid
+          : resolvedChatJid;
+      if (notifyJid) {
         const issueInfo = issueUrl ? `\nGitHub: ${issueUrl}` : '';
         deps
           .sendMessage(
-            resolvedChatJid,
+            notifyJid,
             `📋 New ${caseType} case created: ${name}\n${d.description.slice(0, 200)}${issueInfo}`,
           )
           .catch(() => {
@@ -1115,10 +1120,12 @@ export async function processTaskIpc(
           initiatorChannel: undefined,
           githubIssue: d.githubIssue,
         });
-        // Notify user about the suggestion
-        const targetJid = Object.entries(registeredGroups).find(
-          ([, g]) => g.folder === sourceGroup,
-        )?.[0];
+        // Notify main group about the dev suggestion
+        const targetJid =
+          Object.entries(registeredGroups).find(([, g]) => g.isMain)?.[0] ||
+          Object.entries(registeredGroups).find(
+            ([, g]) => g.folder === sourceGroup,
+          )?.[0];
         if (targetJid) {
           deps
             .sendMessage(
