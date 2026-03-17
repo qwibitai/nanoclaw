@@ -64,9 +64,18 @@ detect_gh_repo() {
   echo "$url" | sed -n 's|.*github\.com[:/]\([^/]*/[^/.]*\).*|\1|p' | head -1
 }
 
+# Extract --repo flag value from a command line.
+# Usage: REPO=$(extract_repo_flag "$CMD_LINE")
+# Returns the repo (owner/name) if --repo is present, empty string otherwise.
+extract_repo_flag() {
+  local cmd_line="$1"
+  echo "$cmd_line" | sed -n 's/.*--repo[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' | head -1
+}
+
 # Get changed file list for a PR command.
 # For merge: uses gh pr diff (actual PR files on GitHub).
 # For create: uses git diff (local branch vs base).
+# Respects --repo flag in the command to avoid cross-repo false positives.
 # Usage: CHANGED_FILES=$(get_pr_changed_files "$CMD_LINE" "$is_merge")
 get_pr_changed_files() {
   local cmd_line="$1"
@@ -75,9 +84,12 @@ get_pr_changed_files() {
   if [ "$is_merge" = true ]; then
     local pr_num repo_flag
     pr_num=$(extract_pr_number "$cmd_line" "merge")
-    # Always specify --repo to avoid resolving to wrong remote (e.g., upstream)
+    # Prefer --repo from the command itself, fall back to origin remote
     local repo
-    repo=$(detect_gh_repo)
+    repo=$(extract_repo_flag "$cmd_line")
+    if [ -z "$repo" ]; then
+      repo=$(detect_gh_repo)
+    fi
     repo_flag=""
     if [ -n "$repo" ]; then
       repo_flag="--repo $repo"

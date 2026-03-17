@@ -119,6 +119,25 @@ assert_fails "git commit should not match push" \
   is_git_command "git commit -m test" "push"
 
 echo ""
+echo "=== extract_repo_flag ==="
+
+assert_eq "extracts --repo value" \
+  "Garsson-io/garsson-prints" \
+  "$(extract_repo_flag "gh pr merge 5 --repo Garsson-io/garsson-prints --merge")"
+
+assert_eq "extracts --repo without PR number" \
+  "Garsson-io/nanoclaw" \
+  "$(extract_repo_flag "gh pr merge --repo Garsson-io/nanoclaw")"
+
+assert_eq "no --repo returns empty" \
+  "" \
+  "$(extract_repo_flag "gh pr merge 42")"
+
+assert_eq "extracts --repo from create" \
+  "Garsson-io/garsson-prints" \
+  "$(extract_repo_flag "gh pr create --title test --repo Garsson-io/garsson-prints")"
+
+echo ""
 echo "=== detect_gh_repo ==="
 
 # Test with the real repo (we're in a nanoclaw worktree)
