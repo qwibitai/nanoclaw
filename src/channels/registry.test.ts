@@ -39,4 +39,24 @@ describe('channel registry', () => {
     registerChannel('overwrite-test', factory2);
     expect(getChannelFactory('overwrite-test')).toBe(factory2);
   });
+
+  it('ChannelOpts accepts optional download tracking callbacks', () => {
+    // Verify the factory typechecks with download callbacks
+    const factory = (opts: import('./registry.js').ChannelOpts) => {
+      opts.onDownloadStart?.('chat1', 'dl-1');
+      opts.onDownloadComplete?.('chat1', 'dl-1');
+      return null;
+    };
+    registerChannel('download-test', factory);
+
+    const retrieved = getChannelFactory('download-test')!;
+    // Calling without callbacks should not throw
+    expect(() =>
+      retrieved({
+        onMessage: () => {},
+        onChatMetadata: () => {},
+        registeredGroups: () => ({}),
+      }),
+    ).not.toThrow();
+  });
 });

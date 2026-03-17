@@ -76,6 +76,7 @@ vi.mock('./group-queue.js', () => ({
   GroupQueue: class MockGroupQueue {
     enqueueMessageCheck = vi.fn();
     setProcessMessagesFn = vi.fn();
+    setDownloadTracker = vi.fn();
     registerProcess = vi.fn();
     closeStdin = vi.fn();
     sendMessage = vi.fn();
@@ -102,6 +103,15 @@ vi.mock('./config.js', () => ({
   TRIGGER_PATTERN: /^@TestBot\b/i,
   DATA_DIR: '/tmp/nanoclaw-test',
   IPC_POLL_INTERVAL: 1000,
+  COALESCE_MS: 0,
+  MAX_DOWNLOAD_WAIT_MS: 60000,
+}));
+vi.mock('./download-tracker.js', () => ({
+  DownloadTracker: class MockDownloadTracker {
+    start = vi.fn();
+    complete = vi.fn();
+    hasPending = vi.fn(() => false);
+  },
 }));
 vi.mock('./env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('./sender-allowlist.js', () => ({

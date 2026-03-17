@@ -912,6 +912,105 @@ describe('TelegramChannel', () => {
 
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
+
+    it('calls onDownloadStart/onDownloadComplete for photo downloads', async () => {
+      const onDownloadStart = vi.fn();
+      const onDownloadComplete = vi.fn();
+      const opts = createTestOpts({ onDownloadStart, onDownloadComplete });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({ messageId: 50 });
+      await triggerMediaMessage('message:photo', ctx);
+
+      expect(onDownloadStart).toHaveBeenCalledWith('tg:100200300', 'photo-50');
+      expect(onDownloadComplete).toHaveBeenCalledWith(
+        'tg:100200300',
+        'photo-50',
+      );
+      // onDownloadStart must fire before onDownloadComplete
+      expect(onDownloadStart.mock.invocationCallOrder[0]).toBeLessThan(
+        onDownloadComplete.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('calls onDownloadStart/onDownloadComplete for document downloads', async () => {
+      const onDownloadStart = vi.fn();
+      const onDownloadComplete = vi.fn();
+      const opts = createTestOpts({ onDownloadStart, onDownloadComplete });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        messageId: 51,
+        extra: { document: { file_id: 'doc_id', file_name: 'report.pdf' } },
+      });
+      await triggerMediaMessage('message:document', ctx);
+
+      expect(onDownloadStart).toHaveBeenCalledWith('tg:100200300', 'doc-51');
+      expect(onDownloadComplete).toHaveBeenCalledWith('tg:100200300', 'doc-51');
+    });
+
+    it('calls onDownloadComplete even when photo download fails', async () => {
+      mockDownloadFile.mockRejectedValueOnce(new Error('Network error'));
+      const onDownloadStart = vi.fn();
+      const onDownloadComplete = vi.fn();
+      const opts = createTestOpts({ onDownloadStart, onDownloadComplete });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({ messageId: 52 });
+      await triggerMediaMessage('message:photo', ctx);
+
+      expect(onDownloadStart).toHaveBeenCalledWith('tg:100200300', 'photo-52');
+      expect(onDownloadComplete).toHaveBeenCalledWith(
+        'tg:100200300',
+        'photo-52',
+      );
+      // Message still stored with fallback placeholder
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '[Photo]' }),
+      );
+    });
+
+    it('calls onDownloadComplete even when document download fails', async () => {
+      mockDownloadFile.mockRejectedValueOnce(new Error('Network error'));
+      const onDownloadStart = vi.fn();
+      const onDownloadComplete = vi.fn();
+      const opts = createTestOpts({ onDownloadStart, onDownloadComplete });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        messageId: 53,
+        extra: { document: { file_id: 'doc_id', file_name: 'report.pdf' } },
+      });
+      await triggerMediaMessage('message:document', ctx);
+
+      expect(onDownloadStart).toHaveBeenCalledWith('tg:100200300', 'doc-53');
+      expect(onDownloadComplete).toHaveBeenCalledWith('tg:100200300', 'doc-53');
+      // Message still stored with fallback
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Document: report.pdf — download failed]',
+        }),
+      );
+    });
+
+    it('works without download tracking callbacks (optional)', async () => {
+      const opts = createTestOpts();
+      // onDownloadStart and onDownloadComplete are not set
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({ messageId: 54 });
+      // Should not throw even without callbacks
+      await triggerMediaMessage('message:photo', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalled();
+    });
   });
 
   // --- sendMessage ---

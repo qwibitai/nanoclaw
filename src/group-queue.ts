@@ -2,7 +2,13 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import {
+  COALESCE_MS,
+  DATA_DIR,
+  MAX_CONCURRENT_CONTAINERS,
+  MAX_DOWNLOAD_WAIT_MS,
+} from './config.js';
+import { DownloadTracker } from './download-tracker.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -25,6 +31,8 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  startDeferred: boolean;
+  coalesceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -34,6 +42,17 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private downloadTracker: DownloadTracker | null = null;
+  private coalesceMs: number;
+  private maxDownloadWaitMs: number;
+
+  constructor(
+    coalesceMs = COALESCE_MS,
+    maxDownloadWaitMs = MAX_DOWNLOAD_WAIT_MS,
+  ) {
+    this.coalesceMs = coalesceMs;
+    this.maxDownloadWaitMs = maxDownloadWaitMs;
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -49,6 +68,8 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        startDeferred: false,
+        coalesceTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -57,6 +78,10 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  setDownloadTracker(tracker: DownloadTracker): void {
+    this.downloadTracker = tracker;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -70,8 +95,9 @@ export class GroupQueue {
       return;
     }
 
+    state.pendingMessages = true;
+
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      state.pendingMessages = true;
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
@@ -79,6 +105,57 @@ export class GroupQueue {
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
+      return;
+    }
+
+    // Already deferring start — new message will be included when it fires
+    if (state.startDeferred) return;
+
+    state.startDeferred = true;
+    this.deferredStart(groupJid).catch((err) =>
+      logger.error({ groupJid, err }, 'Error in deferred start'),
+    );
+  }
+
+  /**
+   * Two-phase deferred container start:
+   * Phase 1 — short coalesce window to batch rapid successive messages
+   * Phase 2 — wait for any in-progress downloads (up to maxDownloadWaitMs)
+   */
+  private async deferredStart(groupJid: string): Promise<void> {
+    const state = this.getGroup(groupJid);
+
+    try {
+      // Phase 1: coalesce window
+      if (this.coalesceMs > 0) {
+        await new Promise<void>((resolve) => {
+          state.coalesceTimer = setTimeout(() => {
+            state.coalesceTimer = null;
+            resolve();
+          }, this.coalesceMs);
+        });
+      }
+
+      // Phase 2: wait for pending downloads
+      if (this.downloadTracker?.hasPending(groupJid)) {
+        logger.debug({ groupJid }, 'Waiting for pending downloads');
+        await this.downloadTracker.waitForCompletion(
+          groupJid,
+          this.maxDownloadWaitMs,
+        );
+      }
+    } catch {
+      logger.warn({ groupJid }, 'Download wait timed out, starting container');
+    } finally {
+      state.startDeferred = false;
+    }
+
+    // Re-check eligibility after wait
+    if (state.active || this.shuttingDown) return;
+    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+      if (!this.waitingGroups.includes(groupJid)) {
+        this.waitingGroups.push(groupJid);
+      }
       return;
     }
 
@@ -347,11 +424,19 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
+    // Clear any pending coalesce timers
+    for (const [, state] of this.groups) {
+      if (state.coalesceTimer) {
+        clearTimeout(state.coalesceTimer);
+        state.coalesceTimer = null;
+      }
+    }
+
     // Count active containers but don't kill them — they'll finish on their own
     // via idle timeout or container timeout. The --rm flag cleans them up on exit.
     // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeContainers: string[] = [];
-    for (const [jid, state] of this.groups) {
+    for (const [, state] of this.groups) {
       if (state.process && !state.process.killed && state.containerName) {
         activeContainers.push(state.containerName);
       }

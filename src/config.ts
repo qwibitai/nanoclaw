@@ -20,6 +20,14 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
+// Download-aware coalescing: short delay before starting a container to
+// batch rapid successive messages and wait for in-progress downloads.
+export const COALESCE_MS = parseInt(process.env.COALESCE_MS || '500', 10);
+export const MAX_DOWNLOAD_WAIT_MS = parseInt(
+  process.env.MAX_DOWNLOAD_WAIT_MS || '60000',
+  10,
+);
+
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
