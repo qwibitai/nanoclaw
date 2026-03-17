@@ -210,6 +210,16 @@ After merging to main, classify the change and follow the appropriate procedure.
 
 Notify only: "✅ Updated [what]. Active on next conversation, no restart needed."
 
+### After every merge: sync local main
+
+After merging a PR (via `gh pr merge`), always sync local main immediately:
+
+```bash
+cd /home/aviadr1/projects/nanoclaw && git fetch origin main && git merge --ff-only origin/main
+```
+
+This ensures hooks, settings, and CLAUDE.md changes take effect in the current session. Skipping this causes hooks registered in merged PRs to remain inactive.
+
 ### Critical rules
 
 - **Build BEFORE restart** — never restart with an untested build
