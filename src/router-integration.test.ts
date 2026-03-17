@@ -107,13 +107,6 @@ describe('readRouterResult file-finding algorithm (real filesystem)', () => {
       return { filepath: resultFile, content };
     }
 
-    // Retry with delay (simplified — no busy-wait in tests)
-    if (fs.existsSync(resultFile)) {
-      const content = fs.readFileSync(resultFile, 'utf-8');
-      fs.unlinkSync(resultFile);
-      return { filepath: resultFile, content };
-    }
-
     // Fallback: find any .json file
     const files = fs.existsSync(resultsDir)
       ? fs.readdirSync(resultsDir).filter((f) => f.endsWith('.json'))
