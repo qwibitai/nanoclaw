@@ -39,7 +39,11 @@ git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
 
 ```bash
 git fetch telegram main
-git merge telegram/main
+git merge telegram/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
@@ -129,31 +133,18 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+The chat ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main chat (responds to all messages):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "telegram_main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  isMain: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
 ```
 
 For additional chats (trigger-only):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "telegram_<group-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
 ```
 
 ## Phase 5: Verify
