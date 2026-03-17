@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { readEnvFile } from './env.js';
+import { readAllEnvFile } from './env.js';
 import { logger } from './logger.js';
 import {
   Channel,
@@ -126,14 +126,14 @@ export async function loadPlugins(
 
   for (const { manifest, entryPath } of hookPlugins) {
     try {
-      // Inject publicEnvVars from .env into process.env so plugins can read them
-      const publicVars = manifest.publicEnvVars ?? [];
-      if (publicVars.length > 0) {
-        const values = readEnvFile(publicVars);
-        for (const [key, value] of Object.entries(values)) {
-          if (process.env[key] === undefined) {
-            process.env[key] = value;
-          }
+      // Inject all .env vars into process.env for hook plugins.
+      // Hook plugins run in the host process and need full config access.
+      // Containers are launched with explicit -e flags, not via process.env,
+      // so this does not expose secrets to subprocesses.
+      const envVars = readAllEnvFile(cwd);
+      for (const [key, value] of Object.entries(envVars)) {
+        if (process.env[key] === undefined) {
+          process.env[key] = value;
         }
       }
 
@@ -184,11 +184,7 @@ export function buildPluginContext(opts: {
       updates: Partial<
         Pick<
           ScheduledTask,
-          | 'prompt'
-          | 'schedule_type'
-          | 'schedule_value'
-          | 'next_run'
-          | 'status'
+          'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
         >
       >,
     ): void;
@@ -244,7 +240,9 @@ export function buildPluginContext(opts: {
           if (!fs.existsSync(manifestPath)) return [];
           try {
             return [
-              JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as InstalledPlugin,
+              JSON.parse(
+                fs.readFileSync(manifestPath, 'utf-8'),
+              ) as InstalledPlugin,
             ];
           } catch {
             return [];
