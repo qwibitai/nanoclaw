@@ -20,10 +20,18 @@ const {
   resetStopping,
 } = _testInternals;
 
-function makeMockDeps(overrides?: Partial<SchedulerDependencies>): SchedulerDependencies {
+function makeMockDeps(
+  overrides?: Partial<SchedulerDependencies>,
+): SchedulerDependencies {
   return {
     registeredGroups: () => ({
-      'ceo@g.us': { name: 'CEO', folder: 'ceo', trigger: '', added_at: '2026-01-01T00:00:00Z', isMain: true },
+      'ceo@g.us': {
+        name: 'CEO',
+        folder: 'ceo',
+        trigger: '',
+        added_at: '2026-01-01T00:00:00Z',
+        isMain: true,
+      },
     }),
     getSessions: () => ({}),
     queue: {
@@ -55,7 +63,7 @@ describe('agency-hq-dispatcher', () => {
     _initTestDatabase();
     vi.useFakeTimers();
 
-    fetchMock = vi.fn().mockResolvedValue(mockFetchResponse({ tasks: [] }));
+    fetchMock = vi.fn().mockResolvedValue(mockFetchResponse({ data: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     // Clean module state
@@ -80,7 +88,13 @@ describe('agency-hq-dispatcher', () => {
     it('returns null when CEO group is not registered', () => {
       const deps = makeMockDeps({
         registeredGroups: () => ({
-          'other@g.us': { name: 'Other', folder: 'other', trigger: '', added_at: '2026-01-01T00:00:00Z', isMain: false },
+          'other@g.us': {
+            name: 'Other',
+            folder: 'other',
+            trigger: '',
+            added_at: '2026-01-01T00:00:00Z',
+            isMain: false,
+          },
         }),
       });
       expect(findCeoJid(deps)).toBeNull();
@@ -89,14 +103,17 @@ describe('agency-hq-dispatcher', () => {
 
   describe('buildPrompt', () => {
     it('builds prompt with task details and write-back instructions', () => {
-      const prompt = buildPrompt({
-        id: 'task-1',
-        title: 'Fix login bug',
-        description: 'Users cannot log in',
-        acceptance_criteria: 'Login works',
-        repository: 'org/repo',
-        status: 'ready',
-      }, 'Ship MVP');
+      const prompt = buildPrompt(
+        {
+          id: 'task-1',
+          title: 'Fix login bug',
+          description: 'Users cannot log in',
+          acceptance_criteria: 'Login works',
+          repository: 'org/repo',
+          status: 'ready',
+        },
+        'Ship MVP',
+      );
 
       expect(prompt).toContain('/orchestrate Fix login bug');
       expect(prompt).toContain('Users cannot log in');
@@ -111,19 +128,29 @@ describe('agency-hq-dispatcher', () => {
 
   describe('dispatch loop', () => {
     it('skips when no ready tasks', async () => {
-      fetchMock.mockResolvedValueOnce(mockFetchResponse({ tasks: [] }));
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({ data: [] }));
       const deps = makeMockDeps();
 
       await dispatchReadyTasks(deps);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect((deps.queue.enqueueTask as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
     });
 
     it('skips tasks assigned to hold', async () => {
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{ id: 't1', title: 'Held', description: 'test', status: 'ready', assigned_to: 'hold' }],
+          data: [
+            {
+              id: 't1',
+              title: 'Held',
+              description: 'test',
+              status: 'ready',
+              assigned_to: 'hold',
+            },
+          ],
         }),
       );
       const deps = makeMockDeps();
@@ -132,14 +159,24 @@ describe('agency-hq-dispatcher', () => {
 
       // Only the initial GET, no PUT for in-progress
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect((deps.queue.enqueueTask as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
     });
 
     it('skips tasks with future scheduled_dispatch_at', async () => {
       const future = new Date(Date.now() + 3600_000).toISOString();
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{ id: 't2', title: 'Future', description: 'test', status: 'ready', scheduled_dispatch_at: future }],
+          data: [
+            {
+              id: 't2',
+              title: 'Future',
+              description: 'test',
+              status: 'ready',
+              scheduled_dispatch_at: future,
+            },
+          ],
         }),
       );
       const deps = makeMockDeps();
@@ -147,14 +184,23 @@ describe('agency-hq-dispatcher', () => {
       await dispatchReadyTasks(deps);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect((deps.queue.enqueueTask as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
     });
 
     it('marks task in-progress and enqueues it', async () => {
       // GET ready tasks
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{ id: 't3', title: 'Ready Task', description: 'Do something', status: 'ready' }],
+          data: [
+            {
+              id: 't3',
+              title: 'Ready Task',
+              description: 'Do something',
+              status: 'ready',
+            },
+          ],
         }),
       );
       // PUT in-progress
@@ -172,7 +218,9 @@ describe('agency-hq-dispatcher', () => {
       expect(putBody.status).toBe('in-progress');
 
       // Should have enqueued the task
-      expect((deps.queue.enqueueTask as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).toHaveBeenCalledTimes(1);
     });
 
     it('marks task blocked after 3 failed dispatch retries', async () => {
@@ -181,7 +229,14 @@ describe('agency-hq-dispatcher', () => {
 
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{ id: 't4', title: 'Failing Task', description: 'fails', status: 'ready' }],
+          data: [
+            {
+              id: 't4',
+              title: 'Failing Task',
+              description: 'fails',
+              status: 'ready',
+            },
+          ],
         }),
       );
       // PUT blocked
@@ -204,10 +259,14 @@ describe('agency-hq-dispatcher', () => {
         (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'POST',
       );
       expect(postCall).toBeDefined();
-      expect(JSON.parse(postCall![1]!.body as string).type).toBe('task-blocked');
+      expect(JSON.parse(postCall![1]!.body as string).type).toBe(
+        'task-blocked',
+      );
 
       // Should NOT have enqueued
-      expect((deps.queue.enqueueTask as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
     });
 
     it('skips dispatch when CEO group is not registered', async () => {
@@ -230,13 +289,15 @@ describe('agency-hq-dispatcher', () => {
       // GET in-progress tasks
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{
-            id: 't5',
-            title: 'Stalled Task',
-            description: 'stuck',
-            status: 'in-progress',
-            dispatched_at: new Date(stalledTime).toISOString(),
-          }],
+          data: [
+            {
+              id: 't5',
+              title: 'Stalled Task',
+              description: 'stuck',
+              status: 'in-progress',
+              dispatched_at: new Date(stalledTime).toISOString(),
+            },
+          ],
         }),
       );
       // POST notification
@@ -250,7 +311,9 @@ describe('agency-hq-dispatcher', () => {
         (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'POST',
       );
       expect(postCall).toBeDefined();
-      expect(JSON.parse(postCall![1]!.body as string).type).toBe('task-stalled');
+      expect(JSON.parse(postCall![1]!.body as string).type).toBe(
+        'task-stalled',
+      );
 
       // Should have sent message to CEO group
       expect(deps.sendMessage).toHaveBeenCalled();
@@ -262,13 +325,15 @@ describe('agency-hq-dispatcher', () => {
 
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{
-            id: 't6',
-            title: 'Recent Task',
-            description: 'working',
-            status: 'in-progress',
-            dispatched_at: new Date(recentTime).toISOString(),
-          }],
+          data: [
+            {
+              id: 't6',
+              title: 'Recent Task',
+              description: 'working',
+              status: 'in-progress',
+              dispatched_at: new Date(recentTime).toISOString(),
+            },
+          ],
         }),
       );
 
@@ -286,14 +351,16 @@ describe('agency-hq-dispatcher', () => {
 
       fetchMock.mockResolvedValueOnce(
         mockFetchResponse({
-          tasks: [{
-            id: 't7',
-            title: 'Updated Task',
-            description: 'progressing',
-            status: 'in-progress',
-            dispatched_at: new Date(stalledTime).toISOString(),
-            updated_at: new Date(Date.now() - 60_000).toISOString(), // Updated 1 min ago
-          }],
+          data: [
+            {
+              id: 't7',
+              title: 'Updated Task',
+              description: 'progressing',
+              status: 'in-progress',
+              dispatched_at: new Date(stalledTime).toISOString(),
+              updated_at: new Date(Date.now() - 60_000).toISOString(), // Updated 1 min ago
+            },
+          ],
         }),
       );
 

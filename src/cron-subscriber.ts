@@ -113,10 +113,7 @@ async function connectAndSubscribe(
   }
 }
 
-function scheduleReconnect(
-  deps: SchedulerDependencies,
-  delay: number,
-): void {
+function scheduleReconnect(deps: SchedulerDependencies, delay: number): void {
   if (stopping) return;
   const nextDelay = Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);
   logger.info({ delayMs: delay }, 'Scheduling RabbitMQ reconnect');
@@ -168,9 +165,9 @@ function handleCronEvent(
   log.info({ taskId }, 'Cron event received, enqueuing task');
 
   // Enqueue the task for execution (same path as the old polling loop)
-  deps.queue.enqueueTask(task.chat_jid, task.id, () =>
-    runScheduledTask(task, deps),
-  );
+  deps.queue.enqueueTask(task.chat_jid, task.id, async () => {
+    await runScheduledTask(task, deps);
+  });
 
   ackChannel.ack(msg);
 }

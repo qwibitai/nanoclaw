@@ -68,15 +68,8 @@ async function agencyFetch(
   });
 }
 
-function buildPrompt(
-  task: AgencyHqTask,
-  sprintGoal?: string,
-): string {
-  const parts = [
-    `/orchestrate ${task.title}`,
-    '',
-    task.description,
-  ];
+function buildPrompt(task: AgencyHqTask, sprintGoal?: string): string {
+  const parts = [`/orchestrate ${task.title}`, '', task.description];
 
   if (task.acceptance_criteria) {
     parts.push('', `Acceptance Criteria: ${task.acceptance_criteria}`);
@@ -93,8 +86,10 @@ function buildPrompt(
     `Agency HQ task ID: ${task.id}`,
     '',
     'IMPORTANT: When this task is complete, you MUST:',
-    `1. PUT ${AGENCY_HQ_URL}/api/v1/tasks/${task.id} with {"status": "done"}`,
+    `1. PUT ${AGENCY_HQ_URL}/api/v1/tasks/${task.id} with {"status": "done", "context": {"result": {"summary": "<what you accomplished>"}}}`,
     `2. POST ${AGENCY_HQ_URL}/api/v1/notifications with a summary notification`,
+    '',
+    'The result write-back in step 1 is critical — without it the task shows as done but with no result.',
   );
 
   return parts.join('\n');
@@ -121,7 +116,10 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
       log.error({ status: res.status, body }, 'Failed to fetch ready tasks');
       return;
     }
-    const json = (await res.json()) as { success: boolean; data: AgencyHqTask[] };
+    const json = (await res.json()) as {
+      success: boolean;
+      data: AgencyHqTask[];
+    };
     tasks = json.data ?? [];
   } catch (err) {
     log.error({ err }, 'Failed to fetch ready tasks from Agency HQ');
@@ -143,7 +141,10 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
     if (task.scheduled_dispatch_at) {
       const scheduledAt = new Date(task.scheduled_dispatch_at).getTime();
       if (scheduledAt > Date.now()) {
-        log.debug({ taskId: task.id, scheduledAt: task.scheduled_dispatch_at }, 'Skipping future-scheduled task');
+        log.debug(
+          { taskId: task.id, scheduledAt: task.scheduled_dispatch_at },
+          'Skipping future-scheduled task',
+        );
         continue;
       }
     }
@@ -151,7 +152,10 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
     // Check retry count
     const retries = dispatchRetryCount.get(task.id) ?? 0;
     if (retries >= 3) {
-      log.warn({ taskId: task.id, retries }, 'Task exceeded max dispatch retries, marking blocked');
+      log.warn(
+        { taskId: task.id, retries },
+        'Task exceeded max dispatch retries, marking blocked',
+      );
       await markBlocked(task, log);
       continue;
     }
@@ -166,7 +170,10 @@ async function dispatchTask(
   deps: SchedulerDependencies,
   parentLog: ReturnType<typeof createCorrelationLogger>,
 ): Promise<void> {
-  const log = createCorrelationLogger(undefined, { op: 'dispatch-loop', taskId: task.id });
+  const log = createCorrelationLogger(undefined, {
+    op: 'dispatch-loop',
+    taskId: task.id,
+  });
 
   // Increment retry count
   const count = (dispatchRetryCount.get(task.id) ?? 0) + 1;
@@ -186,7 +193,10 @@ async function dispatchTask(
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      log.error({ status: res.status, body }, 'Failed to mark task in-progress');
+      log.error(
+        { status: res.status, body },
+        'Failed to mark task in-progress',
+      );
       return;
     }
   } catch (err) {
@@ -200,7 +210,10 @@ async function dispatchTask(
     try {
       const res = await agencyFetch(`/sprints/${task.sprint_id}`);
       if (res.ok) {
-        const sprintJson = (await res.json()) as { success: boolean; data: AgencyHqSprint };
+        const sprintJson = (await res.json()) as {
+          success: boolean;
+          data: AgencyHqSprint;
+        };
         sprintGoal = sprintJson.data?.goal;
       }
     } catch (err) {
@@ -250,9 +263,38 @@ async function dispatchTask(
     created_at: now,
   };
 
-  deps.queue.enqueueTask(ceoJid, localTaskId, () =>
-    runScheduledTask(localTask, deps),
-  );
+  deps.queue.enqueueTask(ceoJid, localTaskId, async () => {
+    const result = await runScheduledTask(localTask, deps);
+
+    // Write result back to Agency HQ (programmatic — doesn't rely on agent)
+    const resultPayload = result
+      ? { summary: result.slice(0, 2000) }
+      : { summary: 'Task completed (no output captured)' };
+
+    try {
+      const res = await agencyFetch(`/tasks/${task.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          context: { result: resultPayload },
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        log.error(
+          { status: res.status, body, taskId: task.id },
+          'Failed to write result back to Agency HQ',
+        );
+      } else {
+        log.info({ taskId: task.id }, 'Result written back to Agency HQ');
+      }
+    } catch (err) {
+      log.error({ err, taskId: task.id }, 'Failed to PUT result to Agency HQ');
+    }
+
+    // Clean up dispatch tracking
+    dispatchRetryCount.delete(task.id);
+    dispatchTime.delete(task.id);
+  });
 
   log.info({ taskId: task.id, localTaskId }, 'Task dispatched successfully');
 }
@@ -302,10 +344,16 @@ async function detectStalledTasks(deps: SchedulerDependencies): Promise<void> {
     const res = await agencyFetch('/tasks?status=in-progress');
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      log.error({ status: res.status, body }, 'Failed to fetch in-progress tasks');
+      log.error(
+        { status: res.status, body },
+        'Failed to fetch in-progress tasks',
+      );
       return;
     }
-    const json = (await res.json()) as { success: boolean; data: AgencyHqTask[] };
+    const json = (await res.json()) as {
+      success: boolean;
+      data: AgencyHqTask[];
+    };
     tasks = json.data ?? [];
   } catch (err) {
     log.error({ err }, 'Failed to fetch in-progress tasks from Agency HQ');
@@ -319,8 +367,9 @@ async function detectStalledTasks(deps: SchedulerDependencies): Promise<void> {
     if (stopping) return;
 
     // Check dispatched_at from local tracking or API response
-    const dispatched = dispatchTime.get(task.id)
-      ?? (task.dispatched_at ? new Date(task.dispatched_at).getTime() : null);
+    const dispatched =
+      dispatchTime.get(task.id) ??
+      (task.dispatched_at ? new Date(task.dispatched_at).getTime() : null);
 
     if (!dispatched) continue;
 
@@ -332,7 +381,10 @@ async function detectStalledTasks(deps: SchedulerDependencies): Promise<void> {
 
     if (now - dispatched > STALL_THRESHOLD_MS) {
       stalledCount++;
-      log.warn({ taskId: task.id, dispatchedAt: new Date(dispatched).toISOString() }, 'Task stalled');
+      log.warn(
+        { taskId: task.id, dispatchedAt: new Date(dispatched).toISOString() },
+        'Task stalled',
+      );
 
       try {
         await agencyFetch('/notifications', {
@@ -347,7 +399,10 @@ async function detectStalledTasks(deps: SchedulerDependencies): Promise<void> {
           }),
         });
       } catch (err) {
-        log.error({ err, taskId: task.id }, 'Failed to POST stall notification');
+        log.error(
+          { err, taskId: task.id },
+          'Failed to POST stall notification',
+        );
       }
 
       // Also notify via message if CEO group exists
@@ -432,5 +487,7 @@ export const _testInternals = {
   detectStalledTasks,
   buildPrompt,
   findCeoJid,
-  resetStopping: () => { stopping = false; },
+  resetStopping: () => {
+    stopping = false;
+  },
 };

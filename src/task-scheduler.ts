@@ -75,11 +75,12 @@ export interface SchedulerDependencies {
 
 /**
  * Run a single scheduled task. Exported for use by the cron subscriber.
+ * Returns the result string (or null) so callers can act on it (e.g. write-back).
  */
 export async function runScheduledTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
-): Promise<void> {
+): Promise<string | null> {
   const startTime = Date.now();
   const log = createCorrelationLogger(undefined, {
     op: 'scheduled-task',
@@ -106,7 +107,7 @@ export async function runScheduledTask(
       result: null,
       error,
     });
-    return;
+    return null;
   }
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -118,10 +119,7 @@ export async function runScheduledTask(
   );
 
   if (!group) {
-    log.error(
-      { groupFolder: task.group_folder },
-      'Group not found for task',
-    );
+    log.error({ groupFolder: task.group_folder }, 'Group not found for task');
     logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
@@ -130,7 +128,7 @@ export async function runScheduledTask(
       result: null,
       error: `Group not found: ${task.group_folder}`,
     });
-    return;
+    return null;
   }
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -213,10 +211,7 @@ export async function runScheduledTask(
       result = output.result;
     }
 
-    log.info(
-      { durationMs: Date.now() - startTime },
-      'Task completed',
-    );
+    log.info({ durationMs: Date.now() - startTime }, 'Task completed');
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
@@ -241,6 +236,8 @@ export async function runScheduledTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  return result;
 }
 
 /**
