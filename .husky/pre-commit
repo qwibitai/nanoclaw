@@ -1,12 +1,10 @@
 #!/bin/sh
 
-# Capture staged .ts files before prettier modifies them
+# Format only staged .ts files (not all files — avoids dirtying unstaged files)
 STAGED_TS=$(git diff --cached --name-only --diff-filter=d -- '*.ts')
 
-npm run format:fix
-
-# Re-stage only files that were already staged (so prettier's changes are included in the commit)
 if [ -n "$STAGED_TS" ]; then
+  echo "$STAGED_TS" | xargs npx prettier --write
   echo "$STAGED_TS" | xargs git add
 fi
 
