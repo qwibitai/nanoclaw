@@ -39,25 +39,41 @@ vi.mock('grammy', () => ({
 
 import { BotPool, BotPoolDeps } from './telegram.js';
 
-// Mock Api factory
-function createMockApi(username = 'test_bot') {
+// Shared mock Api factory — pass overrides for specific method captures
+function createMockApi(
+  overrides: {
+    sendMessage?: (chatId: string | number, text: string, opts?: any) => any;
+    setMyName?: (name: string) => any;
+    getMe?: () => any;
+  } = {},
+) {
   return {
-    getMe: async () => ({
-      username,
-      id: 123,
-      is_bot: true,
-      first_name: username,
-    }),
-    setMyName: async (_name: string) => true,
-    sendMessage: async (_chatId: string | number, _text: string) =>
-      ({ message_id: 1 }) as any,
+    getMe:
+      overrides.getMe ??
+      (async () => ({
+        username: 'test_bot',
+        id: 123,
+        is_bot: true,
+        first_name: 'test_bot',
+      })),
+    setMyName: overrides.setMyName ?? (async (_name: string) => true),
+    sendMessage:
+      overrides.sendMessage ??
+      (async (_chatId: string | number, _text: string) =>
+        ({ message_id: 1 }) as any),
   } as any;
 }
 
-const testDeps: BotPoolDeps = {
-  createApi: () => createMockApi(),
-  renameDelayMs: 0,
-};
+function makeDeps(
+  apiOverrides: Parameters<typeof createMockApi>[0] = {},
+): BotPoolDeps {
+  return {
+    createApi: () => createMockApi(apiOverrides),
+    renameDelayMs: 0,
+  };
+}
+
+const testDeps = makeDeps();
 
 describe('BotPool', () => {
   beforeEach(() => {
@@ -130,25 +146,14 @@ describe('BotPool', () => {
   // INVARIANT: Messages over 4096 chars are split
   test('long messages are split at 4096 char boundary', async () => {
     const sentMessages: string[] = [];
-    const mockDeps: BotPoolDeps = {
-      createApi: () =>
-        ({
-          getMe: async () => ({
-            username: 'bot',
-            id: 1,
-            is_bot: true,
-            first_name: 'bot',
-          }),
-          setMyName: async () => true,
-          sendMessage: async (_chatId: string | number, text: string) => {
-            sentMessages.push(text);
-            return { message_id: 1 } as any;
-          },
-        }) as any,
-      renameDelayMs: 0,
-    };
+    const deps = makeDeps({
+      sendMessage: async (_chatId, text) => {
+        sentMessages.push(text);
+        return { message_id: 1 } as any;
+      },
+    });
 
-    const pool = new BotPool(mockDeps);
+    const pool = new BotPool(deps);
     await pool.init(['token1']);
 
     const longText = 'x'.repeat(5000);
@@ -162,25 +167,14 @@ describe('BotPool', () => {
   // INVARIANT: Message exactly at 4096 chars is sent as a single message
   test('exactly 4096 chars sends as single message', async () => {
     const sentMessages: string[] = [];
-    const mockDeps: BotPoolDeps = {
-      createApi: () =>
-        ({
-          getMe: async () => ({
-            username: 'bot',
-            id: 1,
-            is_bot: true,
-            first_name: 'bot',
-          }),
-          setMyName: async () => true,
-          sendMessage: async (_chatId: string | number, text: string) => {
-            sentMessages.push(text);
-            return { message_id: 1 } as any;
-          },
-        }) as any,
-      renameDelayMs: 0,
-    };
+    const deps = makeDeps({
+      sendMessage: async (_chatId, text) => {
+        sentMessages.push(text);
+        return { message_id: 1 } as any;
+      },
+    });
 
-    const pool = new BotPool(mockDeps);
+    const pool = new BotPool(deps);
     await pool.init(['token1']);
 
     await pool.send('tg:123', 'x'.repeat(4096), 'Writer', 'main');
@@ -192,25 +186,14 @@ describe('BotPool', () => {
   // INVARIANT: Empty string is sent as a single message (no split)
   test('empty string sends as single message', async () => {
     const sentMessages: string[] = [];
-    const mockDeps: BotPoolDeps = {
-      createApi: () =>
-        ({
-          getMe: async () => ({
-            username: 'bot',
-            id: 1,
-            is_bot: true,
-            first_name: 'bot',
-          }),
-          setMyName: async () => true,
-          sendMessage: async (_chatId: string | number, text: string) => {
-            sentMessages.push(text);
-            return { message_id: 1 } as any;
-          },
-        }) as any,
-      renameDelayMs: 0,
-    };
+    const deps = makeDeps({
+      sendMessage: async (_chatId, text) => {
+        sentMessages.push(text);
+        return { message_id: 1 } as any;
+      },
+    });
 
-    const pool = new BotPool(mockDeps);
+    const pool = new BotPool(deps);
     await pool.init(['token1']);
 
     await pool.send('tg:123', '', 'Writer', 'main');
@@ -224,7 +207,7 @@ describe('BotPool', () => {
     let callCount = 0;
     const failingDeps: BotPoolDeps = {
       createApi: () =>
-        ({
+        createMockApi({
           getMe: async () => {
             callCount++;
             if (callCount === 2) throw new Error('Invalid token');
@@ -235,9 +218,7 @@ describe('BotPool', () => {
               first_name: `bot${callCount}`,
             };
           },
-          setMyName: async () => true,
-          sendMessage: async () => ({ message_id: 1 }) as any,
-        }) as any,
+        }),
       renameDelayMs: 0,
     };
 
@@ -274,25 +255,14 @@ describe('BotPool', () => {
   // INVARIANT: setMyName is called on first assignment, not on subsequent sends
   test('renames bot only on first assignment for a sender', async () => {
     const setMyNameCalls: string[] = [];
-    const renameDeps: BotPoolDeps = {
-      createApi: () =>
-        ({
-          getMe: async () => ({
-            username: 'bot',
-            id: 1,
-            is_bot: true,
-            first_name: 'bot',
-          }),
-          setMyName: async (name: string) => {
-            setMyNameCalls.push(name);
-            return true;
-          },
-          sendMessage: async () => ({ message_id: 1 }) as any,
-        }) as any,
-      renameDelayMs: 0,
-    };
+    const deps = makeDeps({
+      setMyName: async (name: string) => {
+        setMyNameCalls.push(name);
+        return true;
+      },
+    });
 
-    const pool = new BotPool(renameDeps);
+    const pool = new BotPool(deps);
     await pool.init(['token1']);
 
     await pool.send('tg:123', 'first', 'Researcher', 'main');
@@ -305,27 +275,17 @@ describe('BotPool', () => {
   // INVARIANT: Failed rename does not prevent message delivery
   test('sends message even when rename fails', async () => {
     const sentMessages: string[] = [];
-    const failRenameDeps: BotPoolDeps = {
-      createApi: () =>
-        ({
-          getMe: async () => ({
-            username: 'bot',
-            id: 1,
-            is_bot: true,
-            first_name: 'bot',
-          }),
-          setMyName: async () => {
-            throw new Error('Rename failed');
-          },
-          sendMessage: async (_chatId: string | number, text: string) => {
-            sentMessages.push(text);
-            return { message_id: 1 } as any;
-          },
-        }) as any,
-      renameDelayMs: 0,
-    };
+    const deps = makeDeps({
+      setMyName: async () => {
+        throw new Error('Rename failed');
+      },
+      sendMessage: async (_chatId, text) => {
+        sentMessages.push(text);
+        return { message_id: 1 } as any;
+      },
+    });
 
-    const pool = new BotPool(failRenameDeps);
+    const pool = new BotPool(deps);
     await pool.init(['token1']);
 
     const result = await pool.send(
@@ -337,5 +297,22 @@ describe('BotPool', () => {
 
     expect(result).toBe(true);
     expect(sentMessages).toEqual(['hello despite rename failure']);
+  });
+
+  // INVARIANT: send propagates Telegram API errors to the caller
+  // SUT: BotPool.send() error path
+  test('propagates sendMessage errors to caller', async () => {
+    const deps = makeDeps({
+      sendMessage: async () => {
+        throw new Error('Telegram API: chat not found');
+      },
+    });
+
+    const pool = new BotPool(deps);
+    await pool.init(['token1']);
+
+    await expect(
+      pool.send('tg:999', 'hello', 'Researcher', 'main'),
+    ).rejects.toThrow('Telegram API: chat not found');
   });
 });

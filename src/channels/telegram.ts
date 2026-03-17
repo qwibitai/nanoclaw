@@ -74,6 +74,10 @@ const DEFAULT_DEPS: BotPoolDeps = {
   renameDelayMs: 2000,
 };
 
+// NOTE: setMyName is a global Telegram API operation — it changes the bot's
+// display name for ALL chats, not per-chat. When the same bot is assigned to
+// different senders across groups (via round-robin wrap), its name will flip
+// between roles. This is a Telegram API limitation, not a bug.
 export class BotPool {
   private apis: Api[] = [];
   private senderMap = new Map<string, number>();
