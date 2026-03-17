@@ -30,13 +30,14 @@ fi
 CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
 # State directory for review tracking
-STATE_DIR="/tmp/.pr-review-state"
+STATE_DIR="${STATE_DIR:-/tmp/.pr-review-state}"
 mkdir -p "$STATE_DIR" 2>/dev/null
 chmod 700 "$STATE_DIR" 2>/dev/null
 
-# Get current branch for state file naming
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-STATE_FILE="$STATE_DIR/$(echo "$BRANCH" | tr '/' '_')"
+# State file is keyed by PR URL (set after trigger detection).
+# Using branch name fails when PRs target other repos (e.g., garsson-prints)
+# because git rev-parse resolves the nanoclaw CWD, not the target repo.
+STATE_FILE=""
 
 # Determine which trigger fired
 IS_PR_CREATE=false
@@ -61,9 +62,36 @@ else
   exit 0
 fi
 
+# Convert a PR URL to a safe state file path.
+# e.g. https://github.com/Garsson-io/nanoclaw/pull/33 → Garsson-io_nanoclaw_33
+pr_url_to_state_file() {
+  local url="$1"
+  echo "$STATE_DIR/$(echo "$url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')"
+}
+
+# Find the most recent active state file (for push/diff triggers that don't know the PR URL).
+find_active_state() {
+  local latest=""
+  local latest_mtime=0
+  for f in "$STATE_DIR"/*; do
+    [ -f "$f" ] || continue
+    local status
+    status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ "$status" = "needs_review" ]; then
+      local mtime
+      mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "0")
+      if [ "$mtime" -gt "$latest_mtime" ]; then
+        latest="$f"
+        latest_mtime="$mtime"
+      fi
+    fi
+  done
+  echo "$latest"
+}
+
 # Safe state read — grep/cut instead of source to prevent code injection
 read_state() {
-  if [ ! -f "$STATE_FILE" ]; then
+  if [ -z "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     PR_URL=""
     ROUND=1
     STATUS=""
@@ -158,6 +186,13 @@ MAX_ROUNDS=4
 
 # TRIGGER 4: gh pr merge — clean up state file
 if $IS_PR_MERGE; then
+  # Try to find state by PR URL from output, or fall back to most recent active
+  MERGE_PR_URL=$(echo "$STDOUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  if [ -n "$MERGE_PR_URL" ]; then
+    STATE_FILE=$(pr_url_to_state_file "$MERGE_PR_URL")
+  else
+    STATE_FILE=$(find_active_state)
+  fi
   cleanup_state
   exit 0
 fi
@@ -172,6 +207,7 @@ if $IS_PR_CREATE; then
     exit 0
   fi
 
+  STATE_FILE=$(pr_url_to_state_file "$PR_URL")
   write_state "$PR_URL" "1" "needs_review"
 
   cat <<EOF
@@ -193,7 +229,8 @@ EOF
   exit 0
 fi
 
-# For git push and gh pr diff, we need an active review state
+# For git push and gh pr diff, find the most recent active state file
+STATE_FILE=$(find_active_state)
 if ! read_state; then
   exit 0
 fi
