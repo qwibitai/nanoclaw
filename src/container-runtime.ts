@@ -2,7 +2,7 @@
  * Container runtime abstraction for NanoClaw.
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import fs from "fs";
 import os from "os";
 
@@ -87,14 +87,17 @@ export function ensureContainerRuntimeRunning(): void {
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=nanoclaw.instance=${INSTANCE_ID} --format '{{.Names}}'`,
+    // Use execFileSync (argument array) instead of execSync (shell string)
+    // so that INSTANCE_ID values with spaces or metacharacters are safe.
+    const output = execFileSync(
+      CONTAINER_RUNTIME_BIN,
+      ["ps", "--filter", `label=nanoclaw.instance=${INSTANCE_ID}`, "--format", "{{.Names}}"],
       { stdio: ["pipe", "pipe", "pipe"], encoding: "utf-8" },
     );
     const orphans = output.trim().split("\n").filter(Boolean);
     for (const name of orphans) {
       try {
-        execSync(stopContainer(name), { stdio: "pipe" });
+        execFileSync(CONTAINER_RUNTIME_BIN, ["stop", name], { stdio: "pipe" });
       } catch {
         /* already stopped */
       }
