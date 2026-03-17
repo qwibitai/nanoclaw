@@ -10,6 +10,7 @@ import { Api, Bot } from 'grammy';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { countPdfPages, indexPdf, computeFileHash } from '../pageindex.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -28,17 +29,18 @@ const EXTRACTABLE_EXTS: Record<string, (filePath: string) => Promise<string>> =
   };
 
 async function extractPdfText(filePath: string): Promise<string> {
-  const { stdout } = await execFileAsync('pdftotext', [
-    '-layout',
-    filePath,
-    '-',
-  ]);
+  // Use absolute path — launchd doesn't include /opt/homebrew/bin in PATH
+  const pdftotext =
+    process.platform === 'darwin' ? '/opt/homebrew/bin/pdftotext' : 'pdftotext';
+  const { stdout } = await execFileAsync(pdftotext, ['-layout', filePath, '-']);
   return stdout;
 }
 
 async function extractDocxText(filePath: string): Promise<string> {
-  // pandoc is optional; fall back gracefully if not installed
-  const { stdout } = await execFileAsync('pandoc', [
+  // Use absolute path — launchd doesn't include /opt/homebrew/bin in PATH
+  const pandoc =
+    process.platform === 'darwin' ? '/opt/homebrew/bin/pandoc' : 'pandoc';
+  const { stdout } = await execFileAsync(pandoc, [
     '-f',
     'docx',
     '-t',
@@ -436,6 +438,123 @@ export class TelegramChannel implements Channel {
 
       // Try extracting text from binary documents (PDF, DOCX, etc.)
       if (doc?.file_id && EXTRACTABLE_EXTS[ext]) {
+        // Special handling for PDFs: auto-index long documents
+        if (ext === '.pdf') {
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-pdf-'));
+          const tmpFile = path.join(tmpDir, name);
+          try {
+            const file = await ctx.api.getFile(doc.file_id);
+            const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+            const resp = await fetch(url);
+            if (!resp.ok) {
+              storeNonText(ctx, `[Document: ${name}]`);
+              return;
+            }
+            const buf = Buffer.from(await resp.arrayBuffer());
+            fs.writeFileSync(tmpFile, buf);
+
+            const pageCount = await countPdfPages(tmpFile);
+            if (pageCount > 20) {
+              // Long PDF — auto-index
+              await ctx.api.sendChatAction(ctx.chat.id, 'typing');
+              const hash = computeFileHash(buf);
+
+              // Determine vault dir from group's additionalMounts config
+              const chatJid = `tg:${ctx.chat.id}`;
+              const group = this.opts.registeredGroups()[chatJid];
+              let vaultDir: string | undefined;
+              let inboxDir: string | undefined;
+              if (group?.containerConfig?.additionalMounts) {
+                for (const m of group.containerConfig.additionalMounts) {
+                  if (fs.existsSync(m.hostPath)) {
+                    inboxDir = path.join(m.hostPath, '00-inbox');
+                    vaultDir = inboxDir;
+                    break;
+                  }
+                }
+              }
+
+              const result = await indexPdf(tmpFile, name, {
+                vaultDir,
+                contentHash: hash,
+                fileBuffer: buf,
+              });
+
+              if (result.success && result.tree) {
+                // Save PDF to vault 00-inbox/
+                if (inboxDir) {
+                  try {
+                    fs.mkdirSync(inboxDir, { recursive: true });
+                    fs.writeFileSync(path.join(inboxDir, name), buf);
+                    logger.info({ name, inboxDir }, 'PDF saved to vault inbox');
+                  } catch (saveErr) {
+                    logger.warn({ name, err: saveErr }, 'Failed to save PDF to vault inbox');
+                  }
+                }
+                storeNonText(
+                  ctx,
+                  `[Document: ${name} — ${pageCount} pages, indexed]\n\n${JSON.stringify(result.tree, null, 2)}`,
+                );
+                logger.info(
+                  { name, pageCount },
+                  'Telegram PDF indexed',
+                );
+                return;
+              } else if (result.fallbackText && result.fallbackText.trim().length > 0) {
+                const maxChars = 50_000;
+                const truncated =
+                  result.fallbackText.length > maxChars
+                    ? result.fallbackText.slice(0, maxChars) +
+                      `\n\n[Truncated — ${result.fallbackText.length} chars total]`
+                    : result.fallbackText;
+                storeNonText(ctx, `[Document: ${name}]\n\n${truncated}`);
+                logger.info(
+                  { name, chars: result.fallbackText.length, pageCount },
+                  'Telegram PDF extracted (fallback)',
+                );
+                return;
+              } else {
+                storeNonText(ctx, `[Document: ${name}]`);
+                return;
+              }
+            }
+
+            // Short PDF (≤20 pages) — use existing extraction flow
+            try {
+              const extracted = await extractPdfText(tmpFile);
+              if (extracted && extracted.trim().length > 0) {
+                const maxChars = 50_000;
+                const truncated =
+                  extracted.length > maxChars
+                    ? extracted.slice(0, maxChars) +
+                      `\n\n[Truncated — ${extracted.length} chars total]`
+                    : extracted;
+                storeNonText(ctx, `[Document: ${name}]\n\n${truncated}`);
+                logger.info(
+                  { name, chars: extracted.length },
+                  'Telegram document extracted',
+                );
+                return;
+              }
+            } catch (extractErr) {
+              logger.warn(
+                { name, err: extractErr },
+                'Failed to extract short PDF text',
+              );
+            }
+          } catch (err) {
+            logger.warn(
+              { name, err },
+              'Failed to process Telegram PDF',
+            );
+          } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+          }
+          storeNonText(ctx, `[Document: ${name}]`);
+          return;
+        }
+
+        // Non-PDF extractable documents (DOCX, etc.)
         try {
           const file = await ctx.api.getFile(doc.file_id);
           const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
