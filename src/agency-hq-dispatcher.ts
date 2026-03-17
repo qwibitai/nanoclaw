@@ -271,11 +271,36 @@ async function dispatchTask(
       ? { summary: result.slice(0, 2000) }
       : { summary: 'Task completed (no output captured)' };
 
+    // Fetch existing context so we merge rather than replace
+    let existingContext: Record<string, unknown> = {};
+    try {
+      const getRes = await agencyFetch(`/tasks/${task.id}`);
+      if (getRes.ok) {
+        const getJson = (await getRes.json()) as {
+          success: boolean;
+          data: { context?: Record<string, unknown> };
+        };
+        existingContext = getJson.data?.context ?? {};
+      } else {
+        log.warn(
+          { status: getRes.status, taskId: task.id },
+          'Failed to fetch existing context, will replace',
+        );
+      }
+    } catch (err) {
+      log.warn(
+        { err, taskId: task.id },
+        'Failed to GET task for context merge, will replace',
+      );
+    }
+
+    const mergedContext = { ...existingContext, result: resultPayload };
+
     try {
       const res = await agencyFetch(`/tasks/${task.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          context: { result: resultPayload },
+          context: mergedContext,
         }),
       });
       if (!res.ok) {

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('./task-scheduler.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    runScheduledTask: vi.fn().mockResolvedValue(null),
+  };
+});
+
 import { _initTestDatabase } from './db.js';
 import {
   _testInternals,
@@ -221,6 +229,106 @@ describe('agency-hq-dispatcher', () => {
       expect(
         deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
       ).toHaveBeenCalledTimes(1);
+    });
+
+    it('merges result into existing context on write-back', async () => {
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-merge',
+              title: 'Merge Task',
+              description: 'test merge',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      const deps = makeMockDeps();
+      const enqueueTask = deps.queue.enqueueTask as ReturnType<typeof vi.fn>;
+
+      await dispatchReadyTasks(deps);
+      expect(enqueueTask).toHaveBeenCalledTimes(1);
+
+      // Extract the enqueued callback and run it
+      const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
+
+      // GET task (for context merge) — returns existing context with extra keys
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          success: true,
+          data: {
+            id: 't-merge',
+            context: { assignee: 'alice', priority: 'high' },
+          },
+        }),
+      );
+      // PUT result write-back
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await callback();
+
+      // Find the PUT call for the result write-back (last PUT)
+      const putCalls = fetchMock.mock.calls.filter(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const resultPut = putCalls[putCalls.length - 1];
+      expect(resultPut).toBeDefined();
+
+      const body = JSON.parse(resultPut![1]!.body as string);
+      // Existing keys must be preserved
+      expect(body.context.assignee).toBe('alice');
+      expect(body.context.priority).toBe('high');
+      // Result must be set
+      expect(body.context.result).toBeDefined();
+      expect(body.context.result.summary).toContain('Task completed');
+    });
+
+    it('falls back to replace when GET for context merge fails', async () => {
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-fallback',
+              title: 'Fallback Task',
+              description: 'test fallback',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      const deps = makeMockDeps();
+      const enqueueTask = deps.queue.enqueueTask as ReturnType<typeof vi.fn>;
+
+      await dispatchReadyTasks(deps);
+      const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
+
+      // GET task fails
+      fetchMock.mockRejectedValueOnce(new Error('Network error'));
+      // PUT result write-back should still succeed
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await callback();
+
+      // Find the PUT call for the result write-back
+      const putCalls = fetchMock.mock.calls.filter(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      const resultPut = putCalls[putCalls.length - 1];
+      expect(resultPut).toBeDefined();
+
+      const body = JSON.parse(resultPut![1]!.body as string);
+      // Should still have result even though GET failed
+      expect(body.context.result).toBeDefined();
+      expect(body.context.result.summary).toContain('Task completed');
     });
 
     it('marks task blocked after 3 failed dispatch retries', async () => {
