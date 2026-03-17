@@ -535,9 +535,10 @@ export function setSession(groupFolder: string, sessionId: string): void {
 }
 
 export function touchSession(groupFolder: string): void {
-  db.prepare(
-    'UPDATE sessions SET last_used = ? WHERE group_folder = ?',
-  ).run(new Date().toISOString(), groupFolder);
+  db.prepare('UPDATE sessions SET last_used = ? WHERE group_folder = ?').run(
+    new Date().toISOString(),
+    groupFolder,
+  );
 }
 
 export function getSessionLastUsed(groupFolder: string): string | undefined {

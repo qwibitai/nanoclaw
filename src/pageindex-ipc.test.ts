@@ -22,7 +22,8 @@ const mockResolveContainerPath = vi.fn();
 vi.mock('./pageindex.js', () => ({
   fetchPageRange: (...args: unknown[]) => mockFetchPageRange(...args),
   indexPdf: (...args: unknown[]) => mockIndexPdf(...args),
-  resolveContainerPath: (...args: unknown[]) => mockResolveContainerPath(...args),
+  resolveContainerPath: (...args: unknown[]) =>
+    mockResolveContainerPath(...args),
 }));
 
 import { handlePageindexIpc } from './pageindex-ipc.js';
@@ -32,8 +33,16 @@ import type { MountMapping } from './pageindex.js';
 
 let tmpDir: string;
 const mounts: MountMapping[] = [
-  { hostPath: '/host/vault', containerPath: '/workspace/extra/vault', readonly: true },
-  { hostPath: '/host/group', containerPath: '/workspace/group', readonly: false },
+  {
+    hostPath: '/host/vault',
+    containerPath: '/workspace/extra/vault',
+    readonly: true,
+  },
+  {
+    hostPath: '/host/group',
+    containerPath: '/workspace/group',
+    readonly: false,
+  },
 ];
 
 beforeEach(() => {
@@ -46,7 +55,13 @@ afterEach(() => {
 });
 
 function readResult(requestId: string): Record<string, unknown> {
-  const resultPath = path.join(tmpDir, 'ipc', 'test-group', 'pageindex_results', `${requestId}.json`);
+  const resultPath = path.join(
+    tmpDir,
+    'ipc',
+    'test-group',
+    'pageindex_results',
+    `${requestId}.json`,
+  );
   return JSON.parse(fs.readFileSync(resultPath, 'utf-8'));
 }
 
@@ -92,7 +107,11 @@ describe('handlePageindexIpc', () => {
 describe('pageindex_fetch', () => {
   it('writes error when required fields are missing', async () => {
     const result = await handlePageindexIpc(
-      { type: 'pageindex_fetch', requestId: 'req-1', pdfPath: '/workspace/extra/vault/test.pdf' },
+      {
+        type: 'pageindex_fetch',
+        requestId: 'req-1',
+        pdfPath: '/workspace/extra/vault/test.pdf',
+      },
       'test-group',
       false,
       tmpDir,
@@ -265,11 +284,9 @@ describe('pageindex_index', () => {
     );
     expect(result).toBe(true);
 
-    expect(mockIndexPdf).toHaveBeenCalledWith(
-      hostFile,
-      'paper.pdf',
-      { vaultDir: tmpDir },
-    );
+    expect(mockIndexPdf).toHaveBeenCalledWith(hostFile, 'paper.pdf', {
+      vaultDir: tmpDir,
+    });
 
     const data = readResult('req-13');
     expect(data.success).toBe(true);
@@ -367,9 +384,14 @@ describe('error handling', () => {
     );
 
     // Verify the final file exists and no tmp file remains
-    const resultsDir = path.join(tmpDir, 'ipc', 'test-group', 'pageindex_results');
+    const resultsDir = path.join(
+      tmpDir,
+      'ipc',
+      'test-group',
+      'pageindex_results',
+    );
     const files = fs.readdirSync(resultsDir);
     expect(files).toContain('req-21.json');
-    expect(files.filter(f => f.includes('.tmp'))).toHaveLength(0);
+    expect(files.filter((f) => f.includes('.tmp'))).toHaveLength(0);
   });
 });

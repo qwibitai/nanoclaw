@@ -440,7 +440,9 @@ export class TelegramChannel implements Channel {
       if (doc?.file_id && EXTRACTABLE_EXTS[ext]) {
         // Special handling for PDFs: auto-index long documents
         if (ext === '.pdf') {
-          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-pdf-'));
+          const tmpDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), 'nanoclaw-pdf-'),
+          );
           const tmpFile = path.join(tmpDir, name);
           try {
             const file = await ctx.api.getFile(doc.file_id);
@@ -488,19 +490,22 @@ export class TelegramChannel implements Channel {
                     fs.writeFileSync(path.join(inboxDir, name), buf);
                     logger.info({ name, inboxDir }, 'PDF saved to vault inbox');
                   } catch (saveErr) {
-                    logger.warn({ name, err: saveErr }, 'Failed to save PDF to vault inbox');
+                    logger.warn(
+                      { name, err: saveErr },
+                      'Failed to save PDF to vault inbox',
+                    );
                   }
                 }
                 storeNonText(
                   ctx,
                   `[Document: ${name} — ${pageCount} pages, indexed]\n\n${JSON.stringify(result.tree, null, 2)}`,
                 );
-                logger.info(
-                  { name, pageCount },
-                  'Telegram PDF indexed',
-                );
+                logger.info({ name, pageCount }, 'Telegram PDF indexed');
                 return;
-              } else if (result.fallbackText && result.fallbackText.trim().length > 0) {
+              } else if (
+                result.fallbackText &&
+                result.fallbackText.trim().length > 0
+              ) {
                 const maxChars = 50_000;
                 const truncated =
                   result.fallbackText.length > maxChars
@@ -543,10 +548,7 @@ export class TelegramChannel implements Channel {
               );
             }
           } catch (err) {
-            logger.warn(
-              { name, err },
-              'Failed to process Telegram PDF',
-            );
+            logger.warn({ name, err }, 'Failed to process Telegram PDF');
           } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
           }

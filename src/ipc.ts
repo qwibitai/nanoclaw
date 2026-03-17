@@ -479,12 +479,22 @@ export async function processTaskIpc(
       let handled = false;
       if (typeof data.type === 'string' && data.type.startsWith('pageindex_')) {
         // Build mount mappings from registered group config
-        const groupEntry = Object.values(registeredGroups).find(g => g.folder === sourceGroup);
-        const mounts: Array<{ hostPath: string; containerPath: string; readonly: boolean }> = [];
+        const groupEntry = Object.values(registeredGroups).find(
+          (g) => g.folder === sourceGroup,
+        );
+        const mounts: Array<{
+          hostPath: string;
+          containerPath: string;
+          readonly: boolean;
+        }> = [];
         if (groupEntry?.containerConfig?.additionalMounts) {
           for (const m of groupEntry.containerConfig.additionalMounts) {
             const containerPath = `/workspace/extra/${m.containerPath || path.basename(m.hostPath)}`;
-            mounts.push({ hostPath: m.hostPath, containerPath, readonly: m.readonly !== false });
+            mounts.push({
+              hostPath: m.hostPath,
+              containerPath,
+              readonly: m.readonly !== false,
+            });
           }
         }
         // Add group folder mount
@@ -501,7 +511,11 @@ export async function processTaskIpc(
           mounts,
         );
       }
-      if (!handled && typeof data.type === 'string' && data.type.startsWith('imessage_')) {
+      if (
+        !handled &&
+        typeof data.type === 'string' &&
+        data.type.startsWith('imessage_')
+      ) {
         handled = await handleImessageIpc(
           data as Record<string, unknown>,
           sourceGroup,

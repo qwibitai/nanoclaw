@@ -66,7 +66,10 @@ function execFileResolves(stdout: string, stderr = '') {
       _cmd: string,
       _args: string[],
       optsOrCb: unknown,
-      maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+      maybeCb?: (
+        err: Error | null,
+        result: { stdout: string; stderr: string },
+      ) => void,
     ) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
       if (cb) cb(null, { stdout, stderr });
@@ -208,10 +211,9 @@ describe('saveCachedTree', () => {
     };
     await saveCachedTree('/docs', 'paper.pdf', 'abcd1234', tree);
 
-    expect(mockMkdir).toHaveBeenCalledWith(
-      path.join('/docs', '.pageindex'),
-      { recursive: true },
-    );
+    expect(mockMkdir).toHaveBeenCalledWith(path.join('/docs', '.pageindex'), {
+      recursive: true,
+    });
     // Should write to tmp file first
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringContaining('.tmp'),
@@ -238,7 +240,11 @@ describe('saveCachedTree', () => {
 
 describe('resolveContainerPath', () => {
   const mounts: MountMapping[] = [
-    { hostPath: '/host/docs', containerPath: '/workspace/docs', readonly: true },
+    {
+      hostPath: '/host/docs',
+      containerPath: '/workspace/docs',
+      readonly: true,
+    },
     {
       hostPath: '/host/extra',
       containerPath: '/workspace/extra',
@@ -247,10 +253,7 @@ describe('resolveContainerPath', () => {
   ];
 
   it('maps container path to host path', () => {
-    const result = resolveContainerPath(
-      '/workspace/docs/paper.pdf',
-      mounts,
-    );
+    const result = resolveContainerPath('/workspace/docs/paper.pdf', mounts);
     expect(result).toBe('/host/docs/paper.pdf');
   });
 
@@ -277,19 +280,13 @@ describe('resolveContainerPath', () => {
 
   it('returns null for partial prefix matches (separator-safe)', () => {
     // /workspace/docsevil should NOT match /workspace/docs
-    const result = resolveContainerPath(
-      '/workspace/docsevil/file.pdf',
-      mounts,
-    );
+    const result = resolveContainerPath('/workspace/docsevil/file.pdf', mounts);
     expect(result).toBeNull();
   });
 
   it('handles exact mount path (file at mount root)', () => {
     // The containerPath itself with a trailing file
-    const result = resolveContainerPath(
-      '/workspace/docs/file.pdf',
-      mounts,
-    );
+    const result = resolveContainerPath('/workspace/docs/file.pdf', mounts);
     expect(result).toBe('/host/docs/file.pdf');
   });
 });
@@ -370,7 +367,10 @@ describe('indexPdf', () => {
         cmd: string,
         args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         callCount++;
@@ -395,7 +395,10 @@ describe('indexPdf', () => {
         cmd: string,
         _args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (cmd.includes('pdfinfo')) {
@@ -425,7 +428,10 @@ describe('indexPdf', () => {
         cmd: string,
         _args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (cmd.includes('pdfinfo')) {
@@ -470,7 +476,10 @@ describe('indexPdf', () => {
         cmd: string,
         args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         // Handle both 2-arg and 3-arg callback styles
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
@@ -508,13 +517,23 @@ describe('indexPdf', () => {
         cmd: string,
         _args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (typeof cmd === 'string' && cmd.includes('pdfinfo')) {
           if (cb) cb(null, { stdout: 'Pages:          30\n', stderr: '' });
         } else if (typeof cmd === 'string' && cmd.includes('python3')) {
-          if (cb) cb(new Error('adapter crashed') as Error & { stdout: string; stderr: string }, { stdout: '', stderr: 'error' });
+          if (cb)
+            cb(
+              new Error('adapter crashed') as Error & {
+                stdout: string;
+                stderr: string;
+              },
+              { stdout: '', stderr: 'error' },
+            );
         } else if (typeof cmd === 'string' && cmd.includes('pdftotext')) {
           if (cb) cb(null, { stdout: 'extracted text\n', stderr: '' });
         }
@@ -558,7 +577,10 @@ describe('indexPdf', () => {
         cmd: string,
         _args: string[],
         optsOrCb: unknown,
-        maybeCb?: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+        maybeCb?: (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void,
       ) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (typeof cmd === 'string' && cmd.includes('pdfinfo')) {
