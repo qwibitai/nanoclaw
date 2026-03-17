@@ -67,7 +67,7 @@ function escapeRegex(str: string): string {
 }
 
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  `^@?${escapeRegex(ASSISTANT_NAME)}\\b|^@${escapeRegex(ASSISTANT_NAME)}PrintsBot\\b`,
   'i',
 );
 
