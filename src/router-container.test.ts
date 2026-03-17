@@ -1,10 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-
-// Sentinel markers must match container-runner.ts / router-container.ts
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
@@ -25,7 +21,7 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock fs
+// Mock fs — include readFileSync and unlinkSync for readRouterResult
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -36,6 +32,8 @@ vi.mock('fs', async () => {
       mkdirSync: vi.fn(),
       writeFileSync: vi.fn(),
       cpSync: vi.fn(),
+      readFileSync: vi.fn(() => '{}'),
+      unlinkSync: vi.fn(),
     },
   };
 });
@@ -68,7 +66,15 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { parseRouterResponse } from './router-container.js';
+// Mock router-prompt
+vi.mock('./router-prompt.js', () => ({
+  buildRouterPrompt: vi.fn(
+    () => 'You are a message router. Route this message.',
+  ),
+}));
+
+import fs from 'fs';
+import { readRouterResult } from './router-container.js';
 import type { RouterRequest } from './router-types.js';
 
 // Helper: create a mock container process
@@ -123,132 +129,99 @@ function makeRouterRequest(
   };
 }
 
-describe('parseRouterResponse', () => {
+// Access the mocked fs default for use in tests
+const mockFs = fs as unknown as {
+  existsSync: ReturnType<typeof vi.fn>;
+  mkdirSync: ReturnType<typeof vi.fn>;
+  writeFileSync: ReturnType<typeof vi.fn>;
+  cpSync: ReturnType<typeof vi.fn>;
+  readFileSync: ReturnType<typeof vi.fn>;
+  unlinkSync: ReturnType<typeof vi.fn>;
+};
+
+describe('readRouterResult', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   /**
-   * INVARIANT: Valid JSON router output is parsed into a RouterResponse
-   * SUT: parseRouterResponse
-   * VERIFICATION: All fields from the JSON are correctly extracted
+   * INVARIANT: readRouterResult reads and parses the IPC result file
+   * SUT: readRouterResult
+   * VERIFICATION: Structured decision is returned from file contents
    */
-  it('parses a valid route_to_case response', () => {
-    const json = JSON.stringify({
+  it('reads structured decision from IPC file', () => {
+    const decision = {
       requestId: 'req-1',
       decision: 'route_to_case',
       caseId: 'case-1',
       caseName: 'fix-auth',
       confidence: 0.9,
-      reason: 'Message about auth',
-    });
+      reason: 'Auth related',
+    };
 
-    const result = parseRouterResponse(json, 'req-1');
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(decision));
+
+    const result = readRouterResult('req-1');
 
     expect(result.decision).toBe('route_to_case');
     expect(result.caseId).toBe('case-1');
-    expect(result.caseName).toBe('fix-auth');
     expect(result.confidence).toBe(0.9);
-    expect(result.reason).toBe('Message about auth');
   });
 
   /**
-   * INVARIANT: Direct answer responses include the answer text
-   * SUT: parseRouterResponse with direct_answer decision
-   * VERIFICATION: directAnswer field is preserved
-   */
-  it('parses a direct_answer response with answer text', () => {
-    const json = JSON.stringify({
-      requestId: 'req-2',
-      decision: 'direct_answer',
-      confidence: 0.95,
-      reason: 'Simple greeting',
-      directAnswer: 'Hello! How can I help?',
-    });
-
-    const result = parseRouterResponse(json, 'req-2');
-
-    expect(result.decision).toBe('direct_answer');
-    expect(result.directAnswer).toBe('Hello! How can I help?');
-    expect(result.caseId).toBeUndefined();
-  });
-
-  /**
-   * INVARIANT: JSON embedded in surrounding text is still extracted
-   * SUT: parseRouterResponse with text wrapping the JSON
-   * VERIFICATION: Response is parsed even with surrounding text
-   */
-  it('extracts JSON from surrounding text', () => {
-    const text = `Here is my routing decision:
-{"requestId":"req-3","decision":"suggest_new","confidence":0.2,"reason":"No match"}
-That's my answer.`;
-
-    const result = parseRouterResponse(text, 'req-3');
-
-    expect(result.decision).toBe('suggest_new');
-    expect(result.confidence).toBe(0.2);
-  });
-
-  /**
-   * INVARIANT: parseRouterResponse throws when no JSON is found
-   * SUT: parseRouterResponse error handling
+   * INVARIANT: readRouterResult throws when no result file exists
+   * SUT: readRouterResult error path
    * VERIFICATION: Error is thrown with descriptive message
    */
-  it('throws when result contains no JSON', () => {
-    expect(() => parseRouterResponse('No JSON here', 'req-4')).toThrow(
-      'Router returned no JSON',
-    );
+  it('throws when result file does not exist', () => {
+    mockFs.existsSync.mockReturnValue(false);
+
+    expect(() => readRouterResult('req-missing')).toThrow('no result file');
   });
 
   /**
    * INVARIANT: Missing fields get safe defaults
-   * SUT: parseRouterResponse default handling
-   * VERIFICATION: Missing decision defaults to suggest_new, missing confidence to 0
+   * SUT: readRouterResult default handling
+   * VERIFICATION: Partial responses get filled with defaults
    */
   it('provides safe defaults for missing fields', () => {
-    const json = JSON.stringify({
-      reason: 'partial response',
-    });
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(JSON.stringify({ reason: 'partial' }));
 
-    const result = parseRouterResponse(json, 'req-5');
+    const result = readRouterResult('req-partial');
 
-    expect(result.requestId).toBe('req-5');
+    expect(result.requestId).toBe('req-partial');
     expect(result.decision).toBe('suggest_new');
     expect(result.confidence).toBe(0);
-    expect(result.reason).toBe('partial response');
   });
 
   /**
-   * INVARIANT: When text contains other braces (e.g. {thinking}), the correct
-   * JSON response is still extracted
-   * SUT: parseRouterResponse with mixed brace content
-   * VERIFICATION: The routing JSON is parsed, not the stray braces
+   * INVARIANT: Result file is cleaned up after reading
+   * SUT: readRouterResult cleanup
+   * VERIFICATION: unlinkSync is called on the result file
    */
-  it('extracts correct JSON when text contains other braces', () => {
-    const text =
-      'Here is my {thinking} about this: {"requestId":"req-6","decision":"route_to_case","caseId":"case-1","confidence":0.9,"reason":"auth related"}';
-    const result = parseRouterResponse(text, 'req-6');
-    expect(result.decision).toBe('route_to_case');
-    expect(result.caseId).toBe('case-1');
-  });
+  it('cleans up result file after reading', () => {
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({
+        decision: 'suggest_new',
+        confidence: 0.3,
+        reason: 'test',
+      }),
+    );
 
-  /**
-   * INVARIANT: Falls back to provided requestId when response omits it
-   * SUT: parseRouterResponse requestId fallback
-   * VERIFICATION: Provided requestId is used when not in the JSON
-   */
-  it('falls back to provided requestId when not in response', () => {
-    const json = JSON.stringify({
-      decision: 'suggest_new',
-      confidence: 0.3,
-      reason: 'test',
-    });
+    readRouterResult('req-cleanup');
 
-    const result = parseRouterResponse(json, 'fallback-id');
-
-    expect(result.requestId).toBe('fallback-id');
+    expect(mockFs.unlinkSync).toHaveBeenCalled();
   });
 });
 
 describe('routeMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: fs mocks return true for existsSync (setup checks in runRouterContainer)
+    mockFs.existsSync.mockReturnValue(true);
   });
 
   /**
@@ -260,29 +233,24 @@ describe('routeMessage', () => {
     const mockProc = createMockProcess();
     mockSpawn.mockReturnValue(mockProc);
 
-    // Import dynamically to ensure mocks are in place
+    const routeDecision = {
+      requestId: 'test-req-1',
+      decision: 'route_to_case',
+      caseId: 'case-1',
+      caseName: 'fix-auth',
+      confidence: 0.85,
+      reason: 'Auth-related message',
+    };
+
+    // readRouterResult will read from the IPC file after container exits
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(routeDecision));
+
     const { routeMessage } = await import('./router-container.js');
     const request = makeRouterRequest();
 
-    // Start the routing (non-blocking)
     const routePromise = routeMessage(request);
 
-    // Simulate container output
-    const output = {
-      status: 'success',
-      result: JSON.stringify({
-        requestId: 'test-req-1',
-        decision: 'route_to_case',
-        caseId: 'case-1',
-        caseName: 'fix-auth',
-        confidence: 0.85,
-        reason: 'Auth-related message',
-      }),
-    };
-
-    mockProc.stdout.write(
-      `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
-    );
+    // Container exits cleanly — route_decision MCP tool wrote the result file
     mockProc.emit('close', 0);
 
     const result = await routePromise;
@@ -319,9 +287,8 @@ describe('routeMessage', () => {
 
     const routePromise = routeMessage(request);
 
-    // Simulate timeout by not producing output — emit close with error
-    // In reality the timeout handler kills the container, we simulate the close
-    mockProc.emit('close', 137); // SIGKILL exit code
+    // Simulate non-zero exit (killed by timeout handler)
+    mockProc.emit('close', 137);
 
     await expect(routePromise).rejects.toThrow('exited with code 137');
   });
@@ -346,33 +313,30 @@ describe('routeMessage', () => {
   });
 
   /**
-   * INVARIANT: direct_answer response is correctly parsed from container output
+   * INVARIANT: direct_answer response is correctly parsed from IPC result file
    * SUT: routeMessage with direct_answer
    * VERIFICATION: Response includes directAnswer text
    */
-  it('returns direct_answer with answer text from container', async () => {
+  it('returns direct_answer with answer text from IPC result', async () => {
     const mockProc = createMockProcess();
     mockSpawn.mockReturnValue(mockProc);
+
+    const routeDecision = {
+      requestId: 'test-req-1',
+      decision: 'direct_answer',
+      confidence: 0.95,
+      reason: 'Simple greeting',
+      directAnswer: 'Hello! How can I help you today?',
+    };
+
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(routeDecision));
 
     const { routeMessage } = await import('./router-container.js');
     const request = makeRouterRequest({ messageText: 'Hello!' });
 
     const routePromise = routeMessage(request);
 
-    const output = {
-      status: 'success',
-      result: JSON.stringify({
-        requestId: request.requestId,
-        decision: 'direct_answer',
-        confidence: 0.95,
-        reason: 'Simple greeting',
-        directAnswer: 'Hello! How can I help you today?',
-      }),
-    };
-
-    mockProc.stdout.write(
-      `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
-    );
+    // Container exits cleanly
     mockProc.emit('close', 0);
 
     const result = await routePromise;
@@ -390,24 +354,20 @@ describe('routeMessage', () => {
     const mockProc = createMockProcess();
     mockSpawn.mockReturnValue(mockProc);
 
+    const routeDecision = {
+      requestId: 'test-req-1',
+      decision: 'suggest_new',
+      confidence: 0.1,
+      reason: 'test',
+    };
+
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(routeDecision));
+
     const { routeMessage } = await import('./router-container.js');
     const request = makeRouterRequest();
 
     const routePromise = routeMessage(request);
 
-    const output = {
-      status: 'success',
-      result: JSON.stringify({
-        requestId: 'test-req-1',
-        decision: 'suggest_new',
-        confidence: 0.1,
-        reason: 'test',
-      }),
-    };
-
-    mockProc.stdout.write(
-      `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
-    );
     mockProc.emit('close', 0);
 
     await routePromise;
@@ -433,24 +393,20 @@ describe('routeMessage', () => {
       stdinData += chunk.toString();
     });
 
+    const routeDecision = {
+      requestId: 'test-req-1',
+      decision: 'suggest_new',
+      confidence: 0.3,
+      reason: 'test',
+    };
+
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(routeDecision));
+
     const { routeMessage } = await import('./router-container.js');
     const request = makeRouterRequest();
 
     const routePromise = routeMessage(request);
 
-    const output = {
-      status: 'success',
-      result: JSON.stringify({
-        requestId: 'test-req-1',
-        decision: 'suggest_new',
-        confidence: 0.3,
-        reason: 'test',
-      }),
-    };
-
-    mockProc.stdout.write(
-      `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
-    );
     mockProc.emit('close', 0);
 
     await routePromise;

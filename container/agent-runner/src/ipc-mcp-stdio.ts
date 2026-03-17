@@ -835,3 +835,70 @@ Allowed labels: work-agent, needs-dev, kaizen, bug, enhancement.`,
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// Router-specific tool — only registered when running as the message router
+const ROUTER_RESULTS_DIR = path.join(IPC_DIR, 'results');
+
+if (groupFolder === '__router__') {
+  server.tool(
+    'route_decision',
+    `Submit your routing decision for the current message. You MUST call this tool exactly once per routing request.
+
+Decisions:
+• "route_to_case" — message belongs to an existing case (provide caseId + caseName)
+• "direct_answer" — simple question you can answer directly (provide directAnswer text)
+• "suggest_new" — no case matches, system should create a new case or handle without case context`,
+    {
+      request_id: z.string().describe('The requestId from the routing prompt'),
+      decision: z
+        .enum(['route_to_case', 'direct_answer', 'suggest_new'])
+        .describe('Your routing decision'),
+      case_id: z
+        .string()
+        .optional()
+        .describe('Case ID to route to (required for route_to_case)'),
+      case_name: z
+        .string()
+        .optional()
+        .describe('Case name (required for route_to_case)'),
+      confidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .describe('Confidence in your decision (0.0 to 1.0)'),
+      reason: z.string().describe('Brief explanation of your routing decision'),
+      direct_answer: z
+        .string()
+        .optional()
+        .describe('Answer text (required for direct_answer)'),
+    },
+    async (args) => {
+      fs.mkdirSync(ROUTER_RESULTS_DIR, { recursive: true });
+
+      const result = {
+        requestId: args.request_id,
+        decision: args.decision,
+        caseId: args.case_id,
+        caseName: args.case_name,
+        confidence: args.confidence,
+        reason: args.reason,
+        directAnswer: args.direct_answer,
+        timestamp: new Date().toISOString(),
+      };
+
+      const filepath = path.join(ROUTER_RESULTS_DIR, `${args.request_id}.json`);
+      const tempPath = `${filepath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(result, null, 2));
+      fs.renameSync(tempPath, filepath);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Routing decision submitted: ${args.decision}${args.case_name ? ` → ${args.case_name}` : ''}`,
+          },
+        ],
+      };
+    },
+  );
+}

@@ -10,7 +10,7 @@
  * The container uses Haiku-class model for fast, cheap routing decisions.
  * Future phases may keep a persistent container alive between requests.
  */
-import { ChildProcess, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -31,10 +31,6 @@ import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
 import { buildRouterPrompt } from './router-prompt.js';
 import { RouterRequest, RouterResponse } from './router-types.js';
-
-// Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 const ROUTER_TIMEOUT_MS = 60_000; // 60 seconds — first container run includes image pull + SDK init
 const ROUTER_GROUP_FOLDER = '__router__';
@@ -59,8 +55,10 @@ export async function routeMessage(
   );
 
   try {
-    const result = await runRouterContainer(prompt, request.requestId);
-    const response = parseRouterResponse(result, request.requestId);
+    // Run the container — the agent calls the route_decision MCP tool,
+    // which writes the structured result to an IPC file
+    await runRouterContainer(prompt, request.requestId);
+    const response = readRouterResult(request.requestId);
 
     logger.info(
       {
@@ -83,66 +81,43 @@ export async function routeMessage(
 }
 
 /**
- * Parse the container's text output into a RouterResponse.
- * Tries to extract JSON from the result text.
+ * Read the router's structured decision from the IPC results directory.
+ * The route_decision MCP tool writes the result as a JSON file.
  */
-export function parseRouterResponse(
-  resultText: string,
-  requestId: string,
-): RouterResponse {
-  // Try to find JSON — agent might wrap it in text.
-  // Try the last {…} block first (most likely the actual response JSON),
-  // then fall back to the first match.
-  const allMatches = resultText.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
-  if (!allMatches || allMatches.length === 0) {
-    throw new Error(`Router returned no JSON: ${resultText.slice(0, 200)}`);
+export function readRouterResult(requestId: string): RouterResponse {
+  const resultsDir = path.join(DATA_DIR, 'ipc', ROUTER_GROUP_FOLDER, 'results');
+  const resultFile = path.join(resultsDir, `${requestId}.json`);
+
+  if (!fs.existsSync(resultFile)) {
+    throw new Error(`Router produced no result file for ${requestId}`);
   }
 
-  // Try each match from last to first, return the first that parses
-  // and looks like a routing response
-  for (let i = allMatches.length - 1; i >= 0; i--) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+    // Clean up the result file
+    fs.unlinkSync(resultFile);
+
+    return {
+      requestId: parsed.requestId || requestId,
+      decision: parsed.decision || 'suggest_new',
+      caseId: parsed.caseId,
+      caseName: parsed.caseName,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+      reason: parsed.reason || '',
+      directAnswer: parsed.directAnswer,
+      model: parsed.model,
+    };
+  } catch (err) {
+    // Clean up even on error
     try {
-      const parsed = JSON.parse(allMatches[i]);
-      if (parsed.decision || parsed.confidence !== undefined || parsed.reason) {
-        return {
-          requestId: parsed.requestId || requestId,
-          decision: parsed.decision || 'suggest_new',
-          caseId: parsed.caseId,
-          caseName: parsed.caseName,
-          confidence:
-            typeof parsed.confidence === 'number' ? parsed.confidence : 0,
-          reason: parsed.reason || '',
-          directAnswer: parsed.directAnswer,
-          model: parsed.model,
-        };
-      }
-    } catch {
-      // Not valid JSON, try next match
-    }
+      fs.unlinkSync(resultFile);
+    } catch {}
+    if (err instanceof Error && err.message.includes('no result file'))
+      throw err;
+    throw new Error(
+      `Failed to parse router result: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-
-  // Last resort: try the greedy match
-  const greedyMatch = resultText.match(/\{[\s\S]*\}/);
-  if (greedyMatch) {
-    try {
-      const parsed = JSON.parse(greedyMatch[0]);
-      return {
-        requestId: parsed.requestId || requestId,
-        decision: parsed.decision || 'suggest_new',
-        caseId: parsed.caseId,
-        caseName: parsed.caseName,
-        confidence:
-          typeof parsed.confidence === 'number' ? parsed.confidence : 0,
-        reason: parsed.reason || '',
-        directAnswer: parsed.directAnswer,
-        model: parsed.model,
-      };
-    } catch {
-      // Fall through to error
-    }
-  }
-
-  throw new Error(`Router returned no valid JSON: ${resultText.slice(0, 200)}`);
 }
 
 /**
@@ -152,7 +127,7 @@ export function parseRouterResponse(
 async function runRouterContainer(
   prompt: string,
   requestId: string,
-): Promise<string> {
+): Promise<void> {
   const projectRoot = process.cwd();
 
   // Prepare minimal IPC directory for the router
@@ -321,37 +296,9 @@ async function runRouterContainer(
         return;
       }
 
-      // Extract result from OUTPUT_START/END markers
-      const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-      const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-      if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-        reject(
-          new Error(
-            `Router container produced no parseable output: ${stdout.slice(-500)}`,
-          ),
-        );
-        return;
-      }
-
-      const jsonStr = stdout
-        .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-        .trim();
-
-      try {
-        const output = JSON.parse(jsonStr);
-        if (output.status === 'error') {
-          reject(new Error(`Router agent error: ${output.error || 'unknown'}`));
-          return;
-        }
-        resolve(output.result || '');
-      } catch (err) {
-        reject(
-          new Error(
-            `Failed to parse router output: ${err instanceof Error ? err.message : String(err)}`,
-          ),
-        );
-      }
+      // Container exited successfully — the route_decision MCP tool
+      // wrote the result to an IPC file. Resolve so the caller can read it.
+      resolve();
     });
 
     container.on('error', (err) => {
