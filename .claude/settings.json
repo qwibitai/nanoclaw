@@ -17,6 +17,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "./.claude/hooks/enforce-pr-review.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "./.claude/hooks/enforce-case-worktree.sh",
             "timeout": 10
           },
