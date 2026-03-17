@@ -117,6 +117,40 @@ Spoke with the design team about the dashboard layout. They want to keep the cur
 
 In this example, the 09:15 and 16:45 entries are voice-originated (they have audio embeds), while the 14:30 entry is text-only (no audio embed).
 
+### Inline Note Linking for Journal Entries
+
+When creating or appending a journal entry, search the vault for related notes and weave `[[wikilinks]]` naturally into the content. Since journal entries are auto-detected (no `/obsidian` command), the pre-computed `obsidian_context.json` may not be available. Follow this process:
+
+1. **Check for pre-computed context first**:
+   ```bash
+   cat /workspace/ipc/obsidian_context.json 2>/dev/null
+   ```
+   If it exists and contains a `related_notes` array, use those results.
+
+2. **If no context file exists, search the vault with grep**:
+   ```bash
+   # Extract key topics/terms from the content, then search for each
+   grep -ril "topic keyword" /workspace/obsidian/pj-private-vault/pj-private-vault/ \
+     --include="*.md" \
+     --exclude-dir=".obsidian" \
+     --exclude-dir="attachments" \
+     --exclude-dir="Journal" | head -10
+   ```
+   Read the top matches to understand context and find linking opportunities.
+
+3. **Verify file existence before linking** — every `[[wikilink]]` must point to an existing note. Before adding a link:
+   ```bash
+   # Confirm the note file exists
+   test -f "/workspace/obsidian/pj-private-vault/pj-private-vault/Path/To/Note.md" && echo "exists"
+   ```
+   Never create links to non-existent notes. If a candidate note cannot be verified, omit the link.
+
+4. **Weave links naturally into prose** — do not dump a list of links at the bottom. Instead, integrate them into the sentence flow:
+   - Good: "Had a great meeting about the [[API Migration]] project."
+   - Bad: "Had a great meeting about the API migration project.\n\nRelated: [[API Migration]]"
+
+5. **Degrade gracefully** — if grep returns no results, or an error occurs during search, or no relevant notes exist in the vault, create the journal entry without any wikilinks. The note must always be created successfully regardless of whether linking succeeds.
+
 ## Note Creation Workflow
 
 ### 1. Clean Up Input
