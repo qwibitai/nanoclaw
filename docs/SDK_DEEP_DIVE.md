@@ -1,101 +1,101 @@
-# Claude Agent SDK Deep Dive
+# Claude Agent SDK 徹底解説
 
-Findings from reverse-engineering `@anthropic-ai/claude-agent-sdk` v0.2.29–0.2.34 to understand how `query()` works, why agent teams subagents were being killed, and how to fix it. Supplemented with official SDK reference docs.
+`@anthropic-ai/claude-agent-sdk` v0.2.29–0.2.34 をリバースエンジニアリングした結果に基づき、`query()` の仕組み、エージェントチームのサブエージェントが強制終了されていた理由、およびその修正方法について解説します。公式の SDK リファレンスドキュメントの内容も補足しています。
 
-## Architecture
+## アーキテクチャ
 
 ```
-Agent Runner (our code)
+エージェントランナー (我々のコード)
   └── query() → SDK (sdk.mjs)
-        └── spawns CLI subprocess (cli.js)
-              └── Claude API calls, tool execution
-              └── Task tool → spawns subagent subprocesses
+        └── CLI サブプロセスを起動 (cli.js)
+              └── Claude API 呼び出し、ツール実行
+              └── Task ツール → サブエージェントのサブプロセスを起動
 ```
 
-The SDK spawns `cli.js` as a child process with `--output-format stream-json --input-format stream-json --print --verbose` flags. Communication happens via JSON-lines on stdin/stdout.
+SDK は `cli.js` を子プロセスとして、`--output-format stream-json --input-format stream-json --print --verbose` フラグを付けて起動します。通信は標準入力/標準出力（stdin/stdout）を介した JSON-lines で行われます。
 
-`query()` returns a `Query` object extending `AsyncGenerator<SDKMessage, void>`. Internally:
+`query()` は `AsyncGenerator<SDKMessage, void>` を継承した `Query` オブジェクトを返します。内部的には：
 
-- SDK spawns CLI as a child process, communicates via stdin/stdout JSON lines
-- SDK's `readMessages()` reads from CLI stdout, enqueues into internal stream
-- `readSdkMessages()` async generator yields from that stream
-- `[Symbol.asyncIterator]` returns `readSdkMessages()`
-- Iterator returns `done: true` only when CLI closes stdout
+- SDK が CLI を子プロセスとして起動し、stdin/stdout の JSON lines で通信する
+- SDK の `readMessages()` が CLI の stdout から読み取り、内部ストリームにエンキューする
+- `readSdkMessages()` 非同期ジェネレーターがそのストリームから yield する
+- `[Symbol.asyncIterator]` が `readSdkMessages()` を返す
+- CLI が stdout を閉じたときにのみ、イテレーターは `done: true` を返す
 
-Both V1 (`query()`) and V2 (`createSession`/`send`/`stream`) use the exact same three-layer architecture:
+V1 (`query()`) と V2 (`createSession`/`send`/`stream`) の両方が、全く同じ 3 層アーキテクチャを使用しています：
 
 ```
-SDK (sdk.mjs)           CLI Process (cli.js)
+SDK (sdk.mjs)           CLI プロセス (cli.js)
 --------------          --------------------
-XX Transport  ------>   stdin reader (bd1)
-  (spawn cli.js)           |
-$X Query      <------   stdout writer
+XX Transport  ------>   stdin リーダー (bd1)
+  (cli.js を起動)          |
+$X Query      <------   stdout ライター
   (JSON-lines)             |
-                        EZ() recursive generator
+                        EZ() 再帰的ジェネレーター
                            |
                         Anthropic Messages API
 ```
 
-## The Core Agent Loop (EZ)
+## コア・エージェントループ (EZ)
 
-Inside the CLI, the agentic loop is a **recursive async generator called `EZ()`**, not an iterative while loop:
+CLI 内部では、エージェントループは while ループではなく、**`EZ()` と呼ばれる再帰的な非同期ジェネレーター**です：
 
 ```
 EZ({ messages, systemPrompt, canUseTool, maxTurns, turnCount=1, ... })
 ```
 
-Each invocation = one API call to Claude (one "turn").
+各呼び出し ＝ Claude への 1 回の API 呼び出し（1 「ターン」）に相当します。
 
-### Flow per turn:
+### 1 ターンごとのフロー：
 
-1. **Prepare messages** — trim context, run compaction if needed
-2. **Call the Anthropic API** (via `mW1` streaming function)
-3. **Extract tool_use blocks** from the response
-4. **Branch:**
-   - If **no tool_use blocks** → stop (run stop hooks, return)
-   - If **tool_use blocks present** → execute tools, increment turnCount, recurse
+1. **メッセージの準備** — コンテキストのトリミング、必要に応じてコンパクション（要約）を実行
+2. **Anthropic API の呼び出し** (`mW1` ストリーミング関数を使用)
+3. **レスポンスから tool_use ブロックを抽出**
+4. **分岐：**
+   - **tool_use ブロックがない場合** → 停止（停止フックを実行してリターン）
+   - **tool_use ブロックがある場合** → ツールを実行し、turnCount をインクリメントして再帰呼び出し
 
-All complex logic — the agent loop, tool execution, background tasks, teammate orchestration — runs inside the CLI subprocess. `query()` is a thin transport wrapper.
+エージェントループ、ツール実行、バックグラウンドタスク、チームメイトのオーケストレーションなど、すべての複雑なロジックは CLI サブプロセス内で実行されます。`query()` は薄いトランスポートラッパーに過ぎません。
 
-## query() Options
+## query() のオプション
 
-Full `Options` type from the official docs:
+公式ドキュメントにある全 `Options` 型：
 
-| Property | Type | Default | Description |
+| プロパティ | 型 | デフォルト | 説明 |
 |----------|------|---------|-------------|
-| `abortController` | `AbortController` | `new AbortController()` | Controller for cancelling operations |
-| `additionalDirectories` | `string[]` | `[]` | Additional directories Claude can access |
-| `agents` | `Record<string, AgentDefinition>` | `undefined` | Programmatically define subagents (not agent teams — no orchestration) |
-| `allowDangerouslySkipPermissions` | `boolean` | `false` | Required when using `permissionMode: 'bypassPermissions'` |
-| `allowedTools` | `string[]` | All tools | List of allowed tool names |
-| `betas` | `SdkBeta[]` | `[]` | Beta features (e.g., `['context-1m-2025-08-07']` for 1M context) |
-| `canUseTool` | `CanUseTool` | `undefined` | Custom permission function for tool usage |
-| `continue` | `boolean` | `false` | Continue the most recent conversation |
-| `cwd` | `string` | `process.cwd()` | Current working directory |
-| `disallowedTools` | `string[]` | `[]` | List of disallowed tool names |
-| `enableFileCheckpointing` | `boolean` | `false` | Enable file change tracking for rewinding |
-| `env` | `Dict<string>` | `process.env` | Environment variables |
-| `executable` | `'bun' \| 'deno' \| 'node'` | Auto-detected | JavaScript runtime |
-| `fallbackModel` | `string` | `undefined` | Model to use if primary fails |
-| `forkSession` | `boolean` | `false` | When resuming, fork to a new session ID instead of continuing original |
-| `hooks` | `Partial<Record<HookEvent, HookCallbackMatcher[]>>` | `{}` | Hook callbacks for events |
-| `includePartialMessages` | `boolean` | `false` | Include partial message events (streaming) |
-| `maxBudgetUsd` | `number` | `undefined` | Maximum budget in USD for the query |
-| `maxThinkingTokens` | `number` | `undefined` | Maximum tokens for thinking process |
-| `maxTurns` | `number` | `undefined` | Maximum conversation turns |
-| `mcpServers` | `Record<string, McpServerConfig>` | `{}` | MCP server configurations |
-| `model` | `string` | Default from CLI | Claude model to use |
-| `outputFormat` | `{ type: 'json_schema', schema: JSONSchema }` | `undefined` | Structured output format |
-| `pathToClaudeCodeExecutable` | `string` | Uses built-in | Path to Claude Code executable |
-| `permissionMode` | `PermissionMode` | `'default'` | Permission mode |
-| `plugins` | `SdkPluginConfig[]` | `[]` | Load custom plugins from local paths |
-| `resume` | `string` | `undefined` | Session ID to resume |
-| `resumeSessionAt` | `string` | `undefined` | Resume session at a specific message UUID |
-| `sandbox` | `SandboxSettings` | `undefined` | Sandbox behavior configuration |
-| `settingSources` | `SettingSource[]` | `[]` (none) | Which filesystem settings to load. Must include `'project'` to load CLAUDE.md |
-| `stderr` | `(data: string) => void` | `undefined` | Callback for stderr output |
-| `systemPrompt` | `string \| { type: 'preset'; preset: 'claude_code'; append?: string }` | `undefined` | System prompt. Use preset to get Claude Code's prompt, with optional `append` |
-| `tools` | `string[] \| { type: 'preset'; preset: 'claude_code' }` | `undefined` | Tool configuration |
+| `abortController` | `AbortController` | `new AbortController()` | 操作をキャンセルするためのコントローラー |
+| `additionalDirectories` | `string[]` | `[]` | Claude がアクセスできる追加ディレクトリ |
+| `agents` | `Record<string, AgentDefinition>` | `undefined` | プログラムでサブエージェントを定義（エージェントチームではなく、オーケストレーションなし） |
+| `allowDangerouslySkipPermissions` | `boolean` | `false` | `permissionMode: 'bypassPermissions'` を使用する場合に必須 |
+| `allowedTools` | `string[]` | 全ツール | 許可されるツール名のリスト |
+| `betas` | `SdkBeta[]` | `[]` | ベータ機能（例：1M コンテキスト用の `['context-1m-2025-08-07']`） |
+| `canUseTool` | `CanUseTool` | `undefined` | ツール使用のためのカスタム権限関数 |
+| `continue` | `boolean` | `false` | 直近の会話を継続する |
+| `cwd` | `string` | `process.cwd()` | 作業ディレクトリ |
+| `disallowedTools` | `string[]` | `[]` | 許可しないツール名のリスト |
+| `enableFileCheckpointing` | `boolean` | `false` | 巻き戻し（rewind）用のファイル変更追跡を有効にする |
+| `env` | `Dict<string>` | `process.env` | 環境変数 |
+| `executable` | `'bun' \| 'deno' \| 'node'` | 自動検出 | JavaScript ランタイム |
+| `fallbackModel` | `string` | `undefined` | プライマリモデルが失敗したときに使用するモデル |
+| `forkSession` | `boolean` | `false` | 再開時にオリジナルを継続せず、新しいセッション ID に分岐する |
+| `hooks` | `Partial<Record<HookEvent, HookCallbackMatcher[]>>` | `{}` | イベント用のフックコールバック |
+| `includePartialMessages` | `boolean` | `false` | 部分的なメッセージイベントを含める（ストリーミング） |
+| `maxBudgetUsd` | `number` | `undefined` | クエリの最大予算 (USD) |
+| `maxThinkingTokens` | `number` | `undefined` | 思考プロセス（thinking）に使用する最大トークン数 |
+| `maxTurns` | `number` | `undefined` | 最大会話ターン数 |
+| `mcpServers` | `Record<string, McpServerConfig>` | `{}` | MCP サーバーの設定 |
+| `model` | `string` | CLI のデフォルト | 使用する Claude モデル |
+| `outputFormat` | `{ type: 'json_schema', schema: JSONSchema }` | `undefined` | 構造化出力形式 |
+| `pathToClaudeCodeExecutable` | `string` | 内蔵を使用 | Claude Code 実行ファイルのパス |
+| `permissionMode` | `PermissionMode` | `'default'` | 権限モード |
+| `plugins` | `SdkPluginConfig[]` | `[]` | ローカルパスからカスタムプラグインをロード |
+| `resume` | `string` | `undefined` | 再開するセッション ID |
+| `resumeSessionAt` | `string` | `undefined` | 特定のメッセージ UUID からセッションを再開 |
+| `sandbox` | `SandboxSettings` | `undefined` | サンドボックスの動作設定 |
+| `settingSources` | `SettingSource[]` | `[]` (なし) | ロードする設定ファイルのソース。CLAUDE.md をロードするには `'project'` を含める必要あり |
+| `stderr` | `(data: string) => void` | `undefined` | 標準エラー出力（stderr）用のコールバック |
+| `systemPrompt` | `string \| { type: 'preset'; preset: 'claude_code'; append?: string }` | `undefined` | システムプロンプト。preset を使用すると Claude Code のプロンプトを取得でき、`append` で追記可能 |
+| `tools` | `string[] \| { type: 'preset'; preset: 'claude_code' }` | `undefined` | ツールの設定 |
 
 ### PermissionMode
 
@@ -108,21 +108,21 @@ type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 ```typescript
 type SettingSource = 'user' | 'project' | 'local';
 // 'user'    → ~/.claude/settings.json
-// 'project' → .claude/settings.json (version controlled)
+// 'project' → .claude/settings.json (バージョン管理対象)
 // 'local'   → .claude/settings.local.json (gitignored)
 ```
 
-When omitted, SDK loads NO filesystem settings (isolation by default). Precedence: local > project > user. Programmatic options always override filesystem settings.
+省略した場合、SDK は設定ファイルを一切ロードしません（デフォルトで隔離）。優先順位： local > project > user。プログラムによるオプションは常に設定ファイルを上書きします。
 
 ### AgentDefinition
 
-Programmatic subagents (NOT agent teams — these are simpler, no inter-agent coordination):
+プログラムによるサブエージェント（エージェントチームでは「ない」 — より単純で、エージェント間の調整機能はありません）：
 
 ```typescript
 type AgentDefinition = {
-  description: string;  // When to use this agent
-  tools?: string[];     // Allowed tools (inherits all if omitted)
-  prompt: string;       // Agent's system prompt
+  description: string;  // このエージェントをいつ使用すべきか
+  tools?: string[];     // 許可されるツール（省略時はすべて継承）
+  prompt: string;       // エージェントのシステムプロンプト
   model?: 'sonnet' | 'opus' | 'haiku' | 'inherit';
 }
 ```
@@ -134,14 +134,14 @@ type McpServerConfig =
   | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
   | { type: 'sse'; url: string; headers?: Record<string, string> }
   | { type: 'http'; url: string; headers?: Record<string, string> }
-  | { type: 'sdk'; name: string; instance: McpServer }  // in-process
+  | { type: 'sdk'; name: string; instance: McpServer }  // プロセス内実行
 ```
 
 ### SdkBeta
 
 ```typescript
 type SdkBeta = 'context-1m-2025-08-07';
-// Enables 1M token context window for Opus 4.6, Sonnet 4.5, Sonnet 4
+// Opus 4.6, Sonnet 4.5, Sonnet 4 で 1M トークンのコンテキストウィンドウを有効にする
 ```
 
 ### CanUseTool
@@ -158,28 +158,28 @@ type PermissionResult =
   | { behavior: 'deny'; message: string; interrupt?: boolean };
 ```
 
-## SDKMessage Types
+## SDKMessage の型
 
-`query()` can yield 16 message types. The official docs show a simplified union of 7, but `sdk.d.ts` has the full set:
+`query()` は 16 種類のメッセージ型を yield する可能性があります。公式ドキュメントには簡略化された 7 種類のみ記載されていますが、`sdk.d.ts` には全セットが定義されています：
 
-| Type | Subtype | Purpose |
+| 型 | サブタイプ | 目的 |
 |------|---------|---------|
-| `system` | `init` | Session initialized, contains session_id, tools, model |
-| `system` | `task_notification` | Background agent completed/failed/stopped |
-| `system` | `compact_boundary` | Conversation was compacted |
-| `system` | `status` | Status change (e.g. compacting) |
-| `system` | `hook_started` | Hook execution started |
-| `system` | `hook_progress` | Hook progress output |
-| `system` | `hook_response` | Hook completed |
-| `system` | `files_persisted` | Files saved |
-| `assistant` | — | Claude's response (text + tool calls) |
-| `user` | — | User message (internal) |
-| `user` (replay) | — | Replayed user message on resume |
-| `result` | `success` / `error_*` | Final result of a prompt processing round |
-| `stream_event` | — | Partial streaming (when includePartialMessages) |
-| `tool_progress` | — | Long-running tool progress |
-| `auth_status` | — | Authentication state changes |
-| `tool_use_summary` | — | Summary of preceding tool uses |
+| `system` | `init` | セッションが初期化された。session_id, ツール、モデルを含む |
+| `system` | `task_notification` | バックグラウンドエージェントが完了/失敗/停止した |
+| `system` | `compact_boundary` | 会話がコンパクション（要約）された |
+| `system` | `status` | ステータスの変更（例：要約中） |
+| `system` | `hook_started` | フックの実行が開始された |
+| `system` | `hook_progress` | フックの進捗出力 |
+| `system` | `hook_response` | フックが完了した |
+| `system` | `files_persisted` | ファイルが保存された |
+| `assistant` | — | Claude のレスポンス（テキスト + ツール呼び出し） |
+| `user` | — | ユーザーメッセージ（内部用） |
+| `user` (replay) | — | 再開時にリプレイされたユーザーメッセージ |
+| `result` | `success` / `error_*` | プロンプト処理ラウンドの最終結果 |
+| `stream_event` | — | 部分的なストリーミング（includePartialMessages が有効な場合） |
+| `tool_progress` | — | 長時間実行されるツールの進捗 |
+| `auth_status` | — | 認証状態の変更 |
+| `tool_use_summary` | — | 直前のツール使用の要約 |
 
 ### SDKTaskNotificationMessage (sdk.d.ts:1507)
 
@@ -198,32 +198,32 @@ type SDKTaskNotificationMessage = {
 
 ### SDKResultMessage (sdk.d.ts:1375)
 
-Two variants with shared fields:
+2 つのバリアントがあり、共通のフィールドを持ちます：
 
 ```typescript
-// Shared fields on both variants:
+// 両バリアント共通のフィールド：
 // uuid, session_id, duration_ms, duration_api_ms, is_error, num_turns,
 // total_cost_usd, usage: NonNullableUsage, modelUsage, permission_denials
 
-// Success:
+// 成功：
 type SDKResultSuccess = {
   type: 'result';
   subtype: 'success';
   result: string;
   structured_output?: unknown;
-  // ...shared fields
+  // ...共通フィールド
 };
 
-// Error:
+// エラー：
 type SDKResultError = {
   type: 'result';
   subtype: 'error_during_execution' | 'error_max_turns' | 'error_max_budget_usd' | 'error_max_structured_output_retries';
   errors: string[];
-  // ...shared fields
+  // ...共通フィールド
 };
 ```
 
-Useful fields on result: `total_cost_usd`, `duration_ms`, `num_turns`, `modelUsage` (per-model breakdown with `costUSD`, `inputTokens`, `outputTokens`, `contextWindow`).
+結果に含まれる有用なフィールド： `total_cost_usd`, `duration_ms`, `num_turns`, `modelUsage` (`costUSD`, `inputTokens`, `outputTokens`, `contextWindow` を含むモデルごとの内訳)。
 
 ### SDKAssistantMessage
 
@@ -232,8 +232,8 @@ type SDKAssistantMessage = {
   type: 'assistant';
   uuid: UUID;
   session_id: string;
-  message: APIAssistantMessage; // From Anthropic SDK
-  parent_tool_use_id: string | null; // Non-null when from subagent
+  message: APIAssistantMessage; // Anthropic SDK から
+  parent_tool_use_id: string | null; // サブエージェントからの場合は非 null
 };
 ```
 
@@ -256,231 +256,231 @@ type SDKSystemMessage = {
 };
 ```
 
-## Turn Behavior: When the Agent Stops vs Continues
+## ターンの動作：エージェントが停止する場合と継続する場合
 
-### When the Agent STOPS (no more API calls)
+### エージェントが停止（STOP）する場合 (API 呼び出しが終了)
 
-**1. No tool_use blocks in response (THE PRIMARY CASE)**
+**1. レスポンスに tool_use ブロックがない場合（主要なケース）**
 
-Claude responded with text only — it decided it has completed the task. The API's `stop_reason` will be `"end_turn"`. The SDK does NOT make this decision — it's entirely driven by Claude's model output.
+Claude がテキストのみで回答した — タスクが完了したと判断した。API の `stop_reason` は `"end_turn"` になります。SDK はこの判断を行わず、完全に Claude モデルの出力によって駆動されます。
 
-**2. Max turns exceeded** — Results in `SDKResultError` with `subtype: "error_max_turns"`.
+**2. 最大ターン数を超えた場合** — `subtype: "error_max_turns"` の `SDKResultError` が返されます。
 
-**3. Abort signal** — User interruption via `abortController`.
+**3. アボートシグナル** — `abortController` を介したユーザーによる中断。
 
-**4. Budget exceeded** — `totalCost >= maxBudgetUsd` → `"error_max_budget_usd"`.
+**4. 予算を超えた場合** — `totalCost >= maxBudgetUsd` → `"error_max_budget_usd"`。
 
-**5. Stop hook prevents continuation** — Hook returns `{preventContinuation: true}`.
+**5. 停止フックが継続を阻止した場合** — フックが `{preventContinuation: true}` を返した場合。
 
-### When the Agent CONTINUES (makes another API call)
+### エージェントが継続（CONTINUE）する場合 (再度 API 呼び出しを行う)
 
-**1. Response contains tool_use blocks (THE PRIMARY CASE)** — Execute tools, increment turnCount, recurse into EZ.
+**1. レスポンスに tool_use ブロックが含まれる場合（主要なケース）** — ツールを実行し、turnCount をインクリメントして `EZ` を再帰呼び出しします。
 
-**2. max_output_tokens recovery** — Up to 3 retries with a "break your work into smaller pieces" context message.
+**2. max_output_tokens 回復** — 「作業をより細かく分割してください」というコンテキストメッセージとともに、最大 3 回までリトライします。
 
-**3. Stop hook blocking errors** — Errors fed back as context messages, loop continues.
+**3. 停止フックのブロッキングエラー** — エラーがコンテキストメッセージとしてフィードバックされ、ループが継続します。
 
-**4. Model fallback** — Retry with fallback model (one-time).
+**4. モデルのフォールバック** — フォールバックモデルでリトライします（1 回限り）。
 
-### Decision Table
+### 判断表
 
-| Condition | Action | Result Type |
+| 条件 | アクション | 結果の型 |
 |-----------|--------|-------------|
-| Response has `tool_use` blocks | Execute tools, recurse into `EZ` | continues |
-| Response has NO `tool_use` blocks | Run stop hooks, return | `success` |
-| `turnCount > maxTurns` | Yield max_turns_reached | `error_max_turns` |
-| `totalCost >= maxBudgetUsd` | Yield budget error | `error_max_budget_usd` |
-| `abortController.signal.aborted` | Yield interrupted msg | depends on context |
-| `stop_reason === "max_tokens"` (output) | Retry up to 3x with recovery prompt | continues |
-| Stop hook `preventContinuation` | Return immediately | `success` |
-| Stop hook blocking error | Feed error back, recurse | continues |
-| Model fallback error | Retry with fallback model (one-time) | continues |
+| レスポンスに `tool_use` ブロックあり | ツールを実行し、`EZ` を再帰呼び出し | 継続 |
+| レスポンスに `tool_use` ブロックなし | 停止フックを実行し、リターン | `success` |
+| `turnCount > maxTurns` | max_turns_reached を yield | `error_max_turns` |
+| `totalCost >= maxBudgetUsd` | 予算エラーを yield | `error_max_budget_usd` |
+| `abortController.signal.aborted` | 中断メッセージを yield | コンテキストに依存 |
+| `stop_reason === "max_tokens"` (出力) | 回復プロンプトで最大 3 回リトライ | 継続 |
+| 停止フック `preventContinuation` | 即座にリターン | `success` |
+| 停止フックのブロッキングエラー | エラーをフィードバックし、再帰呼び出し | 継続 |
+| モデルフォールバックエラー | フォールバックモデルでリトライ（1回限り） | 継続 |
 
-## Subagent Execution Modes
+## サブエージェントの実行モード
 
-### Case 1: Synchronous Subagents (`run_in_background: false`) — BLOCKS
+### ケース 1: 同期サブエージェント (`run_in_background: false`) — ブロック
 
-Parent agent calls Task tool → `VR()` runs `EZ()` for subagent → parent waits for full result → tool result returned to parent → parent continues.
+親エージェントが Task ツールを呼び出す → `VR()` がサブエージェント用に `EZ()` を実行 → 親は最終結果を待つ → ツール結果が親に返される → 親が継続。
 
-The subagent runs the full recursive EZ loop. The parent's tool execution is suspended via `await`. There is a mid-execution "promotion" mechanism: a synchronous subagent can be promoted to background via `Promise.race()` against a `backgroundSignal` promise.
+サブエージェントは再帰的な EZ ループを完全に実行します。親のツール実行は `await` によって一時停止されます。実行途中の「昇格」メカニズムが存在します。同期サブエージェントは、`backgroundSignal` プロミスに対する `Promise.race()` によってバックグラウンドへ昇格させることができます。
 
-### Case 2: Background Tasks (`run_in_background: true`) — DOES NOT WAIT
+### ケース 2: バックグラウンドタスク (`run_in_background: true`) — 待機しない
 
-- **Bash tool:** Command spawned, tool returns immediately with empty result + `backgroundTaskId`
-- **Task/Agent tool:** Subagent launched in fire-and-forget wrapper (`g01()`), tool returns immediately with `status: "async_launched"` + `outputFile` path
+- **Bash ツール:** コマンドが起動され、ツールは空の結果 + `backgroundTaskId` を伴って即座に返ります。
+- **Task/Agent ツール:** サブエージェントが投げっぱなし（fire-and-forget）ラッパー (`g01()`) 内で起動され、ツールは `status: "async_launched"` + `outputFile` パスを伴って即座に返ります。
 
-Zero "wait for background tasks" logic before emitting the `type: "result"` message. When a background task completes, an `SDKTaskNotificationMessage` is emitted separately.
+`type: "result"` メッセージを出力する前に「バックグラウンドタスクを待つ」ロジックは一切ありません。バックグラウンドタスクが完了すると、`SDKTaskNotificationMessage` が別途出力されます。
 
-### Case 3: Agent Teams (TeammateTool / SendMessage) — RESULT FIRST, THEN POLLING
+### ケース 3: エージェントチーム (TeammateTool / SendMessage) — 結果が先、その後にポーリング
 
-The team leader runs its normal EZ loop, which includes spawning teammates. When the leader's EZ loop finishes, `type: "result"` is emitted. Then the leader enters a post-result polling loop:
+チームリーダーは通常の EZ ループを実行し、その中でチームメイトを起動します。リーダーの EZ ループが終了すると、`type: "result"` が出力されます。その後、リーダーは結果出力後のポーリングループに入ります：
 
 ```javascript
 while (true) {
-    // Check if no active teammates AND no running tasks → break
-    // Check for unread messages from teammates → re-inject as new prompt, restart EZ loop
-    // If stdin closed with active teammates → inject shutdown prompt
-    // Poll every 500ms
+    // アクティブなチームメイト「かつ」実行中のタスクがないか確認 → ループを抜ける
+    // チームメイトからの未読メッセージを確認 → 新しいプロンプトとして再注入し、EZ ループを再開
+    // アクティブなチームメイトがいる状態で stdin が閉じられた場合 → シャットダウンプロンプトを注入
+    // 500ms ごとにポーリング
 }
 ```
 
-From the SDK consumer's perspective: you receive the initial `type: "result"`, but the AsyncGenerator may continue yielding more messages as the team leader processes teammate responses and re-enters the agent loop. The generator only truly finishes when all teammates have shut down.
+SDK 利用側の視点： 最初の `type: "result"` を受信した後も、チームリーダーがチームメイトの応答を処理してエージェントループに再突入するため、AsyncGenerator はさらにメッセージを yield し続ける可能性があります。ジェネレーターが真に終了するのは、すべてのチームメイトがシャットダウンしたときのみです。
 
-## The isSingleUserTurn Problem
+## isSingleUserTurn 問題
 
-From sdk.mjs:
+sdk.mjs より：
 
 ```javascript
-QK = typeof X === "string"  // isSingleUserTurn = true when prompt is a string
+QK = typeof X === "string"  // プロンプトが文字列の場合、isSingleUserTurn = true
 ```
 
-When `isSingleUserTurn` is true and the first `result` message arrives:
+`isSingleUserTurn` が true であり、最初の `result` メッセージが届いたとき：
 
 ```javascript
 if (this.isSingleUserTurn) {
-  this.transport.endInput();  // closes stdin to CLI
+  this.transport.endInput();  // CLI への stdin を閉じる
 }
 ```
 
-This triggers a chain reaction:
+これにより連鎖反応が起こります：
 
-1. SDK closes CLI stdin
-2. CLI detects stdin close
-3. Polling loop sees `D = true` (stdin closed) with active teammates
-4. Injects shutdown prompt → leader sends `shutdown_request` to all teammates
-5. **Teammates get killed mid-research**
+1. SDK が CLI の stdin を閉じる
+2. CLI が stdin のクローズを検出
+3. ポーリングループが、アクティブなチームメイトがいる状態で `D = true` (stdin クローズ) を検知
+4. シャットダウンプロンプトを注入 → リーダーがすべてのチームメイトに `shutdown_request` を送信
+5. **チームメイトが調査の途中で強制終了される**
 
-The shutdown prompt (found via `BGq` variable in minified cli.js):
+シャットダウンプロンプト（難読化された cli.js 内の `BGq` 変数に存在）：
 
 ```
-You are running in non-interactive mode and cannot return a response
-to the user until your team is shut down.
+あなたは非対話モードで実行されており、チームがシャットダウンされるまで
+ユーザーにレスポンスを返すことはできません。
 
-You MUST shut down your team before preparing your final response:
-1. Use requestShutdown to ask each team member to shut down gracefully
-2. Wait for shutdown approvals
-3. Use the cleanup operation to clean up the team
-4. Only then provide your final response to the user
+最終的なレスポンスを準備する前に、必ずチームをシャットダウンしなければなりません：
+1. requestShutdown を使用して、各チームメンバーに正常なシャットダウンを依頼する
+2. シャットダウンの承認を待つ
+3. cleanup 操作を使用して、チームをクリーンアップする
+4. その後で初めて、ユーザーに最終的なレスポンスを提供する
 ```
 
-### The practical problem
+### 実用上の問題
 
-With V1 `query()` + string prompt + agent teams:
+V1 `query()` + 文字列プロンプト + エージェントチームを使用した場合：
 
-1. Leader spawns teammates, they start researching
-2. Leader's EZ loop ends ("I've dispatched the team, they're working on it")
-3. `type: "result"` emitted
-4. SDK sees `isSingleUserTurn = true` → closes stdin immediately
-5. Polling loop detects stdin closed + active teammates → injects shutdown prompt
-6. Leader sends `shutdown_request` to all teammates
-7. **Teammates could be 10 seconds into a 5-minute research task and they get told to stop**
+1. リーダーがチームメイトを起動し、彼らが調査を開始する
+2. リーダーの EZ ループが終了（「チームを派遣しました、現在作業中です」）
+3. `type: "result"` が出力される
+4. SDK が `isSingleUserTurn = true` を見て、即座に stdin を閉じる
+5. ポーリングループが stdin のクローズ + アクティブなチームメイトを検出し、シャットダウンプロンプトを注入
+6. リーダーがすべてのチームメイトに `shutdown_request` を送信
+7. **チームメイトは 5 分の調査タスクの開始 10 秒後であっても、停止を命じられる**
 
-## The Fix: Streaming Input Mode
+## 修正方法：ストリーミング入力モード
 
-Instead of passing a string prompt (which sets `isSingleUserTurn = true`), pass an `AsyncIterable<SDKUserMessage>`:
+文字列プロンプト（`isSingleUserTurn = true` になる）を渡す代わりに、`AsyncIterable<SDKUserMessage>` を渡します：
 
 ```typescript
-// Before (broken for agent teams):
-query({ prompt: "do something" })
+// 修正前 (エージェントチームで問題が発生)：
+query({ prompt: "何かして" })
 
-// After (keeps CLI alive):
+// 修正後 (CLI を維持)：
 query({ prompt: asyncIterableOfMessages })
 ```
 
-When prompt is an `AsyncIterable`:
-- `isSingleUserTurn = false`
-- SDK does NOT close stdin after first result
-- CLI stays alive, continues processing
-- Background agents keep running
-- `task_notification` messages flow through the iterator
-- We control when to end the iterable
+プロンプトが `AsyncIterable` の場合：
+- `isSingleUserTurn = false` となる
+- SDK は最初の結果の後に stdin を閉じない
+- CLI は生存し続け、処理を継続する
+- バックグラウンドエージェントは実行を継続する
+- `task_notification` メッセージがイテレーターを通じて流れる
+- イテラブルをいつ終了させるかは、我々が制御できる
 
-### Additional Benefit: Streaming New Messages
+### 追加のメリット：新着メッセージのストリーミング
 
-With the async iterable approach, we can push new incoming WhatsApp messages into the iterable while the agent is still working. Instead of queuing messages until the container exits and spawning a new container, we stream them directly into the running session.
+非同期イテラブルのアプローチを使用すると、エージェントが作業している間に、新しく届いた WhatsApp メッセージをイテラブルにプッシュできます。コンテナが終了するまでメッセージをキューに入れ、新しいコンテナを起動する代わりに、実行中のセッションに直接ストリーミングできます。
 
-### Intended Lifecycle with Agent Teams
+### エージェントチームにおける意図されたライフサイクル
 
-With the async iterable fix (`isSingleUserTurn = false`), stdin stays open so the CLI never hits the teammate check or shutdown prompt injection:
+非同期イテラブルによる修正 (`isSingleUserTurn = false`) を行うと、stdin が開いたままになるため、CLI がチームメイトチェックやシャットダウンプロンプト注入に陥ることはありません：
 
 ```
-1. system/init          → session initialized
-2. assistant/user       → Claude reasoning, tool calls, tool results
-3. ...                  → more assistant/user turns (spawning subagents, etc.)
-4. result #1            → lead agent's first response (capture)
-5. task_notification(s) → background agents complete/fail/stop
-6. assistant/user       → lead agent continues (processing subagent results)
-7. result #2            → lead agent's follow-up response (capture)
-8. [iterator done]      → CLI closed stdout, all done
+1. system/init          → セッション初期化
+2. assistant/user       → Claude の思考、ツール呼び出し、ツール結果
+3. ...                  → さらなる assistant/user ターン (サブエージェントの起動など)
+4. result #1            → リーダーエージェントの最初のレスポンス (捕捉)
+5. task_notification(s) → バックグラウンドエージェントの完了/失敗/停止
+6. assistant/user       → リーダーエージェントが継続 (サブエージェントの結果を処理)
+7. result #2            → リーダーエージェントの追撃レスポンス (捕捉)
+8. [iterator done]      → CLI が stdout を閉じ、すべて完了
 ```
 
-All results are meaningful — capture every one, not just the first.
+すべての結果（result）には意味があります。最初だけでなく、すべてを捕捉してください。
 
 ## V1 vs V2 API
 
-### V1: `query()` — One-shot async generator
+### V1: `query()` — 1 回限りの非同期ジェネレーター
 
 ```typescript
 const q = query({ prompt: "...", options: {...} });
-for await (const msg of q) { /* process events */ }
+for await (const msg of q) { /* イベントを処理 */ }
 ```
 
-- When `prompt` is a string: `isSingleUserTurn = true` → stdin auto-closes after first result
-- For multi-turn: must pass an `AsyncIterable<SDKUserMessage>` and manage coordination yourself
+- `prompt` が文字列の場合： `isSingleUserTurn = true` → 最初の結果の後に stdin が自動的に閉じる
+- マルチターンの場合： `AsyncIterable<SDKUserMessage>` を渡し、自身で調整を管理する必要がある
 
-### V2: `createSession()` + `send()` / `stream()` — Persistent session
+### V2: `createSession()` + `send()` / `stream()` — 永続セッション
 
 ```typescript
 await using session = unstable_v2_createSession({ model: "..." });
-await session.send("first message");
-for await (const msg of session.stream()) { /* events */ }
-await session.send("follow-up");
-for await (const msg of session.stream()) { /* events */ }
+await session.send("最初のメッセージ");
+for await (const msg of session.stream()) { /* イベント */ }
+await session.send("追撃メッセージ");
+for await (const msg of session.stream()) { /* イベント */ }
 ```
 
-- `isSingleUserTurn = false` always → stdin stays open
-- `send()` enqueues into an async queue (`QX`)
-- `stream()` yields from the same message generator, stopping on `result` type
-- Multi-turn is natural — just alternate `send()` / `stream()`
-- V2 does NOT call V1 `query()` internally — both independently create Transport + Query
+- 常に `isSingleUserTurn = false` → stdin は開いたまま
+- `send()` は非同期キュー (`QX`) にエンキューする
+- `stream()` は同じメッセージジェネレーターから yield し、`result` 型で停止する
+- `send()` と `stream()` を交互に呼び出すだけで、自然にマルチターンが可能
+- V2 は内部で V1 `query()` を呼び出さない — 両方が独立して Transport と Query を作成する
 
-### Comparison Table
+### 比較表
 
-| Aspect | V1 | V2 |
+| 特徴 | V1 | V2 |
 |--------|----|----|
-| `isSingleUserTurn` | `true` for string prompt | always `false` |
-| Multi-turn | Requires managing `AsyncIterable` | Just call `send()`/`stream()` |
-| stdin lifecycle | Auto-closes after first result | Stays open until `close()` |
-| Agentic loop | Identical `EZ()` | Identical `EZ()` |
-| Stop conditions | Same | Same |
-| Session persistence | Must pass `resume` to new `query()` | Built-in via session object |
-| API stability | Stable | Unstable preview (`unstable_v2_*` prefix) |
+| `isSingleUserTurn` | 文字列プロンプトの場合 `true` | 常に `false` |
+| マルチターン | `AsyncIterable` の管理が必要 | `send()`/`stream()` を呼ぶだけ |
+| stdin ライフサイクル | 最初の結果の後に自動クローズ | `close()` まで開いたまま |
+| エージェントループ | 同一の `EZ()` | 常に同一の `EZ()` |
+| 停止条件 | 同じ | 同様 |
+| セッションの永続性 | 新しい `query()` に `resume` を渡す必要あり | セッションオブジェクトに内蔵 |
+| API の安定性 | 安定版 | 不安定なプレビュー (`unstable_v2_*` プレフィックス) |
 
-**Key finding: Zero difference in turn behavior.** Both use the same CLI process, the same `EZ()` recursive generator, and the same decision logic.
+**重要な発見：ターンの動作に違いはありません。** 両方とも同じ CLI プロセス、同じ `EZ()` 再帰的ジェネレーター、および同じ判断ロジックを使用しています。
 
-## Hook Events
+## フックイベント (Hook Events)
 
 ```typescript
 type HookEvent =
-  | 'PreToolUse'         // Before tool execution
-  | 'PostToolUse'        // After successful tool execution
-  | 'PostToolUseFailure' // After failed tool execution
-  | 'Notification'       // Notification messages
-  | 'UserPromptSubmit'   // User prompt submitted
-  | 'SessionStart'       // Session started (startup/resume/clear/compact)
-  | 'SessionEnd'         // Session ended
-  | 'Stop'               // Agent stopping
-  | 'SubagentStart'      // Subagent spawned
-  | 'SubagentStop'       // Subagent stopped
-  | 'PreCompact'         // Before conversation compaction
-  | 'PermissionRequest'; // Permission being requested
+  | 'PreToolUse'         // ツール実行前
+  | 'PostToolUse'        // ツール実行成功後
+  | 'PostToolUseFailure' // ツール実行失敗後
+  | 'Notification'       // 通知メッセージ
+  | 'UserPromptSubmit'   // ユーザープロンプト送信時
+  | 'SessionStart'       // セッション開始 (起動/再開/クリア/要約)
+  | 'SessionEnd'         // セッション終了時
+  | 'Stop'               // エージェント停止時
+  | 'SubagentStart'      // サブエージェント起動時
+  | 'SubagentStop'       // サブエージェント停止時
+  | 'PreCompact'         // 会話のコンパクション前
+  | 'PermissionRequest'; // 権限リクエスト時
 ```
 
-### Hook Configuration
+### フックの設定
 
 ```typescript
 interface HookCallbackMatcher {
-  matcher?: string;      // Optional tool name matcher
+  matcher?: string;      // オプション：ツール名のマッチャー
   hooks: HookCallback[];
 }
 
@@ -491,7 +491,7 @@ type HookCallback = (
 ) => Promise<HookJSONOutput>;
 ```
 
-### Hook Return Values
+### フックの戻り値
 
 ```typescript
 type HookJSONOutput = AsyncHookJSONOutput | SyncHookJSONOutput;
@@ -513,7 +513,7 @@ type SyncHookJSONOutput = {
 };
 ```
 
-### Subagent Hooks (from sdk.d.ts)
+### サブエージェントフック (`sdk.d.ts` より)
 
 ```typescript
 type SubagentStartHookInput = BaseHookInput & {
@@ -533,30 +533,30 @@ type SubagentStopHookInput = BaseHookInput & {
 // BaseHookInput = { session_id, transcript_path, cwd, permission_mode? }
 ```
 
-## Query Interface Methods
+## Query インターフェースのメソッド
 
-The `Query` object (sdk.d.ts:931). Official docs list these public methods:
+`Query` オブジェクト (sdk.d.ts:931)。公式ドキュメントに記載されている公開メソッド：
 
 ```typescript
 interface Query extends AsyncGenerator<SDKMessage, void> {
-  interrupt(): Promise<void>;                     // Stop current execution (streaming input mode only)
-  rewindFiles(userMessageUuid: string): Promise<void>; // Restore files to state at message (needs enableFileCheckpointing)
-  setPermissionMode(mode: PermissionMode): Promise<void>; // Change permissions (streaming input mode only)
-  setModel(model?: string): Promise<void>;        // Change model (streaming input mode only)
-  setMaxThinkingTokens(max: number | null): Promise<void>; // Change thinking tokens (streaming input mode only)
-  supportedCommands(): Promise<SlashCommand[]>;   // Available slash commands
-  supportedModels(): Promise<ModelInfo[]>;         // Available models
-  mcpServerStatus(): Promise<McpServerStatus[]>;  // MCP server connection status
-  accountInfo(): Promise<AccountInfo>;             // Authenticated user info
+  interrupt(): Promise<void>;                     // 現在の実行を停止（ストリーミング入力モードのみ）
+  rewindFiles(userMessageUuid: string): Promise<void>; // ファイルを指定したメッセージ時の状態に復元（enableFileCheckpointing が必要）
+  setPermissionMode(mode: PermissionMode): Promise<void>; // 権限を変更（ストリーミング入力モードのみ）
+  setModel(model?: string): Promise<void>;        // モデルを変更（ストリーミング入力モードのみ）
+  setMaxThinkingTokens(max: number | null): Promise<void>; // 思考トークン数を変更（ストリーミング入力モードのみ）
+  supportedCommands(): Promise<SlashCommand[]>;   // 利用可能なスラッシュコマンド
+  supportedModels(): Promise<ModelInfo[]>;         // 利用可能なモデル
+  mcpServerStatus(): Promise<McpServerStatus[]>;  // MCP サーバーの接続状態
+  accountInfo(): Promise<AccountInfo>;             // 認証済みユーザー情報
 }
 ```
 
-Found in sdk.d.ts but NOT in official docs (may be internal):
-- `streamInput(stream)` — stream additional user messages
-- `close()` — forcefully end the query
-- `setMcpServers(servers)` — dynamically add/remove MCP servers
+sdk.d.ts には存在するが、公式ドキュメントにないもの（内部用の可能性あり）：
+- `streamInput(stream)` — 追加のユーザーメッセージをストリーミングする
+- `close()` — クエリを強制終了する
+- `setMcpServers(servers)` — MCP サーバーを動的に追加/削除する
 
-## Sandbox Configuration
+## サンドボックス設定 (Sandbox Configuration)
 
 ```typescript
 type SandboxSettings = {
@@ -578,13 +578,13 @@ type SandboxSettings = {
 };
 ```
 
-When `allowUnsandboxedCommands` is true, the model can set `dangerouslyDisableSandbox: true` in Bash tool input, which falls back to the `canUseTool` permission handler.
+`allowUnsandboxedCommands` が true の場合、モデルは Bash ツールの入力で `dangerouslyDisableSandbox: true` を設定でき、その場合は `canUseTool` 権限ハンドラーにフォールバックします。
 
-## MCP Server Helpers
+## MCP サーバーヘルパー
 
 ### tool()
 
-Creates type-safe MCP tool definitions with Zod schemas:
+Zod スキーマを使用して、型安全な MCP ツール定義を作成します：
 
 ```typescript
 function tool<Schema extends ZodRawShape>(
@@ -597,7 +597,7 @@ function tool<Schema extends ZodRawShape>(
 
 ### createSdkMcpServer()
 
-Creates an in-process MCP server (we use stdio instead for subagent inheritance):
+プロセス内 MCP サーバーを作成します（我々はサブエージェントへの継承のために stdio を使用しています）：
 
 ```typescript
 function createSdkMcpServer(options: {
@@ -607,37 +607,37 @@ function createSdkMcpServer(options: {
 }): McpSdkServerConfigWithInstance
 ```
 
-## Internals Reference
+## 内部リファレンス
 
-### Key minified identifiers (sdk.mjs)
+### 主要な難読化識別子 (sdk.mjs)
 
-| Minified | Purpose |
+| 識別子 | 目的 |
 |----------|---------|
-| `s_` | V1 `query()` export |
+| `s_` | V1 `query()` のエクスポート |
 | `e_` | `unstable_v2_createSession` |
 | `Xx` | `unstable_v2_resumeSession` |
 | `Qx` | `unstable_v2_prompt` |
-| `U9` | V2 Session class (`send`/`stream`/`close`) |
-| `XX` | ProcessTransport (spawns cli.js) |
-| `$X` | Query class (JSON-line routing, async iterable) |
-| `QX` | AsyncQueue (input stream buffer) |
+| `U9` | V2 Session クラス (`send`/`stream`/`close`) |
+| `XX` | ProcessTransport (`cli.js` を起動) |
+| `$X` | Query クラス (JSON-line ルーティング、非同期イテラブル) |
+| `QX` | AsyncQueue (入力ストリームバッファ) |
 
-### Key minified identifiers (cli.js)
+### 主要な難読化識別子 (cli.js)
 
-| Minified | Purpose |
+| 識別子 | 目的 |
 |----------|---------|
-| `EZ` | Core recursive agentic loop (async generator) |
-| `_t4` | Stop hook handler (runs when no tool_use blocks) |
-| `PU1` | Streaming tool executor (parallel during API response) |
-| `TP6` | Standard tool executor (after API response) |
-| `GU1` | Individual tool executor |
-| `lTq` | SDK session runner (calls EZ directly) |
-| `bd1` | stdin reader (JSON-lines from transport) |
-| `mW1` | Anthropic API streaming caller |
+| `EZ` | コアとなる再帰的エージェントループ（非同期ジェネレーター） |
+| `_t4` | 停止フックハンドラー (tool_use ブロックがない場合に実行) |
+| `PU1` | ストリーミングツール実行エンジン (API レスポンス中に並列実行) |
+| `TP6` | 標準ツール実行エンジン (API レスポンス終了後に実行) |
+| `GU1` | 個別ツール実行エンジン |
+| `lTq` | SDK セッションランナー (`EZ` を直接呼び出す) |
+| `bd1` | stdin リーダー (トランスポートからの JSON-lines) |
+| `mW1` | Anthropic API ストリーミング呼び出し関数 |
 
-## Key Files
+## 主要ファイル
 
-- `sdk.d.ts` — All type definitions (1777 lines)
-- `sdk-tools.d.ts` — Tool input schemas
-- `sdk.mjs` — SDK runtime (minified, 376KB)
-- `cli.js` — CLI executable (minified, runs as subprocess)
+- `sdk.d.ts` — すべての型定義 (1777 行)
+- `sdk-tools.d.ts` — ツールの入力スキーマ
+- `sdk.mjs` — SDK ランタイム (難読化済み, 376KB)
+- `cli.js` — CLI 実行ファイル (難読化済み, サブプロセスとして実行)
