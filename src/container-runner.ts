@@ -741,8 +741,8 @@ export class OpenShellRunner implements AgentRunner {
       `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
       '--env',
       detectAuthMode() === 'api-key'
-        ? 'ANTHROPIC_API_KEY=placeholder'
-        : 'CLAUDE_CODE_OAUTH_TOKEN=placeholder',
+        ? `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY || ''}`
+        : `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN || ''}`,
     );
 
     containerArgs.push(...uploadArgs);
