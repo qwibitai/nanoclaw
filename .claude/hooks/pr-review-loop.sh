@@ -12,6 +12,7 @@
 # Always exits 0 — advisory, not blocking.
 
 source "$(dirname "$0")/lib/parse-command.sh"
+source "$(dirname "$0")/lib/state-utils.sh"
 
 DEBUG_LOG="/tmp/pr-review-hook-debug.log"
 echo "[$(date -Iseconds)] pr-review-loop.sh INVOKED" >> "$DEBUG_LOG"
@@ -29,8 +30,7 @@ fi
 
 CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
-# State directory for review tracking
-STATE_DIR="${STATE_DIR:-/tmp/.pr-review-state}"
+# Ensure state directory exists (STATE_DIR set by state-utils.sh)
 mkdir -p "$STATE_DIR" 2>/dev/null
 chmod 700 "$STATE_DIR" 2>/dev/null
 
@@ -69,13 +69,13 @@ pr_url_to_state_file() {
   echo "$STATE_DIR/$(echo "$url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')"
 }
 
-# Find the most recent state file matching given statuses (for push/diff triggers).
+# Find the most recent state file matching given statuses, scoped to the current branch.
+# Uses shared state-utils.sh for worktree isolation — never iterate state files directly.
 # Usage: find_state_by_status "needs_review" or find_state_by_status "needs_review" "passed"
 find_state_by_status() {
   local latest=""
   local latest_mtime=0
-  for f in "$STATE_DIR"/*; do
-    [ -f "$f" ] || continue
+  while IFS= read -r f; do
     local status
     status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
     local matched=false
@@ -93,7 +93,7 @@ find_state_by_status() {
         latest_mtime="$mtime"
       fi
     fi
-  done
+  done < <(list_state_files_for_current_worktree)
   echo "$latest"
 }
 

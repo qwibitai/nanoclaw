@@ -18,6 +18,7 @@
 # in the PostToolUse hook). If the agent pushes fixes, the gate re-engages.
 
 source "$(dirname "$0")/lib/parse-command.sh"
+source "$(dirname "$0")/lib/state-utils.sh"
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -28,45 +29,20 @@ fi
 
 CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
-# State directory — must match pr-review-loop.sh
-STATE_DIR="${STATE_DIR:-/tmp/.pr-review-state}"
-
-# Max age for state files (seconds). Files older than this are stale —
-# likely from a crashed/abandoned session — and should not block.
-MAX_STATE_AGE="${MAX_STATE_AGE:-7200}"  # 2 hours
-
 # Check if any state file has STATUS=needs_review for the CURRENT branch (and is not stale).
-# Only blocks the agent that owns the PR, not agents in other worktrees.
+# Uses shared state-utils.sh for worktree isolation — never iterate state files directly.
 find_needs_review() {
-  local now current_branch
-  now=$(date +%s)
-  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-  for f in "$STATE_DIR"/*; do
-    [ -f "$f" ] || continue
-    # Skip stale state files
-    local mtime
-    mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "0")
-    local age=$(( now - mtime ))
-    if [ "$age" -gt "$MAX_STATE_AGE" ]; then
-      continue
-    fi
-    # Skip state files from other branches (prevents cross-worktree blocking)
-    local file_branch
-    file_branch=$(grep -E '^BRANCH=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
-    if [ -n "$file_branch" ] && [ -n "$current_branch" ] && [ "$file_branch" != "$current_branch" ]; then
-      continue
-    fi
+  while IFS= read -r f; do
     local status
     status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
     if [ "$status" = "needs_review" ]; then
-      local pr_url
+      local pr_url round
       pr_url=$(grep -E '^PR_URL=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
-      local round
       round=$(grep -E '^ROUND=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
       echo "$pr_url|$round"
       return 0
     fi
-  done
+  done < <(list_state_files_for_current_worktree)
   return 1
 }
 

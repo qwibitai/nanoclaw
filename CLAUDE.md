@@ -110,6 +110,7 @@ These policies were learned from past mistakes. Follow them strictly.
     - **If it's a false positive**, fix the hook. Improve its matching logic, add exclusions with rationale, and add a test case that covers the false-positive scenario. This is recursive kaizen — making the enforcement smarter, not weaker.
     - **If it's a true positive**, fix the underlying issue. The hook is doing its job.
     - **Always add a test** for any hook change in `.claude/hooks/tests/`. Hooks without tests are Level 1 pretending to be Level 2.
+13. **Hooks MUST be worktree-isolated.** A hook running in worktree A must NEVER read, modify, or block based on state from worktree B. This is a hard safety invariant — violations cause cross-worktree contamination where one agent's work hijacks another agent's session. All state file iteration MUST go through `lib/state-utils.sh` (`is_state_for_current_worktree`, `list_state_files_for_current_worktree`). Never iterate `/tmp/.pr-review-state/` directly. State files without a BRANCH field are treated as unattributable and skipped.
 
 ## Verification Discipline (Kaizen #11, #15, #17)
 

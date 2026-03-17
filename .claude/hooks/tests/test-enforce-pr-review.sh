@@ -309,18 +309,19 @@ else
   ((FAIL++))
 fi
 
-# INVARIANT: Legacy state files without BRANCH= field still block (backwards compatibility)
-# SUT: enforce-pr-review.sh with missing branch field
+# INVARIANT: Legacy state files without BRANCH= field are SKIPPED — they can't be
+# safely attributed to any worktree, so blocking on them causes cross-worktree contamination.
+# SUT: enforce-pr-review.sh via shared state-utils.sh is_state_for_current_worktree
 setup
 local_file="$STATE_DIR/Garsson-io_nanoclaw_99"
 printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/99\nROUND=1\nSTATUS=needs_review\n' > "$local_file"
 
 OUTPUT=$(run_gate "npm test")
-if is_denied "$OUTPUT"; then
-  echo "  PASS: legacy state file (no BRANCH) still blocks"
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: legacy state file (no BRANCH) does NOT block (cross-worktree safety)"
   ((PASS++))
 else
-  echo "  FAIL: legacy state file (no BRANCH) did NOT block"
+  echo "  FAIL: legacy state file (no BRANCH) is blocking — cross-worktree contamination risk"
   ((FAIL++))
 fi
 

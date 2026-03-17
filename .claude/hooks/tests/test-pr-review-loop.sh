@@ -102,8 +102,9 @@ else
 fi
 
 echo ""
-echo "=== Push finds most recent active state ==="
+echo "=== Push finds most recent active state on CURRENT branch ==="
 
+# Both PRs above (garsson-prints/2 and nanoclaw/40) were created from this branch.
 # Simulate git push (no PR URL in output)
 PUSH_INPUT=$(jq -n '{
   "tool_input": {"command": "git push"},
@@ -115,7 +116,7 @@ PUSH_INPUT=$(jq -n '{
 }')
 
 PUSH_OUTPUT=$(echo "$PUSH_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
-assert_contains "push triggers next review round" "ROUND" "$PUSH_OUTPUT"
+assert_contains "push triggers next review round (same branch)" "ROUND" "$PUSH_OUTPUT"
 
 echo ""
 echo "=== Merge cleans up state file ==="
@@ -173,6 +174,104 @@ if [ -z "$NO_URL_OUTPUT" ]; then
   ((PASS++))
 else
   echo "  FAIL: PR create with no URL produced output"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Cross-worktree isolation: push does NOT update other branch's state ==="
+
+# INVARIANT: A git push in worktree A must NEVER modify state for worktree B's PR.
+# This is the exact bug that caused cross-worktree contamination (kaizen).
+# SUT: find_state_by_status via shared state-utils.sh branch filtering
+teardown
+setup
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
+# Create a state file for a DIFFERENT branch's PR (simulating another worktree's work)
+OTHER_BRANCH="wt/other-worktree-branch"
+OTHER_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_71"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/71\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$OTHER_BRANCH" > "$OTHER_STATE_FILE"
+
+# Push from current worktree — should NOT touch the other branch's state
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+if [ -z "$PUSH_OUTPUT" ]; then
+  echo "  PASS: push in current worktree ignores other branch's state"
+  ((PASS++))
+else
+  echo "  FAIL: push in current worktree modified other branch's state (cross-worktree contamination!)"
+  ((FAIL++))
+fi
+
+# Verify the other branch's state file was NOT modified
+OTHER_STATUS=$(grep '^STATUS=' "$OTHER_STATE_FILE" | cut -d= -f2-)
+OTHER_ROUND=$(grep '^ROUND=' "$OTHER_STATE_FILE" | cut -d= -f2-)
+OTHER_STORED_BRANCH=$(grep '^BRANCH=' "$OTHER_STATE_FILE" | cut -d= -f2-)
+
+assert_eq "other branch state STATUS unchanged" "needs_review" "$OTHER_STATUS"
+assert_eq "other branch state ROUND unchanged" "1" "$OTHER_ROUND"
+assert_eq "other branch state BRANCH unchanged" "$OTHER_BRANCH" "$OTHER_STORED_BRANCH"
+
+echo ""
+echo "=== Cross-worktree isolation: push DOES update same branch's state ==="
+
+# INVARIANT: A git push should update state files for the CURRENT branch.
+# SUT: find_state_by_status with matching branch
+teardown
+setup
+
+# Create a state file for the CURRENT branch's PR
+SAME_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_80"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/80\nROUND=1\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$SAME_STATE_FILE"
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+assert_contains "push updates same branch's state" "ROUND" "$PUSH_OUTPUT"
+
+SAME_STATUS=$(grep '^STATUS=' "$SAME_STATE_FILE" | cut -d= -f2-)
+SAME_ROUND=$(grep '^ROUND=' "$SAME_STATE_FILE" | cut -d= -f2-)
+assert_eq "same branch state STATUS set to needs_review" "needs_review" "$SAME_STATUS"
+assert_eq "same branch state ROUND incremented" "2" "$SAME_ROUND"
+
+echo ""
+echo "=== Cross-worktree isolation: legacy state files (no BRANCH) are skipped ==="
+
+# INVARIANT: State files without BRANCH field cannot be attributed to any worktree
+# and must be skipped to prevent cross-worktree contamination.
+# SUT: find_state_by_status via shared state-utils.sh
+teardown
+setup
+
+LEGACY_STATE="$STATE_DIR/Garsson-io_nanoclaw_50"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/50\nROUND=1\nSTATUS=needs_review\n' > "$LEGACY_STATE"
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+if [ -z "$PUSH_OUTPUT" ]; then
+  echo "  PASS: push ignores legacy state file without BRANCH"
+  ((PASS++))
+else
+  echo "  FAIL: push matched legacy state file without BRANCH (contamination risk)"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Cross-worktree isolation: stale state files are skipped ==="
+
+# INVARIANT: State files older than MAX_STATE_AGE are ignored even if on same branch.
+# SUT: find_state_by_status via shared state-utils.sh staleness check
+teardown
+setup
+
+STALE_STATE="$STATE_DIR/Garsson-io_nanoclaw_90"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/90\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STALE_STATE"
+# Backdate to 3 hours ago
+touch -d "3 hours ago" "$STALE_STATE" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STALE_STATE" 2>/dev/null
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | MAX_STATE_AGE=7200 STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+if [ -z "$PUSH_OUTPUT" ]; then
+  echo "  PASS: push ignores stale state file"
+  ((PASS++))
+else
+  echo "  FAIL: push matched stale state file"
   ((FAIL++))
 fi
 
