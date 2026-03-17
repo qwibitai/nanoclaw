@@ -14,7 +14,8 @@ Generates blog and social media drafts from ideas/theses. Never publishes — on
 | Action | Tool | Description |
 |--------|------|-------------|
 | Git Push | `draft_git_push` | Commit and push thesis to huynh.io GitHub repo |
-| Ghost Draft | `draft_ghost_publish` | Create draft post on Ghost via Admin API |
+| Ghost Draft | `draft_ghost_publish` | Create draft post on Ghost via Admin API (supports feature image) |
+| Ghost Set Image | `draft_ghost_set_image` | Upload image and set as feature image on existing Ghost post |
 
 ## Architecture
 
@@ -96,8 +97,15 @@ huynh.io/
 └── 20260316-spec-driven-dev/
     ├── thesis.md        # Core thesis (raw idea)
     ├── blog-draft.md    # Full blog post draft
-    └── x-draft.md       # Tweet draft (280 chars)
+    ├── x-draft.md       # Tweet draft (280 chars)
+    └── header.jpeg      # Optional header image (uploaded to Ghost as feature image)
 ```
+
+### Header Image Flow
+
+1. If a header image already exists in the thesis directory, it's uploaded to Ghost as the post's feature image during `draft_ghost_publish`
+2. If no image exists, the agent suggests 2-3 image prompts based on the blog content and asks the user
+3. When the user picks a prompt, the agent generates the image with fal.ai and sets it on the Ghost post via `draft_ghost_set_image`
 
 ## Adding New Platforms
 

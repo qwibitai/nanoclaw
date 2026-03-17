@@ -12,7 +12,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { fal } from '@fal-ai/client';
 import { generateImage, downloadImage } from './fal-image.js';
-import { publishToGhost } from './ghost-publish.js';
+import { publishToGhost, uploadImageToGhost, updateGhostPostImage } from './ghost-publish.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -610,9 +610,12 @@ server.tool(
   'draft_ghost_publish',
   `Create a draft post on Ghost (blog). Reads blog-draft.md from the thesis directory and publishes it as a Ghost draft.
 
-Use this after generating the blog draft and pushing to Git.`,
+If a feature_image_path is provided, the image is uploaded to Ghost and set as the post's header image.
+
+Use this after generating the blog draft and pushing to Git. Returns the Ghost post ID on success.`,
   {
     directory: z.string().describe('The thesis directory name (e.g., "20260316-spec-driven-dev")'),
+    feature_image_path: z.string().optional().describe('Absolute path to a header image file to upload as the post feature image'),
   },
   async (args) => {
     const ghostUrl = process.env.GHOST_URL;
@@ -630,11 +633,61 @@ Use this after generating the blog draft and pushing to Git.`,
       ghostUrl,
       ghostAdminApiKey: ghostKey,
       blogRepoPath: process.env.DRAFT_BLOG_REPO_PATH || '/workspace/projects/pj/huynh.io',
+      featureImagePath: args.feature_image_path,
     });
 
     return {
       content: [{ type: 'text' as const, text: result.message }],
       isError: !result.success,
+    };
+  },
+);
+
+server.tool(
+  'draft_ghost_set_image',
+  `Upload an image to Ghost and set it as the feature (header) image on an existing Ghost post.
+
+Use this after generating a header image with generate_image, to attach it to a previously published Ghost draft.`,
+  {
+    post_id: z.string().describe('The Ghost post ID (returned by draft_ghost_publish)'),
+    image_path: z.string().describe('Absolute path to the image file to upload'),
+  },
+  async (args) => {
+    const ghostUrl = process.env.GHOST_URL;
+    const ghostKey = process.env.GHOST_ADMIN_API_KEY;
+
+    if (!ghostUrl || !ghostKey) {
+      return {
+        content: [{ type: 'text' as const, text: 'Missing GHOST_URL or GHOST_ADMIN_API_KEY environment variable.' }],
+        isError: true,
+      };
+    }
+
+    // Upload the image
+    const uploadResult = await uploadImageToGhost({
+      imagePath: args.image_path,
+      ghostUrl,
+      ghostAdminApiKey: ghostKey,
+    });
+
+    if (!uploadResult.success || !uploadResult.imageUrl) {
+      return {
+        content: [{ type: 'text' as const, text: `Image upload failed: ${uploadResult.message}` }],
+        isError: true,
+      };
+    }
+
+    // Set it as the post's feature image
+    const updateResult = await updateGhostPostImage({
+      postId: args.post_id,
+      imageUrl: uploadResult.imageUrl,
+      ghostUrl,
+      ghostAdminApiKey: ghostKey,
+    });
+
+    return {
+      content: [{ type: 'text' as const, text: updateResult.message }],
+      isError: !updateResult.success,
     };
   },
 );

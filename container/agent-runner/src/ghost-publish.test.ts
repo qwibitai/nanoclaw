@@ -16,7 +16,12 @@ vi.mock('fs', async () => {
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { publishToGhost, createGhostToken } from './ghost-publish.js';
+import {
+  publishToGhost,
+  createGhostToken,
+  uploadImageToGhost,
+  updateGhostPostImage,
+} from './ghost-publish.js';
 
 describe('ghost-publish', () => {
   beforeEach(() => {
@@ -168,6 +173,288 @@ describe('ghost-publish', () => {
       const fetchCall = mockFetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
       expect(body.posts[0].title).toBe('20260316-fallback-title');
+    });
+
+    it('returns postId on successful publish', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('# Title\n\nContent');
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            posts: [{ id: 'post-789', url: 'https://blog.com/title' }],
+          }),
+      });
+
+      const result = await publishToGhost({
+        directory: '20260316-test',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+        blogRepoPath: '/workspace/projects/pj/huynh.io',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.postId).toBe('post-789');
+    });
+
+    it('uploads image and sets feature_image when featureImagePath provided', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (String(p).endsWith('blog-draft.md')) return '# My Post\n\nContent';
+        return Buffer.from('fake-image-data');
+      });
+
+      // First call: image upload
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            images: [{ url: 'https://blog.com/content/images/header.jpg' }],
+          }),
+      });
+      // Second call: post creation
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            posts: [{ id: 'post-img', url: 'https://blog.com/my-post' }],
+          }),
+      });
+
+      const result = await publishToGhost({
+        directory: '20260316-test',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+        blogRepoPath: '/workspace/projects/pj/huynh.io',
+        featureImagePath: '/workspace/projects/pj/huynh.io/20260316-test/header.jpg',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.postId).toBe('post-img');
+
+      // Image upload call
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://blog.com/ghost/api/admin/images/upload/',
+      );
+      expect(mockFetch.mock.calls[0][1].method).toBe('POST');
+
+      // Post creation call includes feature_image
+      const postBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+      expect(postBody.posts[0].feature_image).toBe(
+        'https://blog.com/content/images/header.jpg',
+      );
+    });
+
+    it('returns error when image upload fails', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (String(p).endsWith('blog-draft.md')) return '# My Post\n\nContent';
+        return Buffer.from('fake-image-data');
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () =>
+          Promise.resolve({ errors: [{ message: 'Upload failed' }] }),
+      });
+
+      const result = await publishToGhost({
+        directory: '20260316-test',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+        blogRepoPath: '/workspace/projects/pj/huynh.io',
+        featureImagePath: '/workspace/projects/pj/huynh.io/20260316-test/header.jpg',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('image upload');
+    });
+  });
+
+  describe('uploadImageToGhost', () => {
+    it('uploads image and returns URL', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(Buffer.from('fake-image'));
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            images: [
+              { url: 'https://blog.com/content/images/photo.jpg', ref: 'photo.jpg' },
+            ],
+          }),
+      });
+
+      const result = await uploadImageToGhost({
+        imagePath: '/path/to/photo.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.imageUrl).toBe('https://blog.com/content/images/photo.jpg');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://blog.com/ghost/api/admin/images/upload/',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('returns error when image file not found', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const result = await uploadImageToGhost({
+        imagePath: '/path/to/missing.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('not found');
+    });
+
+    it('returns error on API failure', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(Buffer.from('fake-image'));
+
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 413,
+        json: () =>
+          Promise.resolve({ errors: [{ message: 'File too large' }] }),
+      });
+
+      const result = await uploadImageToGhost({
+        imagePath: '/path/to/huge.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('413');
+    });
+
+    it('returns error for invalid API key format', async () => {
+      const result = await uploadImageToGhost({
+        imagePath: '/path/to/photo.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'invalid-key',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Invalid GHOST_ADMIN_API_KEY');
+    });
+  });
+
+  describe('updateGhostPostImage', () => {
+    it('fetches post then updates feature_image', async () => {
+      // GET post
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            posts: [{ id: 'post-123', updated_at: '2024-01-01T00:00:00.000Z' }],
+          }),
+      });
+      // PUT update
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            posts: [
+              {
+                id: 'post-123',
+                feature_image: 'https://blog.com/images/header.jpg',
+              },
+            ],
+          }),
+      });
+
+      const result = await updateGhostPostImage({
+        postId: 'post-123',
+        imageUrl: 'https://blog.com/images/header.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(true);
+
+      // Verify GET call
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://blog.com/ghost/api/admin/posts/post-123/',
+      );
+      expect(mockFetch.mock.calls[0][1].method).toBe('GET');
+
+      // Verify PUT call
+      expect(mockFetch.mock.calls[1][0]).toBe(
+        'https://blog.com/ghost/api/admin/posts/post-123/',
+      );
+      expect(mockFetch.mock.calls[1][1].method).toBe('PUT');
+      const putBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+      expect(putBody.posts[0].feature_image).toBe(
+        'https://blog.com/images/header.jpg',
+      );
+      expect(putBody.posts[0].updated_at).toBe('2024-01-01T00:00:00.000Z');
+    });
+
+    it('returns error when GET post fails', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () =>
+          Promise.resolve({ errors: [{ message: 'Post not found' }] }),
+      });
+
+      const result = await updateGhostPostImage({
+        postId: 'missing',
+        imageUrl: 'https://blog.com/images/header.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('404');
+    });
+
+    it('returns error when PUT update fails', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            posts: [{ id: 'post-123', updated_at: '2024-01-01T00:00:00.000Z' }],
+          }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: () =>
+          Promise.resolve({ errors: [{ message: 'Validation error' }] }),
+      });
+
+      const result = await updateGhostPostImage({
+        postId: 'post-123',
+        imageUrl: 'https://blog.com/images/header.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'keyid:aabbccdd',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('422');
+    });
+
+    it('returns error for invalid API key format', async () => {
+      const result = await updateGhostPostImage({
+        postId: 'post-123',
+        imageUrl: 'https://blog.com/images/header.jpg',
+        ghostUrl: 'https://blog.com',
+        ghostAdminApiKey: 'no-colon',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Invalid GHOST_ADMIN_API_KEY');
     });
   });
 });

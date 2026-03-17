@@ -123,11 +123,45 @@ Before finalizing, audit every draft against these AI-writing patterns and elimi
 
 Re-read the voice.md one more time. Then re-read each draft. Fix anything that doesn't sound like it was written by the person described in voice.md. Trust your judgment — if a sentence sounds "written by AI", rewrite it.
 
-## Step 8: Publish Drafts
+## Step 8: Header Image
+
+Check the thesis directory for an existing header image:
+
+```bash
+ls /workspace/projects/pj/huynh.io/YYYYMMDD-slug/*.{jpg,jpeg,png,webp,gif} 2>/dev/null
+```
+
+**If an image file exists** (e.g., `header.jpg`, `header.png`):
+- Note its full path — you'll pass it to `draft_ghost_publish` in Step 9b.
+
+**If NO image file exists**:
+1. Read `thesis.md` and `blog-draft.md` to understand the content
+2. Suggest 2-3 image prompt ideas based on the post's theme. Keep prompts visual and concrete — describe a scene, mood, or composition, not the thesis itself. Examples:
+   - For a post about dev tooling: "Minimal workspace with a single terminal window glowing blue against a dark background, soft bokeh lights"
+   - For a post about writing: "Notebook open on a wooden desk, morning light casting long shadows, coffee cup nearby, shot from above"
+3. Send the suggestions to the user via `send_message`:
+   ```
+   I didn't find a header image in the thesis directory. Want me to generate one?
+
+   1. [prompt idea 1]
+   2. [prompt idea 2]
+   3. [prompt idea 3]
+
+   Reply with a number, your own prompt, or "skip" to publish without a header image.
+   ```
+4. **Publish the Ghost draft without an image** (Step 9b) — don't block on the user's response
+5. Include the Ghost post ID in the report so the user can add an image later
+
+When the user replies with a number (1, 2, 3) or a custom prompt:
+1. Generate the image using `generate_image` with `landscape_16_9` size, saving to the thesis directory with filename `header`
+2. Call `draft_ghost_set_image` with the Ghost post ID and the generated image path
+3. Also call `draft_git_push` again to push the new image to the repo
+
+## Step 9: Publish Drafts
 
 **CRITICAL: Do NOT run git commands (git add, git commit, git push) directly.** You are inside a container without SSH keys — git push will fail. All git operations must go through the MCP tool, which runs on the host where credentials exist.
 
-### 8a: Git Push
+### 9a: Git Push
 
 Call the `draft_git_push` MCP tool:
 ```
@@ -136,27 +170,34 @@ mcp__nanoclaw__draft_git_push(directory: "YYYYMMDD-slug")
 
 This handles git add, commit, AND push on the host side. The commit message will be auto-generated. Do not stage or commit files yourself — the tool does everything.
 
-### 8b: Ghost Draft
+### 9b: Ghost Draft
 
-Call the `draft_ghost_publish` MCP tool:
+Call the `draft_ghost_publish` MCP tool. If you found a header image in Step 8, pass its path:
+
+```
+mcp__nanoclaw__draft_ghost_publish(directory: "YYYYMMDD-slug", feature_image_path: "/workspace/projects/pj/huynh.io/YYYYMMDD-slug/header.jpg")
+```
+
+Without an image:
 ```
 mcp__nanoclaw__draft_ghost_publish(directory: "YYYYMMDD-slug")
 ```
 
-This calls the Ghost Admin API directly from the container — no IPC round-trip. It reads `blog-draft.md` from the thesis directory, extracts the title from the first `#` heading, and creates a draft post.
+This calls the Ghost Admin API directly from the container — no IPC round-trip. It reads `blog-draft.md` from the thesis directory, extracts the title from the first `#` heading, and creates a draft post. **Save the post ID from the response** — you'll need it if the user wants to add a header image later.
 
-### 8c: X/Twitter — Manual Only
+### 9c: X/Twitter — Manual Only
 
-**Do NOT try to save X drafts via any tool or MCP call.** X does not support draft saving via API or automation. The `x-draft.md` file is pushed to GitHub as part of Step 8a for the user to manually copy and post.
+**Do NOT try to save X drafts via any tool or MCP call.** X does not support draft saving via API or automation. The `x-draft.md` file is pushed to GitHub as part of Step 9a for the user to manually copy and post.
 
-## Step 9: Report
+## Step 10: Report
 
 Tell the user:
 - What thesis directory was created
 - Summary of the blog draft
 - The full tweet text from `x-draft.md` (so they can copy it directly — do NOT say "check x-draft.md", just include the text)
 - Confirmation that changes were pushed to GitHub
-- Confirmation that Ghost draft was created (with URL)
+- Confirmation that Ghost draft was created (with URL and post ID)
+- Whether a header image was included, or that they can reply with a prompt to generate one
 
 ---
 

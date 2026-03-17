@@ -39,7 +39,7 @@ function readEnvKey(key: string): string | undefined {
 }
 
 function parseArgs(args: string[]) {
-  const parsed: { directory: string; repo: string } = {
+  const parsed: { directory: string; repo: string; image?: string } = {
     directory: '',
     repo: path.join(os.homedir(), 'Projects', 'pj', 'huynh.io'),
   };
@@ -48,6 +48,7 @@ function parseArgs(args: string[]) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--repo' || arg === '-r') { parsed.repo = args[++i]; }
+    else if (arg === '--image' || arg === '-i') { parsed.image = args[++i]; }
     else if (arg === '--help' || arg === '-h') {
       console.log(`Usage: npx tsx scripts/ghost-publish.ts <directory> [options]
 
@@ -55,7 +56,8 @@ Arguments:
   directory      Thesis directory name (e.g., "20260316-spec-driven-dev")
 
 Options:
-  --repo, -r     Blog repo path (default: ~/Projects/pj/huynh.io)`);
+  --repo, -r     Blog repo path (default: ~/Projects/pj/huynh.io)
+  --image, -i    Path to header image file (uploaded as Ghost feature image)`);
       process.exit(0);
     }
     else { positional.push(arg); }
@@ -85,13 +87,23 @@ async function main() {
     process.exit(1);
   }
 
+  // Resolve image path relative to thesis directory if not absolute
+  let featureImagePath: string | undefined;
+  if (args.image) {
+    featureImagePath = path.isAbsolute(args.image)
+      ? args.image
+      : path.join(args.repo, args.directory, args.image);
+  }
+
   console.log(`Publishing draft from ${args.directory}...`);
+  if (featureImagePath) console.log(`With header image: ${featureImagePath}`);
 
   const result = await publishToGhost({
     directory: args.directory,
     ghostUrl,
     ghostAdminApiKey: ghostKey,
     blogRepoPath: args.repo,
+    featureImagePath,
   });
 
   console.log(result.message);
