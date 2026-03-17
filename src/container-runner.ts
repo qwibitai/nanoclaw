@@ -228,11 +228,15 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  dbExplorerPort?: number,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Expose the container's port 4000 for the database explorer UI if configured
+  if (dbExplorerPort) args.push('-p', `${dbExplorerPort}:4000`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -297,7 +301,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group.containerConfig?.dbExplorerPort);
 
   logger.debug(
     {

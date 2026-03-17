@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  dbExplorerPort?: number; // Host port to expose the container's port 4000 (db-explorer UI)
 }
 
 export interface RegisteredGroup {
