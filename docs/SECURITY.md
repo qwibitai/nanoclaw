@@ -1,122 +1,122 @@
-# NanoClaw Security Model
+# NanoClaw セキュリティモデル
 
-## Trust Model
+## 信頼モデル
 
-| Entity | Trust Level | Rationale |
+| エンティティ | 信頼レベル | 根拠 |
 |--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| メイングループ | 信頼済み | 非公開の自分自身とのチャット、管理者制御 |
+| メイン以外のグループ | 信頼しない | 他のユーザーが攻撃的である可能性がある |
+| コンテナエージェント | サンドボックス化 | 隔離された実行環境 |
+| WhatsApp メッセージ | ユーザー入力 | プロンプトインジェクションの可能性 |
 
-## Security Boundaries
+## セキュリティ境界
 
-### 1. Container Isolation (Primary Boundary)
+### 1. コンテナによる隔離 (主要な境界)
 
-Agents execute in containers (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+エージェントはコンテナ（軽量な Linux VM）内で実行され、以下を提供します：
+- **プロセス隔離** - コンテナのプロセスはホストに影響を与えられない
+- **ファイルシステム隔離** - 明示的にマウントされたディレクトリのみが見える
+- **非 root 実行** - 非特権の `node` ユーザー (uid 1000) で実行される
+- **エフェメラル（一時的）コンテナ** - 実行のたびにフレッシュな環境が用意される (`--rm`)
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+これが主要なセキュリティ境界です。アプリケーションレベルでの権限チェックに頼るのではなく、攻撃表面をマウントされたものだけに制限しています。
 
-### 2. Mount Security
+### 2. マウントセキュリティ
 
-**External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
-- Outside project root
-- Never mounted into containers
-- Cannot be modified by agents
+**外部許可リスト** - マウント権限は `~/.config/nanoclaw/mount-allowlist.json` に保存されます。このファイルは：
+- プロジェクトルートの外にある
+- コンテナには決してマウントされない
+- エージェントによって修正されることはない
 
-**Default Blocked Patterns:**
+**デフォルトの拒否パターン：**
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
 credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
 private_key, .secret
 ```
 
-**Protections:**
-- Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+**保護機能：**
+- 検証前のシンボリックリンク解決 (トラバーサル攻撃を防止)
+- コンテナパスの検証 (`..` や絶対パスを拒否)
+- `nonMainReadOnly` オプションにより、メイン以外のグループには強制的に読み取り専用でマウント
 
-**Read-Only Project Root:**
+**プロジェクトルートの読み取り専用マウント：**
 
-The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
+メイングループのプロジェクトルートは読み取り専用でマウントされます。エージェントが必要とする書き込み可能なパス（グループフォルダ、IPC、`.claude/`）は個別にマウントされます。これにより、エージェントがホストのアプリケーションコード (`src/`, `dist/`, `package.json` など) を修正し、次回の再起動時にサンドボックスを完全に回避することを防ぎます。
 
-### 3. Session Isolation
+### 3. セッションの隔離
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
-- Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
-- Prevents cross-group information disclosure
+各グループは `data/sessions/{group}/.claude/` に隔離された Claude セッションを持ちます：
+- グループは他のグループの会話履歴を見ることができない
+- セッションデータには、完全なメッセージ履歴と読み取られたファイルの内容が含まれる
+- グループ間での情報漏洩を防止する
 
-### 4. IPC Authorization
+### 4. IPC 認可
 
-Messages and task operations are verified against group identity:
+メッセージおよびタスク操作は、グループの識別情報に対して検証されます：
 
-| Operation | Main Group | Non-Main Group |
+| 操作 | メイングループ | メイン以外のグループ |
 |-----------|------------|----------------|
-| Send message to own chat | ✓ | ✓ |
-| Send message to other chats | ✓ | ✗ |
-| Schedule task for self | ✓ | ✓ |
-| Schedule task for others | ✓ | ✗ |
-| View all tasks | ✓ | Own only |
-| Manage other groups | ✓ | ✗ |
+| 自身のチャットへのメッセージ送信 | ✓ | ✓ |
+| 他のチャットへのメッセージ送信 | ✓ | ✗ |
+| 自身のためのタスク作成 | ✓ | ✓ |
+| 他者のためのタスク作成 | ✓ | ✗ |
+| すべてのタスクの閲覧 | ✓ | 自身のもののみ |
+| 他のグループの管理 | ✓ | ✗ |
 
-### 5. Credential Isolation (Credential Proxy)
+### 5. 認証情報の隔離 (認証情報プロキシ)
 
-Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
+本物の API 認証情報が**コンテナ内に入ることはありません**。代わりに、ホストが HTTP 認証情報プロキシを実行し、認証ヘッダーを透過的に注入します。
 
-**How it works:**
-1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
-2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
-3. The SDK sends API requests to the proxy with the placeholder key
-4. The proxy strips placeholder auth, injects real credentials (`x-api-key` or `Authorization: Bearer`), and forwards to `api.anthropic.com`
-5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+**仕組み：**
+1. ホストが `CREDENTIAL_PROXY_PORT` (デフォルト: 3001) で認証情報プロキシを開始する
+2. コンテナは `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` と `ANTHROPIC_API_KEY=placeholder` を受け取る
+3. SDK はプレースホルダーのキーを使用してプロキシに API リクエストを送信する
+4. プロキシはプレースホルダーの認証情報を削除し、本物の認証情報 (`x-api-key` または `Authorization: Bearer`) を注入して `api.anthropic.com` に転送する
+5. エージェントは本物の認証情報を発見できない — 環境変数、標準入力、ファイル、または `/proc` のどこにも存在しない
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
-- Any credentials matching blocked patterns
-- `.env` is shadowed with `/dev/null` in the project root mount
+**マウントされないもの：**
+- WhatsApp セッション (`store/auth/`) - ホストのみ
+- マウント許可リスト - 外部にあり、決してマウントされない
+- 拒否パターンに一致するあらゆる認証情報
+- `.env` はプロジェクトルートのマウントにおいて `/dev/null` でシャドウイング（隠蔽）される
 
-## Privilege Comparison
+## 特権の比較
 
-| Capability | Main Group | Non-Main Group |
+| 機能 | メイングループ | メイン以外のグループ |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| プロジェクトルートへのアクセス | `/workspace/project` (読み取り専用) | なし |
+| グループフォルダ | `/workspace/group` (読み書き) | `/workspace/group` (読み書き) |
+| グローバルメモリ | プロジェクト経由で暗黙的 | `/workspace/global` (読み取り専用) |
+| 追加マウント | 設定可能 | 許可されない限り読み取り専用 |
+| ネットワークアクセス | 制限なし | 制限なし |
+| MCP ツール | すべて | すべて |
 
-## Security Architecture Diagram
+## セキュリティアーキテクチャ図
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
+│                        信頼されないゾーン                           │
+│  WhatsApp メッセージ (悪意がある可能性あり)                          │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Trigger check, input escaping
+                                 ▼ トリガーチェック、入力のエスケープ
 ┌──────────────────────────────────────────────────────────────────┐
-│                     HOST PROCESS (TRUSTED)                        │
-│  • Message routing                                                │
-│  • IPC authorization                                              │
-│  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
-│  • Credential proxy (injects auth headers)                       │
+│                     ホストプロセス (信頼済み)                       │
+│  • メッセージルーティング                                           │
+│  • IPC 認可                                                       │
+│  • マウント検証 (外部許可リスト)                                    │
+│  • コンテナのライフサイクル管理                                     │
+│  • 認証情報プロキシ (認証ヘッダーの注入)                            │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Explicit mounts only, no secrets
+                                 ▼ 明示的なマウントのみ、シークレットなし
 ┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
-│  • Agent execution                                                │
-│  • Bash commands (sandboxed)                                      │
-│  • File operations (limited to mounts)                            │
-│  • API calls routed through credential proxy                     │
-│  • No real credentials in environment or filesystem              │
+│                コンテナ (隔離 / サンドボックス化)                    │
+│  • エージェント実行                                                │
+│  • Bash コマンド (サンドボックス内)                                │
+│  • ファイル操作 (マウント内に制限)                                  │
+│  • 認証情報プロキシ経由の API 呼び出し                              │
+│  • 環境変数やファイルシステムに本物の認証情報は存在しない              │
 └──────────────────────────────────────────────────────────────────┘
 ```
