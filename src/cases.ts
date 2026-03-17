@@ -249,6 +249,19 @@ export function getCasesByStatus(status: Case['status']): Case[] {
 }
 
 /**
+ * Get active cases with no activity for longer than maxAgeMs.
+ * Used by auto-done reaper to close abandoned cases.
+ */
+export function getStaleActiveCases(maxAgeMs: number): Case[] {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  return db
+    .prepare(
+      `SELECT * FROM cases WHERE status = 'active' AND last_activity_at IS NOT NULL AND last_activity_at < ? ORDER BY last_activity_at ASC`,
+    )
+    .all(cutoff) as Case[];
+}
+
+/**
  * Get done cases older than the given age (in milliseconds).
  * Used by auto-prune to find stale completed work.
  */

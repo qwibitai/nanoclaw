@@ -1,5 +1,5 @@
 #!/bin/bash
-# pr-review-loop.sh — Level 3 kaizen enforcement (Issue #29, #46)
+# pr-review-loop.sh — Level 2 kaizen enforcement (Issue #29)
 # Multi-round PR self-review with state tracking.
 #
 # Triggers on:
@@ -9,9 +9,7 @@
 #   4. gh pr merge   — cleans up state file
 #
 # Uses state file to track review progress across tool calls.
-# Always exits 0 (PostToolUse). Enforcement is done by the PreToolUse
-# gate in enforce-pr-review.sh (Issue #46), which blocks non-review
-# commands while STATUS=needs_review.
+# Always exits 0 — advisory, not blocking.
 
 source "$(dirname "$0")/lib/parse-command.sh"
 
@@ -20,16 +18,12 @@ echo "[$(date -Iseconds)] pr-review-loop.sh INVOKED" >> "$DEBUG_LOG"
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-
-# Claude Code PostToolUse sends tool_response (not tool_output).
-# Bash tool_response has {content: string, is_error: bool} — stdout/stderr merged.
-# Support both field names for backward compatibility with tests.
-TOOL_OUTPUT=$(echo "$INPUT" | jq -r '.tool_response.content // .tool_output.stdout // empty')
-IS_ERROR=$(echo "$INPUT" | jq -r '.tool_response.is_error // false')
-EXIT_CODE=$(echo "$INPUT" | jq -r '.tool_output.exit_code // "0"')
+STDOUT=$(echo "$INPUT" | jq -r '.tool_response.stdout // empty')
+STDERR=$(echo "$INPUT" | jq -r '.tool_response.stderr // empty')
+EXIT_CODE=$(echo "$INPUT" | jq -r '.tool_response.exit_code // "0"')
 
 # Only trigger on successful commands
-if [ "$IS_ERROR" = "true" ] || [ "$EXIT_CODE" != "0" ]; then
+if [ "$EXIT_CODE" != "0" ]; then
   exit 0
 fi
 
@@ -193,7 +187,7 @@ MAX_ROUNDS=4
 # TRIGGER 4: gh pr merge — clean up state file
 if $IS_PR_MERGE; then
   # Try to find state by PR URL from output, or fall back to most recent active
-  MERGE_PR_URL=$(echo "$TOOL_OUTPUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  MERGE_PR_URL=$(echo "$STDOUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
   if [ -n "$MERGE_PR_URL" ]; then
     STATE_FILE=$(pr_url_to_state_file "$MERGE_PR_URL")
   else
@@ -205,9 +199,11 @@ fi
 
 # TRIGGER 1: gh pr create — start the review loop
 if $IS_PR_CREATE; then
-  PR_URL=$(echo "$TOOL_OUTPUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  PR_URL=$(echo "$STDOUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
   if [ -z "$PR_URL" ]; then
-    echo "[$(date -Iseconds)] PR_CREATE: no URL found | output=$(echo "$TOOL_OUTPUT" | head -c 500)" >> "$DEBUG_LOG"
+    PR_URL=$(echo "$STDERR" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  fi
+  if [ -z "$PR_URL" ]; then
     exit 0
   fi
 

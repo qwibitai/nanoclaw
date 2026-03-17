@@ -86,5 +86,9 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "agent-sdk-dev@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true
   }
 }
