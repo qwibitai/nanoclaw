@@ -140,6 +140,62 @@ The file must be accessible from the container. Common locations:
 );
 
 server.tool(
+  'send_document',
+  `Send a document or file to the user or group. Use this for PDFs, spreadsheets, text files, converted files, or any non-image file the user needs.
+
+The file must be accessible from the container. Common locations:
+• /workspace/group/output/ — for generated content
+• /workspace/group/ — for processed files
+• /workspace/case/ — for case-specific files`,
+  {
+    document_path: z
+      .string()
+      .describe(
+        'Absolute path to the document file inside the container (e.g., /workspace/group/output/report.pdf)',
+      ),
+    filename: z
+      .string()
+      .optional()
+      .describe(
+        'Optional display name for the document (defaults to the file basename)',
+      ),
+    caption: z
+      .string()
+      .optional()
+      .describe('Optional caption/description to accompany the document'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.document_path)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Document file not found: ${args.document_path}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'document',
+      chatJid,
+      documentPath: args.document_path,
+      filename: args.filename || undefined,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: 'Document sent.' }],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { _initTestDatabase, getAllChats, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';
-import { routeOutboundImage } from './router.js';
+import { routeOutboundImage, routeOutboundDocument } from './router.js';
 import { Channel } from './types.js';
 
 beforeEach(() => {
@@ -223,5 +223,73 @@ describe('routeOutboundImage', () => {
     expect(() => routeOutboundImage([ch], 'wa:123', '/tmp/img.png')).toThrow(
       'No channel for JID: wa:123',
     );
+  });
+});
+
+// --- routeOutboundDocument ---
+
+describe('routeOutboundDocument', () => {
+  function mockChannel(prefix: string, hasSendDocument: boolean): Channel {
+    return {
+      name: 'test',
+      connect: vi.fn(),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      isConnected: () => true,
+      ownsJid: (jid: string) => jid.startsWith(prefix),
+      disconnect: vi.fn(),
+      sendDocument: hasSendDocument
+        ? vi.fn().mockResolvedValue(undefined)
+        : undefined,
+    };
+  }
+
+  // INVARIANT: Document is routed to the channel that owns the JID
+  it('sends document via channel.sendDocument when supported', async () => {
+    const ch = mockChannel('tg:', true);
+    await routeOutboundDocument(
+      [ch],
+      'tg:123',
+      '/tmp/report.pdf',
+      'report.pdf',
+      'caption',
+    );
+    expect(ch.sendDocument).toHaveBeenCalledWith(
+      'tg:123',
+      '/tmp/report.pdf',
+      'report.pdf',
+      'caption',
+    );
+    expect(ch.sendMessage).not.toHaveBeenCalled();
+  });
+
+  // INVARIANT: Falls back to text when channel has no sendDocument
+  it('falls back to sendMessage with caption when sendDocument not supported', async () => {
+    const ch = mockChannel('tg:', false);
+    await routeOutboundDocument(
+      [ch],
+      'tg:123',
+      '/tmp/report.pdf',
+      'report.pdf',
+      'my report',
+    );
+    expect(ch.sendMessage).toHaveBeenCalledWith('tg:123', 'my report');
+  });
+
+  // INVARIANT: Falls back to default text when no caption and no sendDocument
+  it('sends default text when no sendDocument and no caption', async () => {
+    const ch = mockChannel('tg:', false);
+    await routeOutboundDocument([ch], 'tg:123', '/tmp/report.pdf');
+    expect(ch.sendMessage).toHaveBeenCalledWith(
+      'tg:123',
+      '(Document sent but channel does not support documents)',
+    );
+  });
+
+  // INVARIANT: Throws when no channel owns the JID
+  it('throws when no channel matches JID', () => {
+    const ch = mockChannel('tg:', true);
+    expect(() =>
+      routeOutboundDocument([ch], 'wa:123', '/tmp/report.pdf'),
+    ).toThrow('No channel for JID: wa:123');
   });
 });

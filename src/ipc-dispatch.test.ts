@@ -11,7 +11,12 @@ vi.mock('./group-folder.js', async (importOriginal) => {
   };
 });
 
-import { dispatchIpcMessage, dispatchIpcImage, IpcDeps } from './ipc.js';
+import {
+  dispatchIpcMessage,
+  dispatchIpcImage,
+  dispatchIpcDocument,
+  IpcDeps,
+} from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 const MAIN_GROUP: RegisteredGroup = {
@@ -32,16 +37,24 @@ const OTHER_GROUP: RegisteredGroup = {
 let groups: Record<string, RegisteredGroup>;
 let sendMessage: ReturnType<typeof vi.fn<IpcDeps['sendMessage']>>;
 let sendImage: ReturnType<typeof vi.fn<NonNullable<IpcDeps['sendImage']>>>;
+let sendDocument: ReturnType<
+  typeof vi.fn<NonNullable<IpcDeps['sendDocument']>>
+>;
 let sendPoolMessage: ReturnType<
   typeof vi.fn<NonNullable<IpcDeps['sendPoolMessage']>>
 >;
 
 function makeDeps(
-  opts: { withPool?: boolean; withImage?: boolean } = {},
+  opts: {
+    withPool?: boolean;
+    withImage?: boolean;
+    withDocument?: boolean;
+  } = {},
 ): IpcDeps {
   return {
     sendMessage,
     sendImage: opts.withImage ? sendImage : undefined,
+    sendDocument: opts.withDocument ? sendDocument : undefined,
     sendPoolMessage: opts.withPool ? sendPoolMessage : undefined,
     registeredGroups: () => groups,
     registerGroup: vi.fn(),
@@ -58,6 +71,7 @@ beforeEach(() => {
   };
   sendMessage = vi.fn().mockResolvedValue(undefined);
   sendImage = vi.fn().mockResolvedValue(undefined);
+  sendDocument = vi.fn().mockResolvedValue(undefined);
   sendPoolMessage = vi.fn().mockResolvedValue(true);
 });
 
@@ -323,6 +337,30 @@ describe('dispatchIpcImage', () => {
     vi.restoreAllMocks();
   });
 
+  // INVARIANT: When image file doesn't exist and no caption, user still gets feedback
+  test('sends fallback text when image file not found without caption', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    const result = await dispatchIpcImage(
+      {
+        chatJid: 'tg:111',
+        imagePath: '/test-groups/telegram_main/output/missing.png',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withImage: true }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendImage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:111',
+      expect.stringContaining('Image not found'),
+    );
+
+    vi.restoreAllMocks();
+  });
+
   // INVARIANT: Path traversal via ../ is blocked
   test('blocks path traversal attempts', async () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
@@ -339,6 +377,193 @@ describe('dispatchIpcImage', () => {
 
     expect(result).toBe('unauthorized');
     expect(sendImage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe('dispatchIpcDocument', () => {
+  // INVARIANT: Document messages are sent via sendDocument when channel supports it
+  test('sends document via sendDocument when available', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/test-groups/telegram_main/output/report.pdf',
+        filename: 'report.pdf',
+        caption: 'Your report',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendDocument).toHaveBeenCalledWith(
+      'tg:111',
+      '/test-groups/telegram_main/output/report.pdf',
+      'report.pdf',
+      'Your report',
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: When sendDocument is not available, caption is sent as text
+  test('falls back to sendMessage when sendDocument not available', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/test-groups/telegram_main/output/report.pdf',
+        caption: 'Your report',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: false }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendMessage).toHaveBeenCalledWith('tg:111', 'Your report');
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: When sendDocument is not available and no caption, sends default text
+  test('sends default text when no sendDocument and no caption', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/test-groups/telegram_main/output/report.pdf',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: false }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:111',
+      '(Document sent but channel does not support documents)',
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: Container paths are translated to host paths
+  test('translates /workspace/group/ container paths to host paths', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/workspace/group/output/report.pdf',
+        filename: 'report.pdf',
+        caption: 'A report',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(sendDocument).toHaveBeenCalledWith(
+      'tg:111',
+      expect.stringContaining('telegram_main/output/report.pdf'),
+      'report.pdf',
+      'A report',
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: Non-main groups cannot send documents to other groups
+  test('blocks unauthorized cross-group document sends', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const result = await dispatchIpcDocument(
+      { chatJid: 'tg:111', documentPath: '/tmp/doc.pdf' },
+      'telegram_other',
+      false,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(result).toBe('unauthorized');
+    expect(sendDocument).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: When document file doesn't exist, falls back to text with error
+  test('sends fallback text when document file not found', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/test-groups/telegram_main/output/missing.pdf',
+        caption: 'A report',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendDocument).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:111',
+      expect.stringContaining('Document not found'),
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: When document file doesn't exist and no caption, user still gets feedback
+  test('sends fallback text when document file not found without caption', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/test-groups/telegram_main/output/missing.pdf',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(result).toBe('sent');
+    expect(sendDocument).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:111',
+      expect.stringContaining('Document not found'),
+    );
+
+    vi.restoreAllMocks();
+  });
+
+  // INVARIANT: Path traversal via ../ is blocked
+  test('blocks path traversal attempts', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    const result = await dispatchIpcDocument(
+      {
+        chatJid: 'tg:111',
+        documentPath: '/workspace/group/../../.env',
+      },
+      'telegram_main',
+      true,
+      makeDeps({ withDocument: true }),
+    );
+
+    expect(result).toBe('unauthorized');
+    expect(sendDocument).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
 
     vi.restoreAllMocks();

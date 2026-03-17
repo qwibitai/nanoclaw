@@ -54,6 +54,7 @@ vi.mock('grammy', () => ({
     api = {
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendPhoto: vi.fn().mockResolvedValue(undefined),
+      sendDocument: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
     };
@@ -968,6 +969,97 @@ describe('TelegramChannel', () => {
 
       // Don't connect
       await channel.sendImage('tg:100200300', '/tmp/test.png');
+
+      // No error, no API call
+    });
+  });
+
+  // --- sendDocument ---
+
+  describe('sendDocument', () => {
+    it('sends document via bot API with InputFile', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendDocument(
+        'tg:100200300',
+        '/tmp/report.pdf',
+        'report.pdf',
+        'Your report',
+      );
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledWith(
+        '100200300',
+        expect.objectContaining({ path: '/tmp/report.pdf' }),
+        expect.objectContaining({
+          caption: 'Your report',
+          parse_mode: 'Markdown',
+        }),
+      );
+    });
+
+    it('sends document without caption', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendDocument('tg:100200300', '/tmp/report.pdf');
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledWith(
+        '100200300',
+        expect.any(Object),
+        expect.objectContaining({ caption: undefined }),
+      );
+    });
+
+    it('falls back to text message when sendDocument fails', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.sendDocument.mockRejectedValueOnce(
+        new Error('File too large'),
+      );
+
+      await channel.sendDocument(
+        'tg:100200300',
+        '/tmp/big.pdf',
+        'big.pdf',
+        'Big document',
+      );
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        'Big document\n\n(Document could not be sent)',
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    it('falls back to generic text when sendDocument fails without caption', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.sendDocument.mockRejectedValueOnce(
+        new Error('File too large'),
+      );
+
+      await channel.sendDocument('tg:100200300', '/tmp/big.pdf');
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        '(Document could not be sent)',
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    it('does nothing when bot is not initialized', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+
+      // Don't connect
+      await channel.sendDocument('tg:100200300', '/tmp/report.pdf');
 
       // No error, no API call
     });

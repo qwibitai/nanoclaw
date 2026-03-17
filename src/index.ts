@@ -55,6 +55,7 @@ import {
   formatMessages,
   formatOutbound,
   routeOutboundImage,
+  routeOutboundDocument,
 } from './router.js';
 import {
   addCaseCost,
@@ -1129,6 +1130,8 @@ async function main(): Promise<void> {
     },
     sendImage: (jid, imagePath, caption) =>
       routeOutboundImage(channels, jid, imagePath, caption),
+    sendDocument: (jid, documentPath, filename, caption) =>
+      routeOutboundDocument(channels, jid, documentPath, filename, caption),
     sendPoolMessage:
       TELEGRAM_BOT_POOL.length > 0
         ? (jid, text, sender, groupFolder) =>

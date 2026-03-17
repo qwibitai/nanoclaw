@@ -35,6 +35,13 @@ export interface IpcDeps {
     imagePath: string,
     caption?: string,
   ) => Promise<void>;
+  /** Optional: send a document/file. Falls back to sendMessage with caption if not supported. */
+  sendDocument?: (
+    jid: string,
+    documentPath: string,
+    filename?: string,
+    caption?: string,
+  ) => Promise<void>;
   /** Optional channel-aware send for pool bots (e.g. Telegram swarm).
    *  Returns true if handled, false to fall back to sendMessage. */
   sendPoolMessage?: (
@@ -133,13 +140,12 @@ export async function dispatchIpcImage(
       { chatJid: data.chatJid, imagePath: data.imagePath, hostPath },
       'IPC image file not found',
     );
-    // Fall back to text message with caption
-    if (data.caption) {
-      await deps.sendMessage(
-        data.chatJid,
-        `${data.caption}\n\n(Image not found: ${data.imagePath})`,
-      );
-    }
+    await deps.sendMessage(
+      data.chatJid,
+      data.caption
+        ? `${data.caption}\n\n(Image not found: ${data.imagePath})`
+        : `(Image not found: ${data.imagePath})`,
+    );
     return 'sent';
   }
 
@@ -156,6 +162,87 @@ export async function dispatchIpcImage(
   logger.info(
     { chatJid: data.chatJid, sourceGroup, hostPath },
     'IPC image sent',
+  );
+  return 'sent';
+}
+
+/** Dispatch an IPC document message, translating container paths to host paths. */
+export async function dispatchIpcDocument(
+  data: {
+    chatJid: string;
+    documentPath: string;
+    filename?: string;
+    caption?: string;
+  },
+  sourceGroup: string,
+  isMain: boolean,
+  deps: IpcDeps,
+): Promise<'sent' | 'unauthorized'> {
+  const registeredGroups = deps.registeredGroups();
+  const targetGroup = registeredGroups[data.chatJid];
+  if (!isMain && !(targetGroup && targetGroup.folder === sourceGroup)) {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC document attempt blocked',
+    );
+    return 'unauthorized';
+  }
+
+  // Translate container path to host path.
+  // Container mounts: /workspace/group/ → groups/{folder}/
+  let hostPath = data.documentPath;
+  if (data.documentPath.startsWith('/workspace/group/')) {
+    const relativePath = data.documentPath.slice('/workspace/group/'.length);
+    hostPath = path.join(resolveGroupFolderPath(sourceGroup), relativePath);
+  }
+
+  // Path traversal guard: resolved path must stay within the group folder
+  const groupDir = resolveGroupFolderPath(sourceGroup);
+  const resolved = path.resolve(hostPath);
+  if (!resolved.startsWith(groupDir)) {
+    logger.warn(
+      {
+        chatJid: data.chatJid,
+        documentPath: data.documentPath,
+        resolved,
+        groupDir,
+      },
+      'IPC document path traversal blocked',
+    );
+    return 'unauthorized';
+  }
+
+  if (!fs.existsSync(hostPath)) {
+    logger.warn(
+      { chatJid: data.chatJid, documentPath: data.documentPath, hostPath },
+      'IPC document file not found',
+    );
+    await deps.sendMessage(
+      data.chatJid,
+      data.caption
+        ? `${data.caption}\n\n(Document not found: ${data.documentPath})`
+        : `(Document not found: ${data.documentPath})`,
+    );
+    return 'sent';
+  }
+
+  if (deps.sendDocument) {
+    await deps.sendDocument(
+      data.chatJid,
+      hostPath,
+      data.filename,
+      data.caption,
+    );
+  } else {
+    await deps.sendMessage(
+      data.chatJid,
+      data.caption || '(Document sent but channel does not support documents)',
+    );
+  }
+
+  logger.info(
+    { chatJid: data.chatJid, sourceGroup, hostPath },
+    'IPC document sent',
   );
   return 'sent';
 }
@@ -217,6 +304,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 data.imagePath
               ) {
                 await dispatchIpcImage(data, sourceGroup, isMain, deps);
+              } else if (
+                data.type === 'document' &&
+                data.chatJid &&
+                data.documentPath
+              ) {
+                await dispatchIpcDocument(data, sourceGroup, isMain, deps);
               }
               fs.unlinkSync(filePath);
             } catch (err) {

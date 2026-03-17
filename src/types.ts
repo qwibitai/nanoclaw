@@ -140,6 +140,14 @@ export interface Channel {
   // Optional: send an image file. Channels that support it implement it.
   // imagePath is an absolute host path to the image file.
   sendImage?(jid: string, imagePath: string, caption?: string): Promise<void>;
+  // Optional: send a document/file. Channels that support it implement it.
+  // documentPath is an absolute host path to the document file.
+  sendDocument?(
+    jid: string,
+    documentPath: string,
+    filename?: string,
+    caption?: string,
+  ): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
