@@ -52,8 +52,8 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name] || envConfig[name];
   if (raw === undefined || raw === "") return fallback;
-  const parsed = parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
     throw new Error(`Invalid integer for ${name}: "${raw}"`);
   }
   return parsed;

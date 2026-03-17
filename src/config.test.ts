@@ -23,6 +23,13 @@ describe("parseIntEnv validation", () => {
     );
   });
 
+  it("throws on partially numeric env value", async () => {
+    process.env.CHANNEL_CONNECT_TIMEOUT = "30s";
+    await expect(import("./config.js")).rejects.toThrow(
+      'Invalid integer for CHANNEL_CONNECT_TIMEOUT: "30s"',
+    );
+  });
+
   it("uses env value when set to a valid integer", async () => {
     process.env.CHANNEL_CONNECT_TIMEOUT = "5000";
     const mod = await import("./config.js");
