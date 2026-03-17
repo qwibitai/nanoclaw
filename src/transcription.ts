@@ -1,54 +1,56 @@
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import { WAMessage, WASocket } from '@whiskeysockets/baileys';
+import { execFile } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { promisify } from 'util';
 
-import { readEnvFile } from './env.js';
+import { downloadMediaMessage, WAMessage, WASocket } from '@whiskeysockets/baileys';
 
-interface TranscriptionConfig {
-  model: string;
-  enabled: boolean;
-  fallbackMessage: string;
-}
+const execFileAsync = promisify(execFile);
 
-const DEFAULT_CONFIG: TranscriptionConfig = {
-  model: 'whisper-1',
-  enabled: true,
-  fallbackMessage: '[Voice Message - transcription unavailable]',
-};
+const WHISPER_BIN = process.env.WHISPER_BIN || 'whisper-cli';
+const WHISPER_MODEL =
+  process.env.WHISPER_MODEL ||
+  path.join(process.cwd(), 'data', 'models', 'ggml-base.bin');
 
-async function transcribeWithOpenAI(
+const FALLBACK_MESSAGE = '[Voice Message - transcription unavailable]';
+
+async function transcribeWithWhisperCpp(
   audioBuffer: Buffer,
-  config: TranscriptionConfig,
 ): Promise<string | null> {
-  const env = readEnvFile(['OPENAI_API_KEY']);
-  const apiKey = env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    console.warn('OPENAI_API_KEY not set in .env');
-    return null;
-  }
+  const tmpDir = os.tmpdir();
+  const id = `nanoclaw-voice-${Date.now()}`;
+  const tmpOgg = path.join(tmpDir, `${id}.ogg`);
+  const tmpWav = path.join(tmpDir, `${id}.wav`);
 
   try {
-    const openaiModule = await import('openai');
-    const OpenAI = openaiModule.default;
-    const toFile = openaiModule.toFile;
+    fs.writeFileSync(tmpOgg, audioBuffer);
 
-    const openai = new OpenAI({ apiKey });
+    // Convert ogg/opus to 16kHz mono WAV (required by whisper.cpp)
+    await execFileAsync('ffmpeg', [
+      '-i', tmpOgg,
+      '-ar', '16000',
+      '-ac', '1',
+      '-f', 'wav',
+      '-y', tmpWav,
+    ], { timeout: 30_000 });
 
-    const file = await toFile(audioBuffer, 'voice.ogg', {
-      type: 'audio/ogg',
-    });
+    const { stdout } = await execFileAsync(WHISPER_BIN, [
+      '-m', WHISPER_MODEL,
+      '-f', tmpWav,
+      '--no-timestamps',
+      '-nt',
+    ], { timeout: 60_000 });
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: config.model,
-      response_format: 'text',
-    });
-
-    // When response_format is 'text', the API returns a plain string
-    return transcription as unknown as string;
+    const transcript = stdout.trim();
+    return transcript || null;
   } catch (err) {
-    console.error('OpenAI transcription failed:', err);
+    console.error('whisper.cpp transcription failed:', err);
     return null;
+  } finally {
+    for (const f of [tmpOgg, tmpWav]) {
+      try { fs.unlinkSync(f); } catch { /* best effort cleanup */ }
+    }
   }
 }
 
@@ -56,12 +58,6 @@ export async function transcribeAudioMessage(
   msg: WAMessage,
   sock: WASocket,
 ): Promise<string | null> {
-  const config = DEFAULT_CONFIG;
-
-  if (!config.enabled) {
-    return config.fallbackMessage;
-  }
-
   try {
     const buffer = (await downloadMediaMessage(
       msg,
@@ -75,21 +71,22 @@ export async function transcribeAudioMessage(
 
     if (!buffer || buffer.length === 0) {
       console.error('Failed to download audio message');
-      return config.fallbackMessage;
+      return FALLBACK_MESSAGE;
     }
 
     console.log(`Downloaded audio message: ${buffer.length} bytes`);
 
-    const transcript = await transcribeWithOpenAI(buffer, config);
+    const transcript = await transcribeWithWhisperCpp(buffer);
 
     if (!transcript) {
-      return config.fallbackMessage;
+      return FALLBACK_MESSAGE;
     }
 
+    console.log(`Transcribed voice message: ${transcript.length} chars`);
     return transcript.trim();
   } catch (err) {
     console.error('Transcription error:', err);
-    return config.fallbackMessage;
+    return FALLBACK_MESSAGE;
   }
 }
 
