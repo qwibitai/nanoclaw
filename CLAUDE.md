@@ -30,6 +30,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/add-sdlc` | Establish PR-based SDLC workflow for auditable, tracked changes |
+| `/add-cli` | Add terminal-based CLI channel — no external services needed |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
