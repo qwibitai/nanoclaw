@@ -5,7 +5,7 @@ Call them via HTTP POST to the admin API.
 
 > **Setup**: These endpoints are served by the NestJS booking API (`claws/booking-api/`).
 > Apply the `add-booking-api` skill to create it. Once running, all tools below are active.
-> API is at `http://host.docker.internal:3001/api/tools/`.
+> API is at `http://host.docker.internal:3002/api/tools/`.
 > All requests require header: `x-api-key: {BOOKING_API_KEY}` (injected from env).
 
 ---
@@ -15,7 +15,7 @@ Call them via HTTP POST to the admin API.
 Find free slots for a given date and service.
 
 ```
-POST http://host.docker.internal:3001/api/tools/check_availability
+POST http://host.docker.internal:3002/api/tools/check_availability
 x-api-key: {BOOKING_API_KEY}
 {
   "tenant_id": "{TENANT_ID}",
@@ -36,7 +36,7 @@ Use this **before** suggesting times to the customer. Never invent availability.
 Confirm a booking after the customer agrees to a specific slot.
 
 ```
-POST http://host.docker.internal:3001/api/tools/create_booking
+POST http://host.docker.internal:3002/api/tools/create_booking
 x-api-key: {BOOKING_API_KEY}
 {
   "tenant_id": "{TENANT_ID}",
@@ -59,7 +59,7 @@ Only call this after the customer has **explicitly confirmed** the slot.
 Cancel a booking. Only succeeds if the phone matches the booking.
 
 ```
-POST http://host.docker.internal:3001/api/tools/cancel_booking
+POST http://host.docker.internal:3002/api/tools/cancel_booking
 x-api-key: {BOOKING_API_KEY}
 {
   "booking_id": "...",
@@ -76,7 +76,7 @@ Returns: confirmation or error if phone doesn't match.
 Get upcoming bookings for a customer.
 
 ```
-POST http://host.docker.internal:3001/api/tools/get_my_bookings
+POST http://host.docker.internal:3002/api/tools/get_my_bookings
 x-api-key: {BOOKING_API_KEY}
 {
   "tenant_id": "{TENANT_ID}",

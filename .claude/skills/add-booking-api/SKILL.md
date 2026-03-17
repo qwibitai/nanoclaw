@@ -6,7 +6,7 @@ description: Create the NestJS + PostgreSQL booking API service in claws/booking
 # Add Booking API (Phase 2)
 
 This skill creates `claws/booking-api/` — a standalone NestJS service backed by PostgreSQL.
-Container agents call it via HTTP on port 3001.
+Container agents call it via HTTP on port 3002.
 The nanoclaw SQLite DB is NOT used for booking data after this phase.
 
 ## Pre-flight
@@ -407,7 +407,7 @@ In `nanoclaw/src/container-runner.ts`, when building container env vars, look up
 ```typescript
 // In the env block passed to the container:
 TENANT_ID: getTenantByJid(groupJid)?.id ?? '',
-BOOKING_API_URL: 'http://host.docker.internal:3001',
+BOOKING_API_URL: 'http://host.docker.internal:3002',
 BOOKING_API_KEY: process.env.BOOKING_API_KEY ?? '',
 ```
 
@@ -438,7 +438,7 @@ npx prisma db seed
 npm run start:dev
 
 # From another terminal — test tool endpoints
-curl -X POST http://localhost:3001/api/tools/check_availability \
+curl -X POST http://localhost:3002/api/tools/check_availability \
   -H "Content-Type: application/json" \
   -H "x-api-key: dev_secret_change_in_prod" \
   -d '{"tenant_id":"...","date":"2026-03-20","service":"Tuns"}'
@@ -455,14 +455,14 @@ Then restart nanoclaw, send a booking request via WhatsApp, verify the booking l
 ### Prisma can't connect
 Make sure PostgreSQL is running: `docker compose ps`. Check `DATABASE_URL` in `.env`.
 
-### Container can't reach :3001
+### Container can't reach :3002
 The container uses `host.docker.internal` to reach the host. On Linux this may need:
 ```yaml
 # in nanoclaw's docker run / container config
 extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
-Or set `BOOKING_API_URL=http://172.17.0.1:3001` (Docker bridge IP).
+Or set `BOOKING_API_URL=http://172.17.0.1:3002` (Docker bridge IP).
 
 ### TypeScript errors in tools.service.ts
 The working hours logic (day-of-week, slot generation) can be ported directly from
