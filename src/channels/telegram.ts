@@ -1,8 +1,12 @@
+import fs from 'fs';
 import https from 'https';
+import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { downloadFile } from '../download.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -338,7 +342,42 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      // Try to download the photo so the agent can actually see it
+      try {
+        const photos = ctx.message.photo;
+        // Telegram provides multiple sizes; last is largest
+        const largest = photos[photos.length - 1];
+        const file = await ctx.api.getFile(largest.file_id);
+
+        if (!file.file_path)
+          throw new Error('No file_path in Telegram response');
+
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const groupDir = resolveGroupFolderPath(group.folder);
+        const imagesDir = path.join(groupDir, 'images');
+        fs.mkdirSync(imagesDir, { recursive: true });
+
+        const ext = path.extname(file.file_path) || '.jpg';
+        const filename = `photo-${ctx.message.message_id}${ext}`;
+        const filePath = path.join(imagesDir, filename);
+
+        await downloadFile(url, filePath);
+
+        const containerPath = `/workspace/group/images/${filename}`;
+        logger.info({ chatJid, filePath }, 'Downloaded Telegram photo');
+
+        storeNonText(ctx, `[Image: ${containerPath} — use Read tool to view]`);
+      } catch (err) {
+        logger.error({ err, chatJid }, 'Failed to download Telegram photo');
+        // Fallback to placeholder if download fails
+        storeNonText(ctx, '[Photo]');
+      }
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
