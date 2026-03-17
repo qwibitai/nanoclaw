@@ -11,16 +11,12 @@ source "$(dirname "$0")/lib/parse-command.sh"
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-
-# Claude Code PostToolUse sends tool_response (not tool_output).
-# Bash tool_response has {content: string, is_error: bool} — stdout/stderr merged.
-# Support both field names for backward compatibility with tests.
-TOOL_OUTPUT=$(echo "$INPUT" | jq -r '.tool_response.content // .tool_output.stdout // empty')
-IS_ERROR=$(echo "$INPUT" | jq -r '.tool_response.is_error // false')
-EXIT_CODE=$(echo "$INPUT" | jq -r '.tool_output.exit_code // "0"')
+STDOUT=$(echo "$INPUT" | jq -r '.tool_response.stdout // empty')
+STDERR=$(echo "$INPUT" | jq -r '.tool_response.stderr // empty')
+EXIT_CODE=$(echo "$INPUT" | jq -r '.tool_response.exit_code // "0"')
 
 # Only trigger on successful gh pr create or gh pr merge
-if [ "$IS_ERROR" = "true" ] || [ "$EXIT_CODE" != "0" ]; then
+if [ "$EXIT_CODE" != "0" ]; then
   exit 0
 fi
 
@@ -37,7 +33,10 @@ else
 fi
 
 # Extract PR URL from output
-PR_URL=$(echo "$TOOL_OUTPUT" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -1)
+PR_URL=$(echo "$STDOUT" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -1)
+if [ -z "$PR_URL" ]; then
+  PR_URL=$(echo "$STDERR" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -1)
+fi
 
 # Get current branch for context
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")

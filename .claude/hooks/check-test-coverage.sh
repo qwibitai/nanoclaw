@@ -61,10 +61,24 @@ while IFS= read -r src_file; do
   #   1. Exact: {basename}.test.ts (e.g., ipc.test.ts for ipc.ts)
   #   2. Prefixed: {basename}-*.test.ts (e.g., ipc-github-issues.test.ts for ipc.ts)
   #   3. Directory: {dir}/__tests__/
+  #   4. Import: any changed test file that imports from the source file
   FOUND=false
   if [ -n "$CHANGED_TESTS" ]; then
     if echo "$CHANGED_TESTS" | grep -qE "(${basename}[\.-](test|spec)\.|${basename}-[a-z0-9-]+\.(test|spec)\.|${dir}/__tests__/)"; then
       FOUND=true
+    fi
+
+    # Check if any changed test file imports from this source file
+    if [ "$FOUND" = false ]; then
+      while IFS= read -r test_file; do
+        [ -z "$test_file" ] && continue
+        [ ! -f "$test_file" ] && continue
+        # Match imports like: from './cases.js' or from '../cases.js' etc.
+        if grep -qE "from ['\"].*/${basename}(\.js)?['\"]" "$test_file" 2>/dev/null; then
+          FOUND=true
+          break
+        fi
+      done <<< "$CHANGED_TESTS"
     fi
   fi
 

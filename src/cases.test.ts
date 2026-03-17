@@ -5,6 +5,7 @@ import {
   insertCase,
   getCaseById,
   getActiveCasesByGithubIssue,
+  getStaleActiveCases,
   updateCase,
   formatCaseStatus,
 } from './cases.js';
@@ -108,6 +109,134 @@ describe('getActiveCasesByGithubIssue', () => {
   it('returns empty array when no cases exist', () => {
     const results = getActiveCasesByGithubIssue(999);
     expect(results).toHaveLength(0);
+  });
+});
+
+// INVARIANT: getStaleActiveCases returns only active cases whose last_activity_at
+//   is older than the specified threshold, excluding done/blocked/other statuses.
+// SUT: getStaleActiveCases
+// VERIFICATION: Insert active cases with varying activity timestamps and non-active
+//   cases, confirm only stale active cases are returned.
+describe('getStaleActiveCases', () => {
+  it('returns active cases idle longer than threshold', () => {
+    const threeHoursAgo = new Date(
+      Date.now() - 3 * 60 * 60 * 1000,
+    ).toISOString();
+    insertCase(
+      makeCase({
+        id: 'stale-active',
+        status: 'active',
+        last_activity_at: threeHoursAgo,
+      }),
+    );
+
+    const results = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('stale-active');
+  });
+
+  it('excludes active cases with recent activity', () => {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    insertCase(
+      makeCase({
+        id: 'fresh-active',
+        status: 'active',
+        last_activity_at: fiveMinAgo,
+      }),
+    );
+
+    const results = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(results).toHaveLength(0);
+  });
+
+  it('excludes done/blocked cases even if stale', () => {
+    const threeHoursAgo = new Date(
+      Date.now() - 3 * 60 * 60 * 1000,
+    ).toISOString();
+    insertCase(
+      makeCase({
+        id: 'stale-done',
+        status: 'done',
+        last_activity_at: threeHoursAgo,
+      }),
+    );
+    insertCase(
+      makeCase({
+        id: 'stale-blocked',
+        status: 'blocked',
+        last_activity_at: threeHoursAgo,
+      }),
+    );
+
+    const results = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns empty array when no cases exist', () => {
+    const results = getStaleActiveCases(1000);
+    expect(results).toHaveLength(0);
+  });
+});
+
+// INVARIANT: The auto-done reaper workflow (getStaleActiveCases → updateCase) correctly
+//   transitions stale active cases to done status with a conclusion and timestamp.
+// SUT: getStaleActiveCases + updateCase composition (mirrors ipc.ts auto-done reaper)
+// VERIFICATION: Insert a stale active case, run the reaper logic, confirm status
+//   transitions to done with appropriate fields set.
+describe('auto-done reaper workflow', () => {
+  it('transitions stale active case to done with conclusion', () => {
+    const threeHoursAgo = new Date(
+      Date.now() - 3 * 60 * 60 * 1000,
+    ).toISOString();
+    insertCase(
+      makeCase({
+        id: 'reaper-target',
+        status: 'active',
+        last_activity_at: threeHoursAgo,
+        done_at: null,
+        conclusion: null,
+      }),
+    );
+
+    // Run the same logic as the ipc.ts auto-done reaper
+    const staleCases = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(staleCases).toHaveLength(1);
+
+    for (const c of staleCases) {
+      updateCase(c.id, {
+        status: 'done',
+        done_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
+        conclusion:
+          'Auto-completed: no activity for 2+ hours without calling case_mark_done',
+      });
+    }
+
+    const updated = getCaseById('reaper-target');
+    expect(updated!.status).toBe('done');
+    expect(updated!.done_at).toBeTruthy();
+    expect(updated!.conclusion).toContain('Auto-completed');
+
+    // Should no longer appear in stale active list
+    const remaining = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('does not touch fresh active cases', () => {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    insertCase(
+      makeCase({
+        id: 'fresh-case',
+        status: 'active',
+        last_activity_at: fiveMinAgo,
+      }),
+    );
+
+    const staleCases = getStaleActiveCases(2 * 60 * 60 * 1000);
+    expect(staleCases).toHaveLength(0);
+
+    const unchanged = getCaseById('fresh-case');
+    expect(unchanged!.status).toBe('active');
   });
 });
 

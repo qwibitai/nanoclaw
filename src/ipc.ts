@@ -10,6 +10,7 @@ import {
   generateCaseName,
   getActiveCasesByGithubIssue,
   getCaseById,
+  getStaleActiveCases,
   getStaleDoneCases,
   insertCase,
   pruneCaseWorkspace,
@@ -196,6 +197,37 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
+
+  // Auto-done: every 10 minutes, mark active cases with no activity for >2h as done.
+  // Catches cases where the agent exited without calling case_mark_done.
+  const AUTO_DONE_INTERVAL = 10 * 60 * 1000;
+  const AUTO_DONE_MAX_IDLE = 2 * 60 * 60 * 1000;
+  setInterval(() => {
+    try {
+      const staleCases = getStaleActiveCases(AUTO_DONE_MAX_IDLE);
+      for (const c of staleCases) {
+        logger.info(
+          { caseId: c.id, name: c.name, lastActivity: c.last_activity_at },
+          'Auto-marking stale active case as done',
+        );
+        if (c.worktree_path) {
+          removeWorktreeLock(c.worktree_path);
+        }
+        updateCase(c.id, {
+          status: 'done',
+          done_at: new Date().toISOString(),
+          last_activity_at: new Date().toISOString(),
+          conclusion:
+            'Auto-completed: no activity for 2+ hours without calling case_mark_done',
+        });
+      }
+      if (staleCases.length > 0) {
+        logger.info({ count: staleCases.length }, 'Auto-done cycle complete');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Auto-done reaper failed');
+    }
+  }, AUTO_DONE_INTERVAL);
 
   // Auto-prune: every 10 minutes, prune cases that have been done for >24h
   const AUTO_PRUNE_INTERVAL = 10 * 60 * 1000;
