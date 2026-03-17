@@ -29,6 +29,7 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.34.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
