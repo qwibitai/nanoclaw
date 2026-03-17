@@ -53,6 +53,7 @@ export interface ContainerConfig {
   sessionIdleResetHours?: number; // Override global idle reset (0 = never auto-reset)
   threadSessionIdleHours?: number; // Override idle reset for thread sessions
   notifyJid?: string; // Additional channel for ship log / backlog notifications (sends to this JID in addition to the default)
+  watchGithub?: string[]; // GitHub orgs or owner/repo to scan for team PRs in daily summary (e.g. ["Illysium-ai", "davekim917/nanoclaw"])
 }
 
 export interface RegisteredGroup {

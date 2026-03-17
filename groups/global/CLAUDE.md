@@ -175,6 +175,28 @@ When asked to make code changes or open PRs:
 4. Make the changes
 5. Commit, push, and open a PR using `gh pr create`
 6. Share the PR link
+7. Log the work (see Ship Log below)
+
+### Ship Log & Backlog — MANDATORY POST-PR ACTIONS
+
+These are **non-optional**. Execute immediately after `gh pr create` succeeds, every time, without being asked.
+
+**After every PR:**
+```
+mcp__nanoclaw__add_ship_log({ title, description, pr_url, branch, tags })
+```
+
+**If the PR resolves a known backlog item:**
+```
+mcp__nanoclaw__update_backlog_item({ item_id, status: "resolved", notes: "Fixed in PR #N" })
+```
+
+**When discovering bugs or issues during development (proactively):**
+```
+mcp__nanoclaw__add_backlog_item({ title, description, priority, tags })
+```
+
+Dave never manually triggers these — if you built it and opened the PR, you log it.
 
 ### No Attribution
 
