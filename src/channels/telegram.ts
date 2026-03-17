@@ -145,12 +145,20 @@ export class BotPool {
     }
 
     const api = this.apis[idx];
-    await sendWithSplit(api, chatId, text);
-    logger.info(
-      { chatId, sender, poolIndex: idx, length: text.length },
-      'Pool message sent',
-    );
-    return true;
+    try {
+      await sendWithSplit(api, chatId, text);
+      logger.info(
+        { chatId, sender, poolIndex: idx, length: text.length },
+        'Pool message sent',
+      );
+      return true;
+    } catch (err) {
+      logger.warn(
+        { chatId, sender, poolIndex: idx, err },
+        'Pool bot failed to send, falling back to main bot',
+      );
+      return false;
+    }
   }
 
   get size(): number {

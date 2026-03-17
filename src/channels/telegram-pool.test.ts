@@ -299,9 +299,9 @@ describe('BotPool', () => {
     expect(sentMessages).toEqual(['hello despite rename failure']);
   });
 
-  // INVARIANT: send propagates Telegram API errors to the caller
+  // INVARIANT: send returns false on Telegram API errors so caller can fall back
   // SUT: BotPool.send() error path
-  test('propagates sendMessage errors to caller', async () => {
+  test('returns false when sendMessage fails, enabling fallback', async () => {
     const deps = makeDeps({
       sendMessage: async () => {
         throw new Error('Telegram API: chat not found');
@@ -311,9 +311,8 @@ describe('BotPool', () => {
     const pool = new BotPool(deps);
     await pool.init(['token1']);
 
-    await expect(
-      pool.send('tg:999', 'hello', 'Researcher', 'main'),
-    ).rejects.toThrow('Telegram API: chat not found');
+    const result = await pool.send('tg:999', 'hello', 'Researcher', 'main');
+    expect(result).toBe(false);
   });
 
   // INVARIANT: For any pool size N, sender i always gets bot (i % N)
