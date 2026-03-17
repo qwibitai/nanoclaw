@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,6 +15,10 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
+  RUNTIME_ENGINE,
+  OPENSHELL_POLICY,
+  OPENSHELL_PROVIDERS,
+  OPENSHELL_AUTO_PROVIDERS,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -49,6 +53,38 @@ export interface ContainerOutput {
   newSessionId?: string;
   error?: string;
 }
+
+export interface AgentRunner {
+  runAgent(
+    group: RegisteredGroup,
+    input: ContainerInput,
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ): Promise<ContainerOutput>;
+}
+
+export const activeSandboxes = new Map<string, string>();
+
+function cleanupActiveSandboxes() {
+  for (const [folder, containerName] of activeSandboxes.entries()) {
+    try {
+      console.log(`Cleaning up OpenShell sandbox ${containerName}...`);
+      execSync(`openshell sandbox delete ${containerName}`);
+    } catch (e) {
+      console.error(`Failed to cleanup ${containerName}`);
+    }
+  }
+}
+
+process.on('exit', cleanupActiveSandboxes);
+process.on('SIGINT', () => {
+  cleanupActiveSandboxes();
+  process.exit(1);
+});
+process.on('SIGTERM', () => {
+  cleanupActiveSandboxes();
+  process.exit(1);
+});
 
 interface VolumeMount {
   hostPath: string;
@@ -264,203 +300,313 @@ function buildContainerArgs(
   return args;
 }
 
-export async function runContainerAgent(
-  group: RegisteredGroup,
-  input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<ContainerOutput> {
-  const startTime = Date.now();
+export class DockerRunner implements AgentRunner {
+  async runAgent(
+    group: RegisteredGroup,
+    input: ContainerInput,
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ): Promise<ContainerOutput> {
+    const startTime = Date.now();
 
-  const groupDir = resolveGroupFolderPath(group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
+    const groupDir = resolveGroupFolderPath(group.folder);
+    fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
-  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+    const mounts = buildVolumeMounts(group, input.isMain);
+    const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+    const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+    const containerArgs = buildContainerArgs(mounts, containerName);
 
-  logger.debug(
-    {
-      group: group.name,
-      containerName,
-      mounts: mounts.map(
-        (m) =>
-          `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-      ),
-      containerArgs: containerArgs.join(' '),
-    },
-    'Container mount configuration',
-  );
+    logger.debug(
+      {
+        group: group.name,
+        containerName,
+        mounts: mounts.map(
+          (m) =>
+            `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+        ),
+        containerArgs: containerArgs.join(' '),
+      },
+      'Container mount configuration',
+    );
 
-  logger.info(
-    {
-      group: group.name,
-      containerName,
-      mountCount: mounts.length,
-      isMain: input.isMain,
-    },
-    'Spawning container agent',
-  );
+    logger.info(
+      {
+        group: group.name,
+        containerName,
+        mountCount: mounts.length,
+        isMain: input.isMain,
+      },
+      'Spawning container agent',
+    );
 
-  const logsDir = path.join(groupDir, 'logs');
-  fs.mkdirSync(logsDir, { recursive: true });
+    const logsDir = path.join(groupDir, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
 
-  return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    return new Promise((resolve) => {
+      const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-    onProcess(container, containerName);
+      onProcess(container, containerName);
 
-    let stdout = '';
-    let stderr = '';
-    let stdoutTruncated = false;
-    let stderrTruncated = false;
+      let stdout = '';
+      let stderr = '';
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+      container.stdin.write(JSON.stringify(input));
+      container.stdin.end();
 
-    // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
-    let parseBuffer = '';
-    let newSessionId: string | undefined;
-    let outputChain = Promise.resolve();
+      // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
+      let parseBuffer = '';
+      let newSessionId: string | undefined;
+      let outputChain = Promise.resolve();
 
-    container.stdout.on('data', (data) => {
-      const chunk = data.toString();
+      container.stdout.on('data', (data) => {
+        const chunk = data.toString();
 
-      // Always accumulate for logging
-      if (!stdoutTruncated) {
-        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
-        if (chunk.length > remaining) {
-          stdout += chunk.slice(0, remaining);
-          stdoutTruncated = true;
-          logger.warn(
-            { group: group.name, size: stdout.length },
-            'Container stdout truncated due to size limit',
-          );
-        } else {
-          stdout += chunk;
-        }
-      }
-
-      // Stream-parse for output markers
-      if (onOutput) {
-        parseBuffer += chunk;
-        let startIdx: number;
-        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
-          const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-          if (endIdx === -1) break; // Incomplete pair, wait for more data
-
-          const jsonStr = parseBuffer
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
-
-          try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
-            }
-            hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
-            resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
-          } catch (err) {
+        // Always accumulate for logging
+        if (!stdoutTruncated) {
+          const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+          if (chunk.length > remaining) {
+            stdout += chunk.slice(0, remaining);
+            stdoutTruncated = true;
             logger.warn(
-              { group: group.name, error: err },
-              'Failed to parse streamed output chunk',
+              { group: group.name, size: stdout.length },
+              'Container stdout truncated due to size limit',
             );
+          } else {
+            stdout += chunk;
           }
         }
-      }
-    });
 
-    container.stderr.on('data', (data) => {
-      const chunk = data.toString();
-      const lines = chunk.trim().split('\n');
-      for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
-      }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
-      if (stderrTruncated) return;
-      const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
-      if (chunk.length > remaining) {
-        stderr += chunk.slice(0, remaining);
-        stderrTruncated = true;
-        logger.warn(
-          { group: group.name, size: stderr.length },
-          'Container stderr truncated due to size limit',
-        );
-      } else {
-        stderr += chunk;
-      }
-    });
+        // Stream-parse for output markers
+        if (onOutput) {
+          parseBuffer += chunk;
+          let startIdx: number;
+          while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
+            const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
+            if (endIdx === -1) break; // Incomplete pair, wait for more data
 
-    let timedOut = false;
-    let hadStreamingOutput = false;
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful _close sentinel has time to trigger before the hard kill fires.
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+            const jsonStr = parseBuffer
+              .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+              .trim();
+            parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
-    const killOnTimeout = () => {
-      timedOut = true;
-      logger.error(
-        { group: group.name, containerName },
-        'Container timeout, stopping gracefully',
-      );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
-          container.kill('SIGKILL');
+            try {
+              const parsed: ContainerOutput = JSON.parse(jsonStr);
+              if (parsed.newSessionId) {
+                newSessionId = parsed.newSessionId;
+              }
+              hadStreamingOutput = true;
+              // Activity detected — reset the hard timeout
+              resetTimeout();
+              // Call onOutput for all markers (including null results)
+              // so idle timers start even for "silent" query completions.
+              outputChain = outputChain.then(() => onOutput(parsed));
+            } catch (err) {
+              logger.warn(
+                { group: group.name, error: err },
+                'Failed to parse streamed output chunk',
+              );
+            }
+          }
         }
       });
-    };
 
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
-
-    // Reset the timeout whenever there's activity (streaming output)
-    const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
-    };
-
-    container.on('close', (code) => {
-      clearTimeout(timeout);
-      const duration = Date.now() - startTime;
-
-      if (timedOut) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(
-          timeoutLog,
-          [
-            `=== Container Run Log (TIMEOUT) ===`,
-            `Timestamp: ${new Date().toISOString()}`,
-            `Group: ${group.name}`,
-            `Container: ${containerName}`,
-            `Duration: ${duration}ms`,
-            `Exit Code: ${code}`,
-            `Had Streaming Output: ${hadStreamingOutput}`,
-          ].join('\n'),
-        );
-
-        // Timeout after output = idle cleanup, not failure.
-        // The agent already sent its response; this is just the
-        // container being reaped after the idle period expired.
-        if (hadStreamingOutput) {
-          logger.info(
-            { group: group.name, containerName, duration, code },
-            'Container timed out after output (idle cleanup)',
+      container.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        const lines = chunk.trim().split('\n');
+        for (const line of lines) {
+          if (line) logger.debug({ container: group.folder }, line);
+        }
+        // Don't reset timeout on stderr — SDK writes debug logs continuously.
+        // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
+        if (stderrTruncated) return;
+        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
+        if (chunk.length > remaining) {
+          stderr += chunk.slice(0, remaining);
+          stderrTruncated = true;
+          logger.warn(
+            { group: group.name, size: stderr.length },
+            'Container stderr truncated due to size limit',
           );
+        } else {
+          stderr += chunk;
+        }
+      });
+
+      let timedOut = false;
+      let hadStreamingOutput = false;
+      const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+      // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
+      // graceful _close sentinel has time to trigger before the hard kill fires.
+      const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+
+      const killOnTimeout = () => {
+        timedOut = true;
+        logger.error(
+          { group: group.name, containerName },
+          'Container timeout, stopping gracefully',
+        );
+        exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+          if (err) {
+            logger.warn(
+              { group: group.name, containerName, err },
+              'Graceful stop failed, force killing',
+            );
+            container.kill('SIGKILL');
+          }
+        });
+      };
+
+      let timeout = setTimeout(killOnTimeout, timeoutMs);
+
+      // Reset the timeout whenever there's activity (streaming output)
+      const resetTimeout = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(killOnTimeout, timeoutMs);
+      };
+
+      container.on('close', (code) => {
+        clearTimeout(timeout);
+        const duration = Date.now() - startTime;
+
+        if (timedOut) {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const timeoutLog = path.join(logsDir, `container-${ts}.log`);
+          fs.writeFileSync(
+            timeoutLog,
+            [
+              `=== Container Run Log (TIMEOUT) ===`,
+              `Timestamp: ${new Date().toISOString()}`,
+              `Group: ${group.name}`,
+              `Container: ${containerName}`,
+              `Duration: ${duration}ms`,
+              `Exit Code: ${code}`,
+              `Had Streaming Output: ${hadStreamingOutput}`,
+            ].join('\n'),
+          );
+
+          // Timeout after output = idle cleanup, not failure.
+          // The agent already sent its response; this is just the
+          // container being reaped after the idle period expired.
+          if (hadStreamingOutput) {
+            logger.info(
+              { group: group.name, containerName, duration, code },
+              'Container timed out after output (idle cleanup)',
+            );
+            outputChain.then(() => {
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
+            });
+            return;
+          }
+
+          logger.error(
+            { group: group.name, containerName, duration, code },
+            'Container timed out with no output',
+          );
+
+          resolve({
+            status: 'error',
+            result: null,
+            error: `Container timed out after ${configTimeout}ms`,
+          });
+          return;
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const logFile = path.join(logsDir, `container-${timestamp}.log`);
+        const isVerbose =
+          process.env.LOG_LEVEL === 'debug' ||
+          process.env.LOG_LEVEL === 'trace';
+
+        const logLines = [
+          `=== Container Run Log ===`,
+          `Timestamp: ${new Date().toISOString()}`,
+          `Group: ${group.name}`,
+          `IsMain: ${input.isMain}`,
+          `Duration: ${duration}ms`,
+          `Exit Code: ${code}`,
+          `Stdout Truncated: ${stdoutTruncated}`,
+          `Stderr Truncated: ${stderrTruncated}`,
+          ``,
+        ];
+
+        const isError = code !== 0;
+
+        if (isVerbose || isError) {
+          logLines.push(
+            `=== Input ===`,
+            JSON.stringify(input, null, 2),
+            ``,
+            `=== Container Args ===`,
+            containerArgs.join(' '),
+            ``,
+            `=== Mounts ===`,
+            mounts
+              .map(
+                (m) =>
+                  `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+              )
+              .join('\n'),
+            ``,
+            `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
+            stderr,
+            ``,
+            `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
+            stdout,
+          );
+        } else {
+          logLines.push(
+            `=== Input Summary ===`,
+            `Prompt length: ${input.prompt.length} chars`,
+            `Session ID: ${input.sessionId || 'new'}`,
+            ``,
+            `=== Mounts ===`,
+            mounts
+              .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
+              .join('\n'),
+            ``,
+          );
+        }
+
+        fs.writeFileSync(logFile, logLines.join('\n'));
+        logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
+
+        if (code !== 0) {
+          logger.error(
+            {
+              group: group.name,
+              code,
+              duration,
+              stderr,
+              stdout,
+              logFile,
+            },
+            'Container exited with error',
+          );
+
+          resolve({
+            status: 'error',
+            result: null,
+            error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          });
+          return;
+        }
+
+        // Streaming mode: wait for output chain to settle, return completion marker
+        if (onOutput) {
           outputChain.then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
             resolve({
               status: 'success',
               result: null,
@@ -470,176 +616,355 @@ export async function runContainerAgent(
           return;
         }
 
-        logger.error(
-          { group: group.name, containerName, duration, code },
-          'Container timed out with no output',
-        );
+        // Legacy mode: parse the last output marker pair from accumulated stdout
+        try {
+          // Extract JSON between sentinel markers for robust parsing
+          const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
+          const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
 
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Container timed out after ${configTimeout}ms`,
-        });
-        return;
-      }
+          let jsonLine: string;
+          if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            jsonLine = stdout
+              .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+              .trim();
+          } else {
+            // Fallback: last non-empty line (backwards compatibility)
+            const lines = stdout.trim().split('\n');
+            jsonLine = lines[lines.length - 1];
+          }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const logFile = path.join(logsDir, `container-${timestamp}.log`);
-      const isVerbose =
-        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+          const output: ContainerOutput = JSON.parse(jsonLine);
 
-      const logLines = [
-        `=== Container Run Log ===`,
-        `Timestamp: ${new Date().toISOString()}`,
-        `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
-        `Duration: ${duration}ms`,
-        `Exit Code: ${code}`,
-        `Stdout Truncated: ${stdoutTruncated}`,
-        `Stderr Truncated: ${stderrTruncated}`,
-        ``,
-      ];
-
-      const isError = code !== 0;
-
-      if (isVerbose || isError) {
-        logLines.push(
-          `=== Input ===`,
-          JSON.stringify(input, null, 2),
-          ``,
-          `=== Container Args ===`,
-          containerArgs.join(' '),
-          ``,
-          `=== Mounts ===`,
-          mounts
-            .map(
-              (m) =>
-                `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-            )
-            .join('\n'),
-          ``,
-          `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stderr,
-          ``,
-          `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stdout,
-        );
-      } else {
-        logLines.push(
-          `=== Input Summary ===`,
-          `Prompt length: ${input.prompt.length} chars`,
-          `Session ID: ${input.sessionId || 'new'}`,
-          ``,
-          `=== Mounts ===`,
-          mounts
-            .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
-            .join('\n'),
-          ``,
-        );
-      }
-
-      fs.writeFileSync(logFile, logLines.join('\n'));
-      logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
-
-      if (code !== 0) {
-        logger.error(
-          {
-            group: group.name,
-            code,
-            duration,
-            stderr,
-            stdout,
-            logFile,
-          },
-          'Container exited with error',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
-        });
-        return;
-      }
-
-      // Streaming mode: wait for output chain to settle, return completion marker
-      if (onOutput) {
-        outputChain.then(() => {
           logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
+            {
+              group: group.name,
+              duration,
+              status: output.status,
+              hasResult: !!output.result,
+            },
+            'Container completed',
           );
+
+          resolve(output);
+        } catch (err) {
+          logger.error(
+            {
+              group: group.name,
+              stdout,
+              stderr,
+              error: err,
+            },
+            'Failed to parse container output',
+          );
+
           resolve({
-            status: 'success',
+            status: 'error',
             result: null,
-            newSessionId,
+            error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
           });
-        });
-        return;
-      }
-
-      // Legacy mode: parse the last output marker pair from accumulated stdout
-      try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
         }
+      });
 
-        const output: ContainerOutput = JSON.parse(jsonLine);
-
-        logger.info(
-          {
-            group: group.name,
-            duration,
-            status: output.status,
-            hasResult: !!output.result,
-          },
-          'Container completed',
-        );
-
-        resolve(output);
-      } catch (err) {
+      container.on('error', (err) => {
+        clearTimeout(timeout);
         logger.error(
-          {
-            group: group.name,
-            stdout,
-            stderr,
-            error: err,
-          },
-          'Failed to parse container output',
+          { group: group.name, containerName, error: err },
+          'Container spawn error',
         );
-
         resolve({
           status: 'error',
           result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          error: `Container spawn error: ${err.message}`,
         });
-      }
-    });
-
-    container.on('error', (err) => {
-      clearTimeout(timeout);
-      logger.error(
-        { group: group.name, containerName, error: err },
-        'Container spawn error',
-      );
-      resolve({
-        status: 'error',
-        result: null,
-        error: `Container spawn error: ${err.message}`,
       });
     });
-  });
+  }
+}
+
+export class OpenShellRunner implements AgentRunner {
+  async runAgent(
+    group: RegisteredGroup,
+    input: ContainerInput,
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ): Promise<ContainerOutput> {
+    const startTime = Date.now();
+
+    const groupDir = resolveGroupFolderPath(group.folder);
+    fs.mkdirSync(groupDir, { recursive: true });
+
+    // OpenShell active sandbox registry
+    const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+    const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+    activeSandboxes.set(group.folder, containerName);
+
+    // Filter out mounts that don't make sense to upload (like /dev/null)
+    // and convert the rest to --upload arguments.
+    const mounts = buildVolumeMounts(group, input.isMain);
+    const uploadArgs: string[] = [];
+    const downloadArgs: Array<{ src: string; dst: string }> = [];
+
+    for (const mount of mounts) {
+      if (mount.hostPath === '/dev/null') continue;
+      uploadArgs.push('--upload', `${mount.hostPath}:${mount.containerPath}`);
+      // For cleanup/down-sync, we want to download paths that the agent might have mutated.
+      if (!mount.readonly) {
+        downloadArgs.push({ src: mount.containerPath, dst: mount.hostPath });
+      }
+    }
+
+    const containerArgs = [
+      'sandbox',
+      'create',
+      '--name',
+      containerName,
+      '--from',
+      './container',
+      '--no-tty',
+    ];
+
+    if (OPENSHELL_POLICY) {
+      containerArgs.push('--policy', OPENSHELL_POLICY);
+    }
+    if (OPENSHELL_PROVIDERS) {
+      containerArgs.push('--provider', OPENSHELL_PROVIDERS);
+    }
+    if (OPENSHELL_AUTO_PROVIDERS) {
+      containerArgs.push('--auto-providers');
+    }
+
+    // Add env vars via --env (assume openshell sandbox create supports --env)
+    containerArgs.push(
+      '--env',
+      `TZ=${TIMEZONE}`,
+      '--env',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+      '--env',
+      detectAuthMode() === 'api-key'
+        ? 'ANTHROPIC_API_KEY=placeholder'
+        : 'CLAUDE_CODE_OAUTH_TOKEN=placeholder',
+    );
+
+    containerArgs.push(...uploadArgs);
+
+    logger.info(
+      {
+        group: group.name,
+        containerName,
+        isMain: input.isMain,
+        args: containerArgs,
+      },
+      'Spawning OpenShell agent',
+    );
+
+    const logsDir = path.join(groupDir, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+
+    return new Promise((resolve) => {
+      const container = spawn('openshell', containerArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      onProcess(container, containerName);
+
+      let stdout = '';
+      let stderr = '';
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
+
+      container.stdin.write(JSON.stringify(input));
+      container.stdin.end();
+
+      let parseBuffer = '';
+      let newSessionId: string | undefined;
+      let outputChain = Promise.resolve();
+
+      container.stdout.on('data', (data) => {
+        const chunk = data.toString();
+
+        if (!stdoutTruncated) {
+          const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+          if (chunk.length > remaining) {
+            stdout += chunk.slice(0, remaining);
+            stdoutTruncated = true;
+          } else {
+            stdout += chunk;
+          }
+        }
+
+        if (onOutput) {
+          parseBuffer += chunk;
+          let startIdx: number;
+          while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
+            const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
+            if (endIdx === -1) break;
+
+            const jsonStr = parseBuffer
+              .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+              .trim();
+            parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
+
+            try {
+              const parsed: ContainerOutput = JSON.parse(jsonStr);
+              if (parsed.newSessionId) {
+                newSessionId = parsed.newSessionId;
+              }
+              hadStreamingOutput = true;
+              resetTimeout();
+              outputChain = outputChain.then(() => onOutput(parsed));
+            } catch (err) {
+              logger.warn({ err }, 'Failed to parse OpenShell streamed output');
+            }
+          }
+        }
+      });
+
+      container.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        if (stderrTruncated) return;
+        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
+        if (chunk.length > remaining) {
+          stderr += chunk.slice(0, remaining);
+          stderrTruncated = true;
+        } else {
+          stderr += chunk;
+        }
+      });
+
+      let timedOut = false;
+      let hadStreamingOutput = false;
+      const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+      const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+
+      const killOnTimeout = () => {
+        timedOut = true;
+        logger.error({ containerName }, 'OpenShell sandbox timeout');
+        container.kill('SIGKILL');
+      };
+
+      let timeout = setTimeout(killOnTimeout, timeoutMs);
+      const resetTimeout = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(killOnTimeout, timeoutMs);
+      };
+
+      // Cleanup logic
+      const cleanupSandbox = async () => {
+        activeSandboxes.delete(group.folder);
+        // Down-sync mutated paths
+        for (const dl of downloadArgs) {
+          try {
+            // Note: openshell sandbox download puts files into DEST. If downloading a directory,
+            // we must ensure it doesn't nest incorrectly. We may need to be careful with paths.
+            // For now, execSync or await exec to download.
+            execSync(
+              `openshell sandbox download ${containerName} ${dl.src} ${dl.dst}`,
+            );
+          } catch (e) {
+            logger.warn(
+              { err: e, path: dl.src },
+              'Failed to download from OpenShell sandbox',
+            );
+          }
+        }
+        // Destroy sandbox
+        try {
+          execSync(`openshell sandbox delete ${containerName}`);
+        } catch (e) {
+          logger.warn(
+            { err: e, containerName },
+            'Failed to delete OpenShell sandbox',
+          );
+        }
+      };
+
+      container.on('close', async (code) => {
+        clearTimeout(timeout);
+        const duration = Date.now() - startTime;
+
+        await cleanupSandbox();
+
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const logFile = path.join(logsDir, `openshell-${ts}.log`);
+        fs.writeFileSync(
+          logFile,
+          `Code: ${code}\nDuration: ${duration}ms\n\nStdout:\n${stdout}\n\nStderr:\n${stderr}`,
+        );
+
+        if (timedOut) {
+          if (hadStreamingOutput) {
+            outputChain.then(() =>
+              resolve({ status: 'success', result: null, newSessionId }),
+            );
+          } else {
+            resolve({
+              status: 'error',
+              result: null,
+              error: 'OpenShell timeout',
+            });
+          }
+          return;
+        }
+
+        if (code !== 0) {
+          resolve({
+            status: 'error',
+            result: null,
+            error: `OpenShell exit ${code}: ${stderr.slice(-200)}`,
+          });
+          return;
+        }
+
+        if (onOutput) {
+          outputChain.then(() =>
+            resolve({ status: 'success', result: null, newSessionId }),
+          );
+          return;
+        }
+
+        try {
+          const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
+          const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+          const jsonLine =
+            startIdx !== -1 && endIdx > startIdx
+              ? stdout
+                  .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+                  .trim()
+              : stdout.trim().split('\n').pop() || '';
+
+          const output: ContainerOutput = JSON.parse(jsonLine);
+          resolve(output);
+        } catch (err) {
+          resolve({
+            status: 'error',
+            result: null,
+            error: 'Failed to parse OpenShell output',
+          });
+        }
+      });
+
+      container.on('error', (err) => {
+        clearTimeout(timeout);
+        cleanupSandbox();
+        resolve({
+          status: 'error',
+          result: null,
+          error: `OpenShell spawn error: ${err.message}`,
+        });
+      });
+    });
+  }
+}
+
+export async function runContainerAgent(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  const runner =
+    RUNTIME_ENGINE === 'openshell' ? new OpenShellRunner() : new DockerRunner();
+  return runner.runAgent(group, input, onProcess, onOutput);
 }
 
 export function writeTasksSnapshot(
@@ -666,6 +991,23 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+
+  // Mid-flight sync for OpenShell
+  if (RUNTIME_ENGINE === 'openshell') {
+    const sandboxName = activeSandboxes.get(groupFolder);
+    if (sandboxName) {
+      exec(
+        `openshell sandbox upload ${sandboxName} ${tasksFile} /workspace/ipc/current_tasks.json`,
+        (err) => {
+          if (err)
+            logger.warn(
+              { err, groupFolder },
+              'Failed to mid-flight sync tasks to OpenShell sandbox',
+            );
+        },
+      );
+    }
+  }
 }
 
 export interface AvailableGroup {
@@ -704,4 +1046,21 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+
+  // Mid-flight sync for OpenShell
+  if (RUNTIME_ENGINE === 'openshell') {
+    const sandboxName = activeSandboxes.get(groupFolder);
+    if (sandboxName) {
+      exec(
+        `openshell sandbox upload ${sandboxName} ${groupsFile} /workspace/ipc/available_groups.json`,
+        (err) => {
+          if (err)
+            logger.warn(
+              { err, groupFolder },
+              'Failed to mid-flight sync groups to OpenShell sandbox',
+            );
+        },
+      );
+    }
+  }
 }
