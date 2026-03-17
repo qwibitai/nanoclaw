@@ -119,6 +119,13 @@ assert_fails "git commit should not match push" \
   is_git_command "git commit -m test" "push"
 
 echo ""
+echo "=== detect_gh_repo ==="
+
+# Test with the real repo (we're in a nanoclaw worktree)
+REPO=$(detect_gh_repo)
+assert_eq "detects repo from origin" "Garsson-io/nanoclaw" "$REPO"
+
+echo ""
 echo "=== get_pr_changed_files (with mocked gh/git) ==="
 
 # Create temp dir with mock commands
@@ -138,6 +145,10 @@ chmod +x "$MOCK_DIR/gh"
 
 cat > "$MOCK_DIR/git" << 'MOCK'
 #!/bin/bash
+if echo "$@" | grep -q "remote get-url"; then
+  echo "https://github.com/Garsson-io/nanoclaw.git"
+  exit 0
+fi
 if echo "$@" | grep -q "diff --name-only"; then
   echo "src/index.ts"
   echo "src/config.ts"

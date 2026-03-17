@@ -56,6 +56,14 @@ extract_pr_number() {
   echo "$cmd_line" | sed -n "s/.*gh[[:space:]]\{1,\}pr[[:space:]]\{1,\}${subcommand}[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p" | head -1
 }
 
+# Detect the GitHub repo (owner/name) from the origin remote URL.
+# Returns empty string if detection fails.
+detect_gh_repo() {
+  local url
+  url=$(git remote get-url origin 2>/dev/null || true)
+  echo "$url" | sed -n 's|.*github\.com[:/]\([^/]*/[^/.]*\).*|\1|p' | head -1
+}
+
 # Get changed file list for a PR command.
 # For merge: uses gh pr diff (actual PR files on GitHub).
 # For create: uses git diff (local branch vs base).
@@ -65,13 +73,20 @@ get_pr_changed_files() {
   local is_merge="$2"
 
   if [ "$is_merge" = true ]; then
-    local pr_num
+    local pr_num repo_flag
     pr_num=$(extract_pr_number "$cmd_line" "merge")
+    # Always specify --repo to avoid resolving to wrong remote (e.g., upstream)
+    local repo
+    repo=$(detect_gh_repo)
+    repo_flag=""
+    if [ -n "$repo" ]; then
+      repo_flag="--repo $repo"
+    fi
     local result=""
     if [ -n "$pr_num" ]; then
-      result=$(gh pr diff "$pr_num" --name-only 2>/dev/null || true)
+      result=$(gh pr diff "$pr_num" --name-only $repo_flag 2>/dev/null || true)
     else
-      result=$(gh pr diff --name-only 2>/dev/null || true)
+      result=$(gh pr diff --name-only $repo_flag 2>/dev/null || true)
     fi
     if [ -z "$result" ]; then
       echo "⚠️  Could not fetch PR diff from GitHub, falling back to local git diff" >&2
