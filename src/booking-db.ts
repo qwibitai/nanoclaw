@@ -175,9 +175,9 @@ export function getStaffByTenant(tenantId: string): StaffMember[] {
 }
 
 export function getStaffById(id: string): StaffMember | undefined {
-  const row = bookingDb
-    .prepare('SELECT * FROM staff WHERE id = ?')
-    .get(id) as Parameters<typeof rowToStaff>[0] | undefined;
+  const row = bookingDb.prepare('SELECT * FROM staff WHERE id = ?').get(id) as
+    | Parameters<typeof rowToStaff>[0]
+    | undefined;
   return row ? rowToStaff(row) : undefined;
 }
 
@@ -306,9 +306,7 @@ export function cancelBooking(id: string, phone: string): boolean {
 
 // --- Customers ---
 
-export function upsertCustomer(
-  customer: Omit<Customer, 'id'>,
-): Customer {
+export function upsertCustomer(customer: Omit<Customer, 'id'>): Customer {
   const id = `cust_${customer.tenant_id}_${customer.phone}`;
   bookingDb
     .prepare(
@@ -347,7 +345,7 @@ export function getAvailableSlots(
   staffId?: string,
 ): AvailableSlot[] {
   const allStaff = staffId
-    ? [getStaffById(staffId)].filter(Boolean) as StaffMember[]
+    ? ([getStaffById(staffId)].filter(Boolean) as StaffMember[])
     : getStaffByTenant(tenantId);
 
   const now = new Date();
