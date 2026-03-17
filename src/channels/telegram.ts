@@ -69,6 +69,8 @@ export interface BotPoolDeps {
 
 const DEFAULT_DEPS: BotPoolDeps = {
   createApi: (token: string) => new Api(token),
+  // Telegram rate-limits setMyName; wait after rename so the new name
+  // is visible before the first message arrives in the chat.
   renameDelayMs: 2000,
 };
 

@@ -16,7 +16,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import { initBotPool } from './channels/telegram.js';
+import { initBotPool, sendPoolMessage } from './channels/telegram.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -1045,6 +1045,11 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendPoolMessage:
+      TELEGRAM_BOT_POOL.length > 0
+        ? (jid, text, sender, groupFolder) =>
+            sendPoolMessage(jid, text, sender, groupFolder)
+        : undefined,
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
