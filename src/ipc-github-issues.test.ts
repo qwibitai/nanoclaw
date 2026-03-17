@@ -29,10 +29,11 @@ vi.mock('./cases.js', async (importOriginal) => {
 });
 
 import { createGitHubIssue } from './github-issues.js';
-import { insertCase } from './cases.js';
+import { insertCase, generateCaseName } from './cases.js';
 
 const mockedCreateGitHubIssue = vi.mocked(createGitHubIssue);
 const mockedInsertCase = vi.mocked(insertCase);
+const mockedGenerateCaseName = vi.mocked(generateCaseName);
 
 const MAIN_GROUP: RegisteredGroup = {
   name: 'Main',
@@ -431,6 +432,58 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
         github_issue: 34,
         type: 'dev',
       }),
+    );
+  });
+});
+
+// INVARIANT: case_create passes shortName to generateCaseName when provided.
+// SUT: processTaskIpc case_create handler
+// VERIFICATION: Mock generateCaseName is called with (description, shortName).
+describe('case_create passes shortName to generateCaseName', () => {
+  beforeEach(() => {
+    vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
+    vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
+    mockedGenerateCaseName.mockClear();
+  });
+
+  test('shortName is passed through to generateCaseName', async () => {
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Convert photo to CMYK for Demarco',
+        shortName: 'Demarco T. CMYK Magnificent',
+        caseType: 'work',
+        chatJid: 'tg:222',
+        requestId: 'req-short-1',
+      } as any,
+      'telegram_work',
+      false,
+      deps,
+    );
+
+    expect(mockedGenerateCaseName).toHaveBeenCalledWith(
+      'Convert photo to CMYK for Demarco',
+      'Demarco T. CMYK Magnificent',
+    );
+  });
+
+  test('undefined shortName falls back gracefully', async () => {
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Research market data',
+        caseType: 'work',
+        chatJid: 'tg:222',
+        requestId: 'req-short-2',
+      } as any,
+      'telegram_work',
+      false,
+      deps,
+    );
+
+    expect(mockedGenerateCaseName).toHaveBeenCalledWith(
+      'Research market data',
+      undefined,
     );
   });
 });

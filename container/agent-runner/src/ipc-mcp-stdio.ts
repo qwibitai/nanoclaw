@@ -628,10 +628,16 @@ Case types:
 • "work" — Uses existing tooling for productive work (research, analysis, writing). Gets a scratch directory.
 • "dev" — Improves tooling/workflows to make future work better. Gets a git worktree. Use sparingly.`,
   {
+    short_name: z
+      .string()
+      .optional()
+      .describe(
+        'A cute case name: "{Client FirstName} {Last Initial}. {OneWordTask} {FunAdjective}". Use the client/user\'s name, one word for the task, and one cute irrelevant adjective. Examples: "Aviad R. Banner Fun", "Moshe A. Runner Incredible", "Sarah K. Logo Sparkly", "Demarco T. CMYK Magnificent".',
+      ),
     description: z
       .string()
       .describe(
-        'Brief description of what this case is about (used to generate the case name)',
+        'Brief description of what this case is about (shown in case status)',
       ),
     case_type: z
       .enum(['work', 'dev'])
@@ -643,6 +649,7 @@ Case types:
 
     const data = {
       type: 'case_create',
+      shortName: args.short_name,
       description: args.description,
       caseType: args.case_type || 'work',
       chatJid,

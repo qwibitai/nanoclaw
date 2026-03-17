@@ -947,6 +947,7 @@ export async function processTaskIpc(
     case 'case_create': {
       const d = data as unknown as {
         description: string;
+        shortName?: string;
         caseType?: string;
         chatJid?: string;
         initiator?: string;
@@ -986,7 +987,7 @@ export async function processTaskIpc(
 
       const caseType = d.caseType === 'dev' ? 'dev' : 'work';
       const id = generateCaseId();
-      const name = generateCaseName(d.description);
+      const name = generateCaseName(d.description, d.shortName);
       const now = new Date().toISOString();
 
       // Resolve chatJid: use provided value, or find from registered groups

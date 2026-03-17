@@ -567,7 +567,10 @@ export function generateCaseId(): string {
   return `case-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function generateCaseName(description: string): string {
+export function generateCaseName(
+  description: string,
+  shortName?: string,
+): string {
   const now = new Date();
   const datePrefix = [
     String(now.getFullYear()).slice(2),
@@ -578,13 +581,14 @@ export function generateCaseName(description: string): string {
     String(now.getMinutes()).padStart(2, '0'),
   ].join('');
 
-  // Generate slug from description
-  const slug = description
+  // Prefer short name if provided, fall back to description
+  const source = shortName || description;
+  const slug = source
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
-    .slice(0, 40)
+    .slice(0, 30)
     .replace(/-$/, '');
 
   return `${datePrefix}-${slug}`;
