@@ -2,6 +2,7 @@
 // 各インポートにより、チャネルモジュールの registerChannel() 呼び出しがトリガーされます。
 
 // discord
+import './discord.js';
 
 // gmail
 

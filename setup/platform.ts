@@ -1,5 +1,5 @@
 /**
- * Cross-platform detection utilities for NanoClaw setup.
+ * NanoClaw セットアップ用のクロスプラットフォーム検出ユーティリティ。
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -30,18 +30,18 @@ export function isRoot(): boolean {
 }
 
 export function isHeadless(): boolean {
-  // No display server available
+  // ディスプレイサーバーが利用可能か
   if (getPlatform() === 'linux') {
     return !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
   }
-  // macOS is never headless in practice (even SSH sessions can open URLs)
+  // macOS は実質的に常にヘッドレスではない（SSH セッションからでも URL を開くことが可能）
   return false;
 }
 
 export function hasSystemd(): boolean {
   if (getPlatform() !== 'linux') return false;
   try {
-    // Check if systemd is PID 1
+    // systemd が PID 1 か確認
     const init = fs.readFileSync('/proc/1/comm', 'utf-8').trim();
     return init === 'systemd';
   } catch {
@@ -50,8 +50,8 @@ export function hasSystemd(): boolean {
 }
 
 /**
- * Open a URL in the default browser, cross-platform.
- * Returns true if the command was attempted, false if no method available.
+ * クロスプラットフォームでデフォルトブラウザを使用して URL を開きます。
+ * コマンドが試行された場合は true、利用可能な手段がない場合は false を返します。
  */
 export function openBrowser(url: string): boolean {
   try {
@@ -61,7 +61,7 @@ export function openBrowser(url: string): boolean {
       return true;
     }
     if (platform === 'linux') {
-      // Try xdg-open first, then wslview for WSL
+      // 最初に xdg-open を試し、次に WSL の場合は wslview を試す
       if (commandExists('xdg-open')) {
         execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: 'ignore' });
         return true;
@@ -70,7 +70,7 @@ export function openBrowser(url: string): boolean {
         execSync(`wslview ${JSON.stringify(url)}`, { stdio: 'ignore' });
         return true;
       }
-      // WSL without wslview: try cmd.exe
+      // wslview のない WSL: cmd.exe を試す
       if (isWSL()) {
         try {
           execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, {
@@ -78,12 +78,12 @@ export function openBrowser(url: string): boolean {
           });
           return true;
         } catch {
-          // cmd.exe not available
+          // cmd.exe が利用不可
         }
       }
     }
   } catch {
-    // Command failed
+    // コマンド失敗
   }
   return false;
 }
