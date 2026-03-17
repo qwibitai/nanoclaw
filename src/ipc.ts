@@ -3,6 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { authorizeCaseCreation } from './case-auth.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   createCaseWorkspace,
@@ -986,7 +987,17 @@ export async function processTaskIpc(
         }
       }
 
-      const caseType = d.caseType === 'dev' ? 'dev' : 'work';
+      // Authoritative gate: determines case type and authorization status.
+      // All case type + approval decisions go through case-auth.ts — do NOT duplicate here.
+      const requestedType = d.caseType === 'dev' ? 'dev' : 'work';
+      const authDecision = authorizeCaseCreation({
+        requestedType,
+        description: d.description,
+        sourceGroup,
+        isMain,
+      });
+
+      const { caseType, autoPromoted } = authDecision;
       const id = generateCaseId();
       const name = generateCaseName(d.description, d.shortName);
       const now = new Date().toISOString();
@@ -999,6 +1010,73 @@ export async function processTaskIpc(
         )?.[0] ||
         '';
 
+      // Unauthorized dev case → route through approval gate
+      if (authDecision.status === 'suggested') {
+        const suggested = suggestDevCase({
+          groupFolder: sourceGroup,
+          chatJid: resolvedChatJid,
+          description: autoPromoted
+            ? `[auto-promoted work→dev] ${d.description}`
+            : d.description,
+          sourceWorkCaseId: 'direct-request',
+          initiator: d.initiator || 'agent',
+          initiatorChannel: undefined,
+          githubIssue: d.githubIssue,
+        });
+
+        logger.info(
+          {
+            caseId: suggested.id,
+            name: suggested.name,
+            sourceGroup,
+            autoPromoted,
+            reason: authDecision.reason,
+          },
+          'Dev case routed to approval gate',
+        );
+
+        // Write result so MCP tool can read it back
+        const resultDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'case_results',
+        );
+        fs.mkdirSync(resultDir, { recursive: true });
+        const resultFile = (data as Record<string, unknown>).requestId
+          ? `${(data as Record<string, unknown>).requestId}.json`
+          : `${suggested.id}.json`;
+        fs.writeFileSync(
+          path.join(resultDir, resultFile),
+          JSON.stringify({
+            id: suggested.id,
+            name: suggested.name,
+            workspace_path: '',
+            github_issue: suggested.github_issue,
+            issue_url: null,
+            status: 'suggested',
+            needs_approval: true,
+          }),
+        );
+
+        // Notify main group about pending approval
+        const mainJid = Object.entries(registeredGroups).find(
+          ([, g]) => g.isMain,
+        )?.[0];
+        if (mainJid) {
+          deps
+            .sendMessage(
+              mainJid,
+              `🔒 Dev case needs approval: ${suggested.name}\n${d.description.slice(0, 200)}\n(from: ${sourceGroup}${autoPromoted ? ', auto-promoted from work' : ''})\nReply "approve" to activate.`,
+            )
+            .catch(() => {
+              /* non-critical */
+            });
+        }
+        break;
+      }
+
+      // Authorized case — create immediately as active
       // Dev cases auto-create a GitHub issue for tracking (unless one was provided)
       let githubIssue = d.githubIssue ?? null;
       let issueUrl: string | null = null;
@@ -1063,7 +1141,15 @@ export async function processTaskIpc(
 
       insertCase(newCase);
       logger.info(
-        { caseId: id, name, caseType, sourceGroup, githubIssue },
+        {
+          caseId: id,
+          name,
+          caseType,
+          sourceGroup,
+          githubIssue,
+          autoPromoted,
+          reason: authDecision.reason,
+        },
         'Case created via IPC',
       );
 

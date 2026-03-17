@@ -61,6 +61,8 @@ Before moving on, reflect on the work that led to this PR:
 2. **What level is this fix?**
    - L1 (instructions only) → L2 (hooks/checks) → L3 (mechanistic)
    - Is this the RIGHT level, or should it be escalated?
+   - Remember: MCP tools are Level 3 enforcement points. If the fix
+     is "better instructions", ask if it should be mechanistic instead.
 
 3. **Has this type of failure happened before?**
    - If yes → the previous level wasn't enough, escalate
@@ -70,9 +72,22 @@ Before moving on, reflect on the work that led to this PR:
    - What slowed you down? Missing docs? Unclear architecture?
    - Would a hook, tool, or architectural change prevent this?
 
-5. **Action items:**
-   - File kaizen issues for any improvements identified
-   - Use: gh issue create --repo Garsson-io/kaizen --label kaizen
+5. **⚡ MAKE IT ACTIONABLE — this is the most important step:**
+   Reflection without action is decoration. For each improvement
+   you identified above, you MUST do one of:
+   - **Create a dev case** via `case_suggest_dev` tool if the fix
+     requires code changes (hooks, MCP tools, architecture)
+   - **File a kaizen issue** via `create_github_issue` tool if the
+     fix needs design discussion or is out of scope right now
+   - **Fix it now** in this PR if it's small enough to include
+   - If none apply, explicitly state why no action is needed.
+   Do NOT just list ideas — every insight must become tracked work
+   or an explicit "no action needed" with a reason.
+
+   # TODO(kaizen-L3): This action step is still Level 1 (instructions).
+   # Escalate to Level 3: after this reflection prompt, verify the agent
+   # actually called case_suggest_dev or create_github_issue. If it didn't
+   # and listed improvements, block or re-prompt. See Garsson-io/kaizen#57.
 
 Ensure the PR description includes the Kaizen section:
   ## Kaizen
@@ -80,7 +95,7 @@ Ensure the PR description includes the Kaizen section:
   - **Fix level:** L[1/2/3]
   - **Repeat failure?** [yes/no]
   - **Escalation needed?** [yes/no]
-  - **Backlog issue:** [link or N/A]
+  - **Action taken:** [dev case / kaizen issue / fixed in PR / no action needed]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REFLECT
 fi
@@ -97,6 +112,8 @@ The PR has been merged. Reflect on the outcome:
 1. **Was the fix at the right level?**
    - L1 fixes often recur — should this be escalated to L2/L3?
    - Did this fix address symptoms or root cause?
+   - MCP tools are Level 3 enforcement points — if this was L1,
+     could the MCP tool enforce it mechanistically?
 
 2. **Are any kaizen issues now resolved?**
    - Check: https://github.com/Garsson-io/kaizen/issues
@@ -111,7 +128,17 @@ The PR has been merged. Reflect on the outcome:
    - Should any learnings go into CLAUDE.md or docs/?
    - Is there a pattern here that other agents should know?
 
-5. **Cleanup:**
+5. **⚡ MAKE IT ACTIONABLE:**
+   If you identified that this fix should be escalated, or found
+   friction worth fixing — act NOW before cleanup:
+   - **Create a dev case** via `case_suggest_dev` for code improvements
+   - **File a kaizen issue** via `create_github_issue` for design work
+   - Do NOT move to cleanup until actions are filed or explicitly skipped
+
+   # TODO(kaizen-L3): Verify agent actually created actionable items
+   # when reflection identified improvements. See Garsson-io/kaizen#57.
+
+6. **Cleanup:**
    - Delete the merged branch (local + remote)
    - Remove the worktree if applicable
    - Update any related kaizen issues
