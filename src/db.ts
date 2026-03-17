@@ -298,7 +298,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, media_type
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -325,7 +325,7 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, media_type
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -334,6 +334,16 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+
+export function getMessageMediaBlob(id: string, chatJid: string): Buffer | null {
+  const row = db
+    .prepare(
+      'SELECT media_blob FROM messages WHERE id = ? AND chat_jid = ? AND media_blob IS NOT NULL',
+    )
+    .get(id, chatJid) as { media_blob: Buffer } | undefined;
+  return row?.media_blob || null;
 }
 
 export function createTask(

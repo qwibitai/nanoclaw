@@ -23,6 +23,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getMessageMediaBlob,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -128,6 +129,27 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /**
+ * Save image attachments from messages to disk so the agent container can access them.
+ * Sets msg.imagePath to the container-accessible path for each image.
+ */
+function saveMessageImages(messages: NewMessage[], groupFolder: string): void {
+  for (const msg of messages) {
+    if (msg.media_type) {
+      const blob = getMessageMediaBlob(msg.id, msg.chat_jid);
+      if (blob) {
+        const ext = (msg.media_type.split('/')[1] || 'jpg').replace(/[^a-z0-9]/g, '');
+        const filename = `${msg.id}.${ext}`;
+        const imageDir = path.join(GROUPS_DIR, groupFolder, 'images');
+        fs.mkdirSync(imageDir, { recursive: true });
+        fs.writeFileSync(path.join(imageDir, filename), blob);
+        msg.imagePath = `/workspace/group/images/${filename}`;
+        logger.info({ msgId: msg.id, path: msg.imagePath }, 'Saved image for agent access');
+      }
+    }
+  }
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
@@ -141,6 +163,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
+
+  // Save any image attachments to disk for agent access
+  saveMessageImages(missedMessages, group.folder);
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -376,6 +401,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
+          saveMessageImages(messagesToSend, group.folder);
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {

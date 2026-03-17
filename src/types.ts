@@ -52,6 +52,7 @@ export interface NewMessage {
   is_bot_message?: boolean;
   media_type?: string;   // "image/png", "image/jpeg", "image/webp"
   media_blob?: Buffer;   // raw image bytes
+  imagePath?: string;    // container-accessible path to saved image file
 }
 
 export interface ScheduledTask {
