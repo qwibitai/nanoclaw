@@ -3,7 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock registry (registerChannel runs at import time)
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
+import { registerChannel } from './registry.js';
 import { GmailChannel, GmailChannelOpts } from './gmail.js';
+
+// INVARIANT: Importing gmail.ts registers the 'gmail' channel factory via registerChannel.
+// This is what happens when src/channels/index.ts imports './gmail.js'.
+// SUT: gmail.ts module-level registerChannel call
+// VERIFICATION: registerChannel mock is called with 'gmail' and a factory function
+it('registers gmail channel on import', () => {
+  expect(registerChannel).toHaveBeenCalledWith('gmail', expect.any(Function));
+});
 
 function makeOpts(overrides?: Partial<GmailChannelOpts>): GmailChannelOpts {
   return {
