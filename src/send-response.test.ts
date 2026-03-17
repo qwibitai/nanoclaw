@@ -20,24 +20,40 @@ beforeEach(() => {
 });
 
 describe('sendResponse', () => {
-  // INVARIANT: Telegram JID + pool available routes through pool
-  // SUT: sendResponse routing branch
-  test('routes through pool for telegram JID when pool available', async () => {
+  // INVARIANT: Telegram group JID + pool available routes through pool
+  // SUT: sendResponse routing branch for group chats
+  test('routes through pool for telegram group JID when pool available', async () => {
     await sendResponse(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
       'telegram_main',
-      'Andy',
+      'Garsson',
       makeDeps({ withPool: true }),
     );
 
     expect(sendPoolMessage).toHaveBeenCalledWith(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
-      'Andy',
+      'Garsson',
       'telegram_main',
     );
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  // INVARIANT: Telegram private chat uses direct send even with pool available
+  // SUT: sendResponse private chat guard
+  // In private chats, each bot has its own conversation — pool bots reply in a different chat
+  test('uses direct send for telegram private chat', async () => {
+    await sendResponse(
+      'tg:1211743323',
+      'hello',
+      'telegram_main',
+      'Garsson',
+      makeDeps({ withPool: true }),
+    );
+
+    expect(sendPoolMessage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith('tg:1211743323', 'hello');
   });
 
   // INVARIANT: Pool returning false triggers fallback to direct send
@@ -46,15 +62,15 @@ describe('sendResponse', () => {
     sendPoolMessage.mockResolvedValue(false);
 
     await sendResponse(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
       'telegram_main',
-      'Andy',
+      'Garsson',
       makeDeps({ withPool: true }),
     );
 
     expect(sendPoolMessage).toHaveBeenCalled();
-    expect(sendMessage).toHaveBeenCalledWith('tg:123', 'hello');
+    expect(sendMessage).toHaveBeenCalledWith('tg:-1001234567', 'hello');
   });
 
   // INVARIANT: Non-telegram JID always uses direct send even with pool
@@ -64,7 +80,7 @@ describe('sendResponse', () => {
       'wa:123@g.us',
       'hello',
       'whatsapp_main',
-      'Andy',
+      'Garsson',
       makeDeps({ withPool: true }),
     );
 
@@ -76,14 +92,14 @@ describe('sendResponse', () => {
   // SUT: sendResponse without pool dep
   test('uses direct send when pool not configured', async () => {
     await sendResponse(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
       'telegram_main',
-      'Andy',
+      'Garsson',
       makeDeps({ withPool: false }),
     );
 
-    expect(sendMessage).toHaveBeenCalledWith('tg:123', 'hello');
+    expect(sendMessage).toHaveBeenCalledWith('tg:-1001234567', 'hello');
   });
 
   // INVARIANT: Pool error propagates to caller
@@ -93,10 +109,10 @@ describe('sendResponse', () => {
 
     await expect(
       sendResponse(
-        'tg:123',
+        'tg:-1001234567',
         'hello',
         'telegram_main',
-        'Andy',
+        'Garsson',
         makeDeps({ withPool: true }),
       ),
     ).rejects.toThrow('Telegram API error');
@@ -106,7 +122,7 @@ describe('sendResponse', () => {
   // SUT: sendResponse sender argument forwarding
   test('passes senderName to pool as sender', async () => {
     await sendResponse(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
       'telegram_main',
       'Researcher',
@@ -114,7 +130,7 @@ describe('sendResponse', () => {
     );
 
     expect(sendPoolMessage).toHaveBeenCalledWith(
-      'tg:123',
+      'tg:-1001234567',
       'hello',
       'Researcher',
       'telegram_main',
@@ -125,17 +141,17 @@ describe('sendResponse', () => {
   // SUT: sendResponse with empty string
   test('sends empty text without dropping', async () => {
     await sendResponse(
-      'tg:123',
+      'tg:-1001234567',
       '',
       'telegram_main',
-      'Andy',
+      'Garsson',
       makeDeps({ withPool: true }),
     );
 
     expect(sendPoolMessage).toHaveBeenCalledWith(
-      'tg:123',
+      'tg:-1001234567',
       '',
-      'Andy',
+      'Garsson',
       'telegram_main',
     );
   });
