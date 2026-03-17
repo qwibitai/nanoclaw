@@ -108,31 +108,62 @@ CREATE TABLE IF NOT EXISTS memory_meta (
 
 ### Step 3: Integrate MCP server in container-runner.ts
 
-Find where other MCP servers are configured (look for `mcpServers` object, or where github/google-calendar MCP configs are defined). Add the memory MCP server following the exact same pattern:
+Two changes are needed: **a bind mount** to get the binary into the container, and **an env var** to pass `MEMORY_DIR`.
+
+> **Critical: mount path must be `/app/dist/`, not `/usr/local/lib/`**
+> Node.js ESM module resolution walks up directories from the file's location to find `node_modules`. From `/app/dist/` it reaches `/app/node_modules/` (where `@modelcontextprotocol/sdk` lives). From `/usr/local/lib/` there is no `node_modules/` ancestor — the MCP server silently fails to start.
+
+**1. Add the binary mount** — in `buildVolumeMounts`, add:
 
 ```typescript
-// Add to the mcpServers configuration for each container
-const memoryMcpServer = {
-  command: 'node',
-  args: [path.join(PROJECT_ROOT, 'dist', 'memory-mcp-server.js')],
-  env: {
-    MEMORY_DIR: path.join(HOME_DIR, 'nanoclaw-data', 'memory', groupFolder),
-  }
-};
+// Memory MCP: mount compiled server into /app/dist/ so ESM resolution finds node_modules
+const memoryMcpBin = path.join(process.cwd(), 'dist', 'memory-mcp-server.js');
+if (fs.existsSync(memoryMcpBin)) {
+  mounts.push({
+    hostPath: memoryMcpBin,
+    containerPath: '/app/dist/memory-mcp-server.js',
+    readonly: true,
+  });
+}
+```
+
+**2. Mount the per-group memory directory** — so the MCP server can read/write memory files:
+
+```typescript
+// Mount per-group memory directory for the memory MCP server
+const memoryDir = path.join(os.homedir(), 'nanoclaw-data', 'memory', groupFolder);
+if (fs.existsSync(memoryDir)) {
+  mounts.push({
+    hostPath: memoryDir,
+    containerPath: '/workspace/extra/memory',
+    readonly: false,
+  });
+}
 ```
 
 **IMPORTANT:** The memory MCP server must be added for ALL groups, not just telegram_main. Use the `groupFolder` variable from the container runner context. If a group's memory directory doesn't exist yet, the MCP server should create it on startup.
 
-**IMPORTANT:** The compiled JS file path depends on the build setup. Check where other `.ts` files in `src/` compile to (likely `dist/`). Use the same path pattern.
-
-**IMPORTANT:** Do NOT use `.mcp.json` — it doesn't work for containerized agents. Follow the pattern used by GitHub and Google Calendar MCP servers in `container-runner.ts`.
+**IMPORTANT:** Do NOT use `.mcp.json` — it doesn't work for containerized agents.
 
 ### Step 4: Register tools in agent-runner
 
 In `container/agent-runner/src/index.ts`:
 
-1. Add `memory` to the `mcpServers` object (follow the exact pattern used for `github` and `google_calendar`).
-2. Add `mcp__memory__memory_search`, `mcp__memory__memory_write`, `mcp__memory__memory_get` to the `allowedTools` array. OR use the wildcard pattern `mcp__memory__*` if other MCP tools use wildcards.
+1. Add `memory` to the `mcpServers` object using `/app/dist/memory-mcp-server.js` as the command path:
+
+```typescript
+...(fs.existsSync('/app/dist/memory-mcp-server.js') ? {
+  memory: {
+    command: 'node',
+    args: ['/app/dist/memory-mcp-server.js'],
+    env: { MEMORY_DIR: '/workspace/extra/memory' },
+  },
+} : {}),
+```
+
+2. Add `mcp__memory__*` to the `allowedTools` array (wildcard covers all three tools).
+
+> **Why `/app/dist/`?** The container's Node.js ESM resolution walks up from the file's directory to find `node_modules`. From `/app/dist/` it reaches `/app/node_modules/` where `@modelcontextprotocol/sdk` is installed. Using `/usr/local/lib/` breaks this resolution silently — the MCP server fails to start with no useful error.
 
 ### Step 5: Implement pre-compaction flush in src/index.ts
 
