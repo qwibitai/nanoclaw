@@ -53,34 +53,53 @@ describe('github_issue storage', () => {
 //   confirm only non-terminal statuses are returned.
 describe('getActiveCasesByGithubIssue', () => {
   it('returns active cases matching the issue number', () => {
-    insertCase(makeCase({ id: 'active-16', status: 'active', github_issue: 16 }));
-    insertCase(makeCase({ id: 'backlog-16', status: 'backlog', github_issue: 16 }));
+    insertCase(
+      makeCase({ id: 'active-16', status: 'active', github_issue: 16 }),
+    );
+    insertCase(
+      makeCase({ id: 'backlog-16', status: 'backlog', github_issue: 16 }),
+    );
 
     const results = getActiveCasesByGithubIssue(16);
     expect(results).toHaveLength(2);
-    expect(results.map((c) => c.id).sort()).toEqual(['active-16', 'backlog-16']);
+    expect(results.map((c) => c.id).sort()).toEqual([
+      'active-16',
+      'backlog-16',
+    ]);
   });
 
   it('excludes done/reviewed/pruned cases', () => {
     insertCase(makeCase({ id: 'done-16', status: 'done', github_issue: 16 }));
-    insertCase(makeCase({ id: 'reviewed-16', status: 'reviewed', github_issue: 16 }));
-    insertCase(makeCase({ id: 'pruned-16', status: 'pruned', github_issue: 16 }));
+    insertCase(
+      makeCase({ id: 'reviewed-16', status: 'reviewed', github_issue: 16 }),
+    );
+    insertCase(
+      makeCase({ id: 'pruned-16', status: 'pruned', github_issue: 16 }),
+    );
 
     const results = getActiveCasesByGithubIssue(16);
     expect(results).toHaveLength(0);
   });
 
   it('includes suggested and blocked cases', () => {
-    insertCase(makeCase({ id: 'suggested-16', status: 'suggested', github_issue: 16 }));
-    insertCase(makeCase({ id: 'blocked-16', status: 'blocked', github_issue: 16 }));
+    insertCase(
+      makeCase({ id: 'suggested-16', status: 'suggested', github_issue: 16 }),
+    );
+    insertCase(
+      makeCase({ id: 'blocked-16', status: 'blocked', github_issue: 16 }),
+    );
 
     const results = getActiveCasesByGithubIssue(16);
     expect(results).toHaveLength(2);
   });
 
   it('does not return cases linked to a different issue', () => {
-    insertCase(makeCase({ id: 'other-issue', status: 'active', github_issue: 99 }));
-    insertCase(makeCase({ id: 'no-issue', status: 'active', github_issue: null }));
+    insertCase(
+      makeCase({ id: 'other-issue', status: 'active', github_issue: 99 }),
+    );
+    insertCase(
+      makeCase({ id: 'no-issue', status: 'active', github_issue: null }),
+    );
 
     const results = getActiveCasesByGithubIssue(16);
     expect(results).toHaveLength(0);
