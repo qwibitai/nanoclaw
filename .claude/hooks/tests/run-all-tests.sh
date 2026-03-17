@@ -59,6 +59,8 @@ UNIT_TESTS=(
   "$SCRIPT_DIR/test-check-verification.sh"
   "$SCRIPT_DIR/test-enforce-case-worktree.sh"
   "$SCRIPT_DIR/test-enforce-pr-review.sh"
+  "$SCRIPT_DIR/test-enforce-pr-review-stop.sh"
+  "$SCRIPT_DIR/test-enforce-pr-review-tools.sh"
   "$SCRIPT_DIR/test-pr-review-loop.sh"
   "$SCRIPT_DIR/test-kaizen-merge-notify.sh"
   "$SCRIPT_DIR/test-send-telegram-ipc.sh"
@@ -69,6 +71,7 @@ BASH_HARNESS_TESTS=(
   "$SCRIPT_DIR/test-schema-validation.sh"
   "$SCRIPT_DIR/test-real-world-commands.sh"
   "$SCRIPT_DIR/test-integration-parallel-hooks.sh"
+  "$SCRIPT_DIR/test-review-enforcement-e2e.sh"
 )
 
 # Python harness test (preferred — cleaner, faster, better assertions)

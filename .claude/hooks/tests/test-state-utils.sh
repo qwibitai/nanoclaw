@@ -130,6 +130,61 @@ assert_not_contains "f3 (other branch) excluded" "f3" "$LISTED"
 assert_not_contains "f4 (no BRANCH) excluded" "f4" "$LISTED"
 assert_not_contains "f5 (stale) excluded" "f5" "$LISTED"
 
+echo ""
+echo "=== find_needs_review_state: returns first needs_review ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/10\nROUND=2\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_passed"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/11\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_needs"
+
+# INVARIANT: find_needs_review_state returns the PR with needs_review, not passed
+# SUT: find_needs_review_state
+REVIEW_INFO=$(find_needs_review_state)
+if [ $? -eq 0 ]; then
+  echo "  PASS: find_needs_review_state found a review"
+  ((PASS++))
+else
+  echo "  FAIL: find_needs_review_state returned failure"
+  ((FAIL++))
+fi
+
+assert_contains "returns correct PR URL" "nanoclaw/pull/11" "$REVIEW_INFO"
+assert_contains "returns round" "1" "$REVIEW_INFO"
+
+echo ""
+echo "=== find_needs_review_state: returns failure when none pending ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/10\nROUND=2\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_passed"
+
+# INVARIANT: find_needs_review_state returns 1 when no needs_review exists
+# SUT: find_needs_review_state with only passed state
+REVIEW_INFO=$(find_needs_review_state)
+if [ $? -ne 0 ]; then
+  echo "  PASS: find_needs_review_state returns failure when none pending"
+  ((PASS++))
+else
+  echo "  FAIL: find_needs_review_state returned success when none pending"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== find_needs_review_state: ignores other branch ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/20\nROUND=1\nSTATUS=needs_review\nBRANCH=wt/other\n' > "$STATE_DIR/f_other"
+
+# INVARIANT: find_needs_review_state skips other branches
+# SUT: find_needs_review_state with cross-worktree state
+REVIEW_INFO=$(find_needs_review_state)
+if [ $? -ne 0 ]; then
+  echo "  PASS: find_needs_review_state ignores other branch"
+  ((PASS++))
+else
+  echo "  FAIL: find_needs_review_state matched other branch (cross-worktree contamination!)"
+  ((FAIL++))
+fi
+
 teardown
 
 print_results
