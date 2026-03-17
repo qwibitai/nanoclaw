@@ -2,10 +2,9 @@
  * Case Router — routes incoming messages to the correct case using Haiku.
  * Only activates when a group has 2+ active cases.
  */
-import { request as httpsRequest } from 'https';
-import { request as httpRequest, RequestOptions } from 'http';
+import { request as httpRequest } from 'http';
 
-import { readEnvFile } from './env.js';
+import { CREDENTIAL_PROXY_PORT } from './config.js';
 import { logger } from './logger.js';
 import { Case } from './cases.js';
 
@@ -106,26 +105,10 @@ Respond with JSON only (no markdown):
   }
 }
 
-// ---------------------------------------------------------------------------
-// Haiku API call (direct, bypassing credential proxy)
-// ---------------------------------------------------------------------------
+// Haiku API call (routed through credential proxy)
 
-async function callHaiku(prompt: string): Promise<string> {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL']);
-
-  const apiKey = secrets.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      'ANTHROPIC_API_KEY not configured — cannot route messages via Haiku',
-    );
-  }
-
-  const baseUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      'https://api.anthropic.com',
-  );
-
+/** @internal — exported for testing */
+export async function callHaiku(prompt: string): Promise<string> {
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 150,
@@ -133,22 +116,18 @@ async function callHaiku(prompt: string): Promise<string> {
   });
 
   return new Promise((resolve, reject) => {
-    const isHttps = baseUrl.protocol === 'https:';
-    const makeRequest = isHttps ? httpsRequest : httpRequest;
-
-    const req = makeRequest(
+    const req = httpRequest(
       {
-        hostname: baseUrl.hostname,
-        port: baseUrl.port || (isHttps ? 443 : 80),
+        hostname: '127.0.0.1',
+        port: CREDENTIAL_PROXY_PORT,
         path: '/v1/messages',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
           'Content-Length': Buffer.byteLength(body),
         },
-      } as RequestOptions,
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
@@ -178,9 +157,7 @@ async function callHaiku(prompt: string): Promise<string> {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Utility
-// ---------------------------------------------------------------------------
 
 function timeSince(date: Date): string {
   const diffMs = Date.now() - date.getTime();
