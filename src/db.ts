@@ -193,6 +193,17 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  try {
+    database.exec(
+      `ALTER TABLE tenants ADD COLUMN group_folder TEXT NOT NULL DEFAULT ''`,
+    );
+    database.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_folder ON tenants(group_folder) WHERE group_folder != ''`,
+    );
+  } catch {
+    /* columns already exist */
+  }
 }
 
 export function initDatabase(): void {

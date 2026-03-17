@@ -27,7 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { getTenantByJid } from './booking-db.js';
+import { getTenantByFolder } from './booking-db.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -292,7 +292,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const tenant = getTenantByJid(input.chatJid);
+  const tenant = getTenantByFolder(group.folder);
   const containerArgs = buildContainerArgs(mounts, containerName, tenant?.id);
 
   logger.debug(

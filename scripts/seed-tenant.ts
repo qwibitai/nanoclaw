@@ -34,6 +34,7 @@ const tenantId = randomUUID();
 const tenant: Tenant = {
   id: tenantId,
   whatsapp_jid: TEST_JID,
+  group_folder: 'whatsapp_main',
   business_name: 'Frizeria Test',
   category: 'barbershop',
   config: {

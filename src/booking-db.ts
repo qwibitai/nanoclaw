@@ -32,6 +32,7 @@ const DAY_MAP: Record<string, string> = {
 function rowToTenant(row: {
   id: string;
   whatsapp_jid: string;
+  group_folder: string;
   business_name: string;
   category: string;
   config_json: string;
@@ -41,6 +42,7 @@ function rowToTenant(row: {
   return {
     id: row.id,
     whatsapp_jid: row.whatsapp_jid,
+    group_folder: row.group_folder,
     business_name: row.business_name,
     category: row.category as Tenant['category'],
     config: JSON.parse(row.config_json) as TenantConfig,
@@ -102,12 +104,13 @@ function rowToBooking(row: {
 export function createTenant(tenant: Tenant): void {
   bookingDb
     .prepare(
-      `INSERT INTO tenants (id, whatsapp_jid, business_name, category, config_json, active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tenants (id, whatsapp_jid, group_folder, business_name, category, config_json, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       tenant.id,
       tenant.whatsapp_jid,
+      tenant.group_folder,
       tenant.business_name,
       tenant.category,
       JSON.stringify(tenant.config),
@@ -121,6 +124,14 @@ export function getTenantByJid(jid: string): Tenant | undefined {
   const row = bookingDb
     .prepare('SELECT * FROM tenants WHERE whatsapp_jid = ?')
     .get(jid) as Parameters<typeof rowToTenant>[0] | undefined;
+  return row ? rowToTenant(row) : undefined;
+}
+
+export function getTenantByFolder(folder: string): Tenant | undefined {
+  if (!bookingDb) return undefined;
+  const row = bookingDb
+    .prepare('SELECT * FROM tenants WHERE group_folder = ?')
+    .get(folder) as Parameters<typeof rowToTenant>[0] | undefined;
   return row ? rowToTenant(row) : undefined;
 }
 
