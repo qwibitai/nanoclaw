@@ -74,3 +74,30 @@ list_state_files_for_current_worktree() {
     fi
   done
 }
+
+# Find the first state file with STATUS=needs_review for the current branch.
+# Outputs "PR_URL|ROUND" on success, returns 1 if none found.
+#
+# Used by enforcement hooks (Stop, PreToolUse) to check if a review gate
+# is active. Centralized here to avoid duplication across hooks.
+#
+# Usage:
+#   REVIEW_INFO=$(find_needs_review_state)
+#   if [ $? -eq 0 ]; then
+#     PR_URL=$(echo "$REVIEW_INFO" | cut -d'|' -f1)
+#     ROUND=$(echo "$REVIEW_INFO" | cut -d'|' -f2)
+#   fi
+find_needs_review_state() {
+  while IFS= read -r f; do
+    local status
+    status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ "$status" = "needs_review" ]; then
+      local pr_url round
+      pr_url=$(grep -E '^PR_URL=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      round=$(grep -E '^ROUND=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      echo "$pr_url|$round"
+      return 0
+    fi
+  done < <(list_state_files_for_current_worktree)
+  return 1
+}

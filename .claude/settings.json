@@ -49,6 +49,21 @@
             "type": "command",
             "command": "./.claude/hooks/enforce-worktree-writes.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/hooks/enforce-pr-review-tools.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/enforce-pr-review-tools.sh",
+            "timeout": 10
           }
         ]
       }
@@ -73,6 +88,11 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/enforce-pr-review-stop.sh",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "./.claude/hooks/verify-before-stop.sh",
