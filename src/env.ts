@@ -3,10 +3,9 @@ import path from 'path';
 import { logger } from './logger.js';
 
 /**
- * Parse the .env file and return values for the requested keys.
- * Does NOT load anything into process.env — callers decide what to
- * do with the values. This keeps secrets out of the process environment
- * so they don't leak to child processes.
+ * .env ファイルをパースし、要求されたキーの値を返します。
+ * process.env には何もロードしません — 取得した値をどう扱うかは呼び出し側が決定します。
+ * これにより、シークレットがプロセス環境外に保持され、子プロセスへの漏洩を防ぎます。
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
   const envFile = path.join(process.cwd(), '.env');
