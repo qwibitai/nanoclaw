@@ -251,6 +251,13 @@ function buildContainerArgs(
     args.push('-e', `NANOCLAW_CASE_TYPE=${caseInput.caseType || ''}`);
   }
 
+  // Dev cases get GitHub access so they can push branches and open PRs.
+  // Work cases remain sandboxed with no GitHub credentials.
+  if (caseInput?.caseType === 'dev' && process.env.GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${process.env.GITHUB_TOKEN}`);
+    args.push('-e', `GH_TOKEN=${process.env.GITHUB_TOKEN}`);
+  }
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',

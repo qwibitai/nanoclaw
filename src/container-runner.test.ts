@@ -217,6 +217,87 @@ describe('agent-runner source sync', () => {
   });
 });
 
+describe('GitHub token injection for dev cases', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  async function runWithCaseAndCaptureArgs(
+    caseType: 'dev' | 'work',
+  ): Promise<string[]> {
+    const fs = await import('fs');
+    const { spawn } = await import('child_process');
+
+    vi.spyOn(fs.default, 'existsSync').mockReturnValue(true);
+    vi.spyOn(fs.default, 'readdirSync').mockReturnValue([]);
+    vi.spyOn(fs.default, 'readFileSync').mockReturnValue('{}');
+
+    const input = {
+      ...testInput,
+      isMain: false,
+      caseId: 'case-123',
+      caseName: 'test-case',
+      caseType,
+    };
+    const resultPromise = runContainerAgent(
+      testGroup,
+      input,
+      () => {},
+      async () => {},
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const lastCall = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
+    return lastCall[1] as string[];
+  }
+
+  it('injects GITHUB_TOKEN and GH_TOKEN for dev cases when token is set', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+    const args = await runWithCaseAndCaptureArgs('dev');
+
+    const ghTokenIdx = args.indexOf('GITHUB_TOKEN=ghp_test_token_123');
+    expect(ghTokenIdx).toBeGreaterThan(-1);
+    expect(args[ghTokenIdx - 1]).toBe('-e');
+
+    const ghCliTokenIdx = args.indexOf('GH_TOKEN=ghp_test_token_123');
+    expect(ghCliTokenIdx).toBeGreaterThan(-1);
+    expect(args[ghCliTokenIdx - 1]).toBe('-e');
+  });
+
+  it('does NOT inject GITHUB_TOKEN for work cases', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+    const args = await runWithCaseAndCaptureArgs('work');
+
+    const hasGhToken = args.some(
+      (a: string) => typeof a === 'string' && a.includes('GITHUB_TOKEN='),
+    );
+    expect(hasGhToken).toBe(false);
+  });
+
+  it('does NOT inject GITHUB_TOKEN when env var is not set', async () => {
+    delete process.env.GITHUB_TOKEN;
+    const args = await runWithCaseAndCaptureArgs('dev');
+
+    const hasGhToken = args.some(
+      (a: string) => typeof a === 'string' && a.includes('GITHUB_TOKEN='),
+    );
+    expect(hasGhToken).toBe(false);
+  });
+});
+
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
