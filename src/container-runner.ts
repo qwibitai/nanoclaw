@@ -27,6 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { getTenantByJid } from './booking-db.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -216,6 +217,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  tenantId?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -237,6 +239,17 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Booking API connection — available to all tenant containers
+  const bookingApiUrl = process.env.BOOKING_API_URL;
+  const bookingApiKey = process.env.BOOKING_API_KEY;
+  if (bookingApiUrl && bookingApiKey) {
+    args.push('-e', `BOOKING_API_URL=${bookingApiUrl}`);
+    args.push('-e', `BOOKING_API_KEY=${bookingApiKey}`);
+  }
+  if (tenantId) {
+    args.push('-e', `TENANT_ID=${tenantId}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -279,7 +292,8 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const tenant = getTenantByJid(input.chatJid);
+  const containerArgs = buildContainerArgs(mounts, containerName, tenant?.id);
 
   logger.debug(
     {

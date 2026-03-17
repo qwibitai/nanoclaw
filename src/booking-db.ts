@@ -117,6 +117,7 @@ export function createTenant(tenant: Tenant): void {
 }
 
 export function getTenantByJid(jid: string): Tenant | undefined {
+  if (!bookingDb) return undefined;
   const row = bookingDb
     .prepare('SELECT * FROM tenants WHERE whatsapp_jid = ?')
     .get(jid) as Parameters<typeof rowToTenant>[0] | undefined;
