@@ -34,6 +34,8 @@ vi.mock('fs', async () => {
       cpSync: vi.fn(),
       readFileSync: vi.fn(() => '{}'),
       unlinkSync: vi.fn(),
+      readdirSync: vi.fn(() => []),
+      statSync: vi.fn(() => ({ mtimeMs: Date.now() })),
     },
   };
 });
@@ -137,6 +139,8 @@ const mockFs = fs as unknown as {
   cpSync: ReturnType<typeof vi.fn>;
   readFileSync: ReturnType<typeof vi.fn>;
   unlinkSync: ReturnType<typeof vi.fn>;
+  readdirSync: ReturnType<typeof vi.fn>;
+  statSync: ReturnType<typeof vi.fn>;
 };
 
 describe('readRouterResult', () => {
@@ -170,14 +174,53 @@ describe('readRouterResult', () => {
   });
 
   /**
-   * INVARIANT: readRouterResult throws when no result file exists
+   * INVARIANT: readRouterResult throws when no result files exist at all
    * SUT: readRouterResult error path
    * VERIFICATION: Error is thrown with descriptive message
    */
-  it('throws when result file does not exist', () => {
+  it('throws when no result files exist', () => {
     mockFs.existsSync.mockReturnValue(false);
+    mockFs.readdirSync.mockReturnValue([]);
 
     expect(() => readRouterResult('req-missing')).toThrow('no result file');
+  });
+
+  /**
+   * INVARIANT: When the expected result file doesn't exist but the agent wrote
+   * a result with a different request_id, the fallback finds it.
+   * SUT: readRouterResult fallback path
+   * VERIFICATION: Reads from the most recent .json file in results dir
+   */
+  it('falls back to most recent result file when expected file is missing', () => {
+    const decision = {
+      requestId: 'agent-made-up-id',
+      decision: 'route_to_case',
+      caseId: 'case-1',
+      caseName: 'fix-auth',
+      confidence: 0.85,
+      reason: 'Auth related',
+    };
+
+    // First call: expected file doesn't exist. Second call: resultsDir exists.
+    mockFs.existsSync
+      .mockReturnValueOnce(false) // expected file
+      .mockReturnValueOnce(false) // retry 1
+      .mockReturnValueOnce(false) // retry 2
+      .mockReturnValueOnce(false) // retry 3
+      .mockReturnValueOnce(false) // retry 4
+      .mockReturnValueOnce(false) // retry 5
+      .mockReturnValueOnce(false) // final check for expected file
+      .mockReturnValueOnce(true); // resultsDir exists
+
+    mockFs.readdirSync.mockReturnValue(['agent-made-up-id.json']);
+    mockFs.statSync.mockReturnValue({ mtimeMs: Date.now() });
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(decision));
+
+    const result = readRouterResult('route-1773738908605-pwnz');
+
+    expect(result.decision).toBe('route_to_case');
+    expect(result.caseId).toBe('case-1');
+    expect(result.confidence).toBe(0.85);
   });
 
   /**

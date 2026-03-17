@@ -84,14 +84,17 @@ describe('buildRouterPrompt', () => {
   });
 
   /**
-   * INVARIANT: Prompt must list request_id as a tool parameter
+   * INVARIANT: Prompt must include the actual requestId value so the agent
+   * echoes it back in the route_decision tool call. Without this, the host
+   * cannot find the result file (it looks for {requestId}.json).
    * SUT: buildRouterPrompt output
-   * VERIFICATION: The request_id parameter is mentioned in the tool instructions
+   * VERIFICATION: The exact requestId value appears in the prompt text
    */
-  it('lists request_id as a tool parameter', () => {
-    const request = makeRequest({ requestId: 'route-abc-123' });
+  it('includes the actual requestId value in the prompt', () => {
+    const request = makeRequest({ requestId: 'route-1773738908605-pwnz' });
     const prompt = buildRouterPrompt(request);
 
+    expect(prompt).toContain('route-1773738908605-pwnz');
     expect(prompt).toContain('request_id');
   });
 

@@ -35,6 +35,25 @@ const ROUTER_TIMEOUT_MS = 60_000; // 60 seconds — first container run includes
 const ROUTER_GROUP_FOLDER = '__router__';
 
 /**
+ * Remove stale result files from previous routing requests.
+ * Called before spawning a new router container to prevent the fallback
+ * from finding results from a previous (timed-out) request.
+ */
+function cleanStaleResults(): void {
+  const resultsDir = path.join(DATA_DIR, 'ipc', ROUTER_GROUP_FOLDER, 'results');
+  try {
+    if (!fs.existsSync(resultsDir)) return;
+    const files = fs.readdirSync(resultsDir).filter((f) => f.endsWith('.json'));
+    for (const file of files) {
+      try {
+        fs.unlinkSync(path.join(resultsDir, file));
+        logger.debug({ file }, 'Cleaned stale router result file');
+      } catch {}
+    }
+  } catch {}
+}
+
+/**
  * Route a message using the container-based router.
  * Spawns a one-shot container that runs the Claude agent SDK with a routing prompt.
  * Returns a RouterResponse with the routing decision.
@@ -54,6 +73,10 @@ export async function routeMessage(
   );
 
   try {
+    // Clean stale result files before spawning — prevents the fallback
+    // from picking up results from previous routing requests.
+    cleanStaleResults();
+
     // Run the container — the agent calls the route_decision MCP tool,
     // which writes the structured result to an IPC file
     await runRouterContainer(prompt, request.requestId);
@@ -96,14 +119,37 @@ export function readRouterResult(requestId: string): RouterResponse {
     }
   }
 
+  // Fallback: if the expected file doesn't exist, look for any .json file
+  // in the results dir. The agent may have used a different request_id than
+  // what the host generated (the prompt includes the ID but the agent may
+  // not echo it back exactly).
+  let actualFile = resultFile;
   if (!fs.existsSync(resultFile)) {
-    throw new Error(`Router produced no result file for ${requestId}`);
+    const files = fs.existsSync(resultsDir)
+      ? fs.readdirSync(resultsDir).filter((f) => f.endsWith('.json'))
+      : [];
+    if (files.length > 0) {
+      // Pick the most recently modified file
+      const sorted = files
+        .map((f) => ({
+          name: f,
+          mtime: fs.statSync(path.join(resultsDir, f)).mtimeMs,
+        }))
+        .sort((a, b) => b.mtime - a.mtime);
+      actualFile = path.join(resultsDir, sorted[0].name);
+      logger.warn(
+        { requestId, foundFile: sorted[0].name },
+        'Router result file mismatch — agent used different request_id, using fallback',
+      );
+    } else {
+      throw new Error(`Router produced no result file for ${requestId}`);
+    }
   }
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(actualFile, 'utf-8'));
     // Clean up the result file
-    fs.unlinkSync(resultFile);
+    fs.unlinkSync(actualFile);
 
     return {
       requestId: parsed.requestId || requestId,

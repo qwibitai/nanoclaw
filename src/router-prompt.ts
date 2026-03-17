@@ -53,6 +53,7 @@ Rules:
 - When using direct_answer, provide the answer text in the directAnswer field
 
 You MUST call the \`route_decision\` tool exactly once with your decision. Do NOT output raw JSON — use the tool.
+The request_id for this routing request is: "${request.requestId}"
 The tool parameters are: request_id, decision, case_id, case_name, confidence, reason, direct_answer.`;
 }
 
