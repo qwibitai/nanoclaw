@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "hook-development",
+  "owner": "anthropics",
+  "repo": "claude-code",
+  "path": "plugins/plugin-dev/skills/hook-development",
+  "branch": "main",
+  "sha": "9d89f677df7c43ead68cc64e8b9aa2b5bfb2cd0a",
+  "source": "manual"
+}
