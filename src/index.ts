@@ -677,7 +677,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     effort = resolveEffort(undefined, getSessionEffort(sessionKey));
   }
 
-  const latestMessageText = missedMessages[missedMessages.length - 1]?.content ?? '';
+  const latestMessageText =
+    missedMessages[missedMessages.length - 1]?.content ?? '';
   const memoryBlock = await getMemoryBlock(group.folder, latestMessageText);
 
   const prompt =

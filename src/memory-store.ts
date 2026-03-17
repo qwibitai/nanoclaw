@@ -37,7 +37,16 @@ export function saveMemory(
   const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date().toISOString();
 
-  insertMemory({ id, group_folder: groupFolder, type, name, description, content, created_at: now, updated_at: now });
+  insertMemory({
+    id,
+    group_folder: groupFolder,
+    type,
+    name,
+    description,
+    content,
+    created_at: now,
+    updated_at: now,
+  });
 
   // Generate embedding asynchronously — memory is queryable via keyword immediately
   embedAndStore(id, `${name}: ${description}\n\n${content}`);
@@ -79,7 +88,10 @@ export function formatMemoryBlock(memories: Memory[]): string {
   return `<memories>\n${items}\n</memories>\n`;
 }
 
-export async function getMemoryBlock(groupFolder: string, queryText: string): Promise<string> {
+export async function getMemoryBlock(
+  groupFolder: string,
+  queryText: string,
+): Promise<string> {
   try {
     // Fast-path: skip embedding call if group has no memories
     if (countMemories(groupFolder) === 0) return '';
@@ -94,7 +106,10 @@ export async function getMemoryBlock(groupFolder: string, queryText: string): Pr
           memories = recentMemories(groupFolder, TOP_K);
         }
       } catch (err) {
-        logger.warn({ err }, 'vec_memories search failed, falling back to recent');
+        logger.warn(
+          { err },
+          'vec_memories search failed, falling back to recent',
+        );
         memories = recentMemories(groupFolder, TOP_K);
       }
     } else {

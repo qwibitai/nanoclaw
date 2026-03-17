@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { _initTestDatabase, listMemories, searchMemoriesKeyword } from './db.js';
+import {
+  _initTestDatabase,
+  listMemories,
+  searchMemoriesKeyword,
+} from './db.js';
 import {
   deleteMemory,
   formatMemoryBlock,
@@ -20,7 +24,13 @@ beforeEach(() => {
 
 describe('saveMemory', () => {
   it('saves a memory and returns an id', () => {
-    const id = saveMemory('group1', 'user', 'Dave role', 'role desc', 'Dave is Head of Data');
+    const id = saveMemory(
+      'group1',
+      'user',
+      'Dave role',
+      'role desc',
+      'Dave is Head of Data',
+    );
     expect(id).toMatch(/^mem-/);
   });
 
@@ -40,7 +50,13 @@ describe('saveMemory', () => {
   });
 
   it('sets correct type, name, description, content', () => {
-    const id = saveMemory('group1', 'feedback', 'no mocks', 'why', 'avoid mocking DB in tests');
+    const id = saveMemory(
+      'group1',
+      'feedback',
+      'no mocks',
+      'why',
+      'avoid mocking DB in tests',
+    );
     const [m] = listMemories('group1');
     expect(m.id).toBe(id);
     expect(m.type).toBe('feedback');
@@ -61,7 +77,7 @@ describe('deleteMemory', () => {
     expect(deleteMemory('group1', 'mem-fake-id')).toBe(false);
   });
 
-  it('cannot delete another group\'s memory', () => {
+  it("cannot delete another group's memory", () => {
     const id = saveMemory('group1', 'user', 'private', 'desc', 'content');
     expect(deleteMemory('group2', id)).toBe(false);
     expect(listMemories('group1')).toHaveLength(1);
@@ -80,7 +96,7 @@ describe('updateMemory', () => {
     expect(updateMemory('group1', 'mem-fake', { content: 'x' })).toBe(false);
   });
 
-  it('cannot update another group\'s memory', () => {
+  it("cannot update another group's memory", () => {
     const id = saveMemory('group1', 'user', 'name', 'desc', 'original');
     expect(updateMemory('group2', id, { content: 'hacked' })).toBe(false);
     const [m] = listMemories('group1');
@@ -121,7 +137,13 @@ describe('formatMemoryBlock', () => {
   });
 
   it('escapes XML special characters in content', () => {
-    saveMemory('group1', 'user', 'xss', 'desc', '<script>alert("xss")</script>');
+    saveMemory(
+      'group1',
+      'user',
+      'xss',
+      'desc',
+      '<script>alert("xss")</script>',
+    );
     const mems = listMemories('group1');
     const block = formatMemoryBlock(mems);
     expect(block).not.toContain('<script>');
@@ -144,7 +166,7 @@ describe('getMemoryBlock', () => {
 
   it('returns a memory block when memories exist', async () => {
     saveMemory('group1', 'user', 'Dave role', 'desc', 'Head of Data');
-    const block = await getMemoryBlock('group1', 'what is Dave\'s role');
+    const block = await getMemoryBlock('group1', "what is Dave's role");
     expect(block).toContain('<memories>');
     expect(block).toContain('Dave role');
   });

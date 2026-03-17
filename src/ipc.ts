@@ -43,7 +43,12 @@ import { logger } from './logger.js';
 import { Memory, RegisteredGroup } from './types.js';
 
 const BACKLOG_NOT_OWNED_MSG = 'Backlog item not found or not owned by group';
-const VALID_MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const;
+const VALID_MEMORY_TYPES = [
+  'user',
+  'feedback',
+  'project',
+  'reference',
+] as const;
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, sender?: string) => Promise<void>;
@@ -788,7 +793,10 @@ export async function processTaskIpc(
           data.memoryDescription,
           data.memoryContent,
         );
-        logger.info({ memId, sourceGroup, type: resolvedType }, 'Memory saved via IPC');
+        logger.info(
+          { memId, sourceGroup, type: resolvedType },
+          'Memory saved via IPC',
+        );
       } else {
         logger.warn({ data }, 'save_memory missing required fields');
       }
@@ -798,9 +806,15 @@ export async function processTaskIpc(
       if (data.memoryId) {
         const deleted = deleteMemory(sourceGroup, data.memoryId);
         if (deleted) {
-          logger.info({ memoryId: data.memoryId, sourceGroup }, 'Memory deleted via IPC');
+          logger.info(
+            { memoryId: data.memoryId, sourceGroup },
+            'Memory deleted via IPC',
+          );
         } else {
-          logger.warn({ memoryId: data.memoryId, sourceGroup }, 'delete_memory: not found or not owned');
+          logger.warn(
+            { memoryId: data.memoryId, sourceGroup },
+            'delete_memory: not found or not owned',
+          );
         }
       } else {
         logger.warn({ data }, 'delete_memory missing memoryId');
@@ -811,17 +825,26 @@ export async function processTaskIpc(
       if (data.memoryId && data.memoryFields) {
         const updated = updateMemory(sourceGroup, data.memoryId, {
           ...(data.memoryFields.type !== undefined && {
-            type: (
-              VALID_MEMORY_TYPES.includes(data.memoryFields.type as Memory['type'])
-                ? data.memoryFields.type
-                : 'reference'
-            ) as Memory['type'],
+            type: (VALID_MEMORY_TYPES.includes(
+              data.memoryFields.type as Memory['type'],
+            )
+              ? data.memoryFields.type
+              : 'reference') as Memory['type'],
           }),
-          ...(data.memoryFields.name !== undefined && { name: data.memoryFields.name }),
-          ...(data.memoryFields.description !== undefined && { description: data.memoryFields.description }),
-          ...(data.memoryFields.content !== undefined && { content: data.memoryFields.content }),
+          ...(data.memoryFields.name !== undefined && {
+            name: data.memoryFields.name,
+          }),
+          ...(data.memoryFields.description !== undefined && {
+            description: data.memoryFields.description,
+          }),
+          ...(data.memoryFields.content !== undefined && {
+            content: data.memoryFields.content,
+          }),
         });
-        logger.info({ memoryId: data.memoryId, sourceGroup, updated }, 'Memory updated via IPC');
+        logger.info(
+          { memoryId: data.memoryId, sourceGroup, updated },
+          'Memory updated via IPC',
+        );
       } else {
         logger.warn({ data }, 'update_memory missing memoryId or memoryFields');
       }
@@ -1200,7 +1223,11 @@ function processQueryIpc(
         });
         break;
       }
-      const results = searchMemoriesKeyword(sourceGroup, data.query, data.limit ?? 6);
+      const results = searchMemoriesKeyword(
+        sourceGroup,
+        data.query,
+        data.limit ?? 6,
+      );
       writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
         status: 'ok',
         memories: results,

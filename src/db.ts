@@ -383,7 +383,10 @@ export function initDatabase(): void {
     loadSqliteVec(db);
     vecLoaded = true;
   } catch (err) {
-    logger.warn({ err }, 'sqlite-vec extension failed to load — vector search disabled');
+    logger.warn(
+      { err },
+      'sqlite-vec extension failed to load — vector search disabled',
+    );
   }
   createSchema(db);
 
@@ -1798,19 +1801,36 @@ export function updateMemoryFields(
   const sets: string[] = ['updated_at = ?'];
   const values: unknown[] = [new Date().toISOString()];
 
-  if (fields.type !== undefined) { sets.push('type = ?'); values.push(fields.type); }
-  if (fields.name !== undefined) { sets.push('name = ?'); values.push(fields.name); }
-  if (fields.description !== undefined) { sets.push('description = ?'); values.push(fields.description); }
-  if (fields.content !== undefined) { sets.push('content = ?'); values.push(fields.content); }
+  if (fields.type !== undefined) {
+    sets.push('type = ?');
+    values.push(fields.type);
+  }
+  if (fields.name !== undefined) {
+    sets.push('name = ?');
+    values.push(fields.name);
+  }
+  if (fields.description !== undefined) {
+    sets.push('description = ?');
+    values.push(fields.description);
+  }
+  if (fields.content !== undefined) {
+    sets.push('content = ?');
+    values.push(fields.content);
+  }
 
   values.push(id, groupFolder);
-  const result = db.prepare(
-    `UPDATE memories SET ${sets.join(', ')} WHERE id = ? AND group_folder = ?`,
-  ).run(...values);
+  const result = db
+    .prepare(
+      `UPDATE memories SET ${sets.join(', ')} WHERE id = ? AND group_folder = ?`,
+    )
+    .run(...values);
   return result.changes > 0;
 }
 
-export function getMemoryById(groupFolder: string, id: string): Memory | undefined {
+export function getMemoryById(
+  groupFolder: string,
+  id: string,
+): Memory | undefined {
   return db
     .prepare(
       `SELECT id, group_folder, type, name, description, content, created_at, updated_at
@@ -1835,7 +1855,11 @@ export function countMemories(groupFolder: string): number {
   return row.c;
 }
 
-export function searchMemoriesKeyword(groupFolder: string, query: string, topK = 6): Memory[] {
+export function searchMemoriesKeyword(
+  groupFolder: string,
+  query: string,
+  topK = 6,
+): Memory[] {
   const term = `%${query}%`;
   return db
     .prepare(

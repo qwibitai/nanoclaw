@@ -12,7 +12,9 @@ function getApiKey(): string | null {
   return apiKey;
 }
 
-export async function generateEmbedding(text: string): Promise<Float32Array | null> {
+export async function generateEmbedding(
+  text: string,
+): Promise<Float32Array | null> {
   const key = getApiKey();
   if (!key) return null;
 
@@ -23,7 +25,7 @@ export async function generateEmbedding(text: string): Promise<Float32Array | nu
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${key}`,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ input: text, model: EMBEDDING_MODEL }),
@@ -35,7 +37,9 @@ export async function generateEmbedding(text: string): Promise<Float32Array | nu
       throw new Error(`OpenAI embeddings ${response.status}: ${body}`);
     }
 
-    const data = await response.json() as { data: Array<{ embedding: number[] }> };
+    const data = (await response.json()) as {
+      data: Array<{ embedding: number[] }>;
+    };
     return new Float32Array(data.data[0].embedding);
   } catch {
     return null;
