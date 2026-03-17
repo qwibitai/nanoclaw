@@ -72,7 +72,8 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS sessions (
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
-      last_used TEXT
+      last_used TEXT,
+      created_at TEXT
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
@@ -94,9 +95,14 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  // Add last_used column to sessions if it doesn't exist
+  // Add last_used and created_at columns to sessions if they don't exist
   try {
     database.exec(`ALTER TABLE sessions ADD COLUMN last_used TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT`);
   } catch {
     /* column already exists */
   }
@@ -529,9 +535,15 @@ export function getSession(groupFolder: string): string | undefined {
 }
 
 export function setSession(groupFolder: string, sessionId: string): void {
+  const now = new Date().toISOString();
+  // Preserve created_at if session row already exists (session ID changed but session continues)
+  const existing = db
+    .prepare('SELECT created_at FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { created_at: string | null } | undefined;
+  const createdAt = existing?.created_at || now;
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id, last_used) VALUES (?, ?, ?)',
-  ).run(groupFolder, sessionId, new Date().toISOString());
+    'INSERT OR REPLACE INTO sessions (group_folder, session_id, last_used, created_at) VALUES (?, ?, ?, ?)',
+  ).run(groupFolder, sessionId, now, createdAt);
 }
 
 export function touchSession(groupFolder: string): void {
@@ -541,11 +553,14 @@ export function touchSession(groupFolder: string): void {
   );
 }
 
-export function getSessionLastUsed(groupFolder: string): string | undefined {
+export function getSessionTimestamps(groupFolder: string): { lastUsed?: string; createdAt?: string } {
   const row = db
-    .prepare('SELECT last_used FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { last_used: string | null } | undefined;
-  return row?.last_used ?? undefined;
+    .prepare('SELECT last_used, created_at FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { last_used: string | null; created_at: string | null } | undefined;
+  return {
+    lastUsed: row?.last_used ?? undefined,
+    createdAt: row?.created_at ?? undefined,
+  };
 }
 
 export function deleteSession(groupFolder: string): void {

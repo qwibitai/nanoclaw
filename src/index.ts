@@ -40,7 +40,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   deleteSession,
-  getSessionLastUsed,
+  getSessionTimestamps,
   setSession,
   touchSession,
   storeChatMetadata,
@@ -338,17 +338,28 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
 
-  // Expire sessions older than 2 hours to prevent unbounded context growth
-  const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+  // Expire sessions to prevent unbounded context growth.
+  // Two thresholds:
+  //   IDLE: no activity for 2 hours → expire (prevents stale sessions)
+  //   MAX_AGE: session older than 4 hours total → expire (prevents active sessions from growing forever)
+  const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
+  const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
   let sessionId: string | undefined = sessions[group.folder];
   if (sessionId) {
-    const lastUsed = getSessionLastUsed(group.folder);
-    const age = lastUsed ? Date.now() - new Date(lastUsed).getTime() : Infinity; // No timestamp = treat as expired (migrated from old format)
-    if (age > SESSION_MAX_AGE_MS) {
+    const { lastUsed, createdAt } = getSessionTimestamps(group.folder);
+    const idleAge = lastUsed ? Date.now() - new Date(lastUsed).getTime() : Infinity;
+    const totalAge = createdAt ? Date.now() - new Date(createdAt).getTime() : Infinity;
+    const expireReason =
+      totalAge > SESSION_MAX_AGE_MS ? 'max age (4h)' :
+      idleAge > SESSION_IDLE_MS ? 'idle (2h)' :
+      null;
+    if (expireReason) {
       logger.info(
         {
           group: group.name,
-          ageMinutes: lastUsed ? Math.round(age / 60000) : 'unknown',
+          reason: expireReason,
+          idleMinutes: lastUsed ? Math.round(idleAge / 60000) : 'unknown',
+          totalMinutes: createdAt ? Math.round(totalAge / 60000) : 'unknown',
         },
         'Session expired, starting fresh',
       );
