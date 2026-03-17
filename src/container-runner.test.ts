@@ -87,7 +87,11 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  buildContainerArgs,
+  ContainerOutput,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -112,6 +116,37 @@ function emitOutputMarker(
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
+// Shared helper: run runContainerAgent and capture the spawn args
+async function runAndCaptureSpawnArgs(
+  inputOverrides: Record<string, unknown> = {},
+): Promise<string[]> {
+  const fs = await import('fs');
+  const { spawn } = await import('child_process');
+
+  vi.spyOn(fs.default, 'existsSync').mockReturnValue(true);
+  vi.spyOn(fs.default, 'readdirSync').mockReturnValue([]);
+  vi.spyOn(fs.default, 'readFileSync').mockReturnValue('{}');
+
+  const input = { ...testInput, ...inputOverrides };
+  const resultPromise = runContainerAgent(
+    testGroup,
+    input,
+    () => {},
+    async () => {},
+  );
+
+  await vi.advanceTimersByTimeAsync(10);
+  emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+  await vi.advanceTimersByTimeAsync(10);
+  fakeProc.emit('close', 0);
+  await vi.advanceTimersByTimeAsync(10);
+  await resultPromise;
+
+  const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+  const lastCall = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
+  return lastCall[1] as string[];
+}
+
 describe('global CLAUDE.md mount', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -122,37 +157,8 @@ describe('global CLAUDE.md mount', () => {
     vi.useRealTimers();
   });
 
-  async function runAndCaptureSpawnArgs(isMain: boolean): Promise<string[]> {
-    const fs = await import('fs');
-    const { spawn } = await import('child_process');
-
-    vi.spyOn(fs.default, 'existsSync').mockReturnValue(true);
-    vi.spyOn(fs.default, 'readdirSync').mockReturnValue([]);
-    vi.spyOn(fs.default, 'readFileSync').mockReturnValue('{}');
-
-    const input = { ...testInput, isMain };
-    const resultPromise = runContainerAgent(
-      testGroup,
-      input,
-      () => {},
-      async () => {},
-    );
-
-    await vi.advanceTimersByTimeAsync(10);
-    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
-    await vi.advanceTimersByTimeAsync(10);
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-
-    // spawn is called with (command, args) — return the args
-    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
-    const lastCall = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
-    return lastCall[1] as string[];
-  }
-
   it('mounts /workspace/global for main groups', async () => {
-    const args = await runAndCaptureSpawnArgs(true);
+    const args = await runAndCaptureSpawnArgs({ isMain: true });
     const globalMountArg = args.find(
       (a: string) => typeof a === 'string' && a.includes('/workspace/global'),
     );
@@ -161,7 +167,7 @@ describe('global CLAUDE.md mount', () => {
   });
 
   it('mounts /workspace/global for non-main groups', async () => {
-    const args = await runAndCaptureSpawnArgs(false);
+    const args = await runAndCaptureSpawnArgs({ isMain: false });
     const globalMountArg = args.find(
       (a: string) => typeof a === 'string' && a.includes('/workspace/global'),
     );
@@ -214,6 +220,84 @@ describe('agent-runner source sync', () => {
     expect(agentRunnerCalls.length).toBeGreaterThanOrEqual(1);
     // Verify it uses recursive: true
     expect(agentRunnerCalls[0][2]).toEqual({ recursive: true });
+  });
+});
+
+// INVARIANT: Dev case containers receive GITHUB_TOKEN and GH_TOKEN env vars
+//            when the host has GITHUB_TOKEN set.
+// INVARIANT: Work case containers NEVER receive GitHub credentials,
+//            regardless of host environment.
+// INVARIANT: No GitHub credentials are injected when host has no GITHUB_TOKEN.
+// SUT: buildContainerArgs in container-runner.ts
+// VERIFICATION: Inspect the returned docker args array for presence/absence
+//               of -e GITHUB_TOKEN=... and -e GH_TOKEN=...
+describe('GitHub token injection for dev cases', () => {
+  afterEach(() => {
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  // Helper to find env var args in the docker args array
+  function getEnvVars(args: string[]): Record<string, string> {
+    const envVars: Record<string, string> = {};
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i] === '-e' && args[i + 1].includes('=')) {
+        const [key, ...rest] = args[i + 1].split('=');
+        envVars[key] = rest.join('=');
+      }
+    }
+    return envVars;
+  }
+
+  it('injects GITHUB_TOKEN and GH_TOKEN for dev cases when token is set', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+
+    const args = buildContainerArgs([], 'test-container', {
+      caseId: 'case-1',
+      caseName: 'test',
+      caseType: 'dev',
+    });
+    const envVars = getEnvVars(args);
+
+    expect(envVars['GITHUB_TOKEN']).toBe('ghp_test_token_123');
+    expect(envVars['GH_TOKEN']).toBe('ghp_test_token_123');
+  });
+
+  it('does NOT inject any GitHub credentials for work cases', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+
+    const args = buildContainerArgs([], 'test-container', {
+      caseId: 'case-1',
+      caseName: 'test',
+      caseType: 'work',
+    });
+    const envVars = getEnvVars(args);
+
+    expect(envVars).not.toHaveProperty('GITHUB_TOKEN');
+    expect(envVars).not.toHaveProperty('GH_TOKEN');
+  });
+
+  it('does NOT inject any GitHub credentials when env var is not set', () => {
+    delete process.env.GITHUB_TOKEN;
+
+    const args = buildContainerArgs([], 'test-container', {
+      caseId: 'case-1',
+      caseName: 'test',
+      caseType: 'dev',
+    });
+    const envVars = getEnvVars(args);
+
+    expect(envVars).not.toHaveProperty('GITHUB_TOKEN');
+    expect(envVars).not.toHaveProperty('GH_TOKEN');
+  });
+
+  it('does NOT inject any GitHub credentials when no case input', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+
+    const args = buildContainerArgs([], 'test-container');
+    const envVars = getEnvVars(args);
+
+    expect(envVars).not.toHaveProperty('GITHUB_TOKEN');
+    expect(envVars).not.toHaveProperty('GH_TOKEN');
   });
 });
 

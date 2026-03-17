@@ -234,7 +234,7 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(
+export function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   caseInput?: { caseId?: string; caseName?: string; caseType?: string },
@@ -251,7 +251,15 @@ function buildContainerArgs(
     args.push('-e', `NANOCLAW_CASE_TYPE=${caseInput.caseType || ''}`);
   }
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
+  // Dev cases get GitHub access so they can push branches and open PRs.
+  // Work cases remain sandboxed with no GitHub credentials.
+  if (caseInput?.caseType === 'dev' && process.env.GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${process.env.GITHUB_TOKEN}`);
+    args.push('-e', `GH_TOKEN=${process.env.GITHUB_TOKEN}`);
+  }
+
+  // Route Anthropic API traffic through the credential proxy (never exposes API keys).
+  // Note: GITHUB_TOKEN above is passed directly — it's not proxied.
   args.push(
     '-e',
     `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,

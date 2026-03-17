@@ -9,7 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
-import { CronExpressionParser } from 'cron-parser';
+import { validateScheduleValue } from './validation.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -94,37 +94,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
   },
   async (args) => {
     // Validate schedule_value before writing IPC
-    if (args.schedule_type === 'cron') {
-      try {
-        CronExpressionParser.parse(args.schedule_value);
-      } catch {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
-          isError: true,
-        };
-      }
-    } else if (args.schedule_type === 'interval') {
-      const ms = parseInt(args.schedule_value, 10);
-      if (isNaN(ms) || ms <= 0) {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
-          isError: true,
-        };
-      }
-    } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
-        return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
-          isError: true,
-        };
-      }
-      const date = new Date(args.schedule_value);
-      if (isNaN(date.getTime())) {
-        return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
-          isError: true,
-        };
-      }
+    const validation = validateScheduleValue(args.schedule_type, args.schedule_value);
+    if (!validation.valid) {
+      return {
+        content: [{ type: 'text' as const, text: validation.error! }],
+        isError: true,
+      };
     }
 
     // Non-main groups can only schedule for themselves
@@ -258,23 +233,20 @@ server.tool(
   },
   async (args) => {
     // Validate schedule_value if provided
-    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
-      if (args.schedule_value) {
-        try {
-          CronExpressionParser.parse(args.schedule_value);
-        } catch {
-          return {
-            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
-            isError: true,
-          };
-        }
-      }
-    }
-    if (args.schedule_type === 'interval' && args.schedule_value) {
-      const ms = parseInt(args.schedule_value, 10);
-      if (isNaN(ms) || ms <= 0) {
+    if (args.schedule_value && args.schedule_type) {
+      const validation = validateScheduleValue(args.schedule_type, args.schedule_value);
+      if (!validation.valid) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          content: [{ type: 'text' as const, text: validation.error! }],
+          isError: true,
+        };
+      }
+    } else if (args.schedule_value && !args.schedule_type) {
+      // When no schedule_type given, try cron validation as default
+      const validation = validateScheduleValue('cron', args.schedule_value);
+      if (!validation.valid) {
+        return {
+          content: [{ type: 'text' as const, text: validation.error! }],
           isError: true,
         };
       }

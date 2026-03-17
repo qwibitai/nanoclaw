@@ -139,6 +139,28 @@ export function isTriggerAllowed(
 }
 
 /**
+ * Common acknowledgment patterns that don't need an agent response.
+ * Matches the normalized (trimmed, lowercased) message content.
+ */
+const ACK_PATTERNS =
+  /^(ok|okay|k|kk|yep|yup|yes|no|nope|sure|thanks|thank you|thx|ty|cool|great|nice|got it|noted|lol|haha|hah|ha|👍|👌|🙏|❤️|💯|✅|☑️|🤙|💪|🔥|😊|😂|🤣|👏|🫡|😎|🤷|right|alright|ack|np|nw|good|fine|perfect|done|ikr|sounds good|will do|on it|roger|aight)$/;
+
+/** Minimum content length for auto-trigger (after trimming). */
+const AUTO_TRIGGER_MIN_LENGTH = 3;
+
+/**
+ * Check if message content is substantive enough to warrant auto-triggering.
+ * Filters out short acknowledgments and emoji-only messages.
+ */
+export function isAutoTriggerContent(content: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.length < AUTO_TRIGGER_MIN_LENGTH) return false;
+  const normalized = trimmed.toLowerCase();
+  if (ACK_PATTERNS.test(normalized)) return false;
+  return true;
+}
+
+/**
  * Check if a sender is in the autoTriggerSenders list.
  * Auto-trigger senders activate the agent without needing the @trigger prefix.
  */
@@ -147,4 +169,17 @@ export function isAutoTriggerSender(
   cfg: SenderAllowlistConfig,
 ): boolean {
   return cfg.autoTriggerSenders.includes(sender);
+}
+
+/**
+ * Check if a message from an auto-trigger sender should actually trigger the agent.
+ * Combines sender check with content filter to skip trivial messages.
+ */
+export function shouldAutoTrigger(
+  sender: string,
+  content: string,
+  cfg: SenderAllowlistConfig,
+): boolean {
+  if (!isAutoTriggerSender(sender, cfg)) return false;
+  return isAutoTriggerContent(content);
 }

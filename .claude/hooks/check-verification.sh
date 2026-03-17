@@ -8,19 +8,22 @@
 # Exit 0 = allow (with advisory on stderr)
 # JSON with permissionDecision deny = block
 
+source "$(dirname "$0")/lib/parse-command.sh"
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
 # Only check gh pr create and gh pr merge
-if ! echo "$COMMAND" | grep -qE 'gh\s+pr\s+(create|merge)'; then
+if ! echo "$CMD_LINE" | grep -qE 'gh\s+pr\s+(create|merge)'; then
   exit 0
 fi
 
 IS_CREATE=false
 IS_MERGE=false
-if echo "$COMMAND" | grep -qE 'gh\s+pr\s+create'; then
+if echo "$CMD_LINE" | grep -qE 'gh\s+pr\s+create'; then
   IS_CREATE=true
-elif echo "$COMMAND" | grep -qE 'gh\s+pr\s+merge'; then
+elif echo "$CMD_LINE" | grep -qE 'gh\s+pr\s+merge'; then
   IS_MERGE=true
 fi
 

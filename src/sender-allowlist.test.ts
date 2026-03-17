@@ -4,11 +4,13 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  isAutoTriggerContent,
   isAutoTriggerSender,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
   SenderAllowlistConfig,
+  shouldAutoTrigger,
   shouldDropMessage,
 } from './sender-allowlist.js';
 
@@ -286,5 +288,107 @@ describe('loadSenderAllowlist autoTriggerSenders', () => {
     });
     const cfg = loadSenderAllowlist(p);
     expect(cfg.autoTriggerSenders).toEqual(['valid', 'also-valid']);
+  });
+});
+
+// INVARIANT: Auto-trigger content filter must reject trivial acks and pass substantive messages.
+// SUT: isAutoTriggerContent — pure function, no dependencies.
+describe('isAutoTriggerContent', () => {
+  it('rejects short messages below minimum length', () => {
+    expect(isAutoTriggerContent('ok')).toBe(false);
+    expect(isAutoTriggerContent('k')).toBe(false);
+    expect(isAutoTriggerContent('')).toBe(false);
+    expect(isAutoTriggerContent('  ')).toBe(false);
+  });
+
+  it('rejects common acknowledgment words', () => {
+    expect(isAutoTriggerContent('thanks')).toBe(false);
+    expect(isAutoTriggerContent('Thank you')).toBe(false);
+    expect(isAutoTriggerContent('yep')).toBe(false);
+    expect(isAutoTriggerContent('sure')).toBe(false);
+    expect(isAutoTriggerContent('cool')).toBe(false);
+    expect(isAutoTriggerContent('great')).toBe(false);
+    expect(isAutoTriggerContent('got it')).toBe(false);
+    expect(isAutoTriggerContent('noted')).toBe(false);
+    expect(isAutoTriggerContent('sounds good')).toBe(false);
+    expect(isAutoTriggerContent('will do')).toBe(false);
+    expect(isAutoTriggerContent('done')).toBe(false);
+  });
+
+  it('rejects emoji-only acknowledgments', () => {
+    expect(isAutoTriggerContent('👍')).toBe(false);
+    expect(isAutoTriggerContent('👌')).toBe(false);
+    expect(isAutoTriggerContent('🙏')).toBe(false);
+    expect(isAutoTriggerContent('✅')).toBe(false);
+    expect(isAutoTriggerContent('🔥')).toBe(false);
+  });
+
+  it('rejects ack patterns with surrounding whitespace', () => {
+    expect(isAutoTriggerContent('  thanks  ')).toBe(false);
+    expect(isAutoTriggerContent('\tok\n')).toBe(false);
+  });
+
+  it('is case-insensitive for ack patterns', () => {
+    expect(isAutoTriggerContent('OK')).toBe(false);
+    expect(isAutoTriggerContent('Thanks')).toBe(false);
+    expect(isAutoTriggerContent('SURE')).toBe(false);
+    expect(isAutoTriggerContent('YEP')).toBe(false);
+  });
+
+  it('accepts substantive messages', () => {
+    expect(isAutoTriggerContent('Can you check the logs?')).toBe(true);
+    expect(isAutoTriggerContent('What is the status of the deploy?')).toBe(
+      true,
+    );
+    expect(isAutoTriggerContent('please update the config')).toBe(true);
+    expect(isAutoTriggerContent('run npm test')).toBe(true);
+  });
+
+  it('accepts messages that contain ack words as part of larger text', () => {
+    expect(isAutoTriggerContent('ok, can you also fix the tests?')).toBe(true);
+    expect(isAutoTriggerContent('thanks for that, now deploy it')).toBe(true);
+  });
+
+  it('accepts exactly-min-length non-ack content', () => {
+    expect(isAutoTriggerContent('hey')).toBe(true);
+    expect(isAutoTriggerContent('fix')).toBe(true);
+  });
+
+  it('accepts multi-emoji messages not in ack list', () => {
+    expect(isAutoTriggerContent('👍👍')).toBe(true);
+    expect(isAutoTriggerContent('🎉🎊')).toBe(true);
+  });
+});
+
+// INVARIANT: shouldAutoTrigger must require BOTH sender in auto-trigger list AND substantive content.
+// SUT: shouldAutoTrigger — composes isAutoTriggerSender + isAutoTriggerContent.
+describe('shouldAutoTrigger', () => {
+  const cfg: SenderAllowlistConfig = {
+    default: { allow: '*', mode: 'trigger' },
+    chats: {},
+    logDenied: true,
+    autoTriggerSenders: ['lead1', 'lead2'],
+  };
+
+  it('triggers for auto-trigger sender with substantive content', () => {
+    expect(shouldAutoTrigger('lead1', 'Check the deployment logs', cfg)).toBe(
+      true,
+    );
+  });
+
+  it('does not trigger for auto-trigger sender with ack content', () => {
+    expect(shouldAutoTrigger('lead1', 'ok', cfg)).toBe(false);
+    expect(shouldAutoTrigger('lead2', 'thanks', cfg)).toBe(false);
+    expect(shouldAutoTrigger('lead1', '👍', cfg)).toBe(false);
+  });
+
+  it('does not trigger for non-auto-trigger sender regardless of content', () => {
+    expect(
+      shouldAutoTrigger('random-user', 'Check the deployment logs', cfg),
+    ).toBe(false);
+  });
+
+  it('does not trigger for non-auto-trigger sender with ack content', () => {
+    expect(shouldAutoTrigger('random-user', 'ok', cfg)).toBe(false);
   });
 });

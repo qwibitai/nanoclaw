@@ -7,6 +7,8 @@
 # Runs as PostToolUse hook on Bash tool calls.
 # Always exits 0 — this is advisory, not blocking.
 
+source "$(dirname "$0")/lib/parse-command.sh"
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 STDOUT=$(echo "$INPUT" | jq -r '.tool_output.stdout // empty')
@@ -18,11 +20,13 @@ if [ "$EXIT_CODE" != "0" ]; then
   exit 0
 fi
 
+CMD_LINE=$(strip_heredoc_body "$COMMAND")
+
 IS_CREATE=false
 IS_MERGE=false
-if echo "$COMMAND" | grep -qE 'gh\s+pr\s+create'; then
+if echo "$CMD_LINE" | grep -qE 'gh\s+pr\s+create'; then
   IS_CREATE=true
-elif echo "$COMMAND" | grep -qE 'gh\s+pr\s+merge'; then
+elif echo "$CMD_LINE" | grep -qE 'gh\s+pr\s+merge'; then
   IS_MERGE=true
 else
   exit 0

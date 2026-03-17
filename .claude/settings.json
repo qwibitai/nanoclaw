@@ -49,6 +49,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "./.claude/hooks/review-pr-on-create.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "./.claude/hooks/kaizen-reflect.sh",
             "timeout": 10
           }

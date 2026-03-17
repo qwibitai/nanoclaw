@@ -13,39 +13,10 @@ import {
   checkWorktreeLock,
   pruneCaseWorkspace,
 } from './cases.js';
-import type { Case } from './cases.js';
+import { makeCase } from './test-helpers.js';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'wt-lock-test-'));
-}
-
-function makeCase(overrides: Partial<Case> = {}): Case {
-  return {
-    id: 'case-test-123',
-    group_folder: 'test',
-    chat_jid: 'tg:123',
-    name: '260316-1740-test-case',
-    description: 'Test case',
-    type: 'dev',
-    status: 'done',
-    blocked_on: null,
-    worktree_path: null,
-    workspace_path: '/tmp/test',
-    branch_name: null,
-    initiator: 'test',
-    initiator_channel: null,
-    last_message: null,
-    last_activity_at: new Date().toISOString(),
-    conclusion: null,
-    created_at: new Date().toISOString(),
-    done_at: new Date().toISOString(),
-    reviewed_at: null,
-    pruned_at: null,
-    total_cost_usd: 0,
-    token_source: null,
-    time_spent_ms: 0,
-    ...overrides,
-  };
 }
 
 describe('worktree lock files', () => {

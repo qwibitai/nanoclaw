@@ -34,8 +34,19 @@ if [ -n "$UNMERGED" ]; then
   UNMERGED_COUNT=$(echo "$UNMERGED" | grep -c . 2>/dev/null || echo 0)
 fi
 
+# Check for active cases linked to kaizen issues
+KAIZEN_CASES=""
+KAIZEN_COUNT=0
+DB_PATH="data/nanoclaw.db"
+if [ -f "$DB_PATH" ]; then
+  KAIZEN_CASES=$(sqlite3 "$DB_PATH" "SELECT 'kaizen #' || github_issue || ' → ' || name || ' (' || status || ')' FROM cases WHERE github_issue IS NOT NULL AND status IN ('suggested','backlog','active','blocked') ORDER BY github_issue" 2>/dev/null)
+  if [ -n "$KAIZEN_CASES" ]; then
+    KAIZEN_COUNT=$(echo "$KAIZEN_CASES" | grep -c . 2>/dev/null || echo 0)
+  fi
+fi
+
 # If nothing in progress, stay quiet
-TOTAL=$((WORKTREE_COUNT + PR_COUNT + UNMERGED_COUNT))
+TOTAL=$((WORKTREE_COUNT + PR_COUNT + UNMERGED_COUNT + KAIZEN_COUNT))
 if [ "$TOTAL" -eq 0 ]; then
   exit 0
 fi
@@ -70,6 +81,14 @@ if [ "$UNMERGED_COUNT" -gt 0 ]; then
   echo "Unmerged branches ($UNMERGED_COUNT):"
   echo "$UNMERGED" | while read -r br; do
     echo "  - $br"
+  done
+  echo ""
+fi
+
+if [ "$KAIZEN_COUNT" -gt 0 ]; then
+  echo "Kaizen issues with active cases ($KAIZEN_COUNT):"
+  echo "$KAIZEN_CASES" | while read -r kc; do
+    echo "  - $kc"
   done
   echo ""
 fi
