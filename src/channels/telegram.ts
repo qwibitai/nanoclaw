@@ -41,6 +41,139 @@ async function sendTelegramMessage(
   }
 }
 
+/**
+ * Split long messages at the 4096-char Telegram limit and send each chunk.
+ * Shared between TelegramChannel.sendMessage() and BotPool.send().
+ */
+async function sendWithSplit(
+  api: { sendMessage: Api['sendMessage'] },
+  chatId: string | number,
+  text: string,
+): Promise<void> {
+  const numericId =
+    typeof chatId === 'string' ? chatId.replace(/^tg:/, '') : chatId;
+  const MAX_LENGTH = 4096;
+  if (text.length <= MAX_LENGTH) {
+    await sendTelegramMessage(api, numericId, text);
+  } else {
+    for (let i = 0; i < text.length; i += MAX_LENGTH) {
+      await sendTelegramMessage(api, numericId, text.slice(i, i + MAX_LENGTH));
+    }
+  }
+}
+
+export interface BotPoolDeps {
+  createApi: (token: string) => Api;
+  renameDelayMs: number;
+}
+
+const DEFAULT_DEPS: BotPoolDeps = {
+  createApi: (token: string) => new Api(token),
+  renameDelayMs: 2000,
+};
+
+export class BotPool {
+  private apis: Api[] = [];
+  private senderMap = new Map<string, number>();
+  private nextIndex = 0;
+  private deps: BotPoolDeps;
+
+  constructor(deps: Partial<BotPoolDeps> = {}) {
+    this.deps = { ...DEFAULT_DEPS, ...deps };
+  }
+
+  async init(tokens: string[]): Promise<void> {
+    for (const token of tokens) {
+      try {
+        const api = this.deps.createApi(token);
+        const me = await api.getMe();
+        this.apis.push(api);
+        logger.info(
+          { username: me.username, id: me.id, poolSize: this.apis.length },
+          'Pool bot initialized',
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to initialize pool bot');
+      }
+    }
+    if (this.apis.length > 0) {
+      logger.info({ count: this.apis.length }, 'Telegram bot pool ready');
+    }
+  }
+
+  async send(
+    chatId: string,
+    text: string,
+    sender: string,
+    groupFolder: string,
+  ): Promise<boolean> {
+    if (this.apis.length === 0) {
+      return false; // Signal caller to use fallback
+    }
+
+    const key = `${groupFolder}:${sender}`;
+    let idx = this.senderMap.get(key);
+    if (idx === undefined) {
+      idx = this.nextIndex % this.apis.length;
+      this.nextIndex++;
+      this.senderMap.set(key, idx);
+      try {
+        await this.apis[idx].setMyName(sender);
+        if (this.deps.renameDelayMs > 0) {
+          await new Promise((r) => setTimeout(r, this.deps.renameDelayMs));
+        }
+        logger.info(
+          { sender, groupFolder, poolIndex: idx },
+          'Assigned and renamed pool bot',
+        );
+      } catch (err) {
+        logger.warn(
+          { sender, err },
+          'Failed to rename pool bot (sending anyway)',
+        );
+      }
+    }
+
+    const api = this.apis[idx];
+    await sendWithSplit(api, chatId, text);
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
+    return true;
+  }
+
+  get size(): number {
+    return this.apis.length;
+  }
+
+  getAssignment(sender: string, groupFolder: string): number | undefined {
+    return this.senderMap.get(`${groupFolder}:${sender}`);
+  }
+
+  reset(): void {
+    this.apis = [];
+    this.senderMap.clear();
+    this.nextIndex = 0;
+  }
+}
+
+// Singleton instance and convenience functions
+export const botPool = new BotPool();
+
+export async function initBotPool(tokens: string[]): Promise<void> {
+  await botPool.init(tokens);
+}
+
+export async function sendPoolMessage(
+  chatId: string,
+  text: string,
+  sender: string,
+  groupFolder: string,
+): Promise<boolean> {
+  return botPool.send(chatId, text, sender, groupFolder);
+}
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -244,21 +377,7 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
-
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
-            this.bot.api,
-            numericId,
-            text.slice(i, i + MAX_LENGTH),
-          );
-        }
-      }
+      await sendWithSplit(this.bot.api, jid, text);
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
@@ -302,93 +421,3 @@ registerChannel('telegram', (opts: ChannelOpts) => {
   }
   return new TelegramChannel(token, opts);
 });
-
-// Bot pool for agent teams: send-only Api instances (no polling)
-const poolApis: Api[] = [];
-// Maps "{groupFolder}:{senderName}" → pool Api index for stable assignment
-const senderBotMap = new Map<string, number>();
-let nextPoolIndex = 0;
-
-/**
- * Initialize send-only Api instances for the bot pool.
- * Each pool bot can send messages but doesn't poll for updates.
- */
-export async function initBotPool(tokens: string[]): Promise<void> {
-  for (const token of tokens) {
-    try {
-      const api = new Api(token);
-      const me = await api.getMe();
-      poolApis.push(api);
-      logger.info(
-        { username: me.username, id: me.id, poolSize: poolApis.length },
-        'Pool bot initialized',
-      );
-    } catch (err) {
-      logger.error({ err }, 'Failed to initialize pool bot');
-    }
-  }
-  if (poolApis.length > 0) {
-    logger.info({ count: poolApis.length }, 'Telegram bot pool ready');
-  }
-}
-
-/**
- * Send a message via a pool bot assigned to the given sender name.
- * Assigns bots round-robin on first use; subsequent messages from the
- * same sender in the same group always use the same bot.
- * On first assignment, renames the bot to match the sender's role.
- */
-export async function sendPoolMessage(
-  chatId: string,
-  text: string,
-  sender: string,
-  groupFolder: string,
-): Promise<void> {
-  if (poolApis.length === 0) {
-    return;
-  }
-
-  const key = `${groupFolder}:${sender}`;
-  let idx = senderBotMap.get(key);
-  if (idx === undefined) {
-    idx = nextPoolIndex % poolApis.length;
-    nextPoolIndex++;
-    senderBotMap.set(key, idx);
-    try {
-      await poolApis[idx].setMyName(sender);
-      await new Promise((r) => setTimeout(r, 2000));
-      logger.info(
-        { sender, groupFolder, poolIndex: idx },
-        'Assigned and renamed pool bot',
-      );
-    } catch (err) {
-      logger.warn(
-        { sender, err },
-        'Failed to rename pool bot (sending anyway)',
-      );
-    }
-  }
-
-  const api = poolApis[idx];
-  try {
-    const numericId = chatId.replace(/^tg:/, '');
-    const MAX_LENGTH = 4096;
-    if (text.length <= MAX_LENGTH) {
-      await sendTelegramMessage(api, numericId, text);
-    } else {
-      for (let i = 0; i < text.length; i += MAX_LENGTH) {
-        await sendTelegramMessage(
-          api,
-          numericId,
-          text.slice(i, i + MAX_LENGTH),
-        );
-      }
-    }
-    logger.info(
-      { chatId, sender, poolIndex: idx, length: text.length },
-      'Pool message sent',
-    );
-  } catch (err) {
-    logger.error({ chatId, sender, err }, 'Failed to send pool message');
-  }
-}

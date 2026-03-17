@@ -105,12 +105,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.chatJid.startsWith('tg:') &&
                     TELEGRAM_BOT_POOL.length > 0
                   ) {
-                    await sendPoolMessage(
+                    const sent = await sendPoolMessage(
                       data.chatJid,
                       data.text,
                       data.sender,
                       sourceGroup,
                     );
+                    if (!sent) {
+                      await deps.sendMessage(data.chatJid, data.text);
+                    }
                   } else {
                     await deps.sendMessage(data.chatJid, data.text);
                   }
