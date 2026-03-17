@@ -24,8 +24,8 @@ Discord
   ↓ キューイング（チャンネルごとに直列化）
 コンテナ起動
   ↓ stdin経由でプロンプト送信
-エージェントループ（自作 or Vercel AI SDK, Claude Agent SDK 等）
-  ↓ ツールコール実行・結果返却
+@opencode-ai/sdk（エージェントループ・ツールコール・マルチプロバイダー）
+  ↓ 応答
 stdout経由で応答受信
   ↓
 Discordに送信
@@ -98,40 +98,36 @@ data/
 
 ## プロバイダー設計
 
+### SDK: `@opencode-ai/sdk`
+
+エージェントループ・ツールコール・マルチプロバイダー対応を全て抽象化してくれる。
+
+- 75+プロバイダー対応（Claude・GitHub Copilot・OpenAI Codex等）
+- エージェントループ（ツールコール→実行→結果返却→繰り返し）をビルトインで処理
+- `model: "copilot/gpt-4"` のような形式でプロバイダーを指定するだけ
+
 ### 対応プロバイダー（予定）
 
 | プロバイダー | 認証方式 | 備考 |
 |---|---|---|
-| Claude | Anthropic APIキー or OAuth | NanoClawと同方式 |
-| GitHub Copilot | GitHub Device Flow OAuth | openclaw実装を参考 |
+| Claude | Anthropic APIキー or OAuth | opencode SDKが処理 |
+| GitHub Copilot | GitHub Device Flow OAuth | opencode CLIで初回セットアップ |
+| OpenAI Codex | OAuth | opencode CLIで初回セットアップ |
+
+### 認証フロー
+
+全プロバイダー共通：
+
+1. 初回のみ `opencode` CLIで `/connect` → Device Flow等でログイン
+2. トークンが `~/.local/share/opencode/auth.json` に保存される
+3. SDK実行時はそのファイルを参照するだけ
+
+Credential Proxyは不要になる可能性が高い（SDK側で吸収）。
 
 ### プロバイダー切り替え
 
-`config.json`の`provider`フィールドを書き換えるだけ。
+`config.json`の`model`フィールドを書き換えるだけ。
 `/model`スラッシュコマンドで変更可能。
-
-### Credential Proxy
-
-NanoClawと同じパターンを踏襲する。
-
-- ローカルHTTPサーバーを立てる
-- コンテナからのAPI呼び出しを横取りして本物のトークンを差し込む
-- コンテナ側には`placeholder`しか渡さない
-
-**参考**: `nanoclaw/src/credential-proxy.ts`
-
-### GitHub Copilot認証フロー
-
-openclaw（公式公認OSS）の実装を参考にする。
-
-1. GitHub Device Flow → `github_token`取得
-2. `GET /copilot_internal/v2/token` → `copilot_token`取得（短命）
-3. Copilot APIトークンをキャッシュ・自動更新
-4. OpenAI互換エンドポイントへ転送
-
-**参考**:
-- `nanoclaw/docs/copilot/copilot-oauth-opencode.md`
-- `nanoclaw/docs/copilot/copilot-oauth-openclaw.md`
 
 ---
 
@@ -139,19 +135,14 @@ openclaw（公式公認OSS）の実装を参考にする。
 
 ### 方針
 
-素のAPI呼び出しベースで自作。SDKは未定（Vercel AI SDK等を検討）。
+`@opencode-ai/sdk` に委譲。自前実装不要。
 
-ループの基本構造：
-
-1. プロンプト送信
-2. レスポンス受信
-3. ツールコールがあれば実行
-4. 結果をAPIに返す
-5. 完了するまで2〜4を繰り返す
+- エージェントループ（ツールコール→実行→返却→繰り返し）はSDKが処理
+- プロバイダー差異もSDKが吸収
 
 ### Agent Teams
 
-不採用。素のAPI呼び出しでは実装コストが高く、ユースケースも限定的。
+不採用。
 
 **参考（採用しないが設計理解のため）**: `nanoclaw/container/agent-runner/src/index.ts`
 
@@ -256,6 +247,6 @@ NanoClawのコンテナ設計を踏襲。
 ## 未決定事項
 
 - [ ] プロジェクト名
-- [ ] SDKの選定（Vercel AI SDK vs 完全自作）
-- [ ] `/compact`の実装方法（SDK依存度による）
-- [ ] Copilot以外の追加プロバイダー（Gemini等）
+- [ ] `/compact`の実装方法（opencode SDK依存度による）
+- [ ] Credential Proxyが本当に不要か確認（SDK内部でAPI呼び出しする場合の挙動）
+- [ ] opencode SDK経由のMinimax等無料モデルの料金確認
