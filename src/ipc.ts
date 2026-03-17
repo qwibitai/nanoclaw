@@ -37,7 +37,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
-    // Scan all group IPC directories (identity determined by directory)
+    // すべてのグループの IPC ディレクトリをスキャン（ディレクトリ名で識別）
     let groupFolders: string[];
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
@@ -52,7 +52,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
-    // Build folder→isMain lookup from registered groups
+    // 登録済みグループから folder→isMain のルックアップを構築
     const folderIsMain = new Map<string, boolean>();
     for (const group of Object.values(registeredGroups)) {
       if (group.isMain) folderIsMain.set(group.folder, true);
@@ -63,7 +63,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
-      // Process messages from this group's IPC directory
+      // このグループの IPC ディレクトリからメッセージを処理
       try {
         if (fs.existsSync(messagesDir)) {
           const messageFiles = fs
@@ -74,7 +74,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
+                // 認可: このグループが対象の chatJid に送信可能か確認
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
@@ -114,7 +114,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         );
       }
 
-      // Process tasks from this group's IPC directory
+      // このグループの IPC ディレクトリからタスクを処理
       try {
         if (fs.existsSync(tasksDir)) {
           const taskFiles = fs
@@ -124,7 +124,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(tasksDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
+              // 認可のため送信元グループの識別情報を processTaskIpc に渡す
               await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -164,7 +164,7 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    // For register_group
+    // register_group 用
     jid?: string;
     name?: string;
     folder?: string;
@@ -172,8 +172,8 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
-  sourceGroup: string, // Verified identity from IPC directory
-  isMain: boolean, // Verified from directory path
+  sourceGroup: string, // IPC ディレクトリから検証された識別情報
+  isMain: boolean, // ディレクトリパスから検証された情報
   deps: IpcDeps,
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
@@ -186,7 +186,7 @@ export async function processTaskIpc(
         data.schedule_value &&
         data.targetJid
       ) {
-        // Resolve the target group from JID
+        // JID からターゲットグループを解決
         const targetJid = data.targetJid as string;
         const targetGroupEntry = registeredGroups[targetJid];
 
@@ -200,7 +200,7 @@ export async function processTaskIpc(
 
         const targetFolder = targetGroupEntry.folder;
 
-        // Authorization: non-main groups can only schedule for themselves
+        // 認可: メイン以外のグループは自分自身に対してのみスケジュール可能
         if (!isMain && targetFolder !== sourceGroup) {
           logger.warn(
             { sourceGroup, targetFolder },
@@ -355,7 +355,7 @@ export async function processTaskIpc(
         if (data.schedule_value !== undefined)
           updates.schedule_value = data.schedule_value;
 
-        // Recompute next_run if schedule changed
+        // スケジュールが変更された場合は next_run を再計算
         if (data.schedule_type || data.schedule_value) {
           const updatedTask = {
             ...task,
@@ -392,14 +392,14 @@ export async function processTaskIpc(
       break;
 
     case 'refresh_groups':
-      // Only main group can request a refresh
+      // メイングループのみがリフレッシュを要求可能
       if (isMain) {
         logger.info(
           { sourceGroup },
           'Group metadata refresh requested via IPC',
         );
         await deps.syncGroups(true);
-        // Write updated snapshot immediately
+        // 更新されたスナップショットを即座に書き出し
         const availableGroups = deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
           sourceGroup,
@@ -416,7 +416,7 @@ export async function processTaskIpc(
       break;
 
     case 'register_group':
-      // Only main group can register new groups
+      // メイングループのみが新しいグループを登録可能
       if (!isMain) {
         logger.warn(
           { sourceGroup },
@@ -432,7 +432,7 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC
+        // 多層防御: エージェントは IPC 経由で isMain を設定できない
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
