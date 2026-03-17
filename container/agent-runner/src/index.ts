@@ -490,6 +490,7 @@ async function runQuery(
           command: 'node',
           args: [unraidclawMcpServerPath],
           env: {
+            UNRAIDCLAW_SERVERS: sdkEnv.UNRAIDCLAW_SERVERS ?? '',
             UNRAIDCLAW_URL: sdkEnv.UNRAIDCLAW_URL ?? '',
             UNRAIDCLAW_API_KEY: sdkEnv.UNRAIDCLAW_API_KEY ?? '',
           },
