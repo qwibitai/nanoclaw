@@ -4,6 +4,7 @@ import { formatLocalTime } from './timezone.js';
 export function escapeXml(s: string): string {
   if (!s) return '';
   return s
+    .toWellFormed()
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
