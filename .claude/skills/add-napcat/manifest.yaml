@@ -1,0 +1,20 @@
+skill: napcat
+version: 1.0.0
+description: "QQ integration via NapCat (OneBot 11 WebSocket protocol)"
+core_version: 0.1.0
+adds:
+  - src/channels/napcat.ts
+  - src/channels/napcat.test.ts
+modifies:
+  - src/channels/index.ts
+structured:
+  npm_dependencies:
+    ws: "^8.18.0"
+  npm_dev_dependencies:
+    "@types/ws": "^8.18.0"
+  env_additions:
+    - NAPCAT_WS_URL
+    - NAPCAT_ACCESS_TOKEN
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/napcat.test.ts"
