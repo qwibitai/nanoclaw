@@ -10,7 +10,7 @@
  * The container uses Haiku-class model for fast, cheap routing decisions.
  * Future phases may keep a persistent container alive between requests.
  */
-import { spawn } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -298,6 +298,22 @@ async function runRouterContainer(
       setTimeout(() => {
         if (!container.killed) container.kill('SIGKILL');
       }, 5000);
+      // Docker-level stop as fallback — container.kill() only signals the
+      // `docker run` process, which may not propagate to the container.
+      setTimeout(() => {
+        try {
+          execSync(`${CONTAINER_RUNTIME_BIN} stop ${containerName}`, {
+            stdio: 'pipe',
+            timeout: 5000,
+          });
+          logger.info(
+            { containerName },
+            'Force-stopped router container via docker stop',
+          );
+        } catch {
+          // Already stopped or doesn't exist
+        }
+      }, 8000);
       // Force-reject after grace period if 'close' event never fires.
       // Without this, a zombie container blocks the message queue forever.
       setTimeout(() => {
