@@ -3,12 +3,28 @@
 # Detects in-progress work when starting a new session in the main checkout.
 # Only fires in main checkout (not in worktrees).
 # Outputs a reminder so the agent is aware of existing WIP.
+# Also warns strongly when running on main — agents should use worktrees.
 
 # Only run in main checkout, not worktrees
 GIT_COMMON=$(git rev-parse --git-common-dir 2>/dev/null)
 if [ "$GIT_COMMON" != ".git" ]; then
   exit 0
 fi
+
+# Strong warning: you're on the main checkout, not a worktree
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+cat <<'WORKTREE_WARNING'
+!! WARNING: Running in the MAIN checkout, NOT in an isolated worktree.
+!! Multiple Claude instances on the main checkout WILL conflict.
+!!
+!! USE INSTEAD:
+!!   claude-wt [args...]              — auto-creates isolated worktree
+!!   claude-wt -p "fix the bug"       — headless with prompt
+!!   claude-wt --safe                  — with permission prompts
+!!
+!! You MUST use EnterWorktree or claude-wt for any dev work.
+WORKTREE_WARNING
+echo ""
 
 # Collect worktrees (excluding main)
 WORKTREES=$(git worktree list --porcelain | grep '^worktree ' | grep -v "$(git rev-parse --show-toplevel)$" | sed 's/^worktree //')

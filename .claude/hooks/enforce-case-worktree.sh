@@ -17,8 +17,8 @@ fi
 # Get current branch
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-# Allow: case branches, skill branches, explicit feature branches
-if echo "$BRANCH" | grep -qE '^(case/|skill/|260[0-9]{3}-|feat/)'; then
+# Allow: case branches, skill branches, explicit feature branches, worktree nonces
+if echo "$BRANCH" | grep -qE '^(case/|skill/|260[0-9]{3}-|feat/|wt/)'; then
   exit 0
 fi
 
@@ -30,7 +30,7 @@ fi
 # Block: committing/pushing on main or unrecognized branches
 jq -n \
   --arg branch "$BRANCH" \
-  --arg reason "Dev work must happen in a case worktree, not on '$BRANCH'. Create a case first or use a worktree branch (case/*, skill/*, feat/*, YYMMDD-*)." \
+  --arg reason "Dev work must happen in a worktree, not on '$BRANCH'. Use claude-wt to launch in an isolated worktree, or create a branch (case/*, skill/*, feat/*, wt/*, YYMMDD-*)." \
   '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
