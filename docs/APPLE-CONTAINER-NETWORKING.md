@@ -1,90 +1,90 @@
-# Apple Container Networking Setup (macOS 26)
+# Apple Container ネットワーク設定 (macOS 26)
 
-Apple Container's vmnet networking requires manual configuration for containers to access the internet. Without this, containers can communicate with the host but cannot reach external services (DNS, HTTPS, APIs).
+Apple Container の vmnet ネットワークでは、コンテナがインターネットにアクセスするために手動での設定が必要です。これを行わない場合、コンテナはホストとは通信できますが、外部サービス（DNS, HTTPS, API）には到達できません。
 
-## Quick Setup
+## クイックセットアップ
 
-Run these two commands (requires `sudo`):
+以下の 2 つのコマンドを実行してください（`sudo` 権限が必要です）：
 
 ```bash
-# 1. Enable IP forwarding so the host routes container traffic
+# 1. ホストがコンテナのトラフィックをルーティングできるように IP フォワーディングを有効にする
 sudo sysctl -w net.inet.ip.forwarding=1
 
-# 2. Enable NAT so container traffic gets masqueraded through your internet interface
+# 2. コンテナのトラフィックがインターネットインターフェースを介してマスカレードされるように NAT を有効にする
 echo "nat on en0 from 192.168.64.0/24 to any -> (en0)" | sudo pfctl -ef -
 ```
 
-> **Note:** Replace `en0` with your active internet interface. Check with: `route get 8.8.8.8 | grep interface`
+> **注：** `en0` はアクティブなインターネットインターフェースに置き換えてください。確認コマンド： `route get 8.8.8.8 | grep interface`
 
-## Making It Persistent
+## 設定の永続化
 
-These settings reset on reboot. To make them permanent:
+これらの設定は再起動するとリセットされます。永続化するには：
 
-**IP Forwarding** — add to `/etc/sysctl.conf`:
+**IP フォワーディング** — `/etc/sysctl.conf` に追記：
 ```
 net.inet.ip.forwarding=1
 ```
 
-**NAT Rules** — add to `/etc/pf.conf` (before any existing rules):
+**NAT ルール** — `/etc/pf.conf` に追記（既存のルールの前に追加）：
 ```
 nat on en0 from 192.168.64.0/24 to any -> (en0)
 ```
 
-Then reload: `sudo pfctl -f /etc/pf.conf`
+その後、リロードしてください： `sudo pfctl -f /etc/pf.conf`
 
-## IPv6 DNS Issue
+## IPv6 DNS の問題
 
-By default, DNS resolvers return IPv6 (AAAA) records before IPv4 (A) records. Since our NAT only handles IPv4, Node.js applications inside containers will try IPv6 first and fail.
+デフォルトでは、DNS リゾルバーは IPv4 (A) レコードよりも先に IPv6 (AAAA) レコードを返します。我々の NAT は IPv4 のみを処理するため、コンテナ内の Node.js アプリケーションは最初に IPv6 を試行して失敗します。
 
-The container image and runner are configured to prefer IPv4 via:
+コンテナイメージとランナーは、以下の設定により IPv4 を優先するように構成されています：
 ```
 NODE_OPTIONS=--dns-result-order=ipv4first
 ```
 
-This is set both in the `Dockerfile` and passed via `-e` flag in `container-runner.ts`.
+これは `Dockerfile` 内で設定されているほか、`container-runner.ts` で `-e` フラグを介して渡されます。
 
-## Verification
+## 検証
 
 ```bash
-# Check IP forwarding is enabled
+# IP フォワーディングが有効であることを確認
 sysctl net.inet.ip.forwarding
-# Expected: net.inet.ip.forwarding: 1
+# 期待される結果: net.inet.ip.forwarding: 1
 
-# Test container internet access
+# コンテナのインターネットアクセスをテスト
 container run --rm --entrypoint curl nanoclaw-agent:latest \
   -s4 --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.anthropic.com
-# Expected: 404
+# 期待される結果: 404
 
-# Check bridge interface (only exists when a container is running)
+# ブリッジインターフェースを確認 (コンテナ実行中のみ存在します)
 ifconfig bridge100
 ```
 
-## Troubleshooting
+## トラブルシューティング
 
-| Symptom | Cause | Fix |
+| 症状 | 原因 | 解決策 |
 |---------|-------|-----|
-| `curl: (28) Connection timed out` | IP forwarding disabled | `sudo sysctl -w net.inet.ip.forwarding=1` |
-| HTTP works, HTTPS times out | IPv6 DNS resolution | Add `NODE_OPTIONS=--dns-result-order=ipv4first` |
-| `Could not resolve host` | DNS not forwarded | Check bridge100 exists, verify pfctl NAT rules |
-| Container hangs after output | Missing `process.exit(0)` in agent-runner | Rebuild container image |
+| `curl: (28) Connection timed out` | IP フォワーディングが無効 | `sudo sysctl -w net.inet.ip.forwarding=1` |
+| HTTP は動作するが HTTPS がタイムアウトする | IPv6 DNS 解決の問題 | `NODE_OPTIONS=--dns-result-order=ipv4first` を追加 |
+| `Could not resolve host` | DNS が転送されていない | bridge100 が存在するか確認し、pfctl の NAT ルールを検証 |
+| 出力後にコンテナがハングする | agent-runner 内で `process.exit(0)` が不足 | コンテナイメージを再ビルド |
 
-## How It Works
+## 仕組み
 
 ```
-Container VM (192.168.64.x)
+コンテナ VM (192.168.64.x)
     │
-    ├── eth0 → gateway 192.168.64.1
+    ├── eth0 → ゲートウェイ 192.168.64.1
     │
-bridge100 (192.168.64.1) ← host bridge, created by vmnet when container runs
+bridge100 (192.168.64.1) ← ホストブリッジ。コンテナ実行時に vmnet によって作成される
     │
-    ├── IP forwarding (sysctl) routes packets from bridge100 → en0
+    ├── IP フォワーディング (sysctl) が bridge100 → en0 へのパケットをルーティング
     │
-    ├── NAT (pfctl) masquerades 192.168.64.0/24 → en0's IP
+    ├── NAT (pfctl) が 192.168.64.0/24 を en0 の IP にマスカレード
     │
-en0 (your WiFi/Ethernet) → Internet
+en0 (あなたの WiFi/Ethernet) → インターネット
 ```
 
-## References
+## 参考
 
 - [apple/container#469](https://github.com/apple/container/issues/469) — No network from container on macOS 26
 - [apple/container#656](https://github.com/apple/container/issues/656) — Cannot access internet URLs during building
