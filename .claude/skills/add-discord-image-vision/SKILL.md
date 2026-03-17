@@ -5,70 +5,81 @@ description: Add image vision to NanoClaw's Discord channel. When a user sends a
 
 # Add Discord Image Vision
 
-This skill adds image processing to NanoClaw's Discord channel using the same `processImage` pipeline already used by WhatsApp. When an image attachment arrives in a registered Discord channel, it is fetched, resized via sharp, stored locally, and delivered with a relative path reference the agent can read.
+Adds the ability for NanoClaw agents to see and understand images sent via Discord. Images are downloaded from the Discord CDN, resized with sharp, saved to the group workspace, and delivered to the agent as `[Image: attachments/img-xxx.jpg]`.
 
 ## Phase 1: Pre-flight
 
-### Check if already applied
+1. Check if `src/image.ts` exists — skip to Phase 3 if already applied
+2. Confirm `sharp` is installable (native bindings require build tools)
 
-Read `.nanoclaw/state.yaml`. If `discord-image-vision` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
-
-### Check prerequisites
-
-This skill requires the `discord` skill to be applied first. Confirm `discord` is in `applied_skills`.
+**Prerequisite:** Discord must be installed first (`discord` channel merged). This skill modifies Discord channel files.
 
 ## Phase 2: Apply Code Changes
 
-### Install sharp (if not already installed)
+### Ensure Discord fork remote
 
 ```bash
-npm install sharp
+git remote -v
 ```
 
-### Apply the skill
+If `discord` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-discord-image-vision
+git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
 ```
 
-This deterministically:
-- Adds `src/image.ts` (image processing module using sharp)
-- Three-way merges image handling into `src/channels/discord.ts` (fetch → processImage, with fallback)
-- Three-way merges image tests into `src/channels/discord.test.ts` (fetch mock, processImage mock, 3 test cases)
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
+
+```bash
+git fetch discord skill/image-vision
+git merge discord/skill/image-vision || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This merges in:
+- `src/image.ts` (image download, resize via sharp, local storage)
+- Image attachment handling in `src/channels/discord.ts` (fetch from CDN → processImage → store in group dir)
+- Image processing tests in `src/channels/discord.test.ts` (3 test cases: success, null, fetch failure)
+- `sharp` npm dependency in `package.json`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/discord.test.ts
 ```
 
 All tests must pass and build must be clean before proceeding.
 
-## Phase 3: Verify
+## Phase 3: Configure
 
-### Test with an image
+1. Restart the service:
+   ```bash
+   launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+   # Linux: systemctl --user restart nanoclaw
+   ```
 
-Send an image in any registered Discord channel. The agent should receive it as `[Image: attachments/img-xxx.jpg]` and be able to describe what's in the image.
+## Phase 4: Verify
 
-### Check logs if needed
-
-```bash
-tail -f logs/nanoclaw.log | grep -i image
-```
+1. Send an image in a registered Discord channel
+2. Check the agent responds with understanding of the image content
+3. Check logs for image processing:
+   ```bash
+   tail -f logs/nanoclaw.log | grep -i image
+   ```
 
 Look for:
 - `Discord message stored` — message delivered with image reference
-- `Discord image processing failed` — download or sharp error (check network, disk space)
+- `Discord image processing failed` — download or sharp error
 
 ## Troubleshooting
 
-### Images show `[Image: filename.jpg]` instead of the processed path
-
-The fallback placeholder is shown when processImage returns null (empty buffer) or when fetch fails. Check that the Discord CDN URL is reachable and that the `attachments/` directory is writable.
-
-### sharp installation fails
-
-On macOS: `brew install vips` then `npm install sharp`
-On Linux: `apt-get install libvips-dev` then `npm install sharp`
+- **Images show `[Image: filename.jpg]` instead of the processed path**: The fallback placeholder is shown when processImage returns null (empty buffer) or when fetch fails. Check that the Discord CDN URL is reachable and that the `attachments/` directory is writable.
+- **sharp installation fails**: On macOS: `brew install vips` then `npm install sharp`. On Linux: `apt-get install libvips-dev` then `npm install sharp`.
+- **Agent doesn't mention image content**: Check that the image was stored in `groups/<name>/attachments/`. If missing, check logs for download errors.
