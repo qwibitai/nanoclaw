@@ -25,6 +25,7 @@
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",
+    "googleapis": "^144.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

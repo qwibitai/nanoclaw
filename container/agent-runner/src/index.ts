@@ -243,12 +243,18 @@ async function runQuery(
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: buildSystemPrompt(globalClaudeMd),
-      allowedTools: [...ALLOWED_TOOLS],
+      allowedTools: [...ALLOWED_TOOLS, 'mcp__gmail__*'],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: buildMcpConfig(mcpServerPath, containerInput),
+      mcpServers: {
+        ...buildMcpConfig(mcpServerPath, containerInput),
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+      },
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
