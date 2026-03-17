@@ -630,6 +630,7 @@ Case types:
   {
     short_name: z
       .string()
+      .optional()
       .describe(
         'A cute case name: "{Client FirstName} {Last Initial}. {OneWordTask} {FunAdjective}". Use the client/user\'s name, one word for the task, and one cute irrelevant adjective. Examples: "Aviad R. Banner Fun", "Moshe A. Runner Incredible", "Sarah K. Logo Sparkly", "Demarco T. CMYK Magnificent".',
       ),
