@@ -14,7 +14,15 @@ import { CONFIG_ROOT, PROJECT_ROOT } from "./runtime-paths.js";
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(["ASSISTANT_NAME"]);
+const envConfig = readEnvFile([
+  "ASSISTANT_NAME",
+  "CHANNEL_CONNECT_TIMEOUT",
+  "CONTAINER_TIMEOUT",
+  "CONTAINER_MAX_OUTPUT_SIZE",
+  "CREDENTIAL_PROXY_PORT",
+  "IDLE_TIMEOUT",
+  "MAX_CONCURRENT_CONTAINERS",
+]);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || "Andy";
 export const POLL_INTERVAL = 2000;
@@ -42,7 +50,7 @@ export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
 export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
 
 function parseIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
+  const raw = process.env[name] || envConfig[name];
   if (raw === undefined || raw === "") return fallback;
   const parsed = parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {
