@@ -356,6 +356,57 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
     );
   });
 
+  // INVARIANT: Dev case notifications go to main group, not source group
+  // SUT: processTaskIpc case_create notification routing
+  test('dev case created from non-main group notifies main group', async () => {
+    mockedCreateGitHubIssue.mockResolvedValue({
+      success: true,
+      issueUrl: 'https://github.com/Garsson-io/kaizen/issues/60',
+      issueNumber: 60,
+    });
+
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Fix widget rendering',
+        caseType: 'dev',
+        chatJid: 'tg:222',
+        requestId: 'req-dev-routing',
+      } as any,
+      'telegram_work',
+      false,
+      deps,
+    );
+
+    // Notification should go to main group (tg:111), not source group (tg:222)
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:111',
+      expect.stringContaining('dev case created'),
+    );
+  });
+
+  // INVARIANT: Work case notifications go to source group, not main group
+  test('work case created from non-main group notifies source group', async () => {
+    await processTaskIpc(
+      {
+        type: 'case_create',
+        description: 'Process client order',
+        caseType: 'work',
+        chatJid: 'tg:222',
+        requestId: 'req-work-routing',
+      } as any,
+      'telegram_work',
+      false,
+      deps,
+    );
+
+    // Notification should go to source group (tg:222), not main
+    expect(sendMessage).toHaveBeenCalledWith(
+      'tg:222',
+      expect.stringContaining('work case created'),
+    );
+  });
+
   test('work case does NOT create GitHub issue', async () => {
     await processTaskIpc(
       {
