@@ -520,4 +520,39 @@ describe('routeMessage', () => {
     const closeWrites = writtenFiles.filter((f) => f.includes('_close'));
     expect(closeWrites.length).toBe(1);
   });
+
+  /**
+   * INVARIANT: On timeout, docker stop is called as fallback to kill the container.
+   * SUT: runRouterContainer timeout handler
+   * VERIFICATION: execSync is called with 'docker stop <containerName>' after timeout.
+   */
+  it('calls docker stop as fallback when container times out', async () => {
+    vi.useFakeTimers();
+
+    const { execSync: mockExecSync } = await import('child_process');
+
+    const mockProc = createMockProcess();
+    mockProc.kill = vi.fn();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const { routeMessage } = await import('./router-container.js');
+    const request = makeRouterRequest();
+
+    const routePromise = routeMessage(request).catch((err: Error) => err);
+
+    // Advance past timeout (60s) + docker stop delay (8s)
+    await vi.advanceTimersByTimeAsync(68_000);
+
+    // docker stop should have been called
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('docker stop nanoclaw-router-'),
+      expect.objectContaining({ stdio: 'pipe', timeout: 5000 }),
+    );
+
+    // Clean up — advance past force-reject
+    await vi.advanceTimersByTimeAsync(2_000);
+    await routePromise;
+
+    vi.useRealTimers();
+  });
 });
