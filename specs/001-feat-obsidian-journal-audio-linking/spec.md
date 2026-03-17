@@ -113,12 +113,12 @@ When a note is created or appended, the system searches the vault for related ex
 - **FR-010**: System MUST weave wikilinks naturally into the note content, not as a disconnected list.
 - **FR-011**: System MUST degrade gracefully — if vault search fails, audio save fails, or the journal folder is inaccessible, the note creation must still succeed with whatever components are available.
 - **FR-012**: System MUST use the message timestamp (not processing time) to determine which daily note date to use.
-- **FR-013**: Each entry section within a daily note MUST start with an `### HH:MM` heading (24-hour format from the message timestamp), followed by the content, followed by the audio embed on its own line (if voice-originated). Entries MUST be separated by a blank line.
+- **FR-013**: Each entry section within a daily note MUST start with an `### HH:MM` heading (24-hour format from the message timestamp), followed by a blank line, followed by the content, followed by the audio embed on its own line (if voice-originated). A blank line MUST separate the heading from the content and each entry from the next.
 - **FR-014**: Audio files MUST be named `YYYY-MM-DD-HHMMSS.ogg` (derived from the message timestamp) to prevent filename collisions when multiple voice notes arrive on the same day.
 
 ### Key Entities
 
-- **Daily Note**: A markdown file at `Journal/YYYY-MM-DD.md` containing one or more entry sections. Accumulates entries throughout the day. Each entry section consists of an `### HH:MM` timestamp heading (24-hour format, derived from the message timestamp), followed by the transcribed/text content (with inline wikilinks if applicable), followed by the audio embed on its own line (if voice-originated). Entries are separated by a blank line.
+- **Daily Note**: A markdown file at `Journal/YYYY-MM-DD.md` containing one or more entry sections. Accumulates entries throughout the day. Each entry section consists of an `### HH:MM` timestamp heading (24-hour format, derived from the message timestamp), followed by a blank line, followed by the transcribed/text content (with inline wikilinks if applicable), followed by the audio embed on its own line (if voice-originated). A blank line separates each entry from the next.
 - **Audio Attachment**: An `.ogg` file stored in `attachments/audio/`, named `YYYY-MM-DD-HHMMSS.ogg` (derived from message timestamp to avoid collisions), and referenced via `![[filename]]` embed syntax within a daily note.
 - **Related Note**: An existing vault note discovered via vault search (QMD or grep) that is contextually relevant to the new content, linked inline with `[[wikilink]]` syntax.
 
