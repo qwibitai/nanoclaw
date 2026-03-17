@@ -1,12 +1,14 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { load as loadSqliteVec } from 'sqlite-vec';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   BacklogItem,
+  Memory,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
@@ -15,6 +17,7 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+let vecLoaded = false;
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -169,6 +172,33 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_thread_meta_group ON thread_metadata(group_folder);
   `);
+
+  // Semantic memory — stores facts/preferences/project context per group
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memories_group ON memories(group_folder);
+  `);
+
+  // Vector index for semantic search (requires sqlite-vec extension)
+  try {
+    database.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(
+        memory_id TEXT PRIMARY KEY,
+        embedding float[1536]
+      );
+    `);
+  } catch {
+    // sqlite-vec not loaded — vec_memories unavailable, falls back to keyword/recent
+  }
 
   // Ship log and backlog for tracking shipped features and open issues
   database.exec(`
@@ -349,6 +379,12 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+  try {
+    loadSqliteVec(db);
+    vecLoaded = true;
+  } catch (err) {
+    logger.warn({ err }, 'sqlite-vec extension failed to load — vector search disabled');
+  }
   createSchema(db);
 
   // Migrate from JSON files if they exist
@@ -358,6 +394,13 @@ export function initDatabase(): void {
 /** @internal - for tests only. Creates a fresh in-memory database. */
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
+  vecLoaded = false;
+  try {
+    loadSqliteVec(db);
+    vecLoaded = true;
+  } catch {
+    // Extension unavailable in test environment — vec_memories won't be created
+  }
   createSchema(db);
 }
 
@@ -1706,4 +1749,138 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Memory CRUD ---
+
+export function insertMemory(memory: Memory): void {
+  db.prepare(
+    `INSERT INTO memories (id, group_folder, type, name, description, content, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    memory.id,
+    memory.group_folder,
+    memory.type,
+    memory.name,
+    memory.description,
+    memory.content,
+    memory.created_at,
+    memory.updated_at,
+  );
+}
+
+export function insertMemoryEmbedding(id: string, embedding: Buffer): void {
+  if (!vecLoaded) return;
+  db.prepare(
+    `INSERT OR REPLACE INTO vec_memories (memory_id, embedding) VALUES (?, ?)`,
+  ).run(id, embedding);
+}
+
+export function deleteMemoryById(groupFolder: string, id: string): boolean {
+  const deleteMemoryTx = db.transaction(() => {
+    const result = db
+      .prepare(`DELETE FROM memories WHERE id = ? AND group_folder = ?`)
+      .run(id, groupFolder);
+    if (result.changes > 0) {
+      db.prepare(`DELETE FROM vec_memories WHERE memory_id = ?`).run(id);
+      return true;
+    }
+    return false;
+  });
+  return deleteMemoryTx() as boolean;
+}
+
+export function updateMemoryFields(
+  groupFolder: string,
+  id: string,
+  fields: Partial<Pick<Memory, 'type' | 'name' | 'description' | 'content'>>,
+): boolean {
+  const sets: string[] = ['updated_at = ?'];
+  const values: unknown[] = [new Date().toISOString()];
+
+  if (fields.type !== undefined) { sets.push('type = ?'); values.push(fields.type); }
+  if (fields.name !== undefined) { sets.push('name = ?'); values.push(fields.name); }
+  if (fields.description !== undefined) { sets.push('description = ?'); values.push(fields.description); }
+  if (fields.content !== undefined) { sets.push('content = ?'); values.push(fields.content); }
+
+  values.push(id, groupFolder);
+  const result = db.prepare(
+    `UPDATE memories SET ${sets.join(', ')} WHERE id = ? AND group_folder = ?`,
+  ).run(...values);
+  return result.changes > 0;
+}
+
+export function getMemoryById(groupFolder: string, id: string): Memory | undefined {
+  return db
+    .prepare(
+      `SELECT id, group_folder, type, name, description, content, created_at, updated_at
+       FROM memories WHERE id = ? AND group_folder = ?`,
+    )
+    .get(id, groupFolder) as Memory | undefined;
+}
+
+export function listMemories(groupFolder: string, limit = 50): Memory[] {
+  return db
+    .prepare(
+      `SELECT id, group_folder, type, name, description, content, created_at, updated_at
+       FROM memories WHERE group_folder = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(groupFolder, limit) as Memory[];
+}
+
+export function countMemories(groupFolder: string): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) AS c FROM memories WHERE group_folder = ?`)
+    .get(groupFolder) as { c: number };
+  return row.c;
+}
+
+export function searchMemoriesKeyword(groupFolder: string, query: string, topK = 6): Memory[] {
+  const term = `%${query}%`;
+  return db
+    .prepare(
+      `SELECT id, group_folder, type, name, description, content, created_at, updated_at
+       FROM memories
+       WHERE group_folder = ?
+         AND (name LIKE ? OR description LIKE ? OR content LIKE ?)
+       ORDER BY updated_at DESC
+       LIMIT ?`,
+    )
+    .all(groupFolder, term, term, term, topK) as Memory[];
+}
+
+export function searchMemoriesVec(
+  groupFolder: string,
+  queryEmbedding: Float32Array,
+  topK = 6,
+): Memory[] {
+  // vec0 MATCH evaluates k globally across all groups before the JOIN + group_folder filter.
+  // Use total memory count as k so every embedded memory is a candidate, then LIMIT to topK
+  // after the group filter is applied.
+  const totalCount = (
+    db.prepare('SELECT COUNT(*) AS c FROM memories').get() as { c: number }
+  ).c;
+  const k = Math.max(topK, totalCount);
+
+  return db
+    .prepare(
+      `SELECT m.id, m.group_folder, m.type, m.name, m.description, m.content, m.created_at, m.updated_at
+       FROM vec_memories v
+       JOIN memories m ON m.id = v.memory_id
+       WHERE v.embedding MATCH ?
+         AND m.group_folder = ?
+         AND k = ?
+       ORDER BY v.distance
+       LIMIT ?`,
+    )
+    .all(Buffer.from(queryEmbedding.buffer), groupFolder, k, topK) as Memory[];
+}
+
+export function recentMemories(groupFolder: string, topK = 6): Memory[] {
+  return db
+    .prepare(
+      `SELECT id, group_folder, type, name, description, content, created_at, updated_at
+       FROM memories WHERE group_folder = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(groupFolder, topK) as Memory[];
 }

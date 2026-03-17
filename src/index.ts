@@ -88,6 +88,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { getMemoryBlock } from './memory-store.js';
 import { startDailyNotifier } from './daily-notifications.js';
 import { callHaiku } from './llm.js';
 import {
@@ -676,8 +677,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     effort = resolveEffort(undefined, getSessionEffort(sessionKey));
   }
 
+  const latestMessageText = missedMessages[missedMessages.length - 1]?.content ?? '';
+  const memoryBlock = await getMemoryBlock(group.folder, latestMessageText);
+
   const prompt =
-    formatMessages(missedMessages, TIMEZONE) + modelSwitchNotice + effortNotice;
+    memoryBlock +
+    formatMessages(missedMessages, TIMEZONE) +
+    modelSwitchNotice +
+    effortNotice;
 
   // Collect attachments from messages and remap paths for container mount
   const containerAttachments: ContainerAttachment[] = [];

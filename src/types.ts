@@ -119,6 +119,17 @@ export interface ShipLogEntry {
   shipped_at: string;
 }
 
+export interface Memory {
+  id: string;
+  group_folder: string;
+  type: 'user' | 'feedback' | 'project' | 'reference';
+  name: string;
+  description: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BacklogItem {
   id: string;
   group_folder: string;

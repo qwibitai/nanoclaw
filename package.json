@@ -23,7 +23,6 @@
     "@types/qrcode-terminal": "^0.12.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
-    "grammy": "^1.39.3",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.18.0",
     "googleapis": "^144.0.0",
@@ -33,6 +32,7 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5",
+    "sqlite-vec": "^0.1.7-alpha.2",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
