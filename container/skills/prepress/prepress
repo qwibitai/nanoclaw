@@ -10,11 +10,9 @@ Commands:
 
 import sys
 import os
-import json
 import subprocess
 import tempfile
 import re
-from pathlib import Path
 
 # PDF points conversions
 MM_TO_PT = 2.83465
@@ -76,7 +74,7 @@ def bleed_verdict(bleed_pt):
         return "good (>=3mm)"
     elif bleed_pt >= BLEED_ACCEPTABLE_PT - TOLERANCE:
         return "acceptable (>=2mm)"
-    elif bleed_pt >= BLEED_MARGINAL_PT:
+    elif bleed_pt >= BLEED_MARGINAL_PT - TOLERANCE:
         return "marginal (>=1mm)"
     elif bleed_pt > 0.5:
         return "insufficient (<1mm)"
@@ -117,13 +115,15 @@ def check_edge_content(pdf_path, page_num=1, dpi=72):
         tmp_path = tmp.name
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             ['gs', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dQUIET',
              '-sDEVICE=png16m', f'-r{dpi}',
              f'-dFirstPage={page_num}', f'-dLastPage={page_num}',
              f'-sOutputFile={tmp_path}', str(pdf_path)],
             capture_output=True
         )
+        if result.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            return {side: {'has_content': False, 'coverage': 0} for side in ['top', 'bottom', 'left', 'right']}
 
         from PIL import Image
         img = Image.open(tmp_path).convert('RGB')
@@ -469,7 +469,6 @@ def cmd_preflight(pdf_path):
             page_fonts = doc[i].get_fonts()
             for font in page_fonts:
                 font_name = font[3]  # name field
-                font_type = font[4]  # type field
                 all_fonts.add(font_name)
                 # Check if embedded (xref > 0 and not "n/a")
                 if font[0] == 0:
