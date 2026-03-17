@@ -121,10 +121,7 @@ export async function saveCachedTree(
   try {
     const cacheDir = path.join(pdfDir, '.pageindex');
     await mkdir(cacheDir, { recursive: true });
-    const finalPath = path.join(
-      cacheDir,
-      `${baseName(pdfName)}-${hash}.json`,
-    );
+    const finalPath = path.join(cacheDir, `${baseName(pdfName)}-${hash}.json`);
     const tmpPath = `${finalPath}.tmp.${Date.now()}`;
     await writeFile(tmpPath, JSON.stringify(tree, null, 2));
     await rename(tmpPath, finalPath);
@@ -151,7 +148,15 @@ export function resolveContainerPath(
     const prefix = mount.containerPath + '/';
     if (containerPath.startsWith(prefix)) {
       const relativePath = containerPath.slice(prefix.length);
-      return path.join(mount.hostPath, relativePath);
+      const resolved = path.resolve(mount.hostPath, relativePath);
+      // Verify resolved path hasn't escaped the mount root
+      if (
+        !resolved.startsWith(mount.hostPath + path.sep) &&
+        resolved !== mount.hostPath
+      ) {
+        return null;
+      }
+      return resolved;
     }
     // Exact match (unlikely but handle it)
     if (containerPath === mount.containerPath) {
@@ -232,11 +237,12 @@ export async function indexPdf(
     const pageCount = await countPdfPages(filePath);
 
     if (pageCount === 0) {
+      const fallbackText = await extractFlatText(filePath);
       return {
         success: false,
         pageCount: 0,
-        fallbackText: await extractFlatText(filePath),
-        error: 'Could not determine page count',
+        fallbackText,
+        error: fallbackText ? 'Could not determine page count' : 'All extraction failed',
       };
     }
 
@@ -316,14 +322,18 @@ export async function indexPdf(
 
     // Step 5: Run Python adapter
     try {
-      const { stdout } = await execFileAsync(pythonBin, [scriptPath, filePath], {
-        env: {
-          ...process.env,
-          ANTHROPIC_BASE_URL: `http://localhost:${CREDENTIAL_PROXY_PORT}`,
-          ANTHROPIC_API_KEY: 'placeholder',
+      const { stdout } = await execFileAsync(
+        pythonBin,
+        [scriptPath, filePath],
+        {
+          env: {
+            ...process.env,
+            ANTHROPIC_BASE_URL: `http://localhost:${CREDENTIAL_PROXY_PORT}`,
+            ANTHROPIC_API_KEY: 'placeholder',
+          },
+          timeout: ADAPTER_TIMEOUT_MS,
         },
-        timeout: ADAPTER_TIMEOUT_MS,
-      });
+      );
 
       // Step 6: Parse result
       const tree = JSON.parse(stdout.trim()) as PageIndexNode;
