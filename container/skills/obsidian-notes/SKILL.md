@@ -191,9 +191,9 @@ Use `[[wikilinks]]` naturally within the text:
 
 When the input includes `[audio-file: <filename>]`:
 - The audio file is already saved in the vault at `attachments/audio/<filename>`
-- Embed it in the note: `![[<filename>]]`
-- Add a note about the source: "Transcribed from voice note"
-- Place the embed near the top of the note so the user can re-listen
+- **For journal entries**: Place the audio embed (`![[<filename>]]`) on its own line after the content within the `### HH:MM` entry section. Do NOT add a "Transcribed from voice note" label — the `### HH:MM` heading and audio embed are self-explanatory.
+- **For non-journal notes**: Embed it in the note using `![[<filename>]]` near the relevant content.
+- **Text-only entries**: Omit the audio embed entirely — no `![[...]]` line should appear when the message has no `[audio-file: ...]` marker.
 
 ## TODO List Management
 

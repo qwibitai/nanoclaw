@@ -78,7 +78,7 @@
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Update the obsidian-notes container skill in container/skills/obsidian-notes/SKILL.md to document audio embed placement within `### HH:MM` entry sections (audio embed on own line after content, omitted for text-only entries, uses `![[YYYY-MM-DD-HHMMSS.ogg]]` syntax)
+- [x] T015 [US2] Update the obsidian-notes container skill in container/skills/obsidian-notes/SKILL.md to document audio embed placement within `### HH:MM` entry sections (audio embed on own line after content, omitted for text-only entries, uses `![[YYYY-MM-DD-HHMMSS.ogg]]` syntax)
 - [ ] T016 [US2] Write test in src/obsidian.test.ts that verifies `saveAudioToVault()` returns a filename matching `YYYY-MM-DD-HHMMSS.ogg` format and that the `[audio-file: ...]` marker injected by `transcribeBuffer()` uses this timestamp-based filename (not the legacy `voice-{id}.ogg` format). Run `npm test` and confirm the test passes (it should, since T004 already implemented the rename).
 
 **Checkpoint**: Voice messages produce entries with audio embeds. Text-only messages produce entries without audio embeds. Audio files at `attachments/audio/YYYY-MM-DD-HHMMSS.ogg` are playable in Obsidian.
