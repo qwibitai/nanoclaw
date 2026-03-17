@@ -301,6 +301,67 @@ describe('GitHub token injection for dev cases', () => {
   });
 });
 
+// INVARIANT: When ~/.gmail-mcp exists, containers get it mounted at /home/node/.gmail-mcp
+// INVARIANT: When ~/.gmail-mcp does not exist, no Gmail mount is added
+// SUT: buildVolumeMounts in container-runner.ts (tested via runContainerAgent spawn args)
+// VERIFICATION: Inspect docker spawn args for presence/absence of gmail-mcp mount
+describe('Gmail credentials mount', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('mounts ~/.gmail-mcp when directory exists', async () => {
+    const args = await runAndCaptureSpawnArgs();
+    // existsSync returns true for everything (mocked in runAndCaptureSpawnArgs)
+    const gmailMount = args.find(
+      (a: string) => typeof a === 'string' && a.includes('.gmail-mcp'),
+    );
+    expect(gmailMount).toBeDefined();
+    expect(gmailMount).toContain('/home/node/.gmail-mcp');
+  });
+
+  it('does not mount ~/.gmail-mcp when directory is missing', async () => {
+    const fs = await import('fs');
+    const { spawn } = await import('child_process');
+
+    // Only return false for the gmail-mcp path
+    vi.spyOn(fs.default, 'existsSync').mockImplementation((p: unknown) => {
+      if (typeof p === 'string' && p.includes('.gmail-mcp')) return false;
+      return true;
+    });
+    vi.spyOn(fs.default, 'readdirSync').mockReturnValue([]);
+    vi.spyOn(fs.default, 'readFileSync').mockReturnValue('{}');
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+    const lastCall = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
+    const spawnArgs = lastCall[1] as string[];
+
+    const gmailMount = spawnArgs.find(
+      (a: string) => typeof a === 'string' && a.includes('.gmail-mcp'),
+    );
+    expect(gmailMount).toBeUndefined();
+  });
+});
+
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
