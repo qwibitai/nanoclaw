@@ -86,6 +86,16 @@ RUN mkdir -p /home/node/.agentsh/logs /home/node/.agentsh/data \
     /home/node/.agentsh/sessions /home/node/.agentsh/threat-feeds \
     && chown -R node:node /home/node/.agentsh /etc/agentsh
 
+# Remove dangerous binaries that agents should never use.
+# This is a hard block — seccomp-notif can't be used because it conflicts
+# with kernel shebang resolution for npm/npx scripts.
+RUN rm -f /usr/bin/nsenter /usr/bin/unshare /usr/bin/chroot \
+    /usr/bin/mount /usr/bin/umount /usr/bin/su \
+    /usr/sbin/fdisk /usr/sbin/mkfs* \
+    /usr/bin/nc /usr/bin/nc.* /usr/bin/ncat \
+    /usr/bin/socat /usr/bin/telnet \
+    && chmod 000 /usr/bin/dd 2>/dev/null || true
+
 # Install shell shim LAST — replaces /bin/bash with agentsh policy gateway.
 # All subsequent bash invocations (at runtime) route through the policy engine.
 # No more RUN commands after this point to avoid shim triggering during build.

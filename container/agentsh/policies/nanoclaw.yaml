@@ -591,7 +591,9 @@ command_rules:
   # ---------------------------------------------------------------------------
 
   # System administration commands — the agent runs as non-root in a container,
-  # but blocking these adds defense-in-depth
+  # but blocking these adds defense-in-depth.
+  # Note: kill/killall are bash builtins and can't be intercepted by seccomp.
+  # Docker's process isolation prevents cross-container signaling regardless.
   - name: block-system-commands
     description: Block system administration
     commands:
@@ -605,9 +607,6 @@ command_rules:
       - fdisk
       - mkfs
       - dd
-      - kill
-      - killall
-      - pkill
     decision: deny
 
   # Privilege escalation — these could be used to escape the non-root sandbox
