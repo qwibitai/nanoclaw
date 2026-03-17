@@ -418,15 +418,9 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
     );
   });
 
-  // INVARIANT: Dev case notifications go to main group, not source group
-  // SUT: processTaskIpc case_create notification routing
-  test('dev case created from non-main group notifies main group', async () => {
-    mockedCreateGitHubIssue.mockResolvedValue({
-      success: true,
-      issueUrl: 'https://github.com/Garsson-io/kaizen/issues/60',
-      issueNumber: 60,
-    });
-
+  // INVARIANT: Dev case from non-main group routes to approval gate
+  // SUT: processTaskIpc case_create authorization via case-auth.ts
+  test('dev case from non-main group routes to approval gate and notifies main', async () => {
     await processTaskIpc(
       {
         type: 'case_create',
@@ -440,10 +434,10 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
       deps,
     );
 
-    // Notification should go to main group (tg:111), not source group (tg:222)
+    // Non-main dev case → suggested status, main group notified for approval
     expect(sendMessage).toHaveBeenCalledWith(
       'tg:111',
-      expect.stringContaining('dev case created'),
+      expect.stringContaining('Dev case needs approval'),
     );
   });
 

@@ -625,8 +625,8 @@ server.tool(
 The case gets its own workspace and session, so subsequent messages routed to it have isolated context. Don't create cases for simple one-off questions.
 
 Case types:
-• "work" — Uses existing tooling for productive work (research, analysis, writing). Gets a scratch directory.
-• "dev" — Improves tooling/workflows to make future work better. Gets a git worktree. Use sparingly.`,
+• "work" — Uses existing tooling for productive work (research, analysis, writing, file conversions). Gets a scratch directory. NO git or GitHub access.
+• "dev" — Any task that produces code changes: bug fixes, new features, tooling improvements, config changes, workflow updates. Gets a git worktree + GitHub access for pushing branches and creating PRs. Use this whenever the deliverable is a code change or PR.`,
   {
     short_name: z
       .string()
@@ -648,7 +648,9 @@ Case types:
     case_type: z
       .enum(['work', 'dev'])
       .default('work')
-      .describe('Type of case: work (default) or dev'),
+      .describe(
+        'Type of case: "work" for non-code tasks, "dev" for anything that changes code (bug fixes, features, config, workflows)',
+      ),
   },
   async (args) => {
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -674,6 +676,16 @@ Case types:
       requestId,
     );
     if (result) {
+      if (result.needs_approval) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Dev case suggested (pending approval):\n  ID: ${result.id}\n  Name: ${result.name}\n  Status: SUGGESTED — awaiting approval from main group\n\nThe case needs approval before it becomes active. The main group has been notified. Do NOT start working on this case until it is approved.`,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {
