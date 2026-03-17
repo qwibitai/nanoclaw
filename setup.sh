@@ -79,8 +79,8 @@ install_deps() {
     log "Running as root, using --unsafe-perm"
   fi
 
-  log "Running npm install $npm_flags"
-  if npm install $npm_flags >> "$LOG_FILE" 2>&1; then
+  log "Running npm ci $npm_flags"
+  if npm ci $npm_flags >> "$LOG_FILE" 2>&1; then
     DEPS_OK="true"
     log "npm install succeeded"
   else
