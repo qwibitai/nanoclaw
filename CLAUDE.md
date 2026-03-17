@@ -305,6 +305,17 @@ This is a fork of `qwibitai/nanoclaw`. Remotes:
 
 **Always use `--repo Garsson-io/nanoclaw`** with `gh` commands. The `gh` CLI may default to upstream otherwise.
 
+## Merging PRs
+
+Branch protection has `strict: true` status checks — the PR branch must be current with main at merge time. When `gh pr merge` fails with "base branch policy prohibits the merge", **use `--auto`** to queue the merge for when requirements are met. Do NOT ask the user — just add `--auto` and move on. The `gh` CLI tells you this in its error message; follow its suggestion.
+
+```bash
+# Standard merge command (always use --auto with --squash):
+gh pr merge <url> --repo Garsson-io/nanoclaw --squash --delete-branch --auto
+```
+
+If `--auto` isn't sufficient (e.g., branch is behind), merge main into the branch first, push, then re-run with `--auto`. The PR review Stop hook enforces this — it will block you from stopping until the review loop completes, which includes the merge step.
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
