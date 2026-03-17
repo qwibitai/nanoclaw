@@ -84,46 +84,46 @@ function createSchema(database: Database.Database): void {
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
+  // context_mode カラムが存在しない場合は追加（既存 DB のマイグレーション）
   try {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
   } catch {
-    /* column already exists */
+    /* カラムはすでに存在します */
   }
 
-  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
+  // is_bot_message カラムが存在しない場合は追加（既存 DB のマイグレーション）
   try {
     database.exec(
       `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
     );
-    // Backfill: mark existing bot messages that used the content prefix pattern
+    // 過去分への適用: 内容のプレフィックスパターンから既存のボットメッセージをマーク
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
-    /* column already exists */
+    /* カラムはすでに存在します */
   }
 
-  // Add is_main column if it doesn't exist (migration for existing DBs)
+  // is_main カラムが存在しない場合は追加（既存 DB のマイグレーション）
   try {
     database.exec(
       `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
     );
-    // Backfill: existing rows with folder = 'main' are the main group
+    // 過去分への適用: folder = 'main' の既存行をメイングループとしてマーク
     database.exec(
       `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
     );
   } catch {
-    /* column already exists */
+    /* カラムはすでに存在します */
   }
 
-  // Add channel and is_group columns if they don't exist (migration for existing DBs)
+  // channel および is_group カラムが存在しない場合は追加（既存 DB のマイグレーション）
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
     database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // Backfill from JID patterns
+    // JID パターンから過去分への適用
     database.exec(
       `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
     );
@@ -137,7 +137,7 @@ function createSchema(database: Database.Database): void {
       `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
     );
   } catch {
-    /* columns already exist */
+    /* カラムはすでに存在します */
   }
 }
 
@@ -148,19 +148,19 @@ export function initDatabase(): void {
   db = new Database(dbPath);
   createSchema(db);
 
-  // Migrate from JSON files if they exist
+  // JSON ファイルが存在する場合はマイグレーションを実行
   migrateJsonState();
 }
 
-/** @internal - for tests only. Creates a fresh in-memory database. */
+/** @internal - テスト用のみ。新規のインメモリデータベースを作成します。 */
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
 }
 
 /**
- * Store chat metadata only (no message content).
- * Used for all chats to enable group discovery without storing sensitive content.
+ * チャットのメタデータのみを保存します（メッセージ内容は含みません）。
+ * 機密性の高い内容を保存せずにグループ検出を可能にするため、すべてのチャットで使用されます。
  */
 export function storeChatMetadata(
   chatJid: string,
@@ -173,7 +173,7 @@ export function storeChatMetadata(
   const group = isGroup === undefined ? null : isGroup ? 1 : 0;
 
   if (name) {
-    // Update with name, preserving existing timestamp if newer
+    // 名前で更新。既存のタイムスタンプの方が新しい場合はそれを保持。
     db.prepare(
       `
       INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
@@ -185,7 +185,7 @@ export function storeChatMetadata(
     `,
     ).run(chatJid, name, timestamp, ch, group);
   } else {
-    // Update timestamp only, preserve existing name if any
+    // タイムスタンプのみ更新。既存の名前があれば保持。
     db.prepare(
       `
       INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
@@ -199,9 +199,9 @@ export function storeChatMetadata(
 }
 
 /**
- * Update chat name without changing timestamp for existing chats.
- * New chats get the current time as their initial timestamp.
- * Used during group metadata sync.
+ * 既存チャットのタイムスタンプを変更せずにチャット名を更新します。
+ * 新規チャットの初期タイムスタンプには現在時刻が設定されます。
+ * グループメタデータの同期中に使用されます。
  */
 export function updateChatName(chatJid: string, name: string): void {
   db.prepare(
@@ -221,7 +221,7 @@ export interface ChatInfo {
 }
 
 /**
- * Get all known chats, ordered by most recent activity.
+ * すべての既知のチャットを、直近のアクティビティ順に取得します。
  */
 export function getAllChats(): ChatInfo[] {
   return db
@@ -236,10 +236,10 @@ export function getAllChats(): ChatInfo[] {
 }
 
 /**
- * Get timestamp of last group metadata sync.
+ * 最後のグループメタデータ同期のタイムスタンプを取得します。
  */
 export function getLastGroupSync(): string | null {
-  // Store sync time in a special chat entry
+  // 同期時刻は特別なチャットエントリに保存されます
   const row = db
     .prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
     .get() as { last_message_time: string } | undefined;
@@ -247,7 +247,7 @@ export function getLastGroupSync(): string | null {
 }
 
 /**
- * Record that group metadata was synced.
+ * グループメタデータが同期されたことを記録します。
  */
 export function setLastGroupSync(): void {
   const now = new Date().toISOString();
@@ -257,8 +257,8 @@ export function setLastGroupSync(): void {
 }
 
 /**
- * Store a message with full content.
- * Only call this for registered groups where message history is needed.
+ * メッセージの内容を含めて保存します。
+ * メッセージ履歴が必要な、登録済みグループに対してのみ呼び出してください。
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
@@ -276,7 +276,7 @@ export function storeMessage(msg: NewMessage): void {
 }
 
 /**
- * Store a message directly.
+ * メッセージを直接保存します。
  */
 export function storeMessageDirect(msg: {
   id: string;
@@ -311,9 +311,9 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  // ボットのメッセージを除外するために is_bot_message フラグと内容のプレフィックスの両方を使用します。
+  // 内容のプレフィックスはマイグレーション実行前のメッセージに対するバックストップです。
+  // サブクエリで最新の N 件を取得し、外側のクエリで時系列順に並べ替えます。
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
@@ -344,9 +344,9 @@ export function getMessagesSince(
   botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  // ボットのメッセージを除外するために is_bot_message フラグと内容のプレフィックスの両方を使用します。
+  // 内容のプレフィックスはマイグレーション実行前のメッセージに対するバックストップです。
+  // サブクエリで最新の N 件を取得し、外側のクエリで時系列順に並べ替えます。
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
@@ -447,7 +447,7 @@ export function updateTask(
 }
 
 export function deleteTask(id: string): void {
-  // Delete child records first (FK constraint)
+  // 外部キー制約のため、まず子レコードを削除します
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
 }
@@ -496,7 +496,7 @@ export function logTaskRun(log: TaskRunLog): void {
   );
 }
 
-// --- Router state accessors ---
+// --- ルーターステート・アクセッサー ---
 
 export function getRouterState(key: string): string | undefined {
   const row = db
@@ -511,7 +511,7 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
-// --- Session accessors ---
+// --- セッション・アクセッサー ---
 
 export function getSession(groupFolder: string): string | undefined {
   const row = db
@@ -537,7 +537,7 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
-// --- Registered group accessors ---
+// --- 登録済みグループ・アクセッサー ---
 
 export function getRegisteredGroup(
   jid: string,
@@ -634,7 +634,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
-// --- JSON migration ---
+// --- JSON マイグレーション ---
 
 function migrateJsonState(): void {
   const migrateFile = (filename: string) => {
@@ -649,7 +649,7 @@ function migrateJsonState(): void {
     }
   };
 
-  // Migrate router_state.json
+  // router_state.json のマイグレーション
   const routerState = migrateFile('router_state.json') as {
     last_timestamp?: string;
     last_agent_timestamp?: Record<string, string>;
@@ -666,7 +666,7 @@ function migrateJsonState(): void {
     }
   }
 
-  // Migrate sessions.json
+  // sessions.json のマイグレーション
   const sessions = migrateFile('sessions.json') as Record<
     string,
     string
@@ -677,7 +677,7 @@ function migrateJsonState(): void {
     }
   }
 
-  // Migrate registered_groups.json
+  // registered_groups.json のマイグレーション
   const groups = migrateFile('registered_groups.json') as Record<
     string,
     RegisteredGroup
