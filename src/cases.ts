@@ -588,7 +588,7 @@ export function generateCaseName(
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
-    .slice(0, 20)
+    .slice(0, 30)
     .replace(/-$/, '');
 
   return `${datePrefix}-${slug}`;

@@ -8,6 +8,7 @@ import {
   getStaleActiveCases,
   updateCase,
   formatCaseStatus,
+  generateCaseName,
 } from './cases.js';
 import { makeCase } from './test-helpers.js';
 
@@ -276,5 +277,36 @@ describe('schema migration idempotency', () => {
 
     const retrieved = getCaseById('post-migrate');
     expect(retrieved!.github_issue).toBe(7);
+  });
+});
+
+// INVARIANT: generateCaseName produces a date-prefixed slug, preferring shortName over description.
+// SUT: generateCaseName
+// VERIFICATION: Check slug format with and without shortName, and verify truncation.
+describe('generateCaseName', () => {
+  it('uses description when no shortName provided', () => {
+    const name = generateCaseName('Convert photo to CMYK');
+    expect(name).toMatch(/^\d{6}-\d{4}-convert-photo-to-cmyk$/);
+  });
+
+  it('prefers shortName over description', () => {
+    const name = generateCaseName(
+      'Convert photo 134.jpg to CMYK for printing at Demarco shop',
+      'Demarco T. CMYK Magnificent',
+    );
+    expect(name).toMatch(/^\d{6}-\d{4}-demarco-t-cmyk-magnificent$/);
+  });
+
+  it('truncates slug to 30 characters', () => {
+    const name = generateCaseName(
+      'This is an extremely long description that should be truncated to fit',
+    );
+    const slug = name.replace(/^\d{6}-\d{4}-/, '');
+    expect(slug.length).toBeLessThanOrEqual(30);
+  });
+
+  it('strips special characters from slug', () => {
+    const name = generateCaseName('Sarah K. Logo! @#$% Sparkly!!!');
+    expect(name).toMatch(/^\d{6}-\d{4}-sarah-k-logo-sparkly$/);
   });
 });

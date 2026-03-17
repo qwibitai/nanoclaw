@@ -631,7 +631,7 @@ Case types:
     short_name: z
       .string()
       .describe(
-        'A cute, memorable 2-3 word name for this case. Think creative and fun — e.g. "cmyk-demarco", "logo-resize", "pixel-surgeon", "color-fix". NOT a full description.',
+        'A cute case name: "{Client FirstName} {Last Initial}. {OneWordTask} {FunAdjective}". Use the client/user\'s name, one word for the task, and one cute irrelevant adjective. Examples: "Aviad R. Banner Fun", "Moshe A. Runner Incredible", "Sarah K. Logo Sparkly", "Demarco T. CMYK Magnificent".',
       ),
     description: z
       .string()
