@@ -13,6 +13,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  setSession,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -183,6 +184,11 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        // Persist session updates for group-context tasks
+        if (streamedOutput.newSessionId && task.context_mode === 'group') {
+          sessions[task.group_folder] = streamedOutput.newSessionId;
+          setSession(task.group_folder, streamedOutput.newSessionId);
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)

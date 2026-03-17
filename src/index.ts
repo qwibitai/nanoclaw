@@ -42,6 +42,7 @@ import {
   deleteSession,
   getSessionLastUsed,
   setSession,
+  touchSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -342,17 +343,17 @@ async function runAgent(
   let sessionId: string | undefined = sessions[group.folder];
   if (sessionId) {
     const lastUsed = getSessionLastUsed(group.folder);
-    if (lastUsed) {
-      const age = Date.now() - new Date(lastUsed).getTime();
-      if (age > SESSION_MAX_AGE_MS) {
-        logger.info(
-          { group: group.name, ageMinutes: Math.round(age / 60000) },
-          'Session expired, starting fresh',
-        );
-        delete sessions[group.folder];
-        deleteSession(group.folder);
-        sessionId = undefined;
-      }
+    const age = lastUsed
+      ? Date.now() - new Date(lastUsed).getTime()
+      : Infinity; // No timestamp = treat as expired (migrated from old format)
+    if (age > SESSION_MAX_AGE_MS) {
+      logger.info(
+        { group: group.name, ageMinutes: lastUsed ? Math.round(age / 60000) : 'unknown' },
+        'Session expired, starting fresh',
+      );
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+      sessionId = undefined;
     }
   }
 
@@ -537,6 +538,11 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
+            // Update session last_used so expiry timer resets on active use
+            const grp = registeredGroups[chatJid];
+            if (grp && sessions[grp.folder]) {
+              touchSession(grp.folder);
+            }
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
