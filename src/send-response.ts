@@ -19,7 +19,12 @@ export async function sendResponse(
   senderName: string,
   deps: SendResponseDeps,
 ): Promise<void> {
-  if (deps.sendPoolMessage && jid.startsWith('tg:')) {
+  // Pool bots only work in group chats (negative Telegram IDs).
+  // In private chats, each bot has its own conversation — using a pool bot
+  // would reply in a different chat than the one the user messaged.
+  const tgChatId = jid.startsWith('tg:') ? jid.slice(3) : '';
+  const isTelegramGroup = tgChatId.startsWith('-');
+  if (deps.sendPoolMessage && isTelegramGroup) {
     const sent = await deps.sendPoolMessage(jid, text, senderName, groupFolder);
     if (sent) return;
   }
