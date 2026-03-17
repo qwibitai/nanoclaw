@@ -9,18 +9,9 @@ import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnChatMetadata,
-  OnInboundMessage,
-  RegisteredGroup,
-} from '../types.js';
+import { Channel } from '../types.js';
 
-export interface TelegramChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+export type TelegramChannelOpts = ChannelOpts;
 
 /**
  * Send a message with Telegram Markdown parse mode, falling back to plain text.
@@ -372,7 +363,8 @@ export class TelegramChannel implements Channel {
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
 
-      // Try to download the photo so the agent can actually see it
+      const downloadId = `photo-${ctx.message.message_id}`;
+      this.opts.onDownloadStart?.(chatJid, downloadId);
       try {
         const photos = ctx.message.photo;
         // Telegram provides multiple sizes; last is largest
@@ -399,8 +391,9 @@ export class TelegramChannel implements Channel {
         storeNonText(ctx, `[Image: ${containerPath} — use Read tool to view]`);
       } catch (err) {
         logger.error({ err, chatJid }, 'Failed to download Telegram photo');
-        // Fallback to placeholder if download fails
         storeNonText(ctx, '[Photo]');
+      } finally {
+        this.opts.onDownloadComplete?.(chatJid, downloadId);
       }
     });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
@@ -414,6 +407,8 @@ export class TelegramChannel implements Channel {
       const doc = ctx.message.document;
       const originalName = doc?.file_name || 'file';
 
+      const downloadId = `doc-${ctx.message.message_id}`;
+      this.opts.onDownloadStart?.(chatJid, downloadId);
       try {
         const file = await ctx.api.getFile(doc!.file_id);
         if (!file.file_path)
@@ -447,6 +442,8 @@ export class TelegramChannel implements Channel {
           'Failed to download Telegram document',
         );
         storeNonText(ctx, `[Document: ${originalName} — download failed]`);
+      } finally {
+        this.opts.onDownloadComplete?.(chatJid, downloadId);
       }
     });
     this.bot.on('message:sticker', (ctx) => {

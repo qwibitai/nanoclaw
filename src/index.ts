@@ -47,6 +47,7 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { DownloadTracker } from './download-tracker.js';
 import { GroupQueue } from './group-queue.js';
 import { cleanupStaleUploads, resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -261,7 +262,9 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
+const downloadTracker = new DownloadTracker();
 const queue = new GroupQueue();
+queue.setDownloadTracker(downloadTracker);
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -1078,6 +1081,10 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    onDownloadStart: (chatJid: string, id: string) =>
+      downloadTracker.start(chatJid, id),
+    onDownloadComplete: (chatJid: string, id: string) =>
+      downloadTracker.complete(chatJid, id),
   };
 
   // Create and connect all registered channels.

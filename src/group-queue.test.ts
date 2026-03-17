@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+import { DownloadTracker } from './download-tracker.js';
 import { GroupQueue } from './group-queue.js';
 
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  COALESCE_MS: 0,
+  MAX_DOWNLOAD_WAIT_MS: 60000,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -480,5 +483,200 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+});
+
+/**
+ * INVARIANT: When coalescing is enabled, container start is deferred by
+ * coalesceMs and extended by pending downloads, so all content is available
+ * in a single agent turn.
+ * SUT: GroupQueue with coalesceMs > 0 and DownloadTracker
+ * VERIFICATION: Fake timers control timing; processMessagesFn tracks calls.
+ */
+describe('GroupQueue coalescing + download tracking', () => {
+  let queue: GroupQueue;
+  let tracker: DownloadTracker;
+  let processMessages: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tracker = new DownloadTracker();
+    // coalesceMs=500, maxDownloadWaitMs=5000
+    queue = new GroupQueue(500, 5000);
+    queue.setDownloadTracker(tracker);
+
+    processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(
+      processMessages as (groupJid: string) => Promise<boolean>,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('defers container start by coalesceMs', async () => {
+    queue.enqueueMessageCheck('g1');
+
+    // Not started yet at 499ms
+    await vi.advanceTimersByTimeAsync(499);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // Started at 500ms
+    await vi.advanceTimersByTimeAsync(1);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('absorbs multiple enqueues during coalesce window', async () => {
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(200);
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(200);
+    queue.enqueueMessageCheck('g1');
+
+    // Only one container start at 500ms from first enqueue
+    await vi.advanceTimersByTimeAsync(100);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for pending downloads after coalesce window', async () => {
+    // Simulate: text arrives, download starts at T=200ms
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(200);
+    tracker.start('g1', 'doc-1');
+
+    // Coalesce window ends at T=500ms — but download is pending
+    await vi.advanceTimersByTimeAsync(300);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // Download completes at T=800ms — container starts
+    tracker.complete('g1', 'doc-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts container when download times out', async () => {
+    queue.enqueueMessageCheck('g1');
+    tracker.start('g1', 'doc-1');
+
+    // Coalesce window (500ms) + download wait timeout (5000ms) = 5500ms
+    await vi.advanceTimersByTimeAsync(5499);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts immediately when no downloads pending and coalesce expires', async () => {
+    queue.enqueueMessageCheck('g1');
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not delay messages to active containers', async () => {
+    // Start a container
+    let resolveProcess: () => void;
+    processMessages.mockImplementation(
+      async () =>
+        new Promise<boolean>((resolve) => {
+          resolveProcess = () => resolve(true);
+        }),
+    );
+
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    // Register process and send message — should go through IPC immediately
+    queue.registerProcess('g1', {} as any, 'container-1', 'test-group');
+    queue.enqueueMessageCheck('g1');
+
+    // The second enqueue should just set pendingMessages, no delay
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processMessages).toHaveBeenCalledTimes(1); // Still just the first call
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('shutdown cancels pending coalesce timers', async () => {
+    queue.enqueueMessageCheck('g1');
+
+    await vi.advanceTimersByTimeAsync(200);
+    await queue.shutdown(1000);
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).not.toHaveBeenCalled();
+  });
+
+  it('E2E: text at T=0, download starts T=300, completes T=2000 — container starts at T=2000', async () => {
+    // T=0: text message arrives
+    queue.enqueueMessageCheck('g1');
+
+    // T=300: document webhook arrives, download starts
+    await vi.advanceTimersByTimeAsync(300);
+    tracker.start('g1', 'doc-42');
+
+    // T=500: coalesce window ends, but download pending
+    await vi.advanceTimersByTimeAsync(200);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // T=1000: still downloading
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // T=2000: download completes
+    await vi.advanceTimersByTimeAsync(1000);
+    tracker.complete('g1', 'doc-42');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles multiple concurrent downloads for same chat', async () => {
+    queue.enqueueMessageCheck('g1');
+    tracker.start('g1', 'photo-1');
+    tracker.start('g1', 'doc-1');
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // Complete photo — doc still pending
+    tracker.complete('g1', 'photo-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // Complete doc — all done, container starts
+    tracker.complete('g1', 'doc-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('independent chats coalesce independently', async () => {
+    queue.enqueueMessageCheck('g1');
+    queue.enqueueMessageCheck('g2');
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).toHaveBeenCalledTimes(2);
+    expect(processMessages).toHaveBeenCalledWith('g1');
+    expect(processMessages).toHaveBeenCalledWith('g2');
+  });
+
+  it('coalesce window resets for subsequent messages after container finishes', async () => {
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    // Wait for container to finish
+    await vi.advanceTimersByTimeAsync(10);
+
+    // New message should start a fresh coalesce window
+    queue.enqueueMessageCheck('g1');
+    await vi.advanceTimersByTimeAsync(499);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(processMessages).toHaveBeenCalledTimes(2);
   });
 });
