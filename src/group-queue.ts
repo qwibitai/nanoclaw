@@ -193,6 +193,32 @@ export class GroupQueue {
     }
   }
 
+  getSnapshot(): {
+    activeCount: number;
+    groups: {
+      jid: string;
+      folder: string | null;
+      active: boolean;
+      pendingMessages: boolean;
+      pendingTaskCount: number;
+      containerName: string | null;
+      retryCount: number;
+    }[];
+  } {
+    return {
+      activeCount: this.activeCount,
+      groups: Array.from(this.groups.entries()).map(([jid, s]) => ({
+        jid,
+        folder: s.groupFolder,
+        active: s.active,
+        pendingMessages: s.pendingMessages,
+        pendingTaskCount: s.pendingTasks.length,
+        containerName: s.containerName,
+        retryCount: s.retryCount,
+      })),
+    };
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
