@@ -109,6 +109,14 @@ From the main channel (your self-chat), you can manage groups and tasks:
 @Andy join the Family Chat group
 ```
 
+You can also open a [Remote Control](https://code.claude.com/docs/en/remote-control) session to access NanoClaw's host machine directly from claude.ai/code:
+```
+/remote-control       → starts a session and returns the URL
+/remote-control-end   → stops the active session
+```
+
+To disable Remote Control entirely, pass `--no-remote-control` when registering your main group, or set `remoteControl: false` on the group in the database.
+
 ## Customizing
 
 NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:

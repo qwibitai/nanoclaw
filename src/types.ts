@@ -39,7 +39,8 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  isMain?: boolean; // True for the main control group (no trigger, elevated privileges);
+  remoteControl?: boolean; // Default: true. Set to false to disable /remote-control commands.
 }
 
 export interface NewMessage {
