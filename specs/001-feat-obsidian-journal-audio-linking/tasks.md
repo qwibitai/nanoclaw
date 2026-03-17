@@ -64,7 +64,7 @@
 - [x] T011 [US1] Add pure function `formatJournalEntry(timestamp: Date, content: string, audioFile?: string): string` in src/obsidian.ts that produces the `### HH:MM` + content + optional `![[audioFile]]` format per data-model.md
 - [x] T012 [US1] Add pure function `getJournalNotePath(timestamp: Date): string` in src/obsidian.ts that returns `Journal/YYYY-MM-DD.md` relative to vault root
 - [x] T013 [US1] Update the obsidian-notes container skill in container/skills/obsidian-notes/SKILL.md to document: Journal/ folder convention for daily notes, `### HH:MM` entry format, journal intent detection (NLU-based, no `/obsidian` required), trigger phrase stripping rules, and updated vault structure showing `Journal/` folder
-- [ ] T014 [US1] Run tests and verify T008, T009, T010 pass (`npm test`)
+- [x] T014 [US1] Run tests and verify T008, T009, T010 pass (`npm test`)
 
 **Checkpoint**: The container agent skill knows about Journal/ folder and entry format. Host-side helpers for formatting and path resolution are available. Send a test message and verify `Journal/YYYY-MM-DD.md` is created.
 
