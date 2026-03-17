@@ -69,6 +69,7 @@ NanoClaw (harness, public)              Verticals (private repos)
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
+| `store/messages.db` | SQLite database (messages, chats, cases, api_usage) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
@@ -214,6 +215,16 @@ Notify only: "✅ Updated [what]. Active on next conversation, no restart needed
 - **Build BEFORE restart** — never restart with an untested build
 - **Never leave leads uninformed** — they must know if the system is down or degraded
 - **If anything fails, keep running on the old version** — availability > new features
+
+## Database
+
+SQLite database at `store/messages.db` (path defined by `STORE_DIR` in `src/config.ts`). Uses `better-sqlite3` (NOT the `sqlite3` CLI, which is not installed). Query from the command line:
+
+```bash
+node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare('SELECT name, status, type FROM cases ORDER BY status').all(), null, 2))"
+```
+
+Tables: `messages`, `chats`, `cases`, `sessions`, `api_usage`, `usage_categories`, `scheduled_tasks`, `task_run_logs`, `registered_groups`, `router_state`.
 
 ## Development
 
