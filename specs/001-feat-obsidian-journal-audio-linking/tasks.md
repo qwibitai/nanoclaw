@@ -108,7 +108,7 @@
 ### Implementation for User Story 4
 
 - [x] T018 [US4] Update the obsidian-notes container skill in container/skills/obsidian-notes/SKILL.md to document: for journal entries, the agent should grep the vault for related notes (since `/obsidian` context may not be available), verify file existence before creating `[[wikilinks]]`, weave links naturally into prose, and degrade gracefully if search fails
-- [ ] T019 [US4] Verify the existing `buildObsidianContext()` in src/obsidian.ts remains on the `/obsidian` command path only (per research.md R4 decision) — no changes needed to src/index.ts for QMD routing
+- [x] T019 [US4] Verify the existing `buildObsidianContext()` in src/obsidian.ts remains on the `/obsidian` command path only (per research.md R4 decision) — no changes needed to src/index.ts for QMD routing
 
 **Checkpoint**: Journal entries contain inline wikilinks to related notes when they exist. No broken links. Notes are created successfully even when search fails.
 
