@@ -54,6 +54,32 @@ Use QMD when you need to find information but don't know which file it's in:
 
 For simple lookups where you know the file, use Read/Grep directly — they're faster.
 
+### SimpleMem (long-term conversational memory)
+
+You have access to SimpleMem via `mcp__simplemem__*` tools. SimpleMem stores and retrieves conversational facts with semantic compression, coreference resolution, and timestamp anchoring.
+
+**When to use SimpleMem:**
+- After learning important user preferences, facts, or context
+- When the user asks you to remember something
+- When doing research — store key findings so they persist across sessions
+- When you learn about a new tool, person, deadline, or decision
+
+**Key tools:**
+- `mcp__simplemem__memory_add` — store a conversation or facts (automatically extracts and compresses)
+- `mcp__simplemem__memory_query` — ask natural language questions about past conversations
+- `mcp__simplemem__memory_retrieve` — browse raw stored facts with metadata
+- `mcp__simplemem__memory_stats` — check how many memories are stored
+
+**Example — storing after research:**
+```
+mcp__simplemem__memory_add(content: "User asked me to research PageIndex for PDF indexing. Key findings: it uses LLM-powered TOC detection to build hierarchical trees. We decided to integrate it with Claude API via the credential proxy. Threshold: >20 pages. Storage: vault .pageindex/ folders.")
+```
+
+**Example — recalling context:**
+```
+mcp__simplemem__memory_query(query: "What tools has the user asked me to set up?")
+```
+
 ### File-based memory (local per-group)
 
 For group-specific details and detailed data:

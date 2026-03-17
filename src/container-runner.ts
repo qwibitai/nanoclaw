@@ -94,17 +94,17 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+  }
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
-      });
-    }
+  // Global memory directory (read-only for all groups)
+  // Contains shared instructions (vault writing, QMD, etc.) via CLAUDE.md
+  const globalDir = path.join(GROUPS_DIR, 'global');
+  if (fs.existsSync(globalDir)) {
+    mounts.push({
+      hostPath: globalDir,
+      containerPath: '/workspace/global',
+      readonly: true,
+    });
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
@@ -236,6 +236,12 @@ function buildContainerArgs(
   // Pass QMD search endpoint URL if daemon is running
   const qmdUrl = `http://${CONTAINER_HOST_GATEWAY}:8181/mcp`;
   args.push('-e', `QMD_URL=${qmdUrl}`);
+
+  // Pass SimpleMem memory URL if configured
+  const simpleMemUrl = process.env.SIMPLEMEM_URL;
+  if (simpleMemUrl) {
+    args.push('-e', `SIMPLEMEM_URL=${simpleMemUrl.replace('localhost', CONTAINER_HOST_GATEWAY)}`);
+  }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());

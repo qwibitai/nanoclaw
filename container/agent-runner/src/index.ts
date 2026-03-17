@@ -369,7 +369,7 @@ async function runQuery(
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
@@ -408,7 +408,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__qmd__*'
+        'mcp__qmd__*',
+        'mcp__simplemem__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -428,6 +429,12 @@ async function runQuery(
           qmd: {
             type: 'http' as const,
             url: process.env.QMD_URL,
+          },
+        } : {}),
+        ...(process.env.SIMPLEMEM_URL ? {
+          simplemem: {
+            type: 'http' as const,
+            url: process.env.SIMPLEMEM_URL,
           },
         } : {}),
       },
