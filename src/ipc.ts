@@ -20,6 +20,7 @@ import { processCaseIpc } from './ipc-cases.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { IpcMessageSchema } from './schemas.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -371,20 +372,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const data = IpcMessageSchema.parse(raw);
+              if (data.type === 'message') {
                 await dispatchIpcMessage(data, sourceGroup, isMain, deps);
-              } else if (
-                data.type === 'image' &&
-                data.chatJid &&
-                data.imagePath
-              ) {
+              } else if (data.type === 'image') {
                 await dispatchIpcImage(data, sourceGroup, isMain, deps);
-              } else if (
-                data.type === 'document' &&
-                data.chatJid &&
-                data.documentPath
-              ) {
+              } else if (data.type === 'document') {
                 await dispatchIpcDocument(data, sourceGroup, isMain, deps);
               }
               fs.unlinkSync(filePath);

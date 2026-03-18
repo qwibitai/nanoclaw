@@ -263,3 +263,26 @@ If I were sequencing this, I'd do:
 3. **B1a** — Conditional pre-commit hook (optional, adds full automation)
 
 Steps 1-2 alone would eliminate the recurring problem. Step 3 is nice-to-have.
+
+## 9. Post-Implementation Critique (added 2026-03-18)
+
+Added after PR #120 (Zod config validation) triggered the same dirty-tree pattern this spec describes.
+
+### What's correct
+- The two sub-problems (test side effect vs. freshness) are correctly identified and separated.
+- The interaction matrix (Section 5) is useful — it shows A must be fixed regardless of B.
+- B5 (remove timestamp) is correctly identified as the highest-leverage minimal change.
+- The suggested starting point (A1 + B5) is the right call.
+
+### What's over-engineered
+- **10 options for a 15-minute fix.** The problem is: a test writes to a real file, and a timestamp causes noise diffs. The answer is obviously A1 + B5. Nobody needs a comparison matrix with cron jobs and file watchers to arrive there. Options B2 (CI auto-commit), B3 (cron), B4 (file watcher) are clearly bad fits and the spec says so — including them added length without informing the decision.
+- **265 lines for a problem solvable in 3 commits.** The spec-to-implementation ratio is way off. A spec should be proportional to the uncertainty in the solution. Here, uncertainty is near zero.
+
+### What's missing
+- **No concrete incident data.** The spec says "it's happened across multiple PRs and agents" but doesn't cite which PRs, which agents, or how many times. Without incident counts, we can't tell if this is a 2x/week annoyance or a daily blocker.
+- **`coverage/` is missing.** The same dirty-tree pattern applies to vitest coverage artifacts. The spec is narrowly focused on contract.json and misses the broader gitignore hygiene issue.
+- **Open Question #3 is the most important and it's buried.** "Should contract.json be generated or derived?" — if the answer is "derived at CI time and published as an artifact," the entire spec collapses. That question should be resolved *before* evaluating the other options, not listed as an afterthought.
+
+### What happened since
+- PR #120 (Zod validation, unrelated) triggered the exact same dirty-tree friction with both `contract.json` and `coverage/`. The spec was merged 2026-03-18 but no implementation followed — the same pain continues.
+- **Recommendation:** Skip further spec work. Implement A1 + B5 + add `coverage/` to `.gitignore`. Total: ~30 minutes.

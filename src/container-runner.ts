@@ -28,6 +28,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { ContainerOutputSchema } from './schemas.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup, UsageData } from './types.js';
 
@@ -416,7 +417,9 @@ export async function runContainerAgent(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
+            const parsed: ContainerOutput = ContainerOutputSchema.parse(
+              JSON.parse(jsonStr),
+            );
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
@@ -653,7 +656,9 @@ export async function runContainerAgent(
           jsonLine = lines[lines.length - 1];
         }
 
-        const output: ContainerOutput = JSON.parse(jsonLine);
+        const output: ContainerOutput = ContainerOutputSchema.parse(
+          JSON.parse(jsonLine),
+        );
 
         logger.info(
           {

@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
+import { RemoteControlSessionSchema } from './schemas.js';
 
 interface RemoteControlSession {
   pid: number;
@@ -57,7 +58,9 @@ export function restoreRemoteControl(): void {
   }
 
   try {
-    const session: RemoteControlSession = JSON.parse(data);
+    const session: RemoteControlSession = RemoteControlSessionSchema.parse(
+      JSON.parse(data),
+    );
     if (session.pid && isProcessAlive(session.pid)) {
       activeSession = session;
       logger.info(

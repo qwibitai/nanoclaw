@@ -2,6 +2,7 @@ import fs from 'fs';
 
 import { SENDER_ALLOWLIST_PATH } from './config.js';
 import { logger } from './logger.js';
+import { SenderAllowlistConfigSchema } from './schemas.js';
 
 export interface ChatAllowlistEntry {
   allow: '*' | string[];
@@ -22,16 +23,6 @@ const DEFAULT_CONFIG: SenderAllowlistConfig = {
   logDenied: true,
   autoTriggerSenders: [],
 };
-
-function isValidEntry(entry: unknown): entry is ChatAllowlistEntry {
-  if (!entry || typeof entry !== 'object') return false;
-  const e = entry as Record<string, unknown>;
-  const validAllow =
-    e.allow === '*' ||
-    (Array.isArray(e.allow) && e.allow.every((v) => typeof v === 'string'));
-  const validMode = e.mode === 'trigger' || e.mode === 'drop';
-  return validAllow && validMode;
-}
 
 export function loadSenderAllowlist(
   pathOverride?: string,
@@ -58,45 +49,18 @@ export function loadSenderAllowlist(
     return DEFAULT_CONFIG;
   }
 
-  const obj = parsed as Record<string, unknown>;
-
-  if (!isValidEntry(obj.default)) {
+  try {
+    return SenderAllowlistConfigSchema.parse(parsed);
+  } catch (err) {
     logger.warn(
-      { path: filePath },
-      'sender-allowlist: invalid or missing default entry',
+      {
+        path: filePath,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      'sender-allowlist: schema validation failed',
     );
     return DEFAULT_CONFIG;
   }
-
-  const chats: Record<string, ChatAllowlistEntry> = {};
-  if (obj.chats && typeof obj.chats === 'object') {
-    for (const [jid, entry] of Object.entries(
-      obj.chats as Record<string, unknown>,
-    )) {
-      if (isValidEntry(entry)) {
-        chats[jid] = entry;
-      } else {
-        logger.warn(
-          { jid, path: filePath },
-          'sender-allowlist: skipping invalid chat entry',
-        );
-      }
-    }
-  }
-
-  const autoTriggerSenders: string[] = [];
-  if (Array.isArray(obj.autoTriggerSenders)) {
-    for (const s of obj.autoTriggerSenders) {
-      if (typeof s === 'string') autoTriggerSenders.push(s);
-    }
-  }
-
-  return {
-    default: obj.default as ChatAllowlistEntry,
-    chats,
-    logDenied: obj.logDenied !== false,
-    autoTriggerSenders,
-  };
 }
 
 function getEntry(

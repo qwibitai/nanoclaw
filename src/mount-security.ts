@@ -12,6 +12,7 @@ import path from 'path';
 import pino from 'pino';
 
 import { MOUNT_ALLOWLIST_PATH } from './config.js';
+import { MountAllowlistSchema } from './schemas.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
 const logger = pino({
@@ -73,20 +74,9 @@ export function loadMountAllowlist(): MountAllowlist | null {
     }
 
     const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
-    const allowlist = JSON.parse(content) as MountAllowlist;
-
-    // Validate structure
-    if (!Array.isArray(allowlist.allowedRoots)) {
-      throw new Error('allowedRoots must be an array');
-    }
-
-    if (!Array.isArray(allowlist.blockedPatterns)) {
-      throw new Error('blockedPatterns must be an array');
-    }
-
-    if (typeof allowlist.nonMainReadOnly !== 'boolean') {
-      throw new Error('nonMainReadOnly must be a boolean');
-    }
+    const allowlist: MountAllowlist = MountAllowlistSchema.parse(
+      JSON.parse(content),
+    );
 
     // Merge with default blocked patterns
     const mergedBlockedPatterns = [

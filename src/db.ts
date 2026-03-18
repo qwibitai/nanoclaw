@@ -6,6 +6,7 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { createCasesSchema } from './cases.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { ContainerConfigSchema } from './schemas.js';
 import {
   NewMessage,
   RegisteredGroup,
@@ -16,6 +17,21 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+
+function parseContainerConfig(
+  raw: string | null,
+): RegisteredGroup['containerConfig'] {
+  if (!raw) return undefined;
+  try {
+    return ContainerConfigSchema.parse(JSON.parse(raw));
+  } catch (err) {
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'Invalid container_config in DB — ignoring',
+    );
+    return undefined;
+  }
+}
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -677,9 +693,7 @@ export function getRegisteredGroup(
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig: parseContainerConfig(row.container_config),
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
@@ -730,9 +744,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
+      containerConfig: parseContainerConfig(row.container_config),
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,

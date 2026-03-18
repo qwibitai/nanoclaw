@@ -8,6 +8,7 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
+import { WorktreeLockSchema } from './schemas.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -519,7 +520,9 @@ export function createWorktreeLock(
 export function updateWorktreeLockHeartbeat(worktreePath: string): boolean {
   const lockPath = path.join(worktreePath, LOCK_FILENAME);
   try {
-    const lock: WorktreeLock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    const lock: WorktreeLock = WorktreeLockSchema.parse(
+      JSON.parse(fs.readFileSync(lockPath, 'utf-8')),
+    );
     lock.heartbeat = new Date().toISOString();
     fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2));
     return true;
@@ -547,7 +550,9 @@ export function checkWorktreeLock(worktreePath: string): WorktreeLock | null {
   const lockPath = path.join(worktreePath, LOCK_FILENAME);
   try {
     if (!fs.existsSync(lockPath)) return null;
-    const lock: WorktreeLock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    const lock: WorktreeLock = WorktreeLockSchema.parse(
+      JSON.parse(fs.readFileSync(lockPath, 'utf-8')),
+    );
     const heartbeatAge = Date.now() - new Date(lock.heartbeat).getTime();
     if (heartbeatAge > STALE_LOCK_THRESHOLD_MS) {
       logger.warn(

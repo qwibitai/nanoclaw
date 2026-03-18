@@ -104,7 +104,7 @@ describe('loadSenderAllowlist', () => {
     expect(cfg.default.allow).toBe('*'); // falls back to default
   });
 
-  it('skips invalid per-chat entries', () => {
+  it('rejects config with invalid per-chat entries', () => {
     const p = writeConfig({
       default: { allow: '*', mode: 'trigger' },
       chats: {
@@ -113,8 +113,9 @@ describe('loadSenderAllowlist', () => {
       },
     });
     const cfg = loadSenderAllowlist(p);
-    expect(cfg.chats['good']).toBeDefined();
-    expect(cfg.chats['bad']).toBeUndefined();
+    // Zod rejects the entire config when any chat entry is invalid
+    expect(cfg.default.allow).toBe('*');
+    expect(cfg.chats).toEqual({});
   });
 });
 
@@ -280,14 +281,15 @@ describe('loadSenderAllowlist autoTriggerSenders', () => {
     expect(cfg.autoTriggerSenders).toEqual(['5697720897', '123456']);
   });
 
-  it('filters non-string entries from autoTriggerSenders', () => {
+  it('rejects config with non-string entries in autoTriggerSenders', () => {
     const p = writeConfig({
       default: { allow: '*', mode: 'trigger' },
       chats: {},
       autoTriggerSenders: ['valid', 123, null, 'also-valid'],
     });
     const cfg = loadSenderAllowlist(p);
-    expect(cfg.autoTriggerSenders).toEqual(['valid', 'also-valid']);
+    // Zod rejects the entire config when autoTriggerSenders contains non-strings
+    expect(cfg.autoTriggerSenders).toEqual([]);
   });
 });
 
