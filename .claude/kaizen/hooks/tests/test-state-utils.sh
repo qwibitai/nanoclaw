@@ -8,6 +8,16 @@ STATE_DIR="/tmp/.pr-review-state-test-$$"
 MAX_STATE_AGE=7200
 export STATE_DIR MAX_STATE_AGE
 
+# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
+DEFAULT_MOCK_DIR=$(mktemp -d)
+cat > "$DEFAULT_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$DEFAULT_MOCK_DIR/gh"
+export PATH="$DEFAULT_MOCK_DIR:$PATH"
+
 source "$(dirname "$0")/../lib/state-utils.sh"
 
 setup() {
@@ -185,6 +195,150 @@ else
   ((FAIL++))
 fi
 
+echo ""
+echo "=== find_needs_review_state: auto-clears merged PR state (kaizen #85, Fix A) ==="
+
+setup
+
+# Override default mock: return MERGED for pull/99, OPEN for anything else
+FIXA_MOCK_DIR=$(mktemp -d)
+cat > "$FIXA_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+if echo "$@" | grep -q "pull/99"; then
+  echo "MERGED"
+  exit 0
+fi
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$FIXA_MOCK_DIR/gh"
+
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/99\nROUND=3\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_merged"
+
+# INVARIANT: find_needs_review_state auto-clears state for merged PRs
+# SUT: find_needs_review_state with gh returning MERGED
+REVIEW_INFO=$(PATH="$FIXA_MOCK_DIR:$PATH" find_needs_review_state)
+if [ $? -ne 0 ]; then
+  echo "  PASS: find_needs_review_state returns failure for merged PR"
+  ((PASS++))
+else
+  echo "  FAIL: find_needs_review_state returned success for merged PR"
+  ((FAIL++))
+fi
+
+# INVARIANT: The state file should be deleted after detecting merge
+if [ ! -f "$STATE_DIR/f_merged" ]; then
+  echo "  PASS: state file deleted after merge detection"
+  ((PASS++))
+else
+  echo "  FAIL: state file still exists after merge detection"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== find_needs_review_state: auto-clears CLOSED PR state ==="
+
+setup
+cat > "$FIXA_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "CLOSED"
+exit 0
+MOCK
+chmod +x "$FIXA_MOCK_DIR/gh"
+
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/50\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_closed"
+
+# INVARIANT: CLOSED PRs are also auto-cleared
+REVIEW_INFO=$(PATH="$FIXA_MOCK_DIR:$PATH" find_needs_review_state)
+if [ $? -ne 0 ] && [ ! -f "$STATE_DIR/f_closed" ]; then
+  echo "  PASS: CLOSED PR state auto-cleared"
+  ((PASS++))
+else
+  echo "  FAIL: CLOSED PR state not cleared"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== find_needs_review_state: keeps OPEN PR state ==="
+
+setup
+# Default mock already returns OPEN
+
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/60\nROUND=2\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_open"
+
+# INVARIANT: OPEN PRs are NOT cleared — review gate stays active
+REVIEW_INFO=$(find_needs_review_state)
+if [ $? -eq 0 ] && [ -f "$STATE_DIR/f_open" ]; then
+  echo "  PASS: OPEN PR state preserved, review gate active"
+  ((PASS++))
+else
+  echo "  FAIL: OPEN PR state was incorrectly cleared"
+  ((FAIL++))
+fi
+assert_contains "returns correct PR URL for open PR" "nanoclaw/pull/60" "$REVIEW_INFO"
+
+echo ""
+echo "=== find_needs_review_state: clears merged, returns next open PR ==="
+
+setup
+cat > "$FIXA_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+if echo "$@" | grep -q "pull/70"; then
+  echo "MERGED"
+  exit 0
+fi
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$FIXA_MOCK_DIR/gh"
+
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/70\nROUND=3\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_merged2"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/71\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_open2"
+
+# INVARIANT: Merged PRs are skipped, next open PR is returned
+REVIEW_INFO=$(PATH="$FIXA_MOCK_DIR:$PATH" find_needs_review_state)
+if [ $? -eq 0 ]; then
+  echo "  PASS: found an open PR after skipping merged one"
+  ((PASS++))
+else
+  echo "  FAIL: no PR found after merged one (should have found open PR)"
+  ((FAIL++))
+fi
+assert_contains "returns open PR, not merged one" "nanoclaw/pull/71" "$REVIEW_INFO"
+
+if [ ! -f "$STATE_DIR/f_merged2" ]; then
+  echo "  PASS: merged PR state file was cleaned up"
+  ((PASS++))
+else
+  echo "  FAIL: merged PR state file still exists"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== find_needs_review_state: handles gh failure gracefully ==="
+
+setup
+cat > "$FIXA_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+exit 1
+MOCK
+chmod +x "$FIXA_MOCK_DIR/gh"
+
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/80\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f_gh_fail"
+
+# INVARIANT: If gh fails (network error, etc), treat PR as still open (don't clear)
+REVIEW_INFO=$(PATH="$FIXA_MOCK_DIR:$PATH" find_needs_review_state)
+if [ $? -eq 0 ] && [ -f "$STATE_DIR/f_gh_fail" ]; then
+  echo "  PASS: gh failure treated as PR still open (safe default)"
+  ((PASS++))
+else
+  echo "  FAIL: gh failure caused incorrect behavior"
+  ((FAIL++))
+fi
+
+rm -rf "$FIXA_MOCK_DIR"
+
 teardown
+rm -rf "$DEFAULT_MOCK_DIR"
 
 print_results

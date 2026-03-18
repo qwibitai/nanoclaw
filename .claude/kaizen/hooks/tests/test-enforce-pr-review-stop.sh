@@ -31,6 +31,16 @@ create_state() {
   printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
 }
 
+# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
+# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
+STOP_MOCK_DIR=$(mktemp -d)
+cat > "$STOP_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$STOP_MOCK_DIR/gh"
+
 # Helper: run the Stop hook with given stop_hook_active value
 run_stop_hook() {
   local stop_hook_active="${1:-false}"
@@ -41,7 +51,7 @@ run_stop_hook() {
     stop_hook_active: ($active == "true"),
     last_assistant_message: "PR created: https://github.com/example/repo/pull/1"
   }')
-  echo "$input" | bash "$HOOK" 2>/dev/null
+  echo "$input" | PATH="$STOP_MOCK_DIR:$PATH" bash "$HOOK" 2>/dev/null
 }
 
 # Helper: check if output contains a block decision
@@ -248,5 +258,6 @@ else
 fi
 
 teardown
+rm -rf "$STOP_MOCK_DIR"
 
 print_results

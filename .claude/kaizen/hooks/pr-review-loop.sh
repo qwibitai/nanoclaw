@@ -288,6 +288,19 @@ if $IS_GIT_PUSH; then
     exit 0
   fi
 
+  # Skip round increment for merge-from-main pushes (kaizen #85, Fix B)
+  # When strict branch protection requires syncing with main, the push
+  # contains no code changes — just a merge commit. Don't penalize the agent.
+  LATEST_PARENTS=$(git log -1 --format='%P' HEAD 2>/dev/null)
+  PARENT_COUNT=$(echo "$LATEST_PARENTS" | wc -w)
+  if [ "$PARENT_COUNT" -ge 2 ]; then
+    MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "")
+    if [ -n "$MAIN_HEAD" ] && echo "$LATEST_PARENTS" | grep -qF "$MAIN_HEAD"; then
+      echo "[$(date -Iseconds)] skip round increment: merge-from-main push" >> "$DEBUG_LOG"
+      exit 0
+    fi
+  fi
+
   NEXT_ROUND=$((ROUND + 1))
 
   if [ "$NEXT_ROUND" -gt "$MAX_ROUNDS" ]; then

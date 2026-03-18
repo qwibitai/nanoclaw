@@ -299,11 +299,24 @@ class PRReviewState:
     def __exit__(self, *args):
         self.cleanup()
 
-    def create_state(self, pr_url: str, round_num: int = 1, status: str = "needs_review"):
-        """Create a state file for a PR."""
+    def create_state(self, pr_url: str, round_num: int = 1, status: str = "needs_review",
+                     branch: str = ""):
+        """Create a state file for a PR. Includes BRANCH for worktree isolation.
+
+        If branch is not specified, uses git rev-parse to get the current branch.
+        When using mock git (via PATH override), this will return the mock branch,
+        ensuring state files match what the hooks see at runtime.
+        """
+        if not branch:
+            import subprocess
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True,
+                env=os.environ,
+            ).stdout.strip() or "main"
         filename = pr_url.replace("https://github.com/", "").replace("/pull/", "_").replace("/", "_")
         state_file = self.state_dir / filename
-        state_file.write_text(f"PR_URL={pr_url}\nROUND={round_num}\nSTATUS={status}\n")
+        state_file.write_text(f"PR_URL={pr_url}\nROUND={round_num}\nSTATUS={status}\nBRANCH={branch}\n")
         state_file.chmod(0o600)
 
     def read_state(self, pr_url: str) -> Optional[dict]:

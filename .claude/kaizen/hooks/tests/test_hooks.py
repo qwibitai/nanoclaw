@@ -82,7 +82,7 @@ class TestDenySchema:
         assert "worktree" in result.deny_reason().lower()
 
     def test_pr_review_gate_denies_during_review(self, review_harness, state):
-        state.create_state("https://github.com/Garsson-io/nanoclaw/pull/42", round_num=1, status="needs_review")
+        state.create_state("https://github.com/Garsson-io/nanoclaw/pull/42", round_num=1, status="needs_review", branch="wt/test-branch")
 
         result = review_harness.run_hook("enforce-pr-review.sh", PreToolUseInput.bash("npm test"))
         assert result.denies()
@@ -261,23 +261,15 @@ class TestPRLifecycle:
         r = review_harness.run_hook("enforce-pr-review.sh", PreToolUseInput.bash("npm test"))
         assert r.allows(), "Should allow after review passed"
 
-        # Phase 4: git push → re-gate (THIS IS THE BUG WE FOUND)
+        # Phase 4: git push → re-gate
+        # The push handler finds "passed" state and increments to next round.
         r = review_harness.run_hook("pr-review-loop.sh", PostToolUseInput.bash("git push", stdout="ok"))
         s = state.read_state(self.PR_URL)
-        # BUG: Currently, push after "passed" exits early without incrementing round.
-        # The state stays "passed" instead of going to "needs_review" round 2.
-        # When this bug is fixed, change the assertions below.
-        #
-        # EXPECTED (after fix):
-        #   assert s["STATUS"] == "needs_review"
-        #   assert s["ROUND"] == "2"
-        #
-        # ACTUAL (current bug):
-        assert s["STATUS"] == "passed", "KNOWN BUG: push after passed doesn't re-engage gate"
-        assert s["ROUND"] == "1", "KNOWN BUG: round not incremented after push"
+        assert s["STATUS"] == "needs_review", "Push after passed should re-engage gate"
+        assert s["ROUND"] == "2", "Round should be incremented after push"
 
     def test_merge_cleans_up(self, review_harness, state):
-        state.create_state(self.PR_URL, round_num=2, status="needs_review")
+        state.create_state(self.PR_URL, round_num=2, status="needs_review", branch="wt/test-branch")
 
         review_harness.run_hook("pr-review-loop.sh", PostToolUseInput.bash(
             "gh pr merge 55 --squash",
@@ -333,7 +325,7 @@ class TestParallelExecution:
         mocks.add_git_mock(branch="main", status_output=" M src/dirty.ts")
         harness.set_env("PATH", mocks.path_with_mocks)
         harness.set_env("STATE_DIR", str(state.state_dir))
-        state.create_state("https://github.com/Garsson-io/nanoclaw/pull/42", status="needs_review")
+        state.create_state("https://github.com/Garsson-io/nanoclaw/pull/42", status="needs_review", branch="main")
 
         # gh pr create on main branch with dirty files and active review
         inp = PreToolUseInput.bash("gh pr create --title test --body test")

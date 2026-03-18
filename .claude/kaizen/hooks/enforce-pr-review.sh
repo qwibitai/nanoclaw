@@ -39,10 +39,18 @@ is_review_command() {
   if is_gh_pr_command "$cmd" "diff|view|comment|edit"; then
     return 0
   fi
-  # git diff/log/show/status/branch — read-only review commands
-  if is_git_command "$cmd" "diff|log|show|status|branch"; then
+  # git diff/log/show/status/branch/fetch — read-only review commands
+  # fetch is needed for merge-from-main during review (branch protection sync)
+  if is_git_command "$cmd" "diff|log|show|status|branch|fetch"; then
     return 0
   fi
+  # Read-only filesystem commands — useful for debugging hooks and reviewing code (kaizen #85, Fix C)
+  # These can't "do work" (build, deploy, edit), so they don't violate the review gate.
+  local first_word
+  first_word=$(echo "$cmd" | awk '{print $1}')
+  case "$first_word" in
+    ls|cat|stat|find|head|tail|wc|file) return 0 ;;
+  esac
   return 1
 }
 

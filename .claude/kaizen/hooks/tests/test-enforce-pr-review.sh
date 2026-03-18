@@ -7,6 +7,16 @@ STATE_DIR="/tmp/.pr-review-state-test-$$"
 export STATE_DIR
 export DEBUG_LOG="/dev/null"
 
+# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
+# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
+GATE_MOCK_DIR=$(mktemp -d)
+cat > "$GATE_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$GATE_MOCK_DIR/gh"
+
 setup() {
   rm -rf "$STATE_DIR"
   mkdir -p "$STATE_DIR"
@@ -14,6 +24,14 @@ setup() {
 
 teardown() {
   rm -rf "$STATE_DIR"
+}
+
+# Override run_gate to use mock gh
+run_gate() {
+  local command="$1"
+  local input
+  input=$(jq -n --arg cmd "$command" '{"tool_input":{"command":$cmd}}')
+  echo "$input" | PATH="$GATE_MOCK_DIR:$PATH" bash "$HOOK" 2>/dev/null
 }
 
 # Helper: create a state file with given status
@@ -26,14 +44,6 @@ create_state() {
   local filename
   filename=$(echo "$pr_url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')
   printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
-}
-
-# Helper: run the PreToolUse hook with a command
-run_gate() {
-  local command="$1"
-  local input
-  input=$(jq -n --arg cmd "$command" '{"tool_input":{"command":$cmd}}')
-  echo "$input" | bash "$HOOK" 2>/dev/null
 }
 
 # Helper: check if output contains a deny decision
@@ -102,12 +112,12 @@ else
   ((FAIL++))
 fi
 
-OUTPUT=$(run_gate "ls -la")
+OUTPUT=$(run_gate "node src/index.ts")
 if is_denied "$OUTPUT"; then
-  echo "  PASS: ls blocked during active review"
+  echo "  PASS: node blocked during active review"
   ((PASS++))
 else
-  echo "  FAIL: ls NOT blocked during active review"
+  echo "  FAIL: node NOT blocked during active review"
   ((FAIL++))
 fi
 
@@ -197,6 +207,87 @@ else
   ((FAIL++))
 fi
 
+# git fetch — needed for merge-from-main during review (kaizen #85, Fix C)
+OUTPUT=$(run_gate "git fetch origin main")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: git fetch allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: git fetch blocked during review"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Active review: read-only filesystem commands allowed (kaizen #85, Fix C) ==="
+
+# INVARIANT: Read-only filesystem commands are allowed during review gate
+# because they can't "do work" and are useful for debugging hooks and reviewing code
+# SUT: enforce-pr-review.sh is_review_command allowlist
+
+OUTPUT=$(run_gate "ls -la /tmp/.pr-review-state/")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: ls allowed during review (hook debugging)"
+  ((PASS++))
+else
+  echo "  FAIL: ls blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "cat /tmp/.pr-review-state/some-file")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: cat allowed during review (hook debugging)"
+  ((PASS++))
+else
+  echo "  FAIL: cat blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "stat /tmp/.pr-review-state/some-file")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: stat allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: stat blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "find /tmp/.pr-review-state/ -type f")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: find allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: find blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "head -20 src/index.ts")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: head allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: head blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "wc -l src/index.ts")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: wc allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: wc blocked during review"
+  ((FAIL++))
+fi
+
+# Work commands should still be blocked
+OUTPUT=$(run_gate "npm run build")
+if is_denied "$OUTPUT"; then
+  echo "  PASS: npm run build still blocked during review"
+  ((PASS++))
+else
+  echo "  FAIL: npm run build NOT blocked during review"
+  ((FAIL++))
+fi
+
 echo ""
 echo "=== Passed review: gate opens ==="
 
@@ -260,7 +351,7 @@ echo "=== Empty command: allowed through ==="
 
 # INVARIANT: Empty/missing commands are not blocked
 # SUT: enforce-pr-review.sh edge case handling
-OUTPUT=$(echo '{"tool_input":{}}' | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+OUTPUT=$(echo '{"tool_input":{}}' | PATH="$GATE_MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
 if [ -z "$OUTPUT" ]; then
   echo "  PASS: empty command allowed through"
   ((PASS++))
@@ -378,5 +469,6 @@ else
 fi
 
 teardown
+rm -rf "$GATE_MOCK_DIR"
 
 print_results

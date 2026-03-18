@@ -96,6 +96,16 @@ find_needs_review_state() {
       local pr_url round
       pr_url=$(grep -E '^PR_URL=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
       round=$(grep -E '^ROUND=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      # Auto-clear state for merged/closed PRs (kaizen #85, Fix A)
+      # One API call per stale state encounter — after cleanup, no further calls.
+      if [ -n "$pr_url" ]; then
+        local pr_state
+        pr_state=$(gh pr view "$pr_url" --json state --jq .state 2>/dev/null)
+        if [ "$pr_state" = "MERGED" ] || [ "$pr_state" = "CLOSED" ]; then
+          rm -f "$f" 2>/dev/null
+          continue
+        fi
+      fi
       echo "$pr_url|$round"
       return 0
     fi

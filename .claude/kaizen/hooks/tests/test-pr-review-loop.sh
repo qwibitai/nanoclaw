@@ -275,6 +275,142 @@ else
   ((FAIL++))
 fi
 
+echo ""
+echo "=== Merge-from-main push does NOT increment review round (kaizen #85, Fix B) ==="
+
+# INVARIANT: When HEAD is a merge commit with origin/main as a parent,
+# git push should NOT increment the review round — it's a branch protection
+# sync, not a code change.
+# SUT: pr-review-loop.sh merge-from-main detection in git push handler
+teardown
+setup
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+MAIN_HEAD=$(git rev-parse origin/main 2>/dev/null || echo "abc123")
+
+# Create state file for current branch (passed review, now syncing with main)
+SAME_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_100"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/100\nROUND=2\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$SAME_STATE_FILE"
+
+# Create a mock git that simulates a merge commit from origin/main
+MOCK_DIR=$(mktemp -d)
+SECOND_PARENT="def456"
+cat > "$MOCK_DIR/git" << MOCK
+#!/bin/bash
+if [ "\$1" = "log" ] && echo "\$@" | grep -q -- "--format=%P"; then
+  # Return two parents — merge commit with origin/main as second parent
+  echo "abc123 $MAIN_HEAD"
+  exit 0
+fi
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "origin/main" ]; then
+  echo "$MAIN_HEAD"
+  exit 0
+fi
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "--abbrev-ref" ]; then
+  echo "$CURRENT_BRANCH"
+  exit 0
+fi
+/usr/bin/git "\$@"
+MOCK
+chmod +x "$MOCK_DIR/git"
+
+PUSH_INPUT=$(jq -n '{
+  "tool_input": {"command": "git push"},
+  "tool_response": {
+    "stdout": "Everything up-to-date",
+    "stderr": "",
+    "exit_code": "0"
+  }
+}')
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | PATH="$MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+if [ -z "$PUSH_OUTPUT" ]; then
+  echo "  PASS: merge-from-main push produces no output (round not incremented)"
+  ((PASS++))
+else
+  echo "  FAIL: merge-from-main push triggered a new review round"
+  echo "    output: $(echo "$PUSH_OUTPUT" | head -3)"
+  ((FAIL++))
+fi
+
+# Verify state was NOT modified
+SAME_STATUS=$(grep '^STATUS=' "$SAME_STATE_FILE" | cut -d= -f2-)
+SAME_ROUND=$(grep '^ROUND=' "$SAME_STATE_FILE" | cut -d= -f2-)
+assert_eq "state STATUS unchanged after merge-from-main" "passed" "$SAME_STATUS"
+assert_eq "state ROUND unchanged after merge-from-main" "2" "$SAME_ROUND"
+
+echo ""
+echo "=== Regular push (non-merge) DOES increment review round ==="
+
+# INVARIANT: A normal push (non-merge commit) should still increment the round
+# SUT: pr-review-loop.sh git push handler with normal commit
+teardown
+setup
+
+SAME_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_101"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/101\nROUND=1\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$SAME_STATE_FILE"
+
+# Mock git that simulates a regular (non-merge) commit
+cat > "$MOCK_DIR/git" << MOCK
+#!/bin/bash
+if [ "\$1" = "log" ] && echo "\$@" | grep -q -- "--format=%P"; then
+  # Single parent — not a merge commit
+  echo "abc123"
+  exit 0
+fi
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "--abbrev-ref" ]; then
+  echo "$CURRENT_BRANCH"
+  exit 0
+fi
+/usr/bin/git "\$@"
+MOCK
+chmod +x "$MOCK_DIR/git"
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | PATH="$MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+assert_contains "regular push triggers next review round" "ROUND" "$PUSH_OUTPUT"
+
+SAME_STATUS=$(grep '^STATUS=' "$SAME_STATE_FILE" | cut -d= -f2-)
+SAME_ROUND=$(grep '^ROUND=' "$SAME_STATE_FILE" | cut -d= -f2-)
+assert_eq "state STATUS set to needs_review after regular push" "needs_review" "$SAME_STATUS"
+assert_eq "state ROUND incremented after regular push" "2" "$SAME_ROUND"
+
+echo ""
+echo "=== Merge from non-main branch DOES increment review round ==="
+
+# INVARIANT: A merge commit that doesn't include origin/main as a parent
+# (e.g., merging a feature branch) should still increment the round
+# SUT: pr-review-loop.sh merge-from-main detection specificity
+teardown
+setup
+
+SAME_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_102"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/102\nROUND=1\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$SAME_STATE_FILE"
+
+# Mock git with merge commit from a non-main branch
+cat > "$MOCK_DIR/git" << MOCK
+#!/bin/bash
+if [ "\$1" = "log" ] && echo "\$@" | grep -q -- "--format=%P"; then
+  # Two parents, but neither is origin/main
+  echo "abc123 xyz789"
+  exit 0
+fi
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "origin/main" ]; then
+  echo "$MAIN_HEAD"
+  exit 0
+fi
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "--abbrev-ref" ]; then
+  echo "$CURRENT_BRANCH"
+  exit 0
+fi
+/usr/bin/git "\$@"
+MOCK
+chmod +x "$MOCK_DIR/git"
+
+PUSH_OUTPUT=$(echo "$PUSH_INPUT" | PATH="$MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+assert_contains "merge from non-main branch triggers review round" "ROUND" "$PUSH_OUTPUT"
+
+rm -rf "$MOCK_DIR"
+
 teardown
 
 print_results

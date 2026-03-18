@@ -25,12 +25,25 @@ export DEBUG_LOG="$HARNESS_TEMP/debug.log"
 ENFORCE="$HOOKS_DIR/enforce-pr-review.sh"
 LOOP="$HOOKS_DIR/pr-review-loop.sh"
 
+# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
+# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
+INTEG_MOCK_DIR="$HARNESS_TEMP/mock-bin"
+mkdir -p "$INTEG_MOCK_DIR"
+cat > "$INTEG_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$INTEG_MOCK_DIR/gh"
+
+HOOK_ENV_VARS=$(printf 'STATE_DIR=%s\nPATH=%s\n' "$STATE_DIR" "$INTEG_MOCK_DIR:$PATH")
+
 # Helpers that use the harness input builders
 run_pre_hook() {
   local command="$1"
   local input
   input=$(build_pre_tool_use_input "Bash" "$(jq -n --arg c "$command" '{command: $c}')")
-  run_single_hook "$ENFORCE" "$input" 10 "STATE_DIR=$STATE_DIR"
+  run_single_hook "$ENFORCE" "$input" 10 "$HOOK_ENV_VARS"
 }
 
 run_post_hook() {
@@ -42,7 +55,7 @@ run_post_hook() {
   input=$(build_post_tool_use_input "Bash" \
     "$(jq -n --arg c "$command" '{command: $c}')" \
     "$stdout" "$stderr" "$exit_code")
-  run_single_hook "$LOOP" "$input" 10 "STATE_DIR=$STATE_DIR"
+  run_single_hook "$LOOP" "$input" 10 "$HOOK_ENV_VARS"
 }
 
 echo "=== Phase 1: Before PR create — no gate ==="

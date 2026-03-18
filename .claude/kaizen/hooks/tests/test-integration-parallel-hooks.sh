@@ -65,8 +65,9 @@ echo "=== Parallel PreToolUse: PR review gate + dirty files ==="
 # Both enforce-pr-review and check-dirty-files should deny.
 # They run in parallel — neither should crash from the other's behavior.
 
-# Setup: active review state
-printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/42\nROUND=1\nSTATUS=needs_review\n' > "$STATE_DIR/Garsson-io_nanoclaw_42"
+# Setup: active review state (must include BRANCH for worktree isolation)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/42\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/Garsson-io_nanoclaw_42"
 
 # Setup: dirty files
 setup_git_status_mock " M src/dirty.ts"

@@ -32,6 +32,16 @@ create_state() {
   printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
 }
 
+# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
+# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
+TOOLS_MOCK_DIR=$(mktemp -d)
+cat > "$TOOLS_MOCK_DIR/gh" << 'MOCK'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK
+chmod +x "$TOOLS_MOCK_DIR/gh"
+
 # Helper: run the PreToolUse hook with a tool name
 run_tool_gate() {
   local tool_name="$1"
@@ -44,7 +54,7 @@ run_tool_gate() {
       new_string: "bar"
     }
   }')
-  echo "$input" | bash "$HOOK" 2>/dev/null
+  echo "$input" | PATH="$TOOLS_MOCK_DIR:$PATH" bash "$HOOK" 2>/dev/null
 }
 
 # Helper: check if output contains a deny decision
@@ -169,7 +179,7 @@ echo "=== Empty tool name: allowed through ==="
 setup
 create_state "https://github.com/Garsson-io/nanoclaw/pull/42" "1" "needs_review"
 
-OUTPUT=$(echo '{"tool_name":""}' | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+OUTPUT=$(echo '{"tool_name":""}' | PATH="$TOOLS_MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
 if [ -z "$OUTPUT" ]; then
   echo "  PASS: empty tool name allowed through"
   ((PASS++))
@@ -216,5 +226,6 @@ else
 fi
 
 teardown
+rm -rf "$TOOLS_MOCK_DIR"
 
 print_results
