@@ -20,9 +20,9 @@ cat > /tmp/input.json
 # Running env -i after gosu ensures our explicit HOME takes effect.
 exec gosu "${RUN_UID:-1000}:${RUN_GID:-1000}" \
   env -i \
-  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  PATH="/host/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   HOME="/home/node" \
-  NODE_PATH="/usr/local/lib/node_modules" \
+  NODE_PATH="/host/.npm-global/lib/node_modules:/usr/local/lib/node_modules" \
   AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium" \
   PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/usr/bin/chromium" \
   TZ="${TZ:-UTC}" \
