@@ -50,13 +50,23 @@ When you learn something important:
 
 ## Message Formatting
 
-NEVER use markdown. Only use WhatsApp/Telegram formatting:
-- *single asterisks* for bold (NEVER **double asterisks**)
-- _underscores_ for italic
-- • bullet points
-- ```triple backticks``` for code
+Formatting rules differ by platform. Check which platform you're on and follow the right rules:
 
-No ## headings. No [links](url). No **double stars**.
+### Discord
+- **Bold**: `**double asterisks**`
+- *Italic*: `*single asterisks*`
+- Headers: `#`, `##`, `###` — these render, use them sparingly for structure
+- Code: ` ```language ``` ` with syntax highlighting (python, js, bash, etc.)
+- Links: `[text](url)` — renders as clickable hyperlinks
+- **NO tables** — Discord does not render markdown tables. Use a ` ``` ` code block with aligned fixed-width columns instead:
+  ```
+  Name        | Status   | PR
+  ------------|----------|-----
+  image-gen   | open     | #4
+  chart       | open     | #2
+  ```
+- Lists: `- item` renders fine
+- No • bullet character needed
 
 ## Skills Catalog
 
