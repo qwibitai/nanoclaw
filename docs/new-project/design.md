@@ -253,10 +253,20 @@ NanoClawのXMLフォーマットを踏襲。プロバイダー問わず使える
 
 ## コンテナ設計
 
-NanoClawのコンテナ設計を踏襲。
+### 認証方式（SDK別）
+
+| sdk | 認証方式 |
+|---|---|
+| `claude` | NanoClawと同様にCredential Proxy経由（本物のトークンをコンテナに渡さない） |
+| `opencode` | Credential Proxy不要。opencodeサーバー自身が`~/.local/share/opencode/auth.json`を管理 |
+
+**opencode SDKの場合**、opencodeサーバープロセス（Bunランタイム）がLLMプロバイダへのAPI呼び出しを直接行う。クライアント（SDK）は本物の認証情報を持たない。コンテナ内でopencodeサーバーを起動し、auth.jsonをマウントするだけでよい。
+
+### コンテナ構成
 
 - コンテナ内は全権限（Bash・ネットワーク含め全許可）
-- Credential Proxy経由でAPIアクセス（本物のトークンはコンテナに渡さない）
+- **Claude SDKモード**: Credential Proxy（ホスト側）経由でAPIアクセス。本物のトークンはコンテナに渡さない
+- **opencode SDKモード**: `~/.local/share/opencode/auth.json`をコンテナにマウント。opencodeサーバーが直接管理
 - グループフォルダをマウント（会話履歴・設定ファイルの永続化）
 - mainグループはプロジェクトルートも読み取り専用でマウント
 
@@ -264,12 +274,13 @@ NanoClawのコンテナ設計を踏襲。
 
 ```
 entrypoint.sh
-  ├─ opencodeサーバーをバックグラウンドで起動（常時）
+  ├─ opencodeサーバーをバックグラウンドで起動（sdkに関わらず常時）
   └─ agent-runner起動（sdk/modelに応じて分岐）
+      ├─ sdk: "claude"  → Claude Agent SDK（Credential Proxy経由）
+      └─ sdk: "opencode" → opencode SDK（localhost:4096のopencodeサーバーに接続）
 ```
 
-opencodeサーバーはsdkに関わらず常に起動しておく。
-Claude SDKモード時はポートを使わないだけで問題ない。
+Claude SDKモード時もopencodeサーバーは起動したままで問題ない（ポートを使わないだけ）。
 
 **参考**: `nanoclaw/src/container-runner.ts`
 
@@ -279,5 +290,4 @@ Claude SDKモード時はポートを使わないだけで問題ない。
 
 - [ ] プロジェクト名
 - [ ] `/compact`：Claudeモード時の実装（opencode SDKは`session.summarize()`で解決済み）
-- [ ] Credential Proxyが本当に不要か確認（opencode SDK内部でAPI呼び出しする場合の挙動）
 - [ ] opencode SDK経由のMinimax等無料モデルの料金確認
