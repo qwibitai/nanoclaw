@@ -22,8 +22,11 @@ describe('contract manifest generator', () => {
   it('produces valid JSON with required top-level fields', () => {
     expect(contract.contractVersion).toBe(1);
     expect(contract.harnessVersion).toBeDefined();
-    expect(contract.generatedAt).toBeDefined();
     expect(surfaces).toBeDefined();
+  });
+
+  it('does not include generatedAt (eliminates spurious diffs)', () => {
+    expect(contract).not.toHaveProperty('generatedAt');
   });
 
   it('extracts all 7 contract surfaces', () => {

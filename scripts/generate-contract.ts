@@ -203,7 +203,6 @@ export function generateContract(): object {
     $schema: 'https://nanoclaw.dev/contract.schema.json',
     contractVersion: 1,
     harnessVersion: pkg.version,
-    generatedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
     surfaces: {
       mcpTools: extractMcpTools(),
       ipcTypes: extractIpcTypes(),
