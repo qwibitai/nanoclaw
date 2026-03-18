@@ -41,6 +41,9 @@ export class DiscordChannel implements Channel {
   // Track active thread per channel — persisted in DB, cached in memory
   private activeThread = new Map<string, string>();
   private activeThreadLoaded = false;
+  // JIDs with an active user-triggered conversation (not persisted — clears on restart)
+  // Prevents scheduled task output from going to a stale thread
+  private activeConversation = new Set<string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -115,6 +118,7 @@ export class DiscordChannel implements Channel {
         isThread && this.getThread(chatJid) === message.channelId;
       if (isInBotThread && !TRIGGER_PATTERN.test(content)) {
         content = `@${ASSISTANT_NAME} ${content}`;
+        this.activeConversation.add(chatJid);
       }
 
       // Translate Discord @bot mentions into TRIGGER_PATTERN format.
@@ -146,6 +150,7 @@ export class DiscordChannel implements Channel {
           }
           // Store this message so the response is sent as a thread
           this.pendingTrigger.set(chatJid, message);
+          this.activeConversation.add(chatJid);
           this.deleteThread(chatJid);
         }
       }
@@ -281,7 +286,9 @@ export class DiscordChannel implements Channel {
       const triggerMsg = this.pendingTrigger.get(jid);
       const existingThreadId = this.getThread(jid);
 
-      if (existingThreadId) {
+      if (existingThreadId && triggerMsg) {
+        // New @mention with existing thread — fall through to create new thread
+      } else if (existingThreadId && this.activeConversation.has(jid)) {
         // Streaming continuation — send to the already-created thread
         try {
           const thread = await textChannel.threads.fetch(existingThreadId);
@@ -374,10 +381,7 @@ export class DiscordChannel implements Channel {
       files: files.map((f) => ({ attachment: f.path, name: f.name })),
     });
 
-    logger.info(
-      { jid, fileCount: files.length },
-      'Discord files sent',
-    );
+    logger.info({ jid, fileCount: files.length }, 'Discord files sent');
   }
 
   async disconnect(): Promise<void> {
