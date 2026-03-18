@@ -205,6 +205,11 @@ class TelegramMultiBotChannel implements Channel {
         this.handleCallbackQuery(ctx, folder);
       });
 
+      // Set up message_reaction handler (emoji reactions on messages)
+      instance.bot.on('message_reaction', (ctx: Context) => {
+        this.handleMessageReaction(ctx, folder);
+      });
+
       instance.bot.catch((err) => {
         logger.error(
           { folder, err: err.error },
@@ -222,6 +227,7 @@ class TelegramMultiBotChannel implements Channel {
           );
         },
         drop_pending_updates: true,
+        allowed_updates: ['message', 'callback_query', 'message_reaction'],
       });
 
       // bot.start() doesn't resolve until stopped, so we don't await it
@@ -313,6 +319,62 @@ class TelegramMultiBotChannel implements Channel {
     };
 
     await ctx.answerCallbackQuery();
+    this.onMessage(jid, msg);
+  }
+
+  private async handleMessageReaction(
+    ctx: Context,
+    folder: string,
+  ): Promise<void> {
+    const reaction = ctx.messageReaction;
+    if (!reaction) return;
+
+    const chatId = reaction.chat?.id;
+    if (!chatId) return;
+
+    const jid = `tg:${chatId}`;
+
+    // Ownership check — same logic as handleMessage
+    const registeredFolder = this.jidToFolder.get(jid);
+    if (registeredFolder && registeredFolder !== folder) return;
+
+    if (!registeredFolder) {
+      this.jidToFolder.set(jid, folder);
+    }
+
+    const newEmojis = reaction.new_reaction
+      .filter((r: any) => r.type === 'emoji')
+      .map((r: any) => r.emoji)
+      .join('');
+
+    if (!newEmojis) return; // reaction removed, ignore
+
+    const fromName =
+      reaction.user?.first_name ||
+      reaction.user?.username ||
+      'User';
+
+    const timestamp = new Date().toISOString();
+
+    const content = JSON.stringify({
+      _type: 'message_reaction',
+      emoji: newEmojis,
+      message_id: reaction.message_id,
+      from_name: fromName,
+      text: `[reaction: ${newEmojis}] on message #${reaction.message_id}`,
+    });
+
+    const msg: NewMessage = {
+      id: `reaction-${reaction.message_id}-${Date.now()}`,
+      chat_jid: jid,
+      sender: reaction.user?.id?.toString() ?? 'unknown',
+      sender_name: fromName,
+      content,
+      timestamp,
+      is_from_me: false,
+      is_bot_message: false,
+    };
+
     this.onMessage(jid, msg);
   }
 
