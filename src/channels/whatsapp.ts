@@ -39,17 +39,64 @@ import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/3gpp': '.3gp',
+  'audio/ogg': '.ogg',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/aac': '.aac',
+  'application/pdf': '.pdf',
+};
+
+function getFileExtension(
+  mediaType: string,
+  normalized: proto.IMessage,
+): string {
+  const mime =
+    normalized.imageMessage?.mimetype ||
+    normalized.videoMessage?.mimetype ||
+    normalized.documentMessage?.mimetype ||
+    normalized.audioMessage?.mimetype ||
+    '';
+  if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+  // Fallback: derive from mime (e.g. "application/zip" -> ".zip")
+  const sub = mime.split('/')[1]?.split(';')[0];
+  if (sub) return `.${sub}`;
+  // Last resort by media type
+  const defaults: Record<string, string> = {
+    image: '.jpg',
+    video: '.mp4',
+    document: '.bin',
+    audio: '.ogg',
+  };
+  return defaults[mediaType] || '.bin';
+}
+
 function extractMessageText(msg: proto.IMessage | null | undefined): string {
   if (!msg) return '';
   const n = normalizeMessageContent(msg);
   if (!n) return '';
-  return (
+  // Text content from standard message types
+  const text =
     n.conversation ||
     n.extendedTextMessage?.text ||
     n.imageMessage?.caption ||
     n.videoMessage?.caption ||
-    ''
-  );
+    n.documentMessage?.caption ||
+    '';
+  if (text) return text;
+  // Fallback labels for media-only messages (no caption/text)
+  if (n.audioMessage) return '[Voice message]';
+  if (n.documentMessage)
+    return `[Document: ${n.documentMessage.fileName || 'file'}]`;
+  if (n.imageMessage) return '[Image]';
+  if (n.videoMessage) return '[Video]';
+  return '';
 }
 
 export interface WhatsAppChannelOpts {
@@ -231,11 +278,22 @@ export class WhatsAppChannel implements Channel {
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
+              normalized.documentMessage?.caption ||
               '';
 
-            // Download image attachment and save to group folder so the agent can edit it
+            // Download media attachments and save to group folder so the agent can access them
             let attachmentRef = '';
-            if (normalized.imageMessage) {
+            const mediaType = normalized.imageMessage
+              ? 'image'
+              : normalized.videoMessage
+                ? 'video'
+                : normalized.documentMessage
+                  ? 'document'
+                  : normalized.audioMessage && !normalized.audioMessage.ptt
+                    ? 'audio'
+                    : null;
+
+            if (mediaType) {
               const group = groups[chatJid];
               try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
@@ -243,15 +301,33 @@ export class WhatsAppChannel implements Channel {
                   const groupDir = resolveGroupFolderPath(group.folder);
                   const attachDir = path.join(groupDir, 'attachments');
                   fs.mkdirSync(attachDir, { recursive: true });
-                  const filename = `${Date.now()}.jpg`;
+
+                  const ext = getFileExtension(mediaType, normalized);
+                  const origName =
+                    normalized.documentMessage?.fileName || undefined;
+                  const filename = origName
+                    ? `${Date.now()}-${origName}`
+                    : `${Date.now()}${ext}`;
                   fs.writeFileSync(path.join(attachDir, filename), buffer);
-                  attachmentRef = `\n[Image saved: /workspace/group/attachments/${filename}]`;
-                  logger.info({ chatJid, filename }, 'Image attachment saved');
+
+                  const label =
+                    mediaType === 'image'
+                      ? 'Image'
+                      : mediaType === 'video'
+                        ? 'Video'
+                        : mediaType === 'document'
+                          ? 'Document'
+                          : 'Audio';
+                  attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+                  logger.info(
+                    { chatJid, filename, mediaType },
+                    'Media attachment saved',
+                  );
                 }
               } catch (err) {
                 logger.warn(
-                  { err, chatJid },
-                  'Failed to download image attachment',
+                  { err, chatJid, mediaType },
+                  'Failed to download media attachment',
                 );
               }
             }
@@ -296,7 +372,9 @@ export class WhatsAppChannel implements Channel {
             const contextInfo =
               normalized.extendedTextMessage?.contextInfo ||
               normalized.imageMessage?.contextInfo ||
-              normalized.videoMessage?.contextInfo;
+              normalized.videoMessage?.contextInfo ||
+              normalized.documentMessage?.contextInfo ||
+              normalized.audioMessage?.contextInfo;
 
             let quoted_content: string | undefined;
             let quoted_sender_name: string | undefined;
@@ -345,6 +423,18 @@ export class WhatsAppChannel implements Channel {
         if (keys.length > 0) {
           deleteMessages(keys);
           logger.info({ count: keys.length }, 'Deleted messages from DB');
+        }
+      }
+    });
+
+    this.sock.ev.on('groups.upsert', (groups) => {
+      for (const group of groups) {
+        if (group.id && group.subject) {
+          updateChatName(group.id, group.subject);
+          logger.info(
+            { jid: group.id, name: group.subject },
+            'New group detected, metadata saved',
+          );
         }
       }
     });
