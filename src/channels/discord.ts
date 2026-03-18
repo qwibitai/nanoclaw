@@ -1,6 +1,7 @@
 import {
   Client,
   Collection,
+  EmbedBuilder,
   Events,
   GatewayIntentBits,
   Message,
@@ -15,6 +16,7 @@ import { getRestartPlan, restartNanoClawService } from "../service-control.js";
 import { registerChannel, ChannelOpts } from "./registry.js";
 import {
   Channel,
+  DiscordEmbed,
   OnChatMetadata,
   OnInboundMessage,
   PartialSendError,
@@ -256,6 +258,40 @@ export class DiscordChannel implements Channel {
       logger.info({ jid, length: text.length }, "Discord message sent");
     } catch (err) {
       logger.error({ jid, err }, "Failed to send Discord message");
+      throw err;
+    }
+  }
+
+  async sendEmbed(jid: string, embed: DiscordEmbed): Promise<void> {
+    if (!this.client) {
+      throw new Error("Discord client not initialized");
+    }
+
+    try {
+      const channelId = jid.replace(/^dc:/, "");
+      const channel = await this.client.channels.fetch(channelId);
+
+      if (!channel || !("send" in channel)) {
+        throw new Error(`Discord channel not found or not text-based: ${jid}`);
+      }
+
+      const textChannel = channel as TextChannel;
+      const builder = new EmbedBuilder();
+      if (embed.title) builder.setTitle(embed.title);
+      if (embed.description) builder.setDescription(embed.description);
+      if (embed.color !== undefined) builder.setColor(embed.color);
+      if (embed.fields) {
+        for (const field of embed.fields) {
+          builder.addFields({ name: field.name, value: field.value, inline: field.inline });
+        }
+      }
+      if (embed.footer) builder.setFooter(embed.footer);
+      if (embed.timestamp) builder.setTimestamp(new Date(embed.timestamp));
+
+      await textChannel.send({ embeds: [builder] });
+      logger.info({ jid }, "Discord embed sent");
+    } catch (err) {
+      logger.error({ jid, err }, "Failed to send Discord embed");
       throw err;
     }
   }
