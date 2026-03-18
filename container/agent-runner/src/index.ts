@@ -392,6 +392,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: 'claude-opus-4-6',
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -541,6 +542,26 @@ async function main(): Promise<void> {
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
+    }
+
+    // Auto-save state before session exit
+    if (sessionId && !containerInput.isScheduledTask) {
+      const statePath = '/workspace/group/STATE.md';
+      const hasState = fs.existsSync(statePath);
+      log(`Auto-saving state (existing STATE.md: ${hasState})...`);
+      try {
+        await runQuery(
+          '<internal>Session is ending. Run /save-state now to update STATE.md with what was accomplished this session. Do NOT send any message to the user — just update the file silently.</internal>',
+          sessionId,
+          mcpServerPath,
+          containerInput,
+          sdkEnv,
+          resumeAt,
+        );
+        log('State saved successfully');
+      } catch (err) {
+        log(`Failed to auto-save state: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

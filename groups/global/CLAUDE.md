@@ -38,6 +38,12 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+## Session State
+
+At the start of every session, read `/workspace/group/STATE.md` if it exists. This file contains context from previous sessions — active projects, pending work, key decisions, and references. Use it to pick up where the last session left off without asking the user to repeat themselves.
+
+Before ending a session with meaningful work, run `/save-state` to update STATE.md.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

@@ -480,9 +480,9 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
-  // Proactively refresh OAuth token every 6 hours so it never expires —
+  // Proactively refresh OAuth token every 2 hours so it never expires —
   // keeps both container agents and host CLI (ssh sessions) authenticated.
-  const OAUTH_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+  const OAUTH_REFRESH_INTERVAL = 2 * 60 * 60 * 1000;
   const oauthRefreshTimer = setInterval(async () => {
     logger.info('Periodic OAuth token refresh check');
     try {

@@ -196,6 +196,11 @@ function buildVolumeMounts(
   const homeDir = process.env.HOME || '/home/node';
   const userMounts: VolumeMount[] = [
     {
+      hostPath: path.join(homeDir, '.ssh'),
+      containerPath: '/home/node/.ssh',
+      readonly: true,
+    },
+    {
       hostPath: path.join(homeDir, 'notes'),
       containerPath: '/home/node/notes',
       readonly: false,
@@ -213,6 +218,16 @@ function buildVolumeMounts(
     {
       hostPath: path.join(homeDir, 'projects'),
       containerPath: '/home/node/projects',
+      readonly: false,
+    },
+    {
+      hostPath: path.join(homeDir, 'productivity'),
+      containerPath: '/home/node/cockpit',
+      readonly: false,
+    },
+    {
+      hostPath: path.join(homeDir, 'github-personal-agents', 'work-log'),
+      containerPath: '/home/node/worklog',
       readonly: false,
     },
   ];
