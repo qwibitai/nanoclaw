@@ -64,6 +64,20 @@ export function formatEventEmbed(event: HealthEvent): DiscordEmbed {
   };
 }
 
+export function formatMonitorErrorEmbed(
+  source: string,
+  context: string,
+  err: unknown,
+): DiscordEmbed {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    title: `${source}: ${context}`,
+    description: message,
+    color: COLOR_ORANGE,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export function renderEmbedAsText(embed: DiscordEmbed): string {
   const lines: string[] = [];
   if (embed.title) lines.push(`**${embed.title}**`);

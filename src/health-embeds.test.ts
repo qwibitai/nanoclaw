@@ -7,6 +7,7 @@ import {
   COLOR_RED,
   formatEventEmbed,
   formatHealthStatusEmbed,
+  formatMonitorErrorEmbed,
   renderEmbedAsText,
 } from "./health-embeds.js";
 import type { HealthEvent, HealthStatus } from "./health-monitor.js";
@@ -118,6 +119,41 @@ describe("formatEventEmbed", () => {
       { name: "phase", value: "do-task", inline: true },
       { name: "outcome", value: "success", inline: true },
     ]);
+  });
+});
+
+describe("formatMonitorErrorEmbed", () => {
+  it("uses orange color", () => {
+    const embed = formatMonitorErrorEmbed(
+      "tanren",
+      "Event fetch error",
+      new Error("401 Unauthorized"),
+    );
+    expect(embed.color).toBe(COLOR_ORANGE);
+  });
+
+  it("includes source and context in title", () => {
+    const embed = formatMonitorErrorEmbed("tanren", "Health check error", new Error("timeout"));
+    expect(embed.title).toBe("tanren: Health check error");
+  });
+
+  it("extracts message from Error instances", () => {
+    const embed = formatMonitorErrorEmbed(
+      "tanren",
+      "Event fetch error",
+      new Error("401 Unauthorized"),
+    );
+    expect(embed.description).toBe("401 Unauthorized");
+  });
+
+  it("handles non-Error values", () => {
+    const embed = formatMonitorErrorEmbed("tanren", "Event fetch error", "raw string error");
+    expect(embed.description).toBe("raw string error");
+  });
+
+  it("sets timestamp", () => {
+    const embed = formatMonitorErrorEmbed("tanren", "Error", new Error("x"));
+    expect(embed.timestamp).toBeDefined();
   });
 });
 

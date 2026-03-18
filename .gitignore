@@ -24,6 +24,9 @@ docs/AEGIS-ARCHITECTURE.md
 *.keys.json
 .env
 
+# Instance-specific config
+health-monitor.json
+
 # Temp files
 .tmp-*
 

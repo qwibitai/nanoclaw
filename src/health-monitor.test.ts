@@ -424,6 +424,47 @@ describe("Health Monitor", () => {
       expect(source.checkHealth).toHaveBeenCalledTimes(2);
     });
 
+    it("sends error embed to Discord when fetchEvents throws", async () => {
+      const state = new Map<string, string>();
+      state.set("health_status_test", "true");
+
+      const source = createMockSource("test", {
+        fetchEvents: vi.fn().mockRejectedValue(new Error("401 Unauthorized")),
+      });
+
+      const deps = createDeps({
+        sources: [source],
+        getState: vi.fn((key: string) => state.get(key)),
+        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should have sent an error embed (health was stable, so only event-error embed)
+      expect(deps.sendEmbed).toHaveBeenCalledWith(
+        "dc:123",
+        expect.objectContaining({ title: "test: Event fetch error" }),
+      );
+    });
+
+    it("sends error embed to Discord when checkHealth throws", async () => {
+      const source = createMockSource("test", {
+        checkHealth: vi.fn().mockRejectedValue(new Error("Connection refused")),
+        fetchEvents: vi.fn().mockRejectedValue(new Error("also broken")),
+      });
+
+      const deps = createDeps({ sources: [source] });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(deps.sendEmbed).toHaveBeenCalledWith(
+        "dc:123",
+        expect.objectContaining({ title: "test: Health check error" }),
+      );
+    });
+
     it("continues to next source when one source errors", async () => {
       const source1 = createMockSource("broken", {
         checkHealth: vi.fn().mockRejectedValue(new Error("broken")),

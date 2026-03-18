@@ -1,7 +1,11 @@
 import type { DiscordEmbed } from "./types.js";
 import type { HealthMonitorConfig } from "./health-monitor-config.js";
 import { resolveJids } from "./health-monitor-config.js";
-import { formatEventEmbed, formatHealthStatusEmbed } from "./health-embeds.js";
+import {
+  formatEventEmbed,
+  formatHealthStatusEmbed,
+  formatMonitorErrorEmbed,
+} from "./health-embeds.js";
 import { logger } from "./logger.js";
 
 export interface HealthStatus {
@@ -96,6 +100,7 @@ async function pollSource(
     }
   } catch (err) {
     logger.error({ source: source.name, err }, "Health monitor: checkHealth threw");
+    await sendErrorEmbed(deps, source.name, "Health check error", err);
   }
 
   // Event polling
@@ -127,6 +132,24 @@ async function pollSource(
     }
   } catch (err) {
     logger.error({ source: source.name, err }, "Health monitor: fetchEvents threw");
+    await sendErrorEmbed(deps, source.name, "Event fetch error", err);
+  }
+}
+
+async function sendErrorEmbed(
+  deps: HealthMonitorDeps,
+  sourceName: string,
+  context: string,
+  err: unknown,
+): Promise<void> {
+  const embed = formatMonitorErrorEmbed(sourceName, context, err);
+  const jids = resolveJids(deps.config, "monitor_error", sourceName);
+  for (const jid of jids) {
+    try {
+      await deps.sendEmbed(jid, embed);
+    } catch (sendErr) {
+      logger.error({ jid, sourceName, sendErr }, "Health monitor: failed to send error embed");
+    }
   }
 }
 
