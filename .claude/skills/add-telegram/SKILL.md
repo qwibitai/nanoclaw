@@ -5,13 +5,13 @@ description: Add Telegram as a channel. Can replace WhatsApp entirely or run alo
 
 # Add Telegram Channel
 
-This skill adds Telegram support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Telegram support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/telegram.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -23,43 +23,47 @@ If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `telegram` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
+git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
 ```
 
-This deterministically:
-- Adds `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
-- Adds `src/channels/telegram.test.ts` (46 unit tests)
-- Appends `import './telegram.js'` to the channel barrel file `src/channels/index.ts`
-- Installs the `grammy` npm dependency
-- Updates `.env.example` with `TELEGRAM_BOT_TOKEN`
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent file:
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+```bash
+git fetch telegram main
+git merge telegram/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This merges in:
+- `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
+- `src/channels/telegram.test.ts` (unit tests with grammy mock)
+- `import './telegram.js'` appended to the channel barrel file `src/channels/index.ts`
+- `grammy` npm dependency in `package.json`
+- `TELEGRAM_BOT_TOKEN` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/telegram.test.ts
 ```
 
-All tests must pass (including the new telegram tests) and build must be clean before proceeding.
+All tests must pass (including the new Telegram tests) and build must be clean before proceeding.
 
 ## Phase 3: Setup
 
@@ -129,31 +133,18 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+The chat ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main chat (responds to all messages):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "telegram_main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  isMain: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
 ```
 
 For additional chats (trigger-only):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "telegram_<group-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
 ```
 
 ## Phase 5: Verify

@@ -3,7 +3,15 @@ import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { compareSemver } from '../skills-engine/state.js';
+function compareSemver(a: string, b: string): number {
+  const partsA = a.split('.').map(Number);
+  const partsB = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const diff = (partsA[i] || 0) - (partsB[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 // Resolve tsx binary once to avoid npx race conditions across migrations
 function resolveTsx(): string {

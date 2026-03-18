@@ -1,12 +1,17 @@
+---
+name: add-discord
+description: Add Discord bot channel integration to NanoClaw.
+---
+
 # Add Discord Channel
 
-This skill adds Discord support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Discord support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/discord.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -18,39 +23,44 @@ If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `discord` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-discord
+git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
 ```
 
-This deterministically:
-- Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
-- Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
-- Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
-- Installs the `discord.js` npm dependency
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent file:
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+```bash
+git fetch discord main
+git merge discord/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This merges in:
+- `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
+- `src/channels/discord.test.ts` (unit tests with discord.js mock)
+- `import './discord.js'` appended to the channel barrel file `src/channels/index.ts`
+- `discord.js` npm dependency in `package.json`
+- `DISCORD_BOT_TOKEN` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/discord.test.ts
 ```
 
 All tests must pass (including the new Discord tests) and build must be clean before proceeding.
@@ -120,31 +130,18 @@ Wait for the user to provide the channel ID (format: `dc:1234567890123456`).
 
 ### Register the channel
 
-Use the IPC register flow or register directly. The channel ID, name, and folder name are needed.
+The channel ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main channel (responds to all messages):
 
-```typescript
-registerGroup("dc:<channel-id>", {
-  name: "<server-name> #<channel-name>",
-  folder: "discord_main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  isMain: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_main" --trigger "@${ASSISTANT_NAME}" --channel discord --no-trigger-required --is-main
 ```
 
 For additional channels (trigger-only):
 
-```typescript
-registerGroup("dc:<channel-id>", {
-  name: "<server-name> #<channel-name>",
-  folder: "discord_<channel-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel discord
 ```
 
 ## Phase 5: Verify

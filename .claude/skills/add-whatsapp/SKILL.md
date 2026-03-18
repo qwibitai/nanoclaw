@@ -42,39 +42,54 @@ If they chose pairing code:
 
 AskUserQuestion: What is your phone number? (Include country code without +, e.g., 1234567890)
 
-## Phase 2: Verify Code
+## Phase 2: Apply Code Changes
 
-Apply the skill to install the WhatsApp channel code and dependencies:
+Check if `src/channels/whatsapp.ts` already exists. If it does, skip to Phase 3 (Authentication).
+
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp
+git remote -v
 ```
 
-Verify the code was placed correctly:
+If `whatsapp` is missing, add it:
 
 ```bash
-test -f src/channels/whatsapp.ts && echo "WhatsApp channel code present" || echo "ERROR: WhatsApp channel code missing — re-run skill apply"
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 ```
 
-### Verify dependencies
+### Merge the skill branch
 
 ```bash
-node -e "require('@whiskeysockets/baileys')" 2>/dev/null && echo "Baileys installed" || echo "Installing Baileys..."
+git fetch whatsapp main
+git merge whatsapp/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
-If not installed:
+This merges in:
+- `src/channels/whatsapp.ts` (WhatsAppChannel class with self-registration via `registerChannel`)
+- `src/channels/whatsapp.test.ts` (41 unit tests)
+- `src/whatsapp-auth.ts` (standalone WhatsApp authentication script)
+- `setup/whatsapp-auth.ts` (WhatsApp auth setup step)
+- `import './whatsapp.js'` appended to the channel barrel file `src/channels/index.ts`
+- `'whatsapp-auth'` step added to `setup/index.ts`
+- `@whiskeysockets/baileys`, `qrcode`, `qrcode-terminal` npm dependencies in `package.json`
+- `ASSISTANT_HAS_OWN_NUMBER` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
+
+### Validate code changes
 
 ```bash
-npm install @whiskeysockets/baileys qrcode qrcode-terminal
-```
-
-### Validate build
-
-```bash
+npm install
 npm run build
+npx vitest run src/channels/whatsapp.test.ts
 ```
 
-Build must be clean before proceeding.
+All tests must pass and build must be clean before proceeding.
 
 ## Phase 3: Authentication
 
@@ -115,21 +130,33 @@ Tell the user to run `npm run auth` in another terminal, then:
 
 For pairing code:
 
+Tell the user to have WhatsApp open on **Settings > Linked Devices > Link a Device**, ready to tap **"Link with phone number instead"** — the code expires in ~60 seconds and must be entered immediately.
+
+Run the auth process in the background and poll `store/pairing-code.txt` for the code:
+
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number>
+rm -f store/pairing-code.txt && npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
 ```
 
-(Bash timeout: 150000ms). Display PAIRING_CODE from output.
+Then immediately poll for the code (do NOT wait for the background command to finish):
 
-Tell the user:
+```bash
+for i in $(seq 1 20); do [ -f store/pairing-code.txt ] && cat store/pairing-code.txt && break; sleep 1; done
+```
 
-> A pairing code will appear. **Enter it within 60 seconds** — codes expire quickly.
+Display the code to the user the moment it appears. Tell them:
+
+> **Enter this code now** — it expires in ~60 seconds.
 >
 > 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
 > 2. Tap **Link with phone number instead**
 > 3. Enter the code immediately
->
-> If the code expires, re-run the command — a new code will be generated.
+
+After the user enters the code, poll for authentication to complete:
+
+```bash
+for i in $(seq 1 60); do grep -q 'AUTH_STATUS: authenticated' /tmp/wa-auth.log 2>/dev/null && echo "authenticated" && break; grep -q 'AUTH_STATUS: failed' /tmp/wa-auth.log 2>/dev/null && echo "failed" && break; sleep 2; done
+```
 
 **If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
 
