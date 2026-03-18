@@ -26,8 +26,8 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
   // Outgoing queue for messages sent while disconnected
   const outgoingQueue: Array<{ jid: string; text: string }> = [];
 
-  // Thinking indicator: jid -> interval timer for sendChatAction
-  const thinkingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+  // Thinking indicator messages: jid -> message_id
+  const thinkingMessages = new Map<string, number>();
 
   function extractChatId(jid: string): string {
     return jid.replace(/^telegram:/, '');
@@ -190,7 +190,10 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
       // Resolve bot info first (launch() starts polling and never resolves)
       const me = await bot.telegram.getMe();
       (bot as unknown as { botInfo: typeof me }).botInfo = me;
-      logger.info({ username: me.username }, 'Telegram bot connected');
+      logger.info(
+        { username: me.username },
+        'Telegram bot connected',
+      );
       // Start polling in background (does not return)
       bot.launch().catch((err) => {
         logger.error({ err }, 'Telegram polling error');
@@ -236,19 +239,16 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
       const chatId = extractChatId(jid);
       try {
         if (isTyping) {
-          // Dedup: skip if already showing typing for this chat
-          if (thinkingIntervals.has(jid)) return;
-          // Send immediately, then repeat every 4s (Telegram expires after 5s)
-          await bot.telegram.sendChatAction(chatId, 'typing');
-          const interval = setInterval(() => {
-            bot.telegram.sendChatAction(chatId, 'typing').catch(() => {});
-          }, 4000);
-          thinkingIntervals.set(jid, interval);
+          const sent = await bot.telegram.sendMessage(
+            chatId,
+            '\u{1F9E0} Thinking...',
+          );
+          thinkingMessages.set(jid, sent.message_id);
         } else {
-          const interval = thinkingIntervals.get(jid);
-          if (interval) {
-            clearInterval(interval);
-            thinkingIntervals.delete(jid);
+          const messageId = thinkingMessages.get(jid);
+          if (messageId) {
+            await bot.telegram.deleteMessage(chatId, messageId);
+            thinkingMessages.delete(jid);
           }
         }
       } catch (err) {

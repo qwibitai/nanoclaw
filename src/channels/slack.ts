@@ -138,10 +138,15 @@ export class SlackChannel implements Channel {
       if (!isBotMessage && !this.thinkingMessages.has(jid)) {
         const group = groups[jid];
         const willTrigger =
-          !group.requiresTrigger || group.isMain || TRIGGER_PATTERN.test(content.trim());
+          !group.requiresTrigger ||
+          group.isMain ||
+          TRIGGER_PATTERN.test(content.trim());
         if (willTrigger) {
           this.setTyping(jid, true).catch((err) =>
-            logger.debug({ jid, err }, 'Failed to show early thinking indicator'),
+            logger.debug(
+              { jid, err },
+              'Failed to show early thinking indicator',
+            ),
           );
         }
       }
@@ -240,7 +245,10 @@ export class SlackChannel implements Channel {
         }
       }
     } catch (err) {
-      logger.debug({ jid, isTyping, err }, 'Failed to manage thinking indicator');
+      logger.debug(
+        { jid, isTyping, err },
+        'Failed to manage thinking indicator',
+      );
       this.thinkingMessages.delete(jid);
     }
   }

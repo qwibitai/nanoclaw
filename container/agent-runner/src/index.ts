@@ -323,6 +323,55 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const SONNET_MODEL = 'claude-sonnet-4-6-20250514';
+
+/**
+ * Classify whether a prompt needs the full model or can use Haiku.
+ * Returns the Haiku model ID for simple chat, Sonnet for complex tasks.
+ */
+function pickModel(prompt: string, isScheduledTask?: boolean): string {
+  // Scheduled tasks are automated — always use the full model
+  if (isScheduledTask) return HAIKU_MODEL;
+
+  // Extract raw user text from XML message wrappers if present
+  // formatMessages() wraps input as: <messages><message sender="..." time="...">text</message></messages>
+  let rawText = prompt;
+  const messageContents = prompt.match(/<message[^>]*>([\s\S]*?)<\/message>/g);
+  if (messageContents) {
+    rawText = messageContents
+      .map(m => m.replace(/<message[^>]*>/, '').replace(/<\/message>/, ''))
+      .join('\n')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  }
+
+  // Strip the trigger prefix (@X, /x) for analysis
+  const cleaned = rawText.replace(/^(@\w+\s+|\/x\s+)/i, '').trim();
+
+  // Short casual messages → Haiku
+  if (cleaned.length < 200) {
+    // Check for complexity signals that warrant the full model
+    const complexSignals = [
+      /\b(debug|fix|refactor|implement|deploy|migrate|analyze|investigate|diagnose)\b/i,
+      /\b(code|function|error|bug|exception|stack\s*trace|logs?)\b/i,
+      /\b(create|build|write|generate|design|architect)\b.{10,}/i,
+      /\b(why|how)\b.{20,}\?/i,  // Long "why/how" questions
+      /```/,                        // Code blocks
+      /\b(PR|pull request|commit|branch|merge|git)\b/i,
+      /\b(config|yaml|json|env|docker|ssh|systemctl)\b/i,
+      /\b(search|find|grep|look\s+(for|into|at))\b.*\b(file|code|log|issue)\b/i,
+    ];
+    const isComplex = complexSignals.some(re => re.test(cleaned));
+    if (!isComplex) {
+      return HAIKU_MODEL;
+    }
+  }
+
+  // Long or complex messages → full model
+  return SONNET_MODEL;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -336,6 +385,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  model?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -394,6 +444,7 @@ async function runQuery(
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      model,
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
@@ -511,7 +562,9 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const model = pickModel(prompt, containerInput.isScheduledTask);
+      log(`Model: ${model || 'default'} for prompt: ${prompt.slice(0, 80)}...`);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, model);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

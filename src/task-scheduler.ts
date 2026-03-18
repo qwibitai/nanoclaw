@@ -43,11 +43,14 @@ const DEFAULT_SUPPRESSION_PATTERNS = [
  * Returns true if the output matches a "nothing to report" pattern.
  * Used as defense-in-depth when the gate or prompt fails to prevent output.
  */
-export function shouldSuppressOutput(text: string, extraPatterns?: RegExp[]): boolean {
+export function shouldSuppressOutput(
+  text: string,
+  extraPatterns?: RegExp[],
+): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true; // Empty output is always suppressed
   const patterns = [...DEFAULT_SUPPRESSION_PATTERNS, ...(extraPatterns ?? [])];
-  return patterns.some(p => p.test(trimmed));
+  return patterns.some((p) => p.test(trimmed));
 }
 
 export function computeNextRun(task: ScheduledTask): string | null {
@@ -208,8 +211,14 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Suppress "nothing to report" output from scheduled tasks (defense-in-depth)
-          if (task.schedule_type !== 'once' && shouldSuppressOutput(streamedOutput.result)) {
-            logger.info({ taskId: task.id }, 'Suppressed no-op scheduled task output');
+          if (
+            task.schedule_type !== 'once' &&
+            shouldSuppressOutput(streamedOutput.result)
+          ) {
+            logger.info(
+              { taskId: task.id },
+              'Suppressed no-op scheduled task output',
+            );
             scheduleClose();
           } else {
             await deps.sendMessage(task.chat_jid, streamedOutput.result);

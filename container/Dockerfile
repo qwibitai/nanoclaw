@@ -1,37 +1,21 @@
 # NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# Runs Claude Agent SDK in isolated Linux VM
+# Service Bot mode: SSH-based tools, no browser
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies
+# - openssh-client: Service Bot tools SSH to managed hosts
+# - curl/git: needed for git ops and API calls
+# - No Chromium: browser disabled (Level 0) to reduce attack surface
 RUN apt-get update && apt-get install -y \
-    chromium \
-    fonts-liberation \
-    fonts-noto-cjk \
-    fonts-noto-color-emoji \
-    libgbm1 \
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxshmfence1 \
+    openssh-client \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chromium path for agent-browser
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install claude-code globally (no agent-browser — browser disabled)
+RUN npm install -g @anthropic-ai/claude-code @aisuite/chub
 
 # Create app directory
 WORKDIR /app
@@ -55,7 +39,15 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Create entrypoint script
+# - Dynamic uid mapping: adds current uid to /etc/passwd if missing (needed for SSH)
+# - Container input (prompt, group info) is passed via stdin JSON.
+# - Credentials are injected by the host's credential proxy — never passed here.
+# - Follow-up messages arrive via IPC files in /workspace/ipc/input/
+RUN printf '#!/bin/bash\nset -e\n# Dynamic uid mapping for SSH (container may run as host uid != 1000)\nif ! getent passwd "$(id -u)" >/dev/null 2>&1; then\n  echo "nanoclaw:x:$(id -u):$(id -g):NanoClaw Agent:/home/node:/bin/bash" >> /etc/passwd 2>/dev/null || true\nfi\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Make /etc/passwd writable by all so dynamic uid mapping works at runtime
+RUN chmod 666 /etc/passwd
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

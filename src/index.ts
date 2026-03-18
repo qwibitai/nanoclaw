@@ -53,6 +53,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { ensureWatcherTasks } from './watcher-registration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -539,6 +540,9 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Register watcher tasks if not already present
+  ensureWatcherTasks();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

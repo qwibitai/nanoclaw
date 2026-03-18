@@ -220,6 +220,18 @@ function buildVolumeMounts(
     });
   }
 
+  // Messages database: mounted read-only so agents can query conversation history
+  // without SSH. Used by read_own_conversations tool.
+  const messagesDbPath = path.join(projectRoot, 'store', 'messages.db');
+  if (fs.existsSync(messagesDbPath)) {
+    const messagesDbDir = path.join(projectRoot, 'store');
+    mounts.push({
+      hostPath: messagesDbDir,
+      containerPath: '/workspace/extra/messages-db',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
