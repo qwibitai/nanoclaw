@@ -1794,7 +1794,11 @@ async function main(): Promise<void> {
     } else {
       const result = stopRemoteControl();
       if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.', msg.id);
+        await channel.sendMessage(
+          chatJid,
+          'Remote Control session ended.',
+          msg.id,
+        );
       } else {
         await channel.sendMessage(chatJid, result.error, msg.id);
       }
