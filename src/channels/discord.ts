@@ -29,7 +29,9 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   }
 
   if (!CONTROL_CHANNEL_ID) {
-    logger.warn('DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel');
+    logger.warn(
+      'DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel',
+    );
     return null;
   }
 
@@ -128,15 +130,17 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
       if (connected) return;
 
       client.on('ready', () => {
-        logger.info(
-          { user: client.user?.tag },
-          'Discord bot connected',
-        );
+        logger.info({ user: client.user?.tag }, 'Discord bot connected');
         connected = true;
 
         // Set bot status
         client.user?.setPresence({
-          activities: [{ name: 'Deep Research & Autonomous Building', type: ActivityType.Custom }],
+          activities: [
+            {
+              name: 'Deep Research & Autonomous Building',
+              type: ActivityType.Custom,
+            },
+          ],
           status: 'online',
         });
       });
