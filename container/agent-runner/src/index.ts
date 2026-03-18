@@ -657,7 +657,7 @@ async function main(): Promise<void> {
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   } else if (containerInput.isMain) {
-    prompt = `[Antworte auf Deutsch. Duze den Nutzer (du/dir/dich). Du heißt ${containerInput.assistantName || 'SuKI'}.]\n\n${prompt}`;
+    prompt = `[Antworte auf Deutsch. Duze den Nutzer (du/dir/dich). Du heißt ${containerInput.assistantName || 'SuKI'}. Wichtig: Bei Fragen nach Fakten (Orte, Höhen, Personen, Preise, Öffnungszeiten, aktuelle Ereignisse) → SOFORT Bash-Tool aufrufen und mcporter searxng.search_web nutzen. NIEMALS Fakten aus dem Gedächtnis antworten.]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
