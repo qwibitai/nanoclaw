@@ -924,8 +924,14 @@ export class SlackChannel implements Channel {
       const escaped = escapeRegex(name);
       // Match @Name or plain Name with word boundaries on both sides.
       // Negative lookbehind prevents matching inside <@U...> slack mentions.
+      // The replacer skips matches that fall inside a URL.
       const pattern = new RegExp(`(?<!<)@?\\b${escaped}\\b`, 'gi');
-      result = result.replace(pattern, `<@${userId}>`);
+      result = result.replace(pattern, (match, offset) => {
+        // Walk backwards from the match to see if we're inside a URL.
+        const before = result.slice(Math.max(0, offset - 2048), offset);
+        if (/https?:\/\/\S*$/.test(before)) return match;
+        return `<@${userId}>`;
+      });
     }
     return result;
   }
