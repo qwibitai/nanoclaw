@@ -9,7 +9,7 @@ Covers:
   5. Edge cases — empty input, malformed JSON, missing fields
   6. Bug regression — known issues captured as tests
 
-Run: python3 -m pytest .claude/hooks/tests/test_hooks.py -v
+Run: python3 -m pytest .claude/kaizen/hooks/tests/test_hooks.py -v
 """
 
 import pytest

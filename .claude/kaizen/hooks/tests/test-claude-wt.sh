@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for claude-wt.sh arg parsing
-# Run: bash .claude/hooks/tests/test-claude-wt.sh
+# Run: bash .claude/kaizen/hooks/tests/test-claude-wt.sh
 #
 # INVARIANT: --dangerously-skip-permissions is prepended to claude args by default.
 # INVARIANT: --safe suppresses --dangerously-skip-permissions.

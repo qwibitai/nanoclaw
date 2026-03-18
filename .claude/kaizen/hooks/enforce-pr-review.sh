@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # enforce-pr-review.sh — Level 3 kaizen enforcement (Issue #46)
 # PreToolUse gate: blocks all Bash commands until the agent completes
 # the mandatory PR self-review after `gh pr create` or `git push`.

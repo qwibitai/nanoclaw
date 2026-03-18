@@ -4,7 +4,7 @@
 # The policy is "dev work happens in worktrees" — the branch name is irrelevant.
 # Even `git checkout -b feature` in the main checkout is a policy violation because
 # the main checkout is the running production instance, not a development workspace.
-# See docs/agent-control-flow.md "Main checkout: what is and isn't allowed".
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 #
 # Worktrees have git-dir != git-common-dir.
 GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null)

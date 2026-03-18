@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # enforce-pr-review-stop.sh — Level 3 kaizen enforcement (Issue #46)
 # Stop hook: prevents Claude from finishing its response when a PR review is pending.
 #

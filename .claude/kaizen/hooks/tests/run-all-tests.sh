@@ -2,10 +2,10 @@
 # run-all-tests.sh — Run all hook tests (unit + integration + harness)
 #
 # Usage:
-#   bash .claude/hooks/tests/run-all-tests.sh           # Run all
-#   bash .claude/hooks/tests/run-all-tests.sh --unit     # Unit tests only
-#   bash .claude/hooks/tests/run-all-tests.sh --harness  # Harness tests only
-#   bash .claude/hooks/tests/run-all-tests.sh --quick    # Fast subset
+#   bash .claude/kaizen/hooks/tests/run-all-tests.sh           # Run all
+#   bash .claude/kaizen/hooks/tests/run-all-tests.sh --unit     # Unit tests only
+#   bash .claude/kaizen/hooks/tests/run-all-tests.sh --harness  # Harness tests only
+#   bash .claude/kaizen/hooks/tests/run-all-tests.sh --quick    # Fast subset
 #
 # Exit 0 = all passed, 1 = failures
 

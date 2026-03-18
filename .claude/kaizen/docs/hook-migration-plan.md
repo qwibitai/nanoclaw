@@ -69,7 +69,7 @@ git add -A && git commit        # if only "main" blocked, this succeeds!
 git push -u origin hotfix-typo  # policy violation shipped
 ```
 
-This violates workspace isolation even though the branch isn't `main`. What matters is **where** the work happens, not what branch it's on. See `docs/agent-control-flow.md` for the full rationale.
+This violates workspace isolation even though the branch isn't `main`. What matters is **where** the work happens, not what branch it's on. See `.claude/kaizen/README.md` for the full rationale.
 
 Pre-push is defense-in-depth: if pre-commit blocks all commits, there's nothing to push. But it catches `--no-verify` bypass.
 

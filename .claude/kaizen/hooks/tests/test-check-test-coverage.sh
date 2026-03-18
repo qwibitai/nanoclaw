@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for check-test-coverage.sh hook
-# Run: bash .claude/hooks/tests/test-check-test-coverage.sh
+# Run: bash .claude/kaizen/hooks/tests/test-check-test-coverage.sh
 #
 # INVARIANT: For gh pr merge, the hook checks the ACTUAL PR diff (via gh pr diff),
 #   not the local worktree diff (git diff). Unrelated dirty files in the worktree
@@ -31,7 +31,7 @@ assert_eq "git push exits silently" "" "$OUTPUT"
 echo ""
 echo "=== Merge: PR with no source files → allow ==="
 
-setup_gh_git_mocks ".claude/hooks/check-test-coverage.sh" "src/index.ts
+setup_gh_git_mocks ".claude/kaizen/hooks/check-test-coverage.sh" "src/index.ts
 src/unrelated.ts"
 
 OUTPUT=$(run_hook "$HOOK" "gh pr merge 42")
@@ -52,7 +52,7 @@ echo "=== CRITICAL: Merge uses PR diff, not worktree diff ==="
 # gh pr diff returns ONLY .claude/ files (no src)
 # git diff returns src/index.ts (dirty worktree)
 # Merge should use gh pr diff → no src files → allow
-setup_gh_git_mocks ".claude/hooks/some-hook.sh" "src/index.ts
+setup_gh_git_mocks ".claude/kaizen/hooks/some-hook.sh" "src/index.ts
 src/config.ts"
 
 OUTPUT=$(run_hook "$HOOK" "gh pr merge 42")

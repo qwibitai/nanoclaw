@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # pr-review-loop.sh — Level 2 kaizen enforcement (Issue #29)
 # Multi-round PR self-review with state tracking.
 #
@@ -150,7 +151,14 @@ print_checklist() {
 
   cat <<CHECKLIST
 
-Review the PR against each question below. Be honest and thorough.
+Review the PR against each section below. Be honest and thorough.
+
+**Requirements Verification:**
+- Identify the linked ticket/issue (check PR body, branch name, commit messages for issue references like #123 or kaizen#45).
+- If a ticket is found: run \`gh issue view <number> --repo <repo>\` to read it.
+- Produce a requirements checklist — list every requirement from the ticket, mark each as DONE, PARTIAL, or MISSING.
+- If requirements are MISSING: either implement them now, or explicitly note "deferred to follow-up ticket: [reason]".
+- If NO linked ticket is found: note "No linked ticket — code-only review" and proceed with the remaining checklist.
 
 **Clarity & Conventions:**
 - Is it clear and understandable?
@@ -180,11 +188,12 @@ Review the PR against each question below. Be honest and thorough.
 - Is it kaizen? Is it recursive kaizen?
 
 PROCESS:
-1. Run \`gh pr diff $pr_url\` to review the actual diff
-2. Walk through each checklist item against the diff
-3. If issues found: fix, commit, push, log what you fixed
-4. Re-review from step 1 (next round)
-5. If clean: state "REVIEW PASSED (round $round/$max_rounds)" and proceed
+1. Check for a linked ticket — run \`gh issue view\` if found
+2. Run \`gh pr diff $pr_url\` to review the actual diff
+3. Walk through EVERY checklist section (requirements first, then code review)
+4. If issues found: fix, commit, push, log what you fixed
+5. Re-review from step 1 (next round)
+6. If clean: state "REVIEW PASSED (round $round/$max_rounds)" and proceed
 
 When review is clean, the hook will stop reminding you on subsequent pushes.
 

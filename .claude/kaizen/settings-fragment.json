@@ -1,4 +1,5 @@
 {
+  "_comment": "kAIzen Agent Control Flow — merge this into your .claude/settings.json hooks section",
   "hooks": {
     "SessionStart": [
       {
@@ -106,9 +107,5 @@
         ]
       }
     ]
-  },
-  "enabledPlugins": {
-    "agent-sdk-dev@claude-plugins-official": true,
-    "hookify@claude-plugins-official": true
   }
 }

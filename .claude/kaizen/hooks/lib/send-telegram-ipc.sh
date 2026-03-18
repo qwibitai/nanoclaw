@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # send-telegram-ipc.sh — Send a Telegram message via IPC.
 # Source from hooks: source "$(dirname "$0")/lib/send-telegram-ipc.sh"
 #

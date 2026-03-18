@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # enforce-pr-review-tools.sh — Level 3 kaizen enforcement (Issue #46)
 # PreToolUse gate for non-Bash tools: blocks Edit, Write, and Agent tools
 # until the agent completes the mandatory PR self-review.

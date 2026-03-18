@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for check-verification.sh hook
-# Run: bash .claude/hooks/tests/test-check-verification.sh
+# Run: bash .claude/kaizen/hooks/tests/test-check-verification.sh
 #
 # INVARIANT: gh pr create is BLOCKED if the command body lacks a Verification section.
 # INVARIANT: gh pr create is ALLOWED if the body contains verification markers.

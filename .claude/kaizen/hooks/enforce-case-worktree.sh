@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # enforce-case-worktree.sh — Advisory early warning
 # Warns when git commit/push is attempted outside a worktree.
 # Real enforcement is in git hooks (.husky/pre-commit, .husky/pre-push).

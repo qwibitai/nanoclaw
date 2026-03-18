@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # state-utils.sh — Shared state file utilities for PR review hooks.
 # Source from hooks: source "$(dirname "$0")/lib/state-utils.sh"
 #

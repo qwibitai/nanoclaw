@@ -3,7 +3,7 @@
 # Block ALL pushes from the main checkout (not worktrees).
 # Defense-in-depth: if pre-commit blocks all commits in main checkout,
 # there should be nothing to push. This catches --no-verify bypass.
-# See docs/agent-control-flow.md "Main checkout: what is and isn't allowed".
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 #
 # Worktrees have git-dir != git-common-dir.
 GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null)

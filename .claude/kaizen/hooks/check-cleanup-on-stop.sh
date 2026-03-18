@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # check-cleanup-on-stop.sh — Level 2 kaizen enforcement
 # On session stop, warn about orphaned worktrees for the current branch.
 # Does NOT block — just reminds. The auto-prune handles actual cleanup.

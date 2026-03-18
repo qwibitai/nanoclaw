@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # check-wip.sh — SessionStart hook
 # Detects in-progress work when starting a new session in the main checkout.
 # Only fires in main checkout (not in worktrees).

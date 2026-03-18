@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for enforce-case-worktree.sh hook
-# Run: bash .claude/hooks/tests/test-enforce-case-worktree.sh
+# Run: bash .claude/kaizen/hooks/tests/test-enforce-case-worktree.sh
 #
 # INVARIANT: git commit/push inside a git worktree are ALLOWED.
 # INVARIANT: git commit/push outside a worktree (main checkout) are DENIED.

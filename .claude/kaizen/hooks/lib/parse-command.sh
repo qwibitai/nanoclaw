@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # parse-command.sh — Shared utilities for hook scripts.
 # Source this file from hooks: source "$(dirname "$0")/lib/parse-command.sh"
 

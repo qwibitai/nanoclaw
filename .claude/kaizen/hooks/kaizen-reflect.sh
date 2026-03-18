@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # kaizen-reflect.sh — Level 2 kaizen enforcement (Issue #9)
 # Triggers after `gh pr create` or `gh pr merge` to prompt structured
 # kaizen reflection. Outputs reflection prompts on stdout so the agent

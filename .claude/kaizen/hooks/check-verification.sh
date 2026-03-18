@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # check-verification.sh — Advisory early warning (Issue #10)
 # Warns when PR body lacks a Verification section with concrete success criteria.
 # Also reminds about post-deploy verification on merge.

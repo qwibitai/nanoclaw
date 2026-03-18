@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for check-dirty-files.sh hook
-# Run: bash .claude/hooks/tests/test-check-dirty-files.sh
+# Run: bash .claude/kaizen/hooks/tests/test-check-dirty-files.sh
 #
 # INVARIANT: gh pr create and git push are BLOCKED when dirty files exist.
 # INVARIANT: gh pr merge is WARNED (advisory) when dirty files exist.

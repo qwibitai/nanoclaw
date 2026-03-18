@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for lib/parse-command.sh shared utilities
-# Run: bash .claude/hooks/tests/test-parse-command.sh
+# Run: bash .claude/kaizen/hooks/tests/test-parse-command.sh
 #
 # INVARIANT: extract_pr_number returns ONLY the PR number from the correct
 #   position in "gh pr <subcommand> <number>" — never from flags or other args.
@@ -172,7 +172,7 @@ if echo "$@" | grep -q "diff --name-only"; then
   echo "src/index.ts"
   echo "src/config.ts"
   echo "src/unrelated-dirty-file.ts"
-  echo ".claude/hooks/some-hook.sh"
+  echo ".claude/kaizen/hooks/some-hook.sh"
   exit 0
 fi
 /usr/bin/git "$@"

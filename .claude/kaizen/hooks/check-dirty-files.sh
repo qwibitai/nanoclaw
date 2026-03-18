@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # check-dirty-files.sh — Level 3 kaizen enforcement
 # Ensures the agent makes a conscious choice about every file in the worktree
 # before creating PRs or pushing code. Prevents forgotten work, debug artifacts,

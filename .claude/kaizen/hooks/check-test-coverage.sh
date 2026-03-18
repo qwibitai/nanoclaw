@@ -1,4 +1,5 @@
 #!/bin/bash
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # check-test-coverage.sh — Advisory early warning (Issue #8)
 # Warns when changed source files lack corresponding test coverage changes.
 # Real enforcement is in CI (pr-policy job in .github/workflows/ci.yml).
