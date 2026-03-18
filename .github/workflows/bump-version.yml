@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
-        if: ${{ secrets.APP_ID != '' }}
+        continue-on-error: true
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
