@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Spawns agent execution in containers or directly inside a containerless sandbox and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -22,6 +22,7 @@ import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
+  isContainerlessRuntime,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
@@ -55,6 +56,16 @@ interface VolumeMount {
   containerPath: string;
   readonly: boolean;
 }
+
+interface PreparedExecution {
+  runnerArgs: string[];
+  runnerEnv: NodeJS.ProcessEnv;
+  workspaceRoot: string;
+}
+
+const WORKSPACE_ROOT = '/workspace';
+const PROJECT_MOUNT_PATH = '/workspace/project';
+const CLAUDE_HOME_PATH = '/home/node/.claude';
 
 function buildVolumeMounts(
   group: RegisteredGroup,
@@ -212,6 +223,93 @@ function buildVolumeMounts(
   return mounts;
 }
 
+function ensureDir(dirPath: string): void {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function removePath(targetPath: string): void {
+  fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
+function isDirectory(targetPath: string): boolean {
+  return fs.statSync(targetPath).isDirectory();
+}
+
+function ensureSymlink(targetPath: string, linkPath: string): void {
+  if (fs.existsSync(linkPath)) {
+    try {
+      if (fs.lstatSync(linkPath).isSymbolicLink()) {
+        const currentTarget = fs.readlinkSync(linkPath);
+        if (currentTarget === targetPath) return;
+      }
+    } catch {
+      // Recreate below.
+    }
+    removePath(linkPath);
+  }
+
+  ensureDir(path.dirname(linkPath));
+  fs.symlinkSync(
+    targetPath,
+    linkPath,
+    isDirectory(targetPath) ? 'dir' : 'file',
+  );
+}
+
+function stageProjectView(projectRoot: string, projectViewDir: string): void {
+  removePath(projectViewDir);
+  ensureDir(projectViewDir);
+
+  for (const entry of fs.readdirSync(projectRoot)) {
+    const sourcePath = path.join(projectRoot, entry);
+    const targetPath = path.join(projectViewDir, entry);
+    if (entry === '.env') continue;
+    ensureSymlink(sourcePath, targetPath);
+  }
+
+  fs.writeFileSync(path.join(projectViewDir, '.env'), '');
+}
+
+function resolveWorkspacePath(
+  workspaceRoot: string,
+  containerPath: string,
+): string {
+  if (containerPath === WORKSPACE_ROOT) return workspaceRoot;
+  const relativePath = path.relative(WORKSPACE_ROOT, containerPath);
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`Unsupported workspace path: ${containerPath}`);
+  }
+  return path.join(workspaceRoot, relativePath);
+}
+
+function stageWorkspaceMount(
+  projectRoot: string,
+  workspaceRoot: string,
+  mount: VolumeMount,
+): void {
+  if (
+    mount.containerPath !== WORKSPACE_ROOT &&
+    !mount.containerPath.startsWith(`${WORKSPACE_ROOT}/`)
+  ) {
+    return;
+  }
+
+  const targetPath = resolveWorkspacePath(workspaceRoot, mount.containerPath);
+
+  if (mount.containerPath === PROJECT_MOUNT_PATH) {
+    stageProjectView(projectRoot, targetPath);
+    return;
+  }
+
+  if (mount.hostPath === '/dev/null') {
+    ensureDir(path.dirname(targetPath));
+    fs.writeFileSync(targetPath, '');
+    return;
+  }
+
+  ensureSymlink(mount.hostPath, targetPath);
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -264,6 +362,75 @@ function buildContainerArgs(
   return args;
 }
 
+function prepareExecution(
+  group: RegisteredGroup,
+  mounts: VolumeMount[],
+): PreparedExecution {
+  const projectRoot = process.cwd();
+  const sessionRoot = path.join(DATA_DIR, 'sessions', group.folder);
+  const workspaceRoot = path.join(sessionRoot, 'workspace');
+  const runnerEntryPoint = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'dist',
+    'index.js',
+  );
+
+  if (!fs.existsSync(runnerEntryPoint)) {
+    throw new Error(
+      `Agent runner not built: expected ${runnerEntryPoint}. Run npm --prefix container/agent-runner install && npm --prefix container/agent-runner run build.`,
+    );
+  }
+
+  removePath(workspaceRoot);
+  ensureDir(workspaceRoot);
+
+  for (const mount of mounts) {
+    stageWorkspaceMount(projectRoot, workspaceRoot, mount);
+  }
+
+  const claudeMount = mounts.find(
+    (mount) => mount.containerPath === CLAUDE_HOME_PATH,
+  );
+  const claudeDir = claudeMount?.hostPath;
+  if (!claudeDir) {
+    throw new Error('Missing per-group Claude directory mount');
+  }
+
+  const homeDir = path.dirname(claudeDir);
+  ensureDir(homeDir);
+
+  const authMode = detectAuthMode();
+  const runnerEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    TZ: TIMEZONE,
+    HOME: homeDir,
+    ANTHROPIC_BASE_URL: `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    NANOCLAW_WORKSPACE_ROOT: workspaceRoot,
+    NANOCLAW_PROJECT_DIR: path.join(workspaceRoot, 'project'),
+    NANOCLAW_GROUP_DIR: path.join(workspaceRoot, 'group'),
+    NANOCLAW_GLOBAL_DIR: path.join(workspaceRoot, 'global'),
+    NANOCLAW_IPC_DIR: path.join(workspaceRoot, 'ipc'),
+    NANOCLAW_EXTRA_BASE_DIR: path.join(workspaceRoot, 'extra'),
+  };
+
+  delete runnerEnv.ANTHROPIC_API_KEY;
+  delete runnerEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+  if (authMode === 'api-key') {
+    runnerEnv.ANTHROPIC_API_KEY = 'placeholder';
+  } else {
+    runnerEnv.CLAUDE_CODE_OAUTH_TOKEN = 'placeholder';
+  }
+
+  return {
+    runnerArgs: [runnerEntryPoint],
+    runnerEnv,
+    workspaceRoot,
+  };
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -278,12 +445,36 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerless = isContainerlessRuntime();
+  const containerArgs = containerless
+    ? [
+        CONTAINER_RUNTIME_BIN,
+        path.join('container', 'agent-runner', 'dist', 'index.js'),
+      ]
+    : buildContainerArgs(mounts, containerName);
+  let execution: PreparedExecution | undefined;
+  if (containerless) {
+    try {
+      execution = prepareExecution(group, mounts);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { group: group.name, error: message },
+        'Failed to prepare agent execution',
+      );
+      return {
+        status: 'error',
+        result: null,
+        error: message,
+      };
+    }
+  }
 
   logger.debug(
     {
       group: group.name,
       containerName,
+      workspaceRoot: execution?.workspaceRoot,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
@@ -307,9 +498,16 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const container =
+      containerless && execution
+        ? spawn(CONTAINER_RUNTIME_BIN, execution.runnerArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            cwd: process.cwd(),
+            env: execution.runnerEnv,
+          })
+        : spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
 
     onProcess(container, containerName);
 
@@ -413,15 +611,33 @@ export async function runContainerAgent(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
-          container.kill('SIGKILL');
-        }
-      });
+      if (containerless) {
+        stopContainer(container.pid);
+        setTimeout(() => {
+          if (!container.killed) {
+            logger.warn(
+              { group: group.name, containerName, pid: container.pid },
+              'Graceful stop timed out, force killing',
+            );
+            container.kill('SIGKILL');
+          }
+        }, 10_000).unref();
+        return;
+      }
+
+      exec(
+        stopContainer(containerName) as string,
+        { timeout: 15000 },
+        (err) => {
+          if (err) {
+            logger.warn(
+              { group: group.name, containerName, err },
+              'Graceful stop failed, force killing',
+            );
+            container.kill('SIGKILL');
+          }
+        },
+      );
     };
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);

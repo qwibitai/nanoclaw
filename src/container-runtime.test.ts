@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -16,30 +16,39 @@ vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
-import {
-  CONTAINER_RUNTIME_BIN,
-  readonlyMountArgs,
-  stopContainer,
-  ensureContainerRuntimeRunning,
-  cleanupOrphans,
-} from './container-runtime.js';
 import { logger } from './logger.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.NANOCLAW_CONTAINER_RUNTIME;
 });
 
-// --- Pure functions ---
+afterEach(() => {
+  delete process.env.NANOCLAW_CONTAINER_RUNTIME;
+});
+
+async function importRuntime() {
+  vi.resetModules();
+  return import('./container-runtime.js');
+}
 
 describe('readonlyMountArgs', () => {
-  it('returns -v flag with :ro suffix', () => {
+  it('returns -v flag with :ro suffix', async () => {
+    const { readonlyMountArgs } = await importRuntime();
     const args = readonlyMountArgs('/host/path', '/container/path');
     expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+  });
+
+  it('returns no mount flags in containerless mode', async () => {
+    process.env.NANOCLAW_CONTAINER_RUNTIME = 'none';
+    const { readonlyMountArgs } = await importRuntime();
+    expect(readonlyMountArgs('/host/path', '/container/path')).toEqual([]);
   });
 });
 
 describe('stopContainer', () => {
-  it('returns stop command using CONTAINER_RUNTIME_BIN', () => {
+  it('returns stop command using CONTAINER_RUNTIME_BIN', async () => {
+    const { CONTAINER_RUNTIME_BIN, stopContainer } = await importRuntime();
     expect(stopContainer('nanoclaw-test-123')).toBe(
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`,
     );
@@ -49,7 +58,9 @@ describe('stopContainer', () => {
 // --- ensureContainerRuntimeRunning ---
 
 describe('ensureContainerRuntimeRunning', () => {
-  it('does nothing when runtime is already running', () => {
+  it('does nothing when runtime is already running', async () => {
+    const { CONTAINER_RUNTIME_BIN, ensureContainerRuntimeRunning } =
+      await importRuntime();
     mockExecSync.mockReturnValueOnce('');
 
     ensureContainerRuntimeRunning();
@@ -64,7 +75,8 @@ describe('ensureContainerRuntimeRunning', () => {
     );
   });
 
-  it('throws when docker info fails', () => {
+  it('throws when docker info fails', async () => {
+    const { ensureContainerRuntimeRunning } = await importRuntime();
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('Cannot connect to the Docker daemon');
     });
@@ -74,12 +86,25 @@ describe('ensureContainerRuntimeRunning', () => {
     );
     expect(logger.error).toHaveBeenCalled();
   });
+
+  it('skips runtime checks in containerless mode', async () => {
+    process.env.NANOCLAW_CONTAINER_RUNTIME = 'none';
+    const { ensureContainerRuntimeRunning } = await importRuntime();
+
+    ensureContainerRuntimeRunning();
+
+    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      'Containerless mode: skipping container runtime check',
+    );
+  });
 });
 
 // --- cleanupOrphans ---
 
 describe('cleanupOrphans', () => {
-  it('stops orphaned nanoclaw containers', () => {
+  it('stops orphaned nanoclaw containers', async () => {
+    const { CONTAINER_RUNTIME_BIN, cleanupOrphans } = await importRuntime();
     // docker ps returns container names, one per line
     mockExecSync.mockReturnValueOnce(
       'nanoclaw-group1-111\nnanoclaw-group2-222\n',
@@ -107,7 +132,8 @@ describe('cleanupOrphans', () => {
     );
   });
 
-  it('does nothing when no orphans exist', () => {
+  it('does nothing when no orphans exist', async () => {
+    const { cleanupOrphans } = await importRuntime();
     mockExecSync.mockReturnValueOnce('');
 
     cleanupOrphans();
@@ -116,7 +142,8 @@ describe('cleanupOrphans', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
-  it('warns and continues when ps fails', () => {
+  it('warns and continues when ps fails', async () => {
+    const { cleanupOrphans } = await importRuntime();
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('docker not available');
     });
@@ -129,7 +156,8 @@ describe('cleanupOrphans', () => {
     );
   });
 
-  it('continues stopping remaining containers when one stop fails', () => {
+  it('continues stopping remaining containers when one stop fails', async () => {
+    const { cleanupOrphans } = await importRuntime();
     mockExecSync.mockReturnValueOnce('nanoclaw-a-1\nnanoclaw-b-2\n');
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
@@ -144,6 +172,18 @@ describe('cleanupOrphans', () => {
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
       'Stopped orphaned containers',
+    );
+  });
+
+  it('skips orphan cleanup in containerless mode', async () => {
+    process.env.NANOCLAW_CONTAINER_RUNTIME = 'none';
+    const { cleanupOrphans } = await importRuntime();
+
+    cleanupOrphans();
+
+    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      'Containerless mode: skipping orphan cleanup',
     );
   });
 });

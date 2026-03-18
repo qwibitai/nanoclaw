@@ -8,11 +8,35 @@ import os from 'os';
 
 import { logger } from './logger.js';
 
+type RuntimeMode = 'docker' | 'none';
+
+function getRuntimeMode(): RuntimeMode {
+  const configured =
+    process.env.NANOCLAW_CONTAINER_RUNTIME?.trim().toLowerCase();
+  if (!configured || configured === 'docker') return 'docker';
+  if (
+    configured === 'none' ||
+    configured === 'node' ||
+    configured === 'process'
+  ) {
+    return 'none';
+  }
+  logger.warn(
+    { value: process.env.NANOCLAW_CONTAINER_RUNTIME },
+    'Unknown NANOCLAW_CONTAINER_RUNTIME, falling back to docker',
+  );
+  return 'docker';
+}
+
+const RUNTIME_MODE = getRuntimeMode();
+
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+export const CONTAINER_RUNTIME_BIN =
+  RUNTIME_MODE === 'none' ? 'node' : 'docker';
 
 /** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+export const CONTAINER_HOST_GATEWAY =
+  RUNTIME_MODE === 'none' ? '127.0.0.1' : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.
@@ -21,7 +45,12 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
  *   falling back to 0.0.0.0 if the interface isn't found.
  */
 export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+  process.env.CREDENTIAL_PROXY_HOST ||
+  (RUNTIME_MODE === 'none' ? '127.0.0.1' : detectProxyBindHost());
+
+export function isContainerlessRuntime(): boolean {
+  return RUNTIME_MODE === 'none';
+}
 
 function detectProxyBindHost(): string {
   if (os.platform() === 'darwin') return '127.0.0.1';
@@ -42,6 +71,7 @@ function detectProxyBindHost(): string {
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
+  if (isContainerlessRuntime()) return [];
   // On Linux, host.docker.internal isn't built-in — add it explicitly
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
@@ -54,16 +84,34 @@ export function readonlyMountArgs(
   hostPath: string,
   containerPath: string,
 ): string[] {
+  if (isContainerlessRuntime()) return [];
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
 /** Returns the shell command to stop a container by name. */
-export function stopContainer(name: string): string {
-  return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
+export function stopContainer(
+  nameOrPid: string | number | undefined,
+): string | void {
+  if (isContainerlessRuntime()) {
+    if (typeof nameOrPid !== 'number' || !nameOrPid) return;
+    try {
+      process.kill(nameOrPid, 'SIGTERM');
+    } catch (err) {
+      logger.debug({ pid: nameOrPid, err }, 'Process already stopped');
+    }
+    return;
+  }
+
+  return `${CONTAINER_RUNTIME_BIN} stop ${nameOrPid}`;
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
+  if (isContainerlessRuntime()) {
+    logger.info('Containerless mode: skipping container runtime check');
+    return;
+  }
+
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} info`, {
       stdio: 'pipe',
@@ -102,6 +150,11 @@ export function ensureContainerRuntimeRunning(): void {
 
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
+  if (isContainerlessRuntime()) {
+    logger.info('Containerless mode: skipping orphan cleanup');
+    return;
+  }
+
   try {
     const output = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
@@ -110,7 +163,7 @@ export function cleanupOrphans(): void {
     const orphans = output.trim().split('\n').filter(Boolean);
     for (const name of orphans) {
       try {
-        execSync(stopContainer(name), { stdio: 'pipe' });
+        execSync(stopContainer(name) as string, { stdio: 'pipe' });
       } catch {
         /* already stopped */
       }
