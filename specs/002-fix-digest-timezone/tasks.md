@@ -58,9 +58,9 @@
 
 ### Implementation for User Story 1
 
-- [ ] T013 [US1] Implement `rehydrateTaskTimezones(timezone: string)` function in `src/task-scheduler.ts` — query all cron tasks with `status IN ('active', 'paused')` where `created_tz != timezone`, recompute `next_run` using `CronExpressionParser.parse(schedule_value, { tz: timezone })`, and call `updateTaskTimezone()` for each correction
-- [ ] T014 [US1] Add a new `getCronTasksForRehydration(timezone: string)` query function in `src/db.ts` — `SELECT * FROM scheduled_tasks WHERE schedule_type = 'cron' AND status IN ('active', 'paused') AND created_tz != ?`
-- [ ] T015 [US1] Call `rehydrateTaskTimezones(TIMEZONE)` in `src/index.ts` during startup, after `initDatabase()` and `loadState()` but before `startSchedulerLoop()`
+- [x] T013 [US1] Implement `rehydrateTaskTimezones(timezone: string)` function in `src/task-scheduler.ts` — query all cron tasks with `status IN ('active', 'paused')` where `created_tz != timezone`, recompute `next_run` using `CronExpressionParser.parse(schedule_value, { tz: timezone })`, and call `updateTaskTimezone()` for each correction
+- [x] T014 [US1] Add a new `getCronTasksForRehydration(timezone: string)` query function in `src/db.ts` — `SELECT * FROM scheduled_tasks WHERE schedule_type = 'cron' AND status IN ('active', 'paused') AND created_tz != ?`
+- [x] T015 [US1] Call `rehydrateTaskTimezones(TIMEZONE)` in `src/index.ts` during startup, after `initDatabase()` and `loadState()` but before `startSchedulerLoop()`
 
 **Checkpoint**: Restart under a different timezone corrects stale `next_run` values. US1 acceptance scenarios 1-4 pass.
 

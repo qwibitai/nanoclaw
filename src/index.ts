@@ -59,7 +59,10 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  rehydrateTaskTimezones,
+  startSchedulerLoop,
+} from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { buildObsidianContext } from './obsidian.js';
@@ -478,6 +481,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  rehydrateTaskTimezones(TIMEZONE);
   restoreRemoteControl();
 
   // Start credential proxy (containers route API calls through this)
