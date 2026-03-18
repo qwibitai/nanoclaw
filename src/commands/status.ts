@@ -4,6 +4,7 @@
  * Shows current system status, running agents, and recent activity
  */
 
+import { execSync } from 'child_process';
 import {
   ChatInputCommandInteraction,
   SlashCommandBuilder,
@@ -11,6 +12,18 @@ import {
 } from 'discord.js';
 import { logger } from '../logger.js';
 import { getAllTasks } from '../db.js';
+
+function getRunningContainers(): string[] {
+  try {
+    const out = execSync(
+      'docker ps --filter "name=nanoclaw" --format "{{.Names}}"',
+      { encoding: 'utf8' },
+    ).trim();
+    return out ? out.split('\n') : [];
+  } catch {
+    return [];
+  }
+}
 
 export const statusCommand = {
   data: new SlashCommandBuilder()
@@ -20,13 +33,13 @@ export const statusCommand = {
       option
         .setName('detailed')
         .setDescription('Show detailed information')
-        .setRequired(false)
+        .setRequired(false),
     ),
 
   async execute(
     interaction: ChatInputCommandInteraction,
     registeredGroups: Record<string, any>,
-    activeContainers: Set<string>
+    activeContainers: Set<string>,
   ) {
     const detailed = interaction.options.getBoolean('detailed') ?? false;
 
@@ -36,13 +49,16 @@ export const statusCommand = {
       // Get all registered groups (threads)
       const groups = Object.values(registeredGroups);
       const researchThreads = groups.filter((g: any) =>
-        g.folder?.startsWith('thread-')
+        g.folder?.startsWith('thread_'),
       );
       const controlGroup = groups.find((g: any) => g.isMain);
 
       // Get scheduled tasks
       const tasks = getAllTasks();
       const activeTasks = tasks.filter((t) => t.status === 'active');
+
+      // Query Docker for live container count
+      const runningContainers = getRunningContainers();
 
       // Build status embed
       const embed = new EmbedBuilder()
@@ -54,7 +70,7 @@ export const statusCommand = {
             name: '📊 Overview',
             value:
               `**Active Threads:** ${researchThreads.length}\n` +
-              `**Active Containers:** ${activeContainers.size}\n` +
+              `**Active Containers:** ${runningContainers.length}\n` +
               `**Scheduled Tasks:** ${activeTasks.length}`,
             inline: false,
           },
@@ -69,11 +85,11 @@ export const statusCommand = {
             name: '🔄 System Health',
             value: '✅ Operational',
             inline: true,
-          }
+          },
         );
 
-      if (detailed && activeContainers.size > 0) {
-        const containerList = Array.from(activeContainers)
+      if (detailed && runningContainers.length > 0) {
+        const containerList = runningContainers
           .slice(0, 10)
           .map((name) => `• ${name}`)
           .join('\n');
@@ -90,7 +106,7 @@ export const statusCommand = {
           .slice(0, 5)
           .map(
             (t) =>
-              `• **${t.schedule_type}**: ${t.prompt.slice(0, 50)}${t.prompt.length > 50 ? '...' : ''}`
+              `• **${t.schedule_type}**: ${t.prompt.slice(0, 50)}${t.prompt.length > 50 ? '...' : ''}`,
           )
           .join('\n');
 
@@ -121,9 +137,9 @@ export const statusCommand = {
           user: interaction.user.tag,
           detailed,
           threadCount: researchThreads.length,
-          containerCount: activeContainers.size,
+          containerCount: runningContainers.length,
         },
-        'Status command executed'
+        'Status command executed',
       );
     } catch (err) {
       logger.error({ err }, 'Failed to get status');
