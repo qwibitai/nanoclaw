@@ -95,9 +95,7 @@ function createSchema(database: Database.Database): void {
 
   // Add script column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`,
-    );
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
   } catch {
     /* column already exists */
   }
@@ -425,7 +423,12 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'script' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'script'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
     >
   >,
 ): void {
