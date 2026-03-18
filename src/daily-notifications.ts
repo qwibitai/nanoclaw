@@ -42,7 +42,9 @@ function getUniqueFolders(groups: Record<string, RegisteredGroup>): string[] {
   return [...new Set(Object.values(groups).map((g) => g.folder))];
 }
 
-/** Returns unique non-thread JIDs for a folder, with notifyJid appended if set and different. */
+/** Returns the target JID(s) for daily summary in a folder.
+ *  If any group in the folder has a notifyJid override, sends ONLY there.
+ *  Otherwise falls back to the first non-thread JID. */
 function getTargetJids(
   groups: Record<string, RegisteredGroup>,
   folder: string,
@@ -50,14 +52,13 @@ function getTargetJids(
   const entries = Object.entries(groups).filter(
     ([jid, g]) => g.folder === folder && !jid.includes(':thread:'),
   );
-  const defaultJid = entries[0]?.[0];
-  if (!defaultJid) return [];
+  if (entries.length === 0) return [];
 
   const overrideEntry = entries.find(([, g]) => g.containerConfig?.notifyJid);
   const notifyJid = overrideEntry?.[1].containerConfig?.notifyJid;
-  const targets = [defaultJid];
-  if (notifyJid && notifyJid !== defaultJid) targets.push(notifyJid);
-  return targets;
+  if (notifyJid) return [notifyJid];
+
+  return [entries[0][0]];
 }
 
 /** Find the first ContainerConfig for a folder. */
@@ -265,7 +266,7 @@ export async function sendDailySummaries(
     const lines: string[] = [`📋 **Daily Summary** — ${folder}`];
 
     if (shipped.length > 0) {
-      lines.push(`\n📦 **Shipped** (${shipped.length}):`);
+      lines.push(`\n🤖 **Agent Shipped** (${shipped.length}):`);
       for (const entry of shipped) {
         const prPart = entry.pr_url ? ` — ${entry.pr_url}` : '';
         lines.push(`• ${entry.title}${prPart}`);
@@ -273,7 +274,7 @@ export async function sendDailySummaries(
     }
 
     if (teamPRs.length > 0) {
-      lines.push(`\n👥 **Team Activity** (${teamPRs.length}):`);
+      lines.push(`\n👥 **Team Shipped** (${teamPRs.length}):`);
       for (const pr of teamPRs) {
         lines.push(`• ${pr.title} — ${pr.url} (${pr.author})`);
       }

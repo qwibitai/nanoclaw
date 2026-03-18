@@ -492,6 +492,8 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
       text = await this.replaceMentions(text, textChannel);
+      // Collapse --- horizontal rules (and surrounding blank lines) into a single blank line
+      text = text.replace(/\n*^\s*---\s*$\n*/gm, '\n\n');
       ({ text } = transformTablesInText('discord', text));
       const components = this.buildPrButtons(text);
       await this.sendChunked(textChannel, text, components);
