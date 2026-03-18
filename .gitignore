@@ -39,3 +39,4 @@ groups/global/*
 container/skills-catalog/plugins/
 
 agents-sdk-docs
+container/skills-catalog/catalog.json
