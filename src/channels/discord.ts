@@ -193,8 +193,16 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
               const safeOnMessage = (chatJid: string, msg: any) => {
                 const timestamp = msg.timestamp ?? new Date().toISOString();
                 const threadName = msg.sender_name ?? chatJid;
+                // Claim this JID so ownsJid() returns true for outbound routing
+                discordJids.add(chatJid);
                 // Upsert the chats row (FK requirement)
-                opts.onChatMetadata(chatJid, timestamp, threadName, 'discord', true);
+                opts.onChatMetadata(
+                  chatJid,
+                  timestamp,
+                  threadName,
+                  'discord',
+                  true,
+                );
                 // Auto-register thread as a non-main group if not already known
                 if (!opts.registeredGroups()[chatJid]) {
                   const folder = `thread_${chatJid}`;
