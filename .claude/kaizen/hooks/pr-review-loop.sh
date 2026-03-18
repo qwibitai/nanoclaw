@@ -151,49 +151,17 @@ print_checklist() {
 
   cat <<CHECKLIST
 
-Review the PR against each section below. Be honest and thorough.
+Use the /review-pr skill for the full checklist. Run \`/review-pr $pr_url\` now.
 
-**Requirements Verification:**
-- Identify the linked ticket/issue (check PR body, branch name, commit messages for issue references like #123 or kaizen#45).
-- If a ticket is found: run \`gh issue view <number> --repo <repo>\` to read it.
-- Produce a requirements checklist — list every requirement from the ticket, mark each as DONE, PARTIAL, or MISSING.
-- If requirements are MISSING: either implement them now, or explicitly note "deferred to follow-up ticket: [reason]".
-- If NO linked ticket is found: note "No linked ticket — code-only review" and proceed with the remaining checklist.
-
-**Clarity & Conventions:**
-- Is it clear and understandable?
-- Does it follow our guidelines and conventions (CLAUDE.md, kaizen policies)?
-
-**Testability & Correctness:**
-- Is it designed for testability? What would make it more testable and more correct?
-- Do the tests need harness, simulator, hypothesis, fixtures?
-- Does the feature have a powerful testing harness that lets it test itself thoroughly? Reuse and extend existing test harnesses rather than building from scratch.
-- Does it have clear INVARIANTS and SUT?
-- Did you smoke test it (actually ran it)?
-
-**Code Quality & Refactoring:**
-- Does it need DRYing up? More reuse? Refactoring?
-- Does this feature touch ugly, convoluted code? Giant files with sprawling functions? Take time to refactor and leave the code in a better place than you found it. Continual improvement is the heartblood of this system.
-
-**Purpose & Impact:**
-- Is the PR achieving its intended purpose? Is the intended purpose clear?
-- Is it correct?
-- Does it improve our codebase overall? Does it degrade anything? Create noise?
-
-**Security & QoL:**
-- Review security — any injection, path traversal, or trust boundary issues?
-- Review QoL — is it improving the maintainability and understandability of the codebase?
-
-**Kaizen:**
-- Is it kaizen? Is it recursive kaizen?
+The skill covers: requirements verification, clarity, testability, code quality,
+purpose/impact, security, documentation & system docs updates, and kaizen.
 
 PROCESS:
-1. Check for a linked ticket — run \`gh issue view\` if found
-2. Run \`gh pr diff $pr_url\` to review the actual diff
-3. Walk through EVERY checklist section (requirements first, then code review)
-4. If issues found: fix, commit, push, log what you fixed
-5. Re-review from step 1 (next round)
-6. If clean: state "REVIEW PASSED (round $round/$max_rounds)" and proceed
+1. Run \`/review-pr $pr_url\` — it will load the full checklist
+2. Walk through EVERY section
+3. If issues found: fix, commit, push, log what you fixed
+4. Re-review from step 1 (next round)
+5. If clean: state "REVIEW PASSED (round $round/$max_rounds)" and proceed
 
 When review is clean, the hook will stop reminding you on subsequent pushes.
 

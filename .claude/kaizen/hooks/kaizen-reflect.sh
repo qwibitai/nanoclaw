@@ -129,16 +129,7 @@ The PR has been merged. Reflect on the outcome:
    - Should any learnings go into CLAUDE.md or docs/?
    - Is there a pattern here that other agents should know?
 
-5. **Documentation updates:**
-   - Update documentation of systems touched by this PR:
-     - `.claude/kaizen/README.md` — if hooks, CI checks, or enforcement points changed
-     - `.claude/skills/kaizen/SKILL.md` — if the enforcement inventory changed
-     - `CLAUDE.md` — if workflows, policies, or architecture changed
-   - If this PR adds or improves test coverage for a capability, update the
-     test ladder / capability inventory if one exists (e.g., `docs/test-ladder-spec.md`)
-   - If this PR changes the Dockerfile or CI, update the cache strategy docs
-
-6. **⚡ MAKE IT ACTIONABLE:**
+5. **⚡ MAKE IT ACTIONABLE:**
    If you identified that this fix should be escalated, or found
    friction worth fixing — act NOW before cleanup:
    - **Create a dev case** via `case_suggest_dev` for code improvements
@@ -148,7 +139,7 @@ The PR has been merged. Reflect on the outcome:
    # TODO(kaizen-L3): Verify agent actually created actionable items
    # when reflection identified improvements. See Garsson-io/kaizen#57.
 
-7. **Cleanup:**
+6. **Cleanup:**
    - Delete the merged branch (local + remote)
    - Remove the worktree if applicable
    - Update any related kaizen issues
