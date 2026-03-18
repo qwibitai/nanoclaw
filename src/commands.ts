@@ -205,7 +205,7 @@ function handleQuota(): string {
   lines.push(`Today: ${quota.todayTotal} invocations`);
   lines.push(`  Autonomous: ${quota.autonomousCount}`);
   lines.push(`  CEO sessions: ${quota.ceoCount}`);
-  lines.push(`  Weighted usage: ${quota.weightedUsage} (limit ~200)`);
+  lines.push(`  Weighted usage: ${quota.weightedUsage} (limit ~${quota.dailyLimit}, self-calibrating)`);
   lines.push('');
 
   if (quota.throttleLevel === 'normal') {
@@ -287,15 +287,29 @@ interface QuotaResult {
   ceoCount: number;
   weightedUsage: number;
   throttleLevel: string;
+  dailyLimit: number;
+}
+
+function readCalibratedLimit(): number {
+  const calibrationPath = path.join(ATLAS_STATE_DIR, 'autonomy', 'quota-calibration.json');
+  try {
+    if (fs.existsSync(calibrationPath)) {
+      const data = JSON.parse(fs.readFileSync(calibrationPath, 'utf-8'));
+      return data.estimated_limit || 1000;
+    }
+  } catch { /* use default */ }
+  return 1000;
 }
 
 function readQuotaStatus(): QuotaResult {
+  const dailyLimit = readCalibratedLimit();
   const result: QuotaResult = {
     todayTotal: 0,
     autonomousCount: 0,
     ceoCount: 0,
     weightedUsage: 0,
     throttleLevel: 'normal',
+    dailyLimit,
   };
 
   try {
@@ -312,7 +326,6 @@ function readQuotaStatus(): QuotaResult {
         if (!entry.timestamp?.startsWith(today)) continue;
 
         result.todayTotal++;
-        // Compute model weight
         const model = (entry.model || 'sonnet').toLowerCase();
         let weight = 1.0;
         for (const [key, w] of Object.entries(MODEL_WEIGHTS)) {
@@ -329,7 +342,7 @@ function readQuotaStatus(): QuotaResult {
     }
 
     result.weightedUsage = Math.round(totalWeighted * 100) / 100;
-    const usagePercent = totalWeighted / 200; // DAILY_LIMIT_ESTIMATE
+    const usagePercent = totalWeighted / dailyLimit;
     if (usagePercent >= 0.90) {
       result.throttleLevel = 'paused';
     } else if (usagePercent >= 0.60) {

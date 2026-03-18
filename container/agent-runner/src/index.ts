@@ -28,6 +28,7 @@ import {
   shouldRunTask,
   logInvocation,
   logGovernanceEvent,
+  recordRateLimit,
   type GovernanceContainerInput,
 } from './governance/index.js';
 
@@ -665,6 +666,12 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+
+    // Self-calibrate: if this was a 429 rate limit, record it
+    if (errorMessage.includes('429') || errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit')) {
+      log('Rate limit (429) detected — calibrating quota estimate downward');
+      recordRateLimit();
+    }
 
     // Log failure to governance
     const taskDuration = Date.now() - taskStartTime;
