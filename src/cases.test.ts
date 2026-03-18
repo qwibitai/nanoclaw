@@ -46,6 +46,37 @@ describe('github_issue storage', () => {
     const retrieved = getCaseById('case-gh-3');
     expect(retrieved!.github_issue).toBe(42);
   });
+
+  it('updates priority and gap_type via updateCase', () => {
+    const c = makeCase({ id: 'case-esc-1', priority: null, gap_type: null });
+    insertCase(c);
+
+    updateCase('case-esc-1', {
+      priority: 'critical',
+      gap_type: 'capability_expected',
+    });
+    const retrieved = getCaseById('case-esc-1');
+    expect(retrieved!.priority).toBe('critical');
+    expect(retrieved!.gap_type).toBe('capability_expected');
+  });
+
+  it('sets needs_input status on a case', () => {
+    const c = makeCase({ id: 'case-esc-2', status: 'active' });
+    insertCase(c);
+
+    updateCase('case-esc-2', { status: 'needs_input' });
+    const retrieved = getCaseById('case-esc-2');
+    expect(retrieved!.status).toBe('needs_input');
+  });
+
+  it('sets needs_approval status on a case', () => {
+    const c = makeCase({ id: 'case-esc-3', status: 'suggested' });
+    insertCase(c);
+
+    updateCase('case-esc-3', { status: 'needs_approval' });
+    const retrieved = getCaseById('case-esc-3');
+    expect(retrieved!.status).toBe('needs_approval');
+  });
 });
 
 // INVARIANT: getActiveCasesByGithubIssue returns only active/backlog/blocked/suggested
@@ -277,6 +308,30 @@ describe('schema migration idempotency', () => {
 
     const retrieved = getCaseById('post-migrate');
     expect(retrieved!.github_issue).toBe(7);
+  });
+
+  it('cases inserted after migration have priority and gap_type', () => {
+    _initTestDatabase();
+    const c = makeCase({
+      id: 'post-migrate-esc',
+      priority: 'high',
+      gap_type: 'information_expected',
+    });
+    insertCase(c);
+
+    const retrieved = getCaseById('post-migrate-esc');
+    expect(retrieved!.priority).toBe('high');
+    expect(retrieved!.gap_type).toBe('information_expected');
+  });
+
+  it('priority and gap_type default to null', () => {
+    _initTestDatabase();
+    const c = makeCase({ id: 'post-migrate-null' });
+    insertCase(c);
+
+    const retrieved = getCaseById('post-migrate-null');
+    expect(retrieved!.priority).toBeNull();
+    expect(retrieved!.gap_type).toBeNull();
   });
 });
 

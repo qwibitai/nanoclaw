@@ -16,12 +16,16 @@ import { logger } from './logger.js';
 export type CaseType = 'dev' | 'work';
 export type CaseStatus =
   | 'suggested'
+  | 'needs_approval'
+  | 'needs_input'
   | 'backlog'
   | 'active'
   | 'blocked'
   | 'done'
   | 'reviewed'
   | 'pruned';
+
+export type CasePriority = 'critical' | 'high' | 'normal' | 'low' | null;
 
 export interface Case {
   id: string;
@@ -48,6 +52,8 @@ export interface Case {
   token_source: string | null;
   time_spent_ms: number;
   github_issue: number | null;
+  priority: CasePriority;
+  gap_type: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +105,22 @@ export function createCasesSchema(database: Database.Database): void {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : '';
     if (!msg.includes('duplicate column')) {
-      throw err; // Re-throw unexpected errors
+      throw err;
+    }
+  }
+
+  // Migration: add priority and gap_type columns for escalation
+  for (const col of [
+    'ALTER TABLE cases ADD COLUMN priority TEXT',
+    'ALTER TABLE cases ADD COLUMN gap_type TEXT',
+  ]) {
+    try {
+      database.exec(col);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (!msg.includes('duplicate column')) {
+        throw err;
+      }
     }
   }
 }
@@ -119,8 +140,9 @@ export function insertCase(c: Case): void {
       status, blocked_on, worktree_path, workspace_path, branch_name,
       initiator, initiator_channel, last_message, last_activity_at,
       conclusion, created_at, done_at, reviewed_at, pruned_at,
-      total_cost_usd, token_source, time_spent_ms, github_issue)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      total_cost_usd, token_source, time_spent_ms, github_issue,
+      priority, gap_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     c.id,
     c.group_folder,
@@ -146,6 +168,8 @@ export function insertCase(c: Case): void {
     c.token_source,
     c.time_spent_ms,
     c.github_issue,
+    c.priority,
+    c.gap_type,
   );
 }
 
@@ -292,6 +316,8 @@ export function updateCase(
       | 'time_spent_ms'
       | 'description'
       | 'github_issue'
+      | 'priority'
+      | 'gap_type'
     >
   >,
 ): void {
@@ -698,6 +724,8 @@ export function suggestDevCase(opts: {
     token_source: null,
     time_spent_ms: 0,
     github_issue: opts.githubIssue ?? null,
+    priority: null,
+    gap_type: null,
   };
 
   insertCase(c);

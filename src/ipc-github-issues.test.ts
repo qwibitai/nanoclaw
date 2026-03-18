@@ -511,6 +511,8 @@ describe('case_create auto-creates GitHub issue for dev cases', () => {
       expect.objectContaining({
         github_issue: null,
         type: 'dev',
+        priority: null,
+        gap_type: null,
       }),
     );
   });

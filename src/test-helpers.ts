@@ -28,6 +28,8 @@ export function makeCase(overrides: Partial<Case> = {}): Case {
     token_source: null,
     time_spent_ms: 0,
     github_issue: null,
+    priority: null,
+    gap_type: null,
     ...overrides,
   };
 }

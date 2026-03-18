@@ -1137,6 +1137,8 @@ export async function processTaskIpc(
         token_source: null,
         time_spent_ms: 0,
         github_issue: githubIssue,
+        priority: null,
+        gap_type: null,
       };
 
       insertCase(newCase);
