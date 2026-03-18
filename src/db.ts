@@ -133,6 +133,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Migrate existing groups from old default ["general"] to new default ["general","coding"]
+  try {
+    database.exec(
+      `UPDATE registered_groups SET skills = '["general","coding"]' WHERE skills = '["general"]'`,
+    );
+  } catch {
+    /* already migrated or table doesn't exist yet */
+  }
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -621,9 +630,9 @@ export function getRegisteredGroup(
   } catch {
     logger.warn({ jid: row.jid }, 'Invalid container_config JSON, ignoring');
   }
-  let skills: string[] = ['general'];
+  let skills: string[] = ['general', 'coding'];
   try {
-    skills = row.skills ? JSON.parse(row.skills) : ['general'];
+    skills = row.skills ? JSON.parse(row.skills) : ['general', 'coding'];
   } catch {
     logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
   }
@@ -657,7 +666,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
-    group.skills ? JSON.stringify(group.skills) : '["general"]',
+    group.skills ? JSON.stringify(group.skills) : '["general","coding"]',
   );
 }
 
@@ -690,9 +699,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     } catch {
       logger.warn({ jid: row.jid }, 'Invalid container_config JSON, ignoring');
     }
-    let skills: string[] = ['general'];
+    let skills: string[] = ['general', 'coding'];
     try {
-      skills = row.skills ? JSON.parse(row.skills) : ['general'];
+      skills = row.skills ? JSON.parse(row.skills) : ['general', 'coding'];
     } catch {
       logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
     }

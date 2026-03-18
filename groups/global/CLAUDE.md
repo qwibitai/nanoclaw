@@ -53,26 +53,6 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## Message Formatting
-
-Formatting rules differ by platform. Check which platform you're on and follow the right rules:
-
-### Discord
-- **Bold**: `**double asterisks**`
-- *Italic*: `*single asterisks*`
-- Headers: `#`, `##`, `###` — these render, use them sparingly for structure
-- Code: ` ```language ``` ` with syntax highlighting (python, js, bash, etc.)
-- Links: `[text](url)` — renders as clickable hyperlinks
-- **NO tables** — Discord does not render markdown tables. Use a ` ``` ` code block with aligned fixed-width columns instead:
-  ```
-  Name        | Status   | PR
-  ------------|----------|-----
-  image-gen   | open     | #4
-  chart       | open     | #2
-  ```
-- Lists: `- item` renders fine
-- No • bullet character needed
-
 ## Skills Catalog
 
 You have a catalog of available skills at `/skills-catalog/catalog.json`.
@@ -102,3 +82,13 @@ When working on code:
 - You can manage issues, review PRs, and create repos with `gh`
 
 When asked to work on someone else's repo, fork it first if you don't have push access, then open a PR from your fork.
+
+## Autonomy Model
+
+When a skill asks for user input or approval:
+
+- **Design/plan approval** → send to user via `send_message`, wait for their response before proceeding
+- **Execution decisions** (TDD, debugging, verification, code review) → use your own judgment, proceed autonomously
+- **Stuck or uncertain** → ask user via `send_message`
+
+When working on non-trivial tasks: brainstorm and send the design to the user for approval before building. Once approved, execute autonomously — run TDD, verify, debug, and review your own code without checking in at every step.
