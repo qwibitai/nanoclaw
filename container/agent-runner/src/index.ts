@@ -1087,12 +1087,20 @@ async function main(): Promise<void> {
   const modelNote = containerInput.model
     ? `You are running on model: ${containerInput.model}. If the user asks what model you are using, report this accurately.`
     : undefined;
-  // Inject default tone as a lightweight one-liner (NOT the full profile).
-  // The agent calls get_tone_profile to load the full profile on demand —
-  // for email drafting, explicit overrides, or any response where tone fidelity matters.
-  const toneNote = containerInput.tone
-    ? `Your default tone profile is "${containerInput.tone}". Use the get_tone_profile tool to load the full profile when drafting emails, when the user requests a tone override ("use X tone"), or when tone fidelity matters. For casual conversation, this hint is sufficient. If the user says "use X tone" and no profile file exists, interpret X as an ad-hoc style hint for that response. Per-response overrides revert to the default on the next message. Per-session overrides ("switch to X tone") persist for the thread.`
-    : undefined;
+  // Inject default tone profile at boot — full file content, read once.
+  // Same pattern as claude.ai's Personalize instructions: static system prompt block.
+  // The get_tone_profile tool is still available for overrides (loading a different profile)
+  // and email drafts (Dave-voice profiles via selection guide).
+  let toneNote: string | undefined;
+  if (containerInput.tone) {
+    const toneProfilePath = `/workspace/tone-profiles/${containerInput.tone}.md`;
+    if (fs.existsSync(toneProfilePath)) {
+      const toneContent = fs.readFileSync(toneProfilePath, 'utf-8');
+      toneNote = `## Default Tone Profile: ${containerInput.tone}\n\n${toneContent}\n\nThis is your default tone for this session. Use the get_tone_profile tool to load a different profile when drafting emails or when the user requests a tone override ("use X tone"). If the user says "use X tone" and no profile file exists, interpret X as an ad-hoc style hint. Per-response overrides revert to this default on the next message. Per-session overrides ("switch to X tone") persist for the thread.`;
+    } else {
+      toneNote = `Your default tone profile is "${containerInput.tone}" (no profile file found — use this as a style hint). Use the get_tone_profile tool to load profiles for email drafts or tone overrides.`;
+    }
+  }
   const systemPromptParts = [globalClaudeMd, channelFormatting, identityNote, modelNote, toneNote].filter(Boolean);
   const systemPromptOption = systemPromptParts.length > 0
     ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptParts.join('\n\n') }
