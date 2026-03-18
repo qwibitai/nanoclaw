@@ -567,6 +567,7 @@ class TelegramMultiBotChannel implements Channel {
     sender?: string,
     messageThreadId?: number,
     parseMode?: string,
+    replyMarkup?: unknown,
   ): Promise<void> {
     const chatId = jid.replace('tg:', '');
 
@@ -685,9 +686,11 @@ class TelegramMultiBotChannel implements Channel {
     const chunks = splitMessage(text);
     for (let i = 0; i < chunks.length; i++) {
       const { text: plainText, entities } = markdownToFormattable(chunks[i]);
+      const isLastChunk = i === chunks.length - 1;
       const opts = {
         ...baseOpts,
         ...(entities.length > 0 ? { entities } : {}),
+        ...(replyMarkup && isLastChunk ? { reply_markup: replyMarkup } : {}),
       };
       await sendWithRetry(chatId, plainText, opts);
       if (i < chunks.length - 1) {

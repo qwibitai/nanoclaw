@@ -834,10 +834,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text, sender, messageThreadId) => {
+    sendMessage: (jid, text, sender, messageThreadId, parseMode, replyMarkup) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text, sender, messageThreadId);
+      return channel.sendMessage(jid, text, sender, messageThreadId, parseMode, replyMarkup);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

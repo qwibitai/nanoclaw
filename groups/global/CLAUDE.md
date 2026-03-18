@@ -16,6 +16,7 @@
 - 用中文和用户交流, 学术术语保留英文
 - 进行操作前需与用户确认步骤和方案，被允许之后才执行，禁止擅自执行。
 - 提供任何信息前必须复核真实性（读文件、调API、或外部搜索确认），不可以凭印象编造或猜测。
+- 与用户说话时，必须用用户能理解的表达方式，不要只输出关键词堆砌或过于简短的句子；要说完整的意思，让用户不需要猜测或补全
 
 ## 日期约定
 - 一周从**周日**开始。"本周" = 本周日到本周六，"下周" = 下周日到下周六
@@ -129,19 +130,58 @@ bash /workspace/extra/scripts/kb-query.sh "AI assessment" --year 2023 --no-llm  
 - 各 agent 从 Obsidian `/workspace/extra/vault/{自己目录}/todoist-tasks.md` 读取分配给自己的任务
 - 用户不需要手动标记任务归属
 
-## 跨频道发送（仅 Shinobu）
-Shinobu 是 main group，可以通过写 IPC JSON 文件发消息到任何已注册频道或 topic。
+## IPC 消息发送
+
+通过写 JSON 文件到 `/workspace/ipc/messages/` 发送 Telegram 消息。
+
+**权限规则：**
+- Shinobu（main）可以发给任何群
+- 其他 agent 可以发给**自己的群**或**忍群**（main group）
+- 不能跨群发给其他 agent 的群
 
 ```bash
-# 发送消息到「异世界日常」Topic（忍群内）
-cat > /workspace/ipc/messages/$(date +%s)-kanban.json << 'IPCEOF'
+# 基本发送
+cat > /workspace/ipc/messages/$(date +%s)-msg.json << 'IPCEOF'
 {"type":"message","chatJid":"tg:-1003863760557","text":"消息内容","sender":"shinobu","message_thread_id":778}
 IPCEOF
 ```
 
 「异世界日常」Topic: 忍群 `tg:-1003863760557`，`message_thread_id: 778`
 
-用途：晨报/周报等经用户确认后，发到「异世界日常」Topic 存档。
+### Inline Button（确认按钮）
+
+需要用户确认时，**分两条消息**发：先发事情说明，再发带按钮的确认消息。
+
+```bash
+# 带 inline button 的消息
+cat > /workspace/ipc/messages/$(date +%s)-confirm.json << 'IPCEOF'
+{
+  "type": "message",
+  "chatJid": "你的群JID",
+  "text": "请确认是否执行？",
+  "extra": {
+    "reply_markup": {
+      "inline_keyboard": [
+        [
+          {"text": "✅ 确认", "callback_data": "confirm_xxx"},
+          {"text": "❌ 取消", "callback_data": "cancel_xxx"}
+        ]
+      ]
+    }
+  }
+}
+IPCEOF
+```
+
+**用户点击按钮后**，你会收到一条 callback_query 消息：
+```json
+{"_type": "callback_query", "data": "confirm_xxx", "message_id": 123, "query_id": "...", "from_name": "用户名"}
+```
+
+**使用原则：**
+- 需要用户确认的操作，先发说明文字，再单独发一条带按钮的短消息
+- `callback_data` 用有意义的前缀区分场景（如 `confirm_deploy`、`approve_report`）
+- 按钮文字简短（1-4个字）
 
 ## Cross-Agent Coordination
 - 跨 Agent 信号写入 /workspace/extra/vault/cross-agent/alerts/

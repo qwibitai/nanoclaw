@@ -97,6 +97,8 @@ export interface Channel {
     text: string,
     sender?: string,
     messageThreadId?: number,
+    parseMode?: string,
+    replyMarkup?: unknown,
   ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;

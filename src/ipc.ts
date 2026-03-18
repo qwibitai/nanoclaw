@@ -32,6 +32,8 @@ export interface IpcDeps {
     text: string,
     sender?: string,
     messageThreadId?: number,
+    parseMode?: string,
+    replyMarkup?: unknown,
   ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
@@ -96,10 +98,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
+                // - isMain (shinobu) can send anywhere
+                // - Any agent can send to its own group
+                // - Any agent can send to the main group (shinobu)
                 const targetGroup = registeredGroups[data.chatJid];
+                const targetIsMain = targetGroup?.isMain === true;
                 if (
                   isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
+                  (targetGroup && targetGroup.folder === sourceGroup) ||
+                  targetIsMain
                 ) {
                   const threadId =
                     data.message_thread_id ??
@@ -129,15 +136,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     );
                   }
 
-                  // Also send via Telegram when:
-                  // - message has a thread_id (needs topic routing)
-                  // - cross-group (message should be visible in target channel)
-                  if (resolvedThreadId != null || !isSelfTarget) {
+                  // Always send via Telegram so users can see the message
+                  // (self-target IPC messages come from scheduled tasks / proactive actions)
+                  {
+                    const replyMarkup = data.extra?.reply_markup ?? data.reply_markup;
                     await deps.sendMessage(
                       data.chatJid,
                       data.text,
                       data.sender,
                       resolvedThreadId,
+                      'MarkdownV2',
+                      replyMarkup,
                     );
                     logger.info(
                       {
