@@ -336,7 +336,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; leftoverMessages: string[] }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -460,8 +460,18 @@ async function runQuery(
   }
 
   ipcPolling = false;
+
+  // Drain any IPC messages that arrived after the SDK finished but before
+  // we stopped polling. Without this, messages consumed by pollIpcDuringQuery
+  // (pushed into the now-dead stream) or sitting on disk would be lost until
+  // the next user message triggers waitForIpcMessage.
+  const leftover = drainIpcInput();
+  if (leftover.length > 0) {
+    log(`Recovered ${leftover.length} IPC message(s) after query ended`);
+  }
+
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, leftoverMessages: leftover };
 }
 
 async function main(): Promise<void> {
@@ -530,10 +540,17 @@ async function main(): Promise<void> {
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
-      log('Query ended, waiting for next IPC message...');
+      // Use leftover messages from the query if any were consumed but not processed
+      let nextMessage: string | null;
+      if (queryResult.leftoverMessages.length > 0) {
+        nextMessage = queryResult.leftoverMessages.join('\n');
+        log(`Using ${queryResult.leftoverMessages.length} leftover message(s) from previous query`);
+      } else {
+        log('Query ended, waiting for next IPC message...');
+        // Wait for the next message or _close sentinel
+        nextMessage = await waitForIpcMessage();
+      }
 
-      // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
