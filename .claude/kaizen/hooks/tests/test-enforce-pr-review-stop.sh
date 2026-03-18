@@ -7,41 +7,11 @@
 source "$(dirname "$0")/test-helpers.sh"
 
 HOOK="$(dirname "$0")/../enforce-pr-review-stop.sh"
-STATE_DIR="/tmp/.pr-review-state-test-stop-$$"
-export STATE_DIR
-export DEBUG_LOG="/dev/null"
+setup_test_env
 
-setup() {
-  rm -rf "$STATE_DIR"
-  mkdir -p "$STATE_DIR"
-}
+setup() { reset_state; }
+teardown() { reset_state; }
 
-teardown() {
-  rm -rf "$STATE_DIR"
-}
-
-# Helper: create a state file with given status
-create_state() {
-  local pr_url="$1"
-  local round="$2"
-  local status="$3"
-  local branch="${4:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'main')}"
-  local filename
-  filename=$(echo "$pr_url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')
-  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
-}
-
-# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
-# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
-STOP_MOCK_DIR=$(mktemp -d)
-cat > "$STOP_MOCK_DIR/gh" << 'MOCK'
-#!/bin/bash
-echo "OPEN"
-exit 0
-MOCK
-chmod +x "$STOP_MOCK_DIR/gh"
-
-# Helper: run the Stop hook with given stop_hook_active value
 run_stop_hook() {
   local stop_hook_active="${1:-false}"
   local input
@@ -51,13 +21,7 @@ run_stop_hook() {
     stop_hook_active: ($active == "true"),
     last_assistant_message: "PR created: https://github.com/example/repo/pull/1"
   }')
-  echo "$input" | PATH="$STOP_MOCK_DIR:$PATH" bash "$HOOK" 2>/dev/null
-}
-
-# Helper: check if output contains a block decision
-is_blocked() {
-  local output="$1"
-  echo "$output" | jq -e '.decision == "block"' >/dev/null 2>&1
+  echo "$input" | bash "$HOOK" 2>/dev/null
 }
 
 echo "=== No active review: stop allowed ==="
@@ -200,7 +164,7 @@ echo "=== Stale state files do not block stop ==="
 setup
 create_state "https://github.com/Garsson-io/nanoclaw/pull/60" "1" "needs_review"
 STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_60"
-touch -d "3 hours ago" "$STATE_FILE" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STATE_FILE" 2>/dev/null
+backdate_file "$STATE_FILE" 3
 
 # INVARIANT: State files older than MAX_STATE_AGE are treated as stale
 # SUT: enforce-pr-review-stop.sh via state-utils.sh staleness check

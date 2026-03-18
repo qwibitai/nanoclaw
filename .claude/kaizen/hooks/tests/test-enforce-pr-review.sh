@@ -3,54 +3,17 @@
 source "$(dirname "$0")/test-helpers.sh"
 
 HOOK="$(dirname "$0")/../enforce-pr-review.sh"
-STATE_DIR="/tmp/.pr-review-state-test-$$"
-export STATE_DIR
-export DEBUG_LOG="/dev/null"
+setup_test_env
 
-# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
-# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
-GATE_MOCK_DIR=$(mktemp -d)
-cat > "$GATE_MOCK_DIR/gh" << 'MOCK'
-#!/bin/bash
-echo "OPEN"
-exit 0
-MOCK
-chmod +x "$GATE_MOCK_DIR/gh"
-
-setup() {
-  rm -rf "$STATE_DIR"
-  mkdir -p "$STATE_DIR"
-}
-
-teardown() {
-  rm -rf "$STATE_DIR"
-}
-
-# Override run_gate to use mock gh
 run_gate() {
   local command="$1"
   local input
   input=$(jq -n --arg cmd "$command" '{"tool_input":{"command":$cmd}}')
-  echo "$input" | PATH="$GATE_MOCK_DIR:$PATH" bash "$HOOK" 2>/dev/null
+  echo "$input" | bash "$HOOK" 2>/dev/null
 }
 
-# Helper: create a state file with given status
-# Optional 4th arg: branch name (defaults to current branch)
-create_state() {
-  local pr_url="$1"
-  local round="$2"
-  local status="$3"
-  local branch="${4:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'main')}"
-  local filename
-  filename=$(echo "$pr_url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')
-  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
-}
-
-# Helper: check if output contains a deny decision
-is_denied() {
-  local output="$1"
-  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
-}
+setup() { reset_state; }
+teardown() { reset_state; }
 
 echo "=== No active review: all commands allowed ==="
 
@@ -426,7 +389,7 @@ create_state "https://github.com/Garsson-io/nanoclaw/pull/50" "1" "needs_review"
 # SUT: enforce-pr-review.sh staleness check
 # Backdate the state file to 3 hours ago (10800 seconds)
 STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_50"
-touch -d "3 hours ago" "$STATE_FILE" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STATE_FILE" 2>/dev/null
+backdate_file "$STATE_FILE" 3
 
 OUTPUT=$(MAX_STATE_AGE=7200 run_gate "npm test")
 if [ -z "$OUTPUT" ]; then
@@ -469,6 +432,6 @@ else
 fi
 
 teardown
-rm -rf "$GATE_MOCK_DIR"
+cleanup_test_env
 
 print_results

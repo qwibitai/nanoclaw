@@ -188,10 +188,26 @@ After refactoring, run the full hook test suite:
 bash .claude/kaizen/hooks/tests/run-all-tests.sh
 ```
 
-**Pass criteria:** Same pass/fail counts as before (316 pass, 14 fail — all pre-existing). Zero regressions.
+**Pass criteria:** Same pass/fail counts as before. Zero regressions.
 
-## 8. Open Questions
+## 8. Open Questions (Resolved)
 
-1. **Should `setup_test_env` create a mock `git` too?** Currently only mock `gh` is needed globally. Mock `git` is only needed by specific tests (merge-from-main, branch simulation). Lean: no — keep mock `git` per-test to avoid hiding which tests need git mocking.
+1. **Should `setup_test_env` create a mock `git` too?** No — mock `git` stays per-test since only specific tests need git mocking (merge-from-main, branch simulation).
 
-2. **Should `run-all-tests.sh` call `cleanup_test_env` as a safety net?** Currently each file cleans up its own temp dirs. If a test crashes mid-run, orphaned dirs accumulate in `/tmp`. Lean: not worth it — `/tmp` is cleaned on reboot, and the dirs are tiny.
+2. **Should `run-all-tests.sh` call `cleanup_test_env` as a safety net?** No — `/tmp` is cleaned on reboot, and the dirs are tiny.
+
+## 9. Implementation Record
+
+**Completed:** Phases 1-2 (Phase 3 was already done in #125).
+
+**What was built:**
+- Added 7 shared functions to `test-helpers.sh`: `setup_test_env`, `reset_state`, `cleanup_test_env`, `create_state`, `is_denied`, `is_blocked`, `backdate_file`, `setup_default_gh_mock`
+- Updated 7 test files to use shared helpers: `test-enforce-pr-review.sh`, `test-enforce-pr-review-tools.sh`, `test-enforce-pr-review-stop.sh`, `test-state-utils.sh`, `test-pr-review-loop.sh`, `test-review-enforcement-e2e.sh`, `test-integration-pr-lifecycle.sh`
+- Net change: +114 / -206 lines (92 lines removed)
+
+**Verification:** Baseline 321 pass / 14 fail → After refactoring 321 pass / 14 fail. Same failed files, same pre-existing failures. Zero regressions.
+
+**Learnings:**
+- The e2e test (`test-review-enforcement-e2e.sh`) had `is_stop_blocked` and `is_tool_denied` which are just aliases for `is_blocked` and `is_denied` — kept as thin wrappers for readability in e2e context.
+- Integration tests (harness.sh-based) use a different env management pattern (HARNESS_TEMP), so `setup_default_gh_mock` was added to accept a directory parameter rather than forcing all tests into one pattern.
+- The `run_gate`/`run_tool_gate`/`run_stop_hook` wrappers stayed per-file as the spec predicted — different JSON input shapes make consolidation harder to read.

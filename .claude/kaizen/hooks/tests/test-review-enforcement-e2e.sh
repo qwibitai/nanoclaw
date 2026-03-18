@@ -13,32 +13,11 @@ PR_REVIEW_LOOP="$HOOKS_DIR/pr-review-loop.sh"
 ENFORCE_PR_REVIEW="$HOOKS_DIR/enforce-pr-review.sh"
 ENFORCE_PR_REVIEW_STOP="$HOOKS_DIR/enforce-pr-review-stop.sh"
 ENFORCE_PR_REVIEW_TOOLS="$HOOKS_DIR/enforce-pr-review-tools.sh"
-STATE_DIR="/tmp/.pr-review-state-test-e2e-$$"
-export STATE_DIR
-export DEBUG_LOG="/dev/null"
+setup_test_env
 
-setup() {
-  rm -rf "$STATE_DIR"
-  mkdir -p "$STATE_DIR"
-}
+setup() { reset_state; }
+teardown() { reset_state; }
 
-teardown() {
-  rm -rf "$STATE_DIR"
-}
-
-# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
-# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
-E2E_MOCK_DIR=$(mktemp -d)
-cat > "$E2E_MOCK_DIR/gh" << 'MOCK'
-#!/bin/bash
-echo "OPEN"
-exit 0
-MOCK
-chmod +x "$E2E_MOCK_DIR/gh"
-
-# Helpers: simulate hook invocations for each event type
-
-# Simulate PostToolUse for a Bash command
 sim_post_tool_use() {
   local command="$1"
   local stdout="$2"
@@ -50,22 +29,19 @@ sim_post_tool_use() {
     '{
       tool_input: {command: $cmd},
       tool_response: {stdout: $out, stderr: "", exit_code: $ec}
-    }' | PATH="$E2E_MOCK_DIR:$PATH" bash "$PR_REVIEW_LOOP" 2>/dev/null
+    }' | bash "$PR_REVIEW_LOOP" 2>/dev/null
 }
 
-# Simulate PreToolUse for a Bash command
 sim_pre_tool_use_bash() {
   local command="$1"
-  jq -n --arg cmd "$command" '{tool_input: {command: $cmd}}' | PATH="$E2E_MOCK_DIR:$PATH" bash "$ENFORCE_PR_REVIEW" 2>/dev/null
+  jq -n --arg cmd "$command" '{tool_input: {command: $cmd}}' | bash "$ENFORCE_PR_REVIEW" 2>/dev/null
 }
 
-# Simulate PreToolUse for a non-Bash tool
 sim_pre_tool_use_tool() {
   local tool_name="$1"
-  jq -n --arg tool "$tool_name" '{tool_name: $tool, tool_input: {}}' | PATH="$E2E_MOCK_DIR:$PATH" bash "$ENFORCE_PR_REVIEW_TOOLS" 2>/dev/null
+  jq -n --arg tool "$tool_name" '{tool_name: $tool, tool_input: {}}' | bash "$ENFORCE_PR_REVIEW_TOOLS" 2>/dev/null
 }
 
-# Simulate Stop event
 sim_stop() {
   local stop_hook_active="${1:-false}"
   jq -n --arg active "$stop_hook_active" '{
@@ -73,17 +49,12 @@ sim_stop() {
     hook_event_name: "Stop",
     stop_hook_active: ($active == "true"),
     last_assistant_message: "test"
-  }' | PATH="$E2E_MOCK_DIR:$PATH" bash "$ENFORCE_PR_REVIEW_STOP" 2>/dev/null
+  }' | bash "$ENFORCE_PR_REVIEW_STOP" 2>/dev/null
 }
 
-# Decision extractors
-is_stop_blocked() {
-  echo "$1" | jq -e '.decision == "block"' >/dev/null 2>&1
-}
-
-is_tool_denied() {
-  echo "$1" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
-}
+# Aliases for shared decision extractors (readable names for e2e context)
+is_stop_blocked() { is_blocked "$1"; }
+is_tool_denied() { is_denied "$1"; }
 
 echo "=== SCENARIO 1: Full lifecycle — create → stop blocked → review → stop allowed ==="
 echo "  This is the exact scenario that was broken before the fix."

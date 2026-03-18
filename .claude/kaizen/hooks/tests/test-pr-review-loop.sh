@@ -3,17 +3,10 @@
 source "$(dirname "$0")/test-helpers.sh"
 
 HOOK="$(dirname "$0")/../pr-review-loop.sh"
-STATE_DIR="/tmp/.pr-review-state-test-$$"
-export DEBUG_LOG="/dev/null"
+setup_test_env
 
-setup() {
-  rm -rf "$STATE_DIR"
-  mkdir -p "$STATE_DIR"
-}
-
-teardown() {
-  rm -rf "$STATE_DIR"
-}
+setup() { reset_state; }
+teardown() { reset_state; }
 
 # Source the hook's functions for direct testing
 source "$(dirname "$0")/../lib/parse-command.sh"
@@ -287,7 +280,7 @@ setup
 STALE_STATE="$STATE_DIR/Garsson-io_nanoclaw_90"
 printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/90\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STALE_STATE"
 # Backdate to 3 hours ago
-touch -d "3 hours ago" "$STALE_STATE" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STALE_STATE" 2>/dev/null
+backdate_file "$STALE_STATE" 3
 
 PUSH_OUTPUT=$(echo "$PUSH_INPUT" | MAX_STATE_AGE=7200 STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
 if [ -z "$PUSH_OUTPUT" ]; then

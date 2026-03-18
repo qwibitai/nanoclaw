@@ -159,6 +159,83 @@ MOCK
   chmod +x "$MOCK_DIR/git"
 }
 
+# PR review state test environment
+# Creates STATE_DIR, mock gh (returns OPEN), exports PATH.
+# Call cleanup_test_env in a trap or at end of test.
+setup_test_env() {
+  TEST_STATE_DIR="/tmp/.pr-review-state-test-$$"
+  rm -rf "$TEST_STATE_DIR"
+  mkdir -p "$TEST_STATE_DIR"
+  export STATE_DIR="$TEST_STATE_DIR"
+  export DEBUG_LOG="/dev/null"
+
+  TEST_MOCK_DIR=$(mktemp -d)
+  cat > "$TEST_MOCK_DIR/gh" << 'MOCK_EOF'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK_EOF
+  chmod +x "$TEST_MOCK_DIR/gh"
+  export PATH="$TEST_MOCK_DIR:$PATH"
+}
+
+# Reset state between tests (equivalent to setup() in individual files)
+reset_state() {
+  rm -rf "$STATE_DIR"
+  mkdir -p "$STATE_DIR"
+}
+
+# Cleanup everything created by setup_test_env
+cleanup_test_env() {
+  rm -rf "$TEST_STATE_DIR" "$TEST_MOCK_DIR"
+}
+
+# Create PR review state file with mandatory BRANCH field
+# Usage: create_state "https://github.com/owner/repo/pull/1" [round] [status] [branch]
+create_state() {
+  local pr_url="$1"
+  local round="${2:-1}"
+  local status="${3:-needs_review}"
+  local branch="${4:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+  local filename
+  filename=$(echo "$pr_url" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')
+  printf 'PR_URL=%s\nROUND=%s\nSTATUS=%s\nBRANCH=%s\n' \
+    "$pr_url" "$round" "$status" "$branch" > "$STATE_DIR/$filename"
+}
+
+# Decision extractors
+is_denied() {
+  echo "$1" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1
+}
+
+is_blocked() {
+  echo "$1" | jq -e '.decision == "block"' >/dev/null 2>&1
+}
+
+# Cross-platform file backdating
+# Usage: backdate_file "path/to/file" [hours_ago]
+backdate_file() {
+  local file="$1"
+  local hours="${2:-3}"
+  touch -d "$hours hours ago" "$file" 2>/dev/null ||
+    touch -t "$(date -d "$hours hours ago" +%Y%m%d%H%M.%S 2>/dev/null ||
+      date -v-${hours}H +%Y%m%d%H%M.%S)" "$file" 2>/dev/null
+}
+
+# Create a default "OPEN" gh mock in a specified directory.
+# Useful for integration tests that manage their own mock dirs.
+# Usage: setup_default_gh_mock "/path/to/mock/dir"
+setup_default_gh_mock() {
+  local mock_dir="$1"
+  mkdir -p "$mock_dir"
+  cat > "$mock_dir/gh" << 'MOCK_EOF'
+#!/bin/bash
+echo "OPEN"
+exit 0
+MOCK_EOF
+  chmod +x "$mock_dir/gh"
+}
+
 # Print final results and exit with appropriate code
 print_results() {
   echo ""

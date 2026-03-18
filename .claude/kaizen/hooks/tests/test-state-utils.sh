@@ -4,30 +4,14 @@
 # All hooks use these functions instead of iterating state files directly.
 source "$(dirname "$0")/test-helpers.sh"
 
-STATE_DIR="/tmp/.pr-review-state-test-$$"
+setup_test_env
 MAX_STATE_AGE=7200
-export STATE_DIR MAX_STATE_AGE
-
-# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
-DEFAULT_MOCK_DIR=$(mktemp -d)
-cat > "$DEFAULT_MOCK_DIR/gh" << 'MOCK'
-#!/bin/bash
-echo "OPEN"
-exit 0
-MOCK
-chmod +x "$DEFAULT_MOCK_DIR/gh"
-export PATH="$DEFAULT_MOCK_DIR:$PATH"
+export MAX_STATE_AGE
 
 source "$(dirname "$0")/../lib/state-utils.sh"
 
-setup() {
-  rm -rf "$STATE_DIR"
-  mkdir -p "$STATE_DIR"
-}
-
-teardown() {
-  rm -rf "$STATE_DIR"
-}
+setup() { reset_state; }
+teardown() { reset_state; }
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 
@@ -87,7 +71,7 @@ echo "=== is_state_for_current_worktree: stale file ==="
 setup
 STATE_FILE="$STATE_DIR/test_stale"
 printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/4\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_FILE"
-touch -d "3 hours ago" "$STATE_FILE" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STATE_FILE" 2>/dev/null
+backdate_file "$STATE_FILE" 3
 
 # INVARIANT: Stale files (>MAX_STATE_AGE) are rejected even if same branch
 # SUT: is_state_for_current_worktree staleness check
@@ -123,7 +107,7 @@ printf 'PR_URL=url2\nROUND=1\nSTATUS=passed\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$
 printf 'PR_URL=url3\nROUND=1\nSTATUS=needs_review\nBRANCH=wt/other\n' > "$STATE_DIR/f3"
 printf 'PR_URL=url4\nROUND=1\nSTATUS=needs_review\n' > "$STATE_DIR/f4"
 printf 'PR_URL=url5\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/f5"
-touch -d "3 hours ago" "$STATE_DIR/f5" 2>/dev/null || touch -t "$(date -d '3 hours ago' +%Y%m%d%H%M.%S 2>/dev/null || date -v-3H +%Y%m%d%H%M.%S)" "$STATE_DIR/f5" 2>/dev/null
+backdate_file "$STATE_DIR/f5" 3
 
 # INVARIANT: Only fresh, same-branch, BRANCH-tagged files are returned
 # SUT: list_state_files_for_current_worktree

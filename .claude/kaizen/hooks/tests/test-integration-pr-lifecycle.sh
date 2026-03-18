@@ -25,16 +25,8 @@ export DEBUG_LOG="$HARNESS_TEMP/debug.log"
 ENFORCE="$HOOKS_DIR/enforce-pr-review.sh"
 LOOP="$HOOKS_DIR/pr-review-loop.sh"
 
-# Default mock gh: returns OPEN for all PRs (prevents real API calls in tests)
-# find_needs_review_state now checks PR state via gh (kaizen #85, Fix A)
 INTEG_MOCK_DIR="$HARNESS_TEMP/mock-bin"
-mkdir -p "$INTEG_MOCK_DIR"
-cat > "$INTEG_MOCK_DIR/gh" << 'MOCK'
-#!/bin/bash
-echo "OPEN"
-exit 0
-MOCK
-chmod +x "$INTEG_MOCK_DIR/gh"
+setup_default_gh_mock "$INTEG_MOCK_DIR"
 
 HOOK_ENV_VARS=$(printf 'STATE_DIR=%s\nPATH=%s\n' "$STATE_DIR" "$INTEG_MOCK_DIR:$PATH")
 
