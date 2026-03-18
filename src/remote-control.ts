@@ -196,9 +196,11 @@ export async function startRemoteControl(
   });
 }
 
-export function stopRemoteControl(): {
-  ok: true;
-} | { ok: false; error: string } {
+export function stopRemoteControl():
+  | {
+      ok: true;
+    }
+  | { ok: false; error: string } {
   if (!activeSession) {
     return { ok: false, error: 'No active Remote Control session' };
   }
