@@ -215,6 +215,22 @@ Four hooks working together:
 
 The Stop hook is the **keystone** — without it, Claude can simply respond with text and stop, never triggering any PreToolUse hooks.
 
+### Post-Review and Post-Merge Summaries
+
+`pr-review-loop.sh` also handles agent communication at two key milestones:
+
+**Review passed** (state → `passed` after `gh pr diff`):
+- Prompts the agent to summarize what the PR achieves
+- Reports the PR is ready to merge with the URL
+- Reminds the agent to classify the post-merge action needed (none, build+restart, container rebuild)
+
+**Merge complete** (`gh pr merge` succeeds):
+- Prompts the agent to summarize what was achieved and its impact
+- Reminds the agent to classify the change and state what deployment action is needed
+- Reminds the agent to sync local main
+
+This ensures the user always gets a clear status report at both milestones, and the agent considers deployment implications before declaring done.
+
 ## Testing Requirements
 
 Every enforcement system MUST have:
