@@ -10,7 +10,15 @@ IMAGE_NAME="nanoclaw-agent"
 TAG="${1:-latest}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 
-echo "Building NanoClaw agent container image..."
+echo "=== Syncing marketplace plugins ==="
+./sync-plugins.sh
+
+echo ""
+echo "=== Generating skills catalog ==="
+npx tsx generate-catalog.ts
+
+echo ""
+echo "=== Building container image ==="
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
 ${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
