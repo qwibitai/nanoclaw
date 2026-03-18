@@ -11,6 +11,7 @@
 
 - Q: What happens if rehydration fails partway through (e.g., after correcting some tasks but not all)? Should corrections be transactional or idempotent? → A: Per-task idempotent — each task's `next_run` and `created_tz` are updated atomically (single UPDATE statement per task). No wrapping transaction needed. If the process crashes mid-rehydration, uncorrected tasks retain their old `created_tz` and will be corrected on the next startup. The update order within each task MUST be: update both `next_run` and `created_tz` in a single UPDATE statement to prevent inconsistent intermediate state.
 - Q: How does rehydration determine whether a cron task's `next_run` is "already correct" — by comparing the `next_run` value or by checking `created_tz`? → A: By `created_tz == TIMEZONE` string comparison. The system does NOT recompute and compare `next_run` values. If `created_tz` matches the current `TIMEZONE`, the task is skipped entirely regardless of its `next_run` value.
+- Q: Should rehydration correct paused cron tasks in addition to active ones? → A: Yes. Paused cron tasks with stale `created_tz` must also have their `next_run` and `created_tz` corrected during rehydration. The `resume_task` IPC handler only sets `status: 'active'` without recomputing `next_run`, so a paused task resumed after a timezone change would fire at the wrong time if not corrected. Completed tasks are excluded (they will not fire again).
 
 ## Assumptions
 
@@ -35,6 +36,7 @@ When NanoClaw starts, it should detect and correct any scheduled tasks whose `ne
 1. **Given** a cron task `0 9 * * *` with `next_run` computed under UTC (e.g., `2026-03-18T09:00:00.000Z`), **When** NanoClaw starts with `TIMEZONE=America/Chicago`, **Then** the task's `next_run` is recomputed using the cron expression evaluated in `America/Chicago`, yielding `2026-03-18T14:00:00.000Z` (9am Central = 2pm UTC during CDT).
 2. **Given** a cron task `0 9 * * *` whose `created_tz` already matches the current `TIMEZONE` (e.g., both `America/Chicago`), **When** NanoClaw starts, **Then** the task's `next_run` is unchanged (no unnecessary writes). Detection is by `created_tz == TIMEZONE` string comparison, NOT by comparing the computed `next_run` value.
 3. **Given** an interval task (not cron), **When** NanoClaw starts, **Then** the task's `next_run` is not modified (interval tasks are relative, not timezone-dependent).
+4. **Given** a paused cron task `0 9 * * *` with `created_tz = 'UTC'`, **When** NanoClaw starts with `TIMEZONE=America/Chicago`, **Then** the task's `next_run` and `created_tz` are corrected (same as active tasks). This ensures that when the task is later resumed, it fires at the correct local time without requiring `resume_task` to recompute `next_run`.
 
 ---
 
@@ -76,12 +78,13 @@ When NanoClaw starts and rehydrates tasks, it should log any timezone correction
 - What happens during DST transitions? The `cron-parser` library with `tz` option handles DST correctly. The rehydration just needs to call it with the current timezone.
 - What happens if `TIMEZONE` is explicitly set to `UTC` and the task was created under `UTC`? No correction should occur — `created_tz` matches current timezone.
 - What happens if the process crashes during rehydration (partial failure)? Each task correction is idempotent — `next_run` and `created_tz` are updated in a single UPDATE statement per task. Uncorrected tasks retain their old `created_tz` and will be corrected on the next startup. No wrapping transaction is needed.
+- What happens to paused cron tasks during rehydration? Paused cron tasks with stale `created_tz` are corrected (both `next_run` and `created_tz` updated) just like active tasks. This is necessary because `resume_task` only sets `status: 'active'` without recomputing `next_run`. Completed tasks are excluded since they will not fire again.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: System MUST recompute `next_run` for all active cron tasks on startup when the task's `created_tz` differs from the current `TIMEZONE`.
+- **FR-001**: System MUST recompute `next_run` for all active and paused cron tasks on startup when the task's `created_tz` differs from the current `TIMEZONE`. Completed tasks are excluded.
 - **FR-002**: System MUST store the timezone (`created_tz`) used at task creation time in the `scheduled_tasks` table.
 - **FR-003**: System MUST add a database migration that adds the `created_tz` column with a default of `'UTC'` for existing rows.
 - **FR-004**: System MUST NOT modify `next_run` for interval or once-type tasks during startup rehydration (these are timezone-independent).
@@ -105,4 +108,4 @@ When NanoClaw starts and rehydrates tasks, it should log any timezone correction
 - **SC-002**: All existing cron tasks have their `next_run` corrected on first startup after deployment, verified by checking `next_run` values in the database match the cron expression evaluated in the current timezone.
 - **SC-003**: New tasks created after deployment include a `created_tz` value matching the current `TIMEZONE`, verified by database inspection.
 - **SC-004**: The rehydration process adds less than 100ms to startup time for databases with fewer than 100 scheduled tasks.
-- **SC-005**: All existing tests continue to pass. New tests cover: (a) rehydration corrects drifted cron tasks, (b) rehydration skips interval/once tasks, (c) rehydration skips already-correct cron tasks, (d) `created_tz` is stored on new tasks.
+- **SC-005**: All existing tests continue to pass. New tests cover: (a) rehydration corrects drifted cron tasks, (b) rehydration skips interval/once tasks, (c) rehydration skips already-correct cron tasks, (d) `created_tz` is stored on new tasks, (e) rehydration corrects paused cron tasks with stale `created_tz`.
