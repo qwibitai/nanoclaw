@@ -237,6 +237,47 @@ describe('rehydrateTaskTimezones', () => {
     expect(task!.created_tz).toBe('UTC');
   });
 
+  it('corrects paused cron tasks during rehydration', () => {
+    // Create a paused cron task "0 9 * * *" that was created under UTC
+    const utcNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'UTC',
+    })
+      .next()
+      .toISOString();
+
+    createTask({
+      id: 'paused-cron-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'daily digest',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: utcNextRun,
+      status: 'paused',
+      created_at: '2026-03-17T00:00:00.000Z',
+      created_tz: 'UTC',
+    });
+
+    // Run rehydration under America/Chicago
+    rehydrateTaskTimezones('America/Chicago');
+
+    // Compute what the correct next_run should be under America/Chicago
+    const expectedNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'America/Chicago',
+    })
+      .next()
+      .toISOString();
+
+    const task = getTaskById('paused-cron-1');
+    expect(task).toBeDefined();
+    // Both next_run and created_tz should be corrected
+    expect(task!.next_run).toBe(expectedNextRun);
+    expect(task!.created_tz).toBe('America/Chicago');
+    // Status should remain paused (rehydration does not change status)
+    expect(task!.status).toBe('paused');
+  });
+
   it('skips once-type tasks during rehydration', () => {
     // Create a once task with created_tz = 'UTC' (different from target tz)
     const onceNextRun = new Date(Date.now() + 3_600_000).toISOString();
