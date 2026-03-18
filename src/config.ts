@@ -16,6 +16,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'TELEGRAM_BOT_POOL',
+  'CASE_SYNC_REPO',
 ]);
 
 export const ASSISTANT_NAME =
@@ -99,8 +100,9 @@ export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Case sync: sync cases to a cloud backend (GitHub Issues V1)
-// Format: "owner/repo" e.g. "Garsson-io/prints-demo-crm"
-export const CASE_SYNC_REPO = process.env.CASE_SYNC_REPO || '';
+// Format: "owner/repo" e.g. "Garsson-io/prints-demo"
+export const CASE_SYNC_REPO =
+  process.env.CASE_SYNC_REPO || envConfig.CASE_SYNC_REPO || '';
 export const CASE_SYNC_ENABLED =
   CASE_SYNC_REPO.length > 0 && !!process.env.GITHUB_TOKEN;
 
