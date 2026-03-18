@@ -94,13 +94,15 @@ The L3 enforcement in `ipc-cases.ts` will:
 
 ### On PR creation
 
-After creating a PR, link it to the kaizen issue:
+After creating a PR, link it to the kaizen issue and ensure auto-closure on merge:
 ```bash
 # Add has-pr label
 gh issue edit {N} --repo Garsson-io/kaizen --add-label "status:has-pr"
 # Add PR link as comment
 gh issue comment {N} --repo Garsson-io/kaizen --body "PR: {pr_url}"
 ```
+
+**CRITICAL: The PR description body MUST include `Fixes Garsson-io/kaizen#{N}`** (with the cross-repo prefix). This tells GitHub to auto-close the kaizen issue when the PR merges. Without this, issues stay open after PRs merge and epic progress tracking breaks.
 
 ### On case completion
 
@@ -109,6 +111,26 @@ The L3 enforcement in `case-backend-github.ts` handles this automatically:
 - Closes the issue if the case is marked done
 
 You don't need to manually update labels on completion — the code does it.
+
+### On sub-issue closure — update the parent epic
+
+When a sub-issue is closed (either by PR merge or case completion), **update the parent epic issue body**:
+
+1. **Check off the completed item** in the Progress checklist (`- [x] #N`)
+2. **Update "Current State"** with what was actually built (1-2 sentences)
+3. **Update "Next Step"** with the recommended next sub-issue and why
+
+```bash
+# Find the parent epic — look for task list references to this issue
+gh issue list --repo Garsson-io/kaizen --state open --label "kaizen" --search "#{N}" --json number,title
+# Then edit the epic body with updated progress
+gh issue edit {EPIC} --repo Garsson-io/kaizen --body "$(cat <<'BODY'
+... updated body with checked items, current state, next step ...
+BODY
+)"
+```
+
+This keeps the epic as a living dashboard. `/pick-work` reads the epic's "Next Step" to boost scoring for the recommended follow-up work.
 
 ## The Implementation Loop
 
