@@ -29,6 +29,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { startHostExecWatcher, stopHostExecWatcher } from './host-exec.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatOutbound } from './router.js';
 import {
@@ -183,6 +184,7 @@ export async function initApp(): Promise<void> {
     proxyServer.close();
     if (skillServer) skillServer.close();
     await stopAgencyHqSubsystems();
+    stopHostExecWatcher();
     await stopCronSubscriber();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -290,9 +292,8 @@ export async function initApp(): Promise<void> {
     }
     channels.push(channel);
 
-    const connected = await connectWithBackoff(
-      channelName,
-      () => channel.connect(),
+    const connected = await connectWithBackoff(channelName, () =>
+      channel.connect(),
     );
     if (!connected) {
       logger.warn(
@@ -317,8 +318,12 @@ export async function initApp(): Promise<void> {
     registeredGroups: () => state.registeredGroups,
     getSessions: () => state.sessions,
     queue,
-    onProcess: (groupJid: string, proc: import('child_process').ChildProcess, containerName: string, groupFolder: string) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (
+      groupJid: string,
+      proc: import('child_process').ChildProcess,
+      containerName: string,
+      groupFolder: string,
+    ) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid: string, rawText: string) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -339,6 +344,7 @@ export async function initApp(): Promise<void> {
   startStallDetector(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start stall detector'),
   );
+  startHostExecWatcher();
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
