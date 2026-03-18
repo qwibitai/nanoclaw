@@ -32,6 +32,7 @@ const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
 const MAX_TOOL_LOOPS = 16;
 const MAX_TOOL_OUTPUT_CHARS = 120_000;
 const execFileAsync = promisify(execFile);
+const DEFAULT_WEB_TIMEOUT_MS = 45_000;
 
 function ensureStateDir(): void {
   fs.mkdirSync(OPENAI_STATE_DIR, { recursive: true });
@@ -110,7 +111,7 @@ function buildPrompt(
   sections.push('Latest user message:');
   sections.push(prompt);
   sections.push(
-    'Respond as the NanoClaw agent. Use the available shell tool whenever local files, commands, or environment inspection are needed.',
+    'Respond as the NanoClaw agent. You have working tools. Use shell for local file/command tasks, web_fetch for known URLs, and web_search when you need current web information. Do not claim tools are unavailable.',
   );
 
   return sections.join('\n\n');
@@ -127,7 +128,7 @@ function getToolDefinitions(): unknown[] {
       type: 'function',
       name: 'shell',
       description:
-        'Execute a shell command inside the container workspace. Use this for file inspection, search, edits, git commands, and other local operations.',
+        'Execute a shell command inside the container workspace. Use this for file inspection, search, edits, git commands, and local operations. This tool can also use curl for direct web requests if needed.',
       strict: true,
       parameters: {
         type: 'object',
@@ -149,6 +150,52 @@ function getToolDefinitions(): unknown[] {
           },
         },
         required: ['command'],
+        additionalProperties: false,
+      },
+    },
+    {
+      type: 'function',
+      name: 'web_fetch',
+      description:
+        'Fetch a URL from the web and return the response body. Use this for known pages or APIs.',
+      strict: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'The full URL to fetch.',
+          },
+          timeout_ms: {
+            type: 'integer',
+            description:
+              'Optional timeout in milliseconds. Defaults to 45000.',
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    },
+    {
+      type: 'function',
+      name: 'web_search',
+      description:
+        'Search the web for current information and return the result page HTML. Use this when you do not yet know the target URL.',
+      strict: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The web search query.',
+          },
+          timeout_ms: {
+            type: 'integer',
+            description:
+              'Optional timeout in milliseconds. Defaults to 45000.',
+          },
+        },
+        required: ['query'],
         additionalProperties: false,
       },
     },
@@ -276,6 +323,93 @@ async function runShellTool(
   }
 }
 
+async function runWebFetchTool(argsJson: string): Promise<string> {
+  let args: { url: string; timeout_ms?: number };
+  try {
+    args = JSON.parse(argsJson) as { url: string; timeout_ms?: number };
+  } catch (err) {
+    return JSON.stringify({
+      ok: false,
+      error: `Invalid web_fetch arguments JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+  }
+
+  const url = args.url?.trim();
+  if (!url) {
+    return JSON.stringify({ ok: false, error: 'web_fetch requires a URL' });
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      '/bin/bash',
+      [
+        '-lc',
+        `curl -L --silent --show-error --max-time ${Math.ceil(
+          (args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS) / 1000,
+        )} ${JSON.stringify(url)}`,
+      ],
+      {
+        cwd: '/workspace/group',
+        timeout: args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS,
+        maxBuffer: MAX_TOOL_OUTPUT_CHARS * 2,
+      },
+    );
+
+    return JSON.stringify({
+      ok: true,
+      url,
+      stdout: truncateOutput(stdout),
+      stderr: truncateOutput(stderr),
+    });
+  } catch (err) {
+    const error = err as {
+      code?: number | string;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    return JSON.stringify({
+      ok: false,
+      url,
+      exit_code:
+        typeof error.code === 'number' ? error.code : String(error.code || ''),
+      stdout: truncateOutput(error.stdout || ''),
+      stderr: truncateOutput(error.stderr || ''),
+      error: error.message || 'web_fetch failed',
+    });
+  }
+}
+
+async function runWebSearchTool(argsJson: string): Promise<string> {
+  let args: { query: string; timeout_ms?: number };
+  try {
+    args = JSON.parse(argsJson) as { query: string; timeout_ms?: number };
+  } catch (err) {
+    return JSON.stringify({
+      ok: false,
+      error: `Invalid web_search arguments JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+  }
+
+  const query = args.query?.trim();
+  if (!query) {
+    return JSON.stringify({ ok: false, error: 'web_search requires a query' });
+  }
+
+  const encodedQuery = encodeURIComponent(query);
+  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
+  return runWebFetchTool(
+    JSON.stringify({
+      url: searchUrl,
+      timeout_ms: args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS,
+    }),
+  );
+}
+
 async function runOpenAITurn(
   context: AgentTurnContext,
 ): Promise<AgentTurnResult> {
@@ -328,6 +462,12 @@ async function runOpenAITurn(
       switch (call.name) {
         case 'shell':
           output = await runShellTool(call.arguments, context);
+          break;
+        case 'web_fetch':
+          output = await runWebFetchTool(call.arguments);
+          break;
+        case 'web_search':
+          output = await runWebSearchTool(call.arguments);
           break;
         default:
           output = JSON.stringify({
