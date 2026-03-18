@@ -18,9 +18,11 @@ groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 
-# Secrets
+# Secrets — NEVER commit these
 *.keys.json
 .env
+.dev.vars                   # Cloudflare Workers local dev secrets (see .dev.vars.example)
+wrangler.toml.local         # Local wrangler overrides
 
 # Temp files
 .tmp-*
@@ -34,5 +36,6 @@ groups/global/*
 
 # Skills system (local per-installation state)
 .nanoclaw/
+.thagomizer/
 
 agents-sdk-docs

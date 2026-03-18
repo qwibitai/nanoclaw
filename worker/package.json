@@ -1,0 +1,25 @@
+{
+  "name": "thagomizer-claw-worker",
+  "version": "1.0.0",
+  "description": "ThagomizerClaw Cloudflare Workers runtime",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply thagomizer-claw-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply thagomizer-claw-db",
+    "db:schema": "wrangler d1 execute thagomizer-claw-db --local --file=../migrations/0001_initial.sql",
+    "secret:set": "wrangler secret put",
+    "secret:list": "wrangler secret list",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}

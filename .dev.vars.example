@@ -1,0 +1,39 @@
+# ThagomizerClaw — Local Development Variables
+# Copy this file to .dev.vars and fill in real values.
+# .dev.vars is gitignored — NEVER commit real secrets.
+#
+# For production: use `wrangler secret put <NAME>` for all secrets below.
+# Variables marked [SECRET] must NEVER appear in wrangler.toml or source code.
+
+# ─── Required Secrets [SECRET] ────────────────────────────────────────────────
+
+# Anthropic Claude API key (https://console.anthropic.com)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Shared secret for webhook URL verification and admin API auth
+# Generate with: openssl rand -hex 32
+WEBHOOK_SECRET=your-random-secret-here
+
+# ─── Telegram [SECRET] ────────────────────────────────────────────────────────
+# Get from @BotFather
+TELEGRAM_BOT_TOKEN=
+
+# ─── Discord [SECRET] ─────────────────────────────────────────────────────────
+# Get from https://discord.com/developers/applications
+DISCORD_BOT_TOKEN=
+DISCORD_PUBLIC_KEY=
+
+# ─── Slack [SECRET] ───────────────────────────────────────────────────────────
+# Get from https://api.slack.com/apps
+SLACK_BOT_TOKEN=
+SLACK_SIGNING_SECRET=
+
+# ─── Non-secret Configuration ─────────────────────────────────────────────────
+# These can also go in wrangler.toml [vars] for production
+
+ASSISTANT_NAME=Andy
+ENVIRONMENT=development
+LOG_LEVEL=debug
+MAX_CONCURRENT_AGENTS=3
+AGENT_TIMEOUT_MS=120000
+WORKER_AI_MODEL=@cf/meta/llama-3.1-8b-instruct

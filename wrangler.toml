@@ -1,0 +1,106 @@
+name = "thagomizer-claw"
+main = "worker/src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cloudflare D1 — Primary database (SQLite-compatible, globally replicated)
+# ────────────────────────────────────────────────────────────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "thagomizer-claw-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cloudflare R2 — Object storage (group files, CLAUDE.md, session data, logs)
+# ────────────────────────────────────────────────────────────────────────────
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "thagomizer-claw-storage"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cloudflare KV — Fast key-value store (hot state: sessions, cursors, config)
+# ────────────────────────────────────────────────────────────────────────────
+[[kv_namespaces]]
+binding = "STATE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cloudflare Queues — Async message processing (decouples webhook from agent)
+# ────────────────────────────────────────────────────────────────────────────
+[[queues.producers]]
+binding = "MESSAGE_QUEUE"
+queue = "thagomizer-messages"
+
+[[queues.consumers]]
+queue = "thagomizer-messages"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "thagomizer-messages-dlq"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cloudflare Workers AI — On-device LLM inference (Llama, Mistral, etc.)
+# ────────────────────────────────────────────────────────────────────────────
+[ai]
+binding = "AI"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Durable Objects — Stateful per-group session management and rate limiting
+# ────────────────────────────────────────────────────────────────────────────
+[[durable_objects.bindings]]
+name = "GROUP_SESSION"
+class_name = "GroupSessionDO"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GroupSessionDO", "RateLimiterDO"]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cron Triggers — Scheduled task execution (replaces Node.js polling loop)
+# ────────────────────────────────────────────────────────────────────────────
+[triggers]
+crons = [
+  "* * * * *",   # Every minute: check due scheduled tasks
+  "*/5 * * * *", # Every 5 min: cleanup expired sessions
+]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Secrets — Managed via `wrangler secret put` (NEVER commit real values)
+# See docs/CLOUDFLARE_SECRETS.md for the full list of required secrets
+# ────────────────────────────────────────────────────────────────────────────
+# Required secrets (set with: wrangler secret put <NAME>):
+#   ANTHROPIC_API_KEY          — Anthropic Claude API key
+#   TELEGRAM_BOT_TOKEN         — Telegram bot token (if using Telegram channel)
+#   DISCORD_BOT_TOKEN          — Discord bot token (if using Discord channel)
+#   DISCORD_PUBLIC_KEY         — Discord app public key (for webhook verification)
+#   SLACK_BOT_TOKEN            — Slack bot OAuth token (if using Slack channel)
+#   SLACK_SIGNING_SECRET       — Slack signing secret (for request verification)
+#   WEBHOOK_SECRET             — Shared secret for authenticating internal webhooks
+
+# ────────────────────────────────────────────────────────────────────────────
+# Environment variables (non-secret configuration)
+# ────────────────────────────────────────────────────────────────────────────
+[vars]
+ASSISTANT_NAME = "Andy"
+ENVIRONMENT = "production"
+LOG_LEVEL = "info"
+MAX_CONCURRENT_AGENTS = "5"
+AGENT_TIMEOUT_MS = "120000"
+# WORKER_AI_MODEL overrides which Workers AI model to use as fallback
+WORKER_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Local development (wrangler dev)
+# ────────────────────────────────────────────────────────────────────────────
+[dev]
+port = 8787
+local_protocol = "http"
+
+# Dev vars are loaded from .dev.vars (gitignored) — never commit secrets
+# Copy .dev.vars.example to .dev.vars and fill in real values

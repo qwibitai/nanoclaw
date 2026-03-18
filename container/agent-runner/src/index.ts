@@ -1,5 +1,5 @@
 /**
- * NanoClaw Agent Runner
+ * ThagomizerClaw Agent Runner
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Input protocol:
@@ -104,8 +104,8 @@ async function readStdin(): Promise<string> {
   });
 }
 
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---THAGOMIZER_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---THAGOMIZER_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
