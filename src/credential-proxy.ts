@@ -37,15 +37,11 @@ export function startCredentialProxy(
     'NOVITA_API_KEY',
   ]);
 
-  // Novita mode: use Novita API endpoint with Novita API key
-  let authMode: AuthMode = 'api-key';
-  if (secrets.NOVITA_API_KEY) {
-    authMode = 'novita-api-key';
-  } else if (secrets.ANTHROPIC_API_KEY) {
-    authMode = 'api-key';
-  } else {
-    authMode = 'oauth';
-  }
+  const authMode: AuthMode = secrets.NOVITA_API_KEY
+    ? 'novita-api-key'
+    : secrets.ANTHROPIC_API_KEY
+      ? 'api-key'
+      : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
@@ -142,11 +138,9 @@ export function startCredentialProxy(
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
   const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'NOVITA_API_KEY']);
-  if (secrets.NOVITA_API_KEY) {
-    return 'novita-api-key';
-  } else if (secrets.ANTHROPIC_API_KEY) {
-    return 'api-key';
-  } else {
-    return 'oauth';
-  }
+  return secrets.NOVITA_API_KEY
+    ? 'novita-api-key'
+    : secrets.ANTHROPIC_API_KEY
+      ? 'api-key'
+      : 'oauth';
 }
