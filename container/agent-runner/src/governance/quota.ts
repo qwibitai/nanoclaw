@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { QuotaEntry, QuotaStatus } from './types.js';
 
-const ATLAS_STATE_DIR = '/workspace/atlas-state';
+const ATLAS_STATE_DIR = '/workspace/extra/atlas-state';
 const QUOTA_FILE = path.join(ATLAS_STATE_DIR, 'autonomy', 'quota-tracking.jsonl');
 
 // Estimated daily limit in weighted units.

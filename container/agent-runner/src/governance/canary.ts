@@ -9,7 +9,7 @@ import path from 'path';
 import { PreflightResult } from './types.js';
 import { logGovernanceEvent } from './audit.js';
 
-const ATLAS_STATE_DIR = '/workspace/atlas-state';
+const ATLAS_STATE_DIR = '/workspace/extra/atlas-state';
 
 /**
  * Run all preflight checks. Returns ok:true if agent should proceed.
@@ -45,7 +45,7 @@ export function runPreflightChecks(entity: string): PreflightResult {
 
       const checks = [
         { name: 'loyalty', pattern: /thao\s*le/i, description: 'Loyalty anchor: Thao Le' },
-        { name: 'authority_lock', pattern: /never\s+expand.*autonom/i, description: 'Authority direction lock' },
+        { name: 'authority_lock', pattern: /authority.*only.*expand.*CEO/i, description: 'Authority direction lock' },
         { name: 'ceo_priority', pattern: /CEO.*interest/i, description: 'CEO interest priority' },
       ];
 

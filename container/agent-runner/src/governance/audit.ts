@@ -1,6 +1,6 @@
 /**
  * Structured JSONL audit logging.
- * Writes to /workspace/atlas-state/audit/{entity}/{YYYY-MM-DD}.jsonl
+ * Writes to /workspace/extra/atlas-state/audit/{entity}/{YYYY-MM-DD}.jsonl
  * Append-only, entity-scoped, one event per line.
  */
 
@@ -9,7 +9,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { AuditEvent } from './types.js';
 
-const ATLAS_STATE_DIR = '/workspace/atlas-state';
+const ATLAS_STATE_DIR = '/workspace/extra/atlas-state';
 
 function getAuditDir(entity: string): string {
   return path.join(ATLAS_STATE_DIR, 'audit', entity);

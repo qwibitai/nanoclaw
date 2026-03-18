@@ -387,7 +387,7 @@ async function runQuery(
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
@@ -430,7 +430,7 @@ async function runQuery(
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+        : { type: "preset" as const, preset: "claude_code" as const },
       allowedTools: effectiveTools,
       model: (containerInput as ContainerInput).model || undefined,
       env: sdkEnv,

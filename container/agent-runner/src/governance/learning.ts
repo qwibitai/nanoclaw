@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { PostTaskParams } from './types.js';
 
-const ATLAS_STATE_DIR = '/workspace/atlas-state';
+const ATLAS_STATE_DIR = '/workspace/extra/atlas-state';
 const AUTONOMY_DIR = path.join(ATLAS_STATE_DIR, 'autonomy');
 const LEARNING_LOG = path.join(AUTONOMY_DIR, 'learning-log.jsonl');
 const GRADUATION_STATUS = path.join(AUTONOMY_DIR, 'graduation-status.json');
