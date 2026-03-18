@@ -62,6 +62,13 @@ const GRANOLA_REFRESH_TIMEOUT_MS = 10_000;
 // Proactive refresh interval — keeps the refresh token chain alive even when
 // no container spawns occur. 4 hours is well within the ~6h access token TTL.
 const GRANOLA_PROACTIVE_REFRESH_MS = 4 * 60 * 60 * 1000;
+// Primary token file — we own this file, not Claude Code.
+// Same pattern as Google (credentials.json in ~/.gmail-mcp/).
+const GRANOLA_TOKEN_PATH = path.join(
+  os.homedir(),
+  '.claude',
+  '.granola-tokens.json',
+);
 
 // Google OAuth token refresh (Gmail, Calendar, Google Workspace — same GCP app).
 // If refresh tokens expire every 7 days, the GCP app is in "Testing" mode.
@@ -115,8 +122,78 @@ const CACHE_EXCLUDE_EXTENSIONS = new Set([
 let granolaTokenCache: { token: string; expiresAt: number } | null = null;
 let granolaRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
+interface GranolaTokenFile {
+  accessToken: string;
+  refreshToken: string;
+  clientId: string;
+  expiresAt: number; // ms epoch
+}
+
+/** Read Granola tokens from our own file (primary source of truth). */
+function readGranolaTokens(): GranolaTokenFile | null {
+  try {
+    const data = JSON.parse(
+      fs.readFileSync(GRANOLA_TOKEN_PATH, 'utf-8'),
+    ) as GranolaTokenFile;
+    if (data.refreshToken && data.clientId) return data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write Granola tokens to our own file. */
+function writeGranolaTokens(data: GranolaTokenFile): void {
+  try {
+    fs.writeFileSync(GRANOLA_TOKEN_PATH, JSON.stringify(data, null, 2) + '\n', {
+      mode: 0o600,
+    });
+  } catch (err) {
+    logger.warn(`Failed to write Granola tokens: ${err}`);
+  }
+}
+
 /**
- * Read Granola MCP OAuth access token from the host's Claude credentials file,
+ * One-time migration: if our token file doesn't exist yet but Claude Code's
+ * .credentials.json has Granola tokens, copy them over. After this,
+ * .credentials.json is never read for Granola again.
+ */
+function migrateGranolaTokensFromCredentials(): void {
+  if (readGranolaTokens()) return; // already have our own file
+
+  try {
+    const creds = JSON.parse(
+      fs.readFileSync(HOST_CREDENTIALS_PATH, 'utf-8'),
+    ) as Record<string, unknown>;
+    const mcpOAuth = creds.mcpOAuth as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    if (!mcpOAuth) return;
+
+    const granolaKey = Object.keys(mcpOAuth).find((k) =>
+      k.startsWith('granola|'),
+    );
+    if (!granolaKey) return;
+
+    const entry = mcpOAuth[granolaKey];
+    if (!entry.refreshToken || !entry.clientId) return;
+
+    logger.info(
+      'Migrating Granola tokens from .credentials.json to own token file',
+    );
+    writeGranolaTokens({
+      accessToken: (entry.accessToken as string) || '',
+      refreshToken: entry.refreshToken as string,
+      clientId: entry.clientId as string,
+      expiresAt: (entry.expiresAt as number) || 0,
+    });
+  } catch {
+    // .credentials.json unreadable — nothing to migrate
+  }
+}
+
+/**
+ * Read Granola MCP OAuth access token from our own token file,
  * refresh if expired. Returns the access token string or null.
  */
 async function getGranolaAccessToken(): Promise<string | null> {
@@ -124,28 +201,13 @@ async function getGranolaAccessToken(): Promise<string | null> {
     return granolaTokenCache.token;
   }
 
-  let creds: Record<string, unknown>;
-  try {
-    creds = JSON.parse(fs.readFileSync(HOST_CREDENTIALS_PATH, 'utf-8'));
-  } catch {
-    return null;
-  }
+  // Ensure migration from .credentials.json has happened
+  migrateGranolaTokensFromCredentials();
 
-  const mcpOAuth = creds.mcpOAuth as
-    | Record<string, Record<string, unknown>>
-    | undefined;
-  if (!mcpOAuth) return null;
+  const tokens = readGranolaTokens();
+  if (!tokens) return null;
 
-  const granolaKey = Object.keys(mcpOAuth).find((k) =>
-    k.startsWith('granola|'),
-  );
-  if (!granolaKey) return null;
-
-  const entry = mcpOAuth[granolaKey];
-  const expiresAt = entry.expiresAt as number;
-  const accessToken = entry.accessToken as string | undefined;
-  const refreshToken = entry.refreshToken as string | undefined;
-  const clientId = entry.clientId as string | undefined;
+  const { accessToken, refreshToken, clientId, expiresAt } = tokens;
 
   // Token still valid (with 5-minute buffer)
   if (expiresAt && Date.now() < expiresAt - 5 * 60 * 1000 && accessToken) {
@@ -159,7 +221,7 @@ async function getGranolaAccessToken(): Promise<string | null> {
   // Token expired — try to refresh
   if (!refreshToken || !clientId) {
     logger.error(
-      'Granola OAuth token expired and no refresh token available. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp',
+      'Granola OAuth token expired and no refresh token available. Re-run OAuth flow.',
     );
     return null;
   }
@@ -180,40 +242,24 @@ async function getGranolaAccessToken(): Promise<string | null> {
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
       logger.error(
-        `Granola token refresh failed: ${resp.status} ${resp.statusText} — ${body}. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp`,
+        `Granola token refresh failed: ${resp.status} ${resp.statusText} — ${body}. Re-run OAuth flow.`,
       );
-      // Don't pass the expired token — it causes silent MCP tool failures
       return null;
     }
 
-    const tokens = (await resp.json()) as Record<string, unknown>;
-    const expiresIn = ((tokens.expires_in as number) || 3600) * 1000;
-    const newAccessToken = tokens.access_token as string;
+    const result = (await resp.json()) as Record<string, unknown>;
+    const expiresIn = ((result.expires_in as number) || 3600) * 1000;
+    const newAccessToken = result.access_token as string;
     const newExpiresAt = Date.now() + expiresIn;
 
-    // Persist refreshed tokens back to host credentials — re-read to minimize race window
-    try {
-      const freshCreds = JSON.parse(
-        fs.readFileSync(HOST_CREDENTIALS_PATH, 'utf-8'),
-      ) as Record<string, unknown>;
-      const freshOAuth = (freshCreds.mcpOAuth || {}) as Record<
-        string,
-        Record<string, unknown>
-      >;
-      freshOAuth[granolaKey] = {
-        ...entry,
-        accessToken: newAccessToken,
-        expiresAt: newExpiresAt,
-        ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
-      };
-      freshCreds.mcpOAuth = freshOAuth;
-      fs.writeFileSync(
-        HOST_CREDENTIALS_PATH,
-        JSON.stringify(freshCreds, null, 4) + '\n',
-      );
-    } catch (writeErr) {
-      logger.warn(`Failed to persist refreshed Granola token: ${writeErr}`);
-    }
+    const updated: GranolaTokenFile = {
+      accessToken: newAccessToken,
+      refreshToken: (result.refresh_token as string) || refreshToken,
+      clientId,
+      expiresAt: newExpiresAt,
+    };
+
+    writeGranolaTokens(updated);
 
     granolaTokenCache = {
       token: newAccessToken,
@@ -222,9 +268,7 @@ async function getGranolaAccessToken(): Promise<string | null> {
     logger.info('Granola OAuth token refreshed successfully');
     return newAccessToken;
   } catch (err) {
-    logger.error(
-      `Granola token refresh error: ${err}. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp`,
-    );
+    logger.error(`Granola token refresh error: ${err}. Re-run OAuth flow.`);
     return null;
   }
 }
