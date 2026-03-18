@@ -15,6 +15,9 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- Defense-in-depth: prevents rapid crash loops during boot. See #1067. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

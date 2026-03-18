@@ -7,6 +7,13 @@ import fs from 'fs';
 import os from 'os';
 
 import { logger } from './logger.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Apple Container runtime XPC service name. */
+const APPLE_CONTAINER_XPC_SERVICE = 'com.apple.container.apiserver';
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
@@ -64,6 +71,32 @@ export function stopContainer(name: string): string {
 
 /** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
+  // ── macOS: wait for Apple Container XPC service (boot guard) ──
+  // When launchd starts NanoClaw at boot (RunAtLoad: true), Apple
+  // Container services may not be ready yet. A compiled Swift helper
+  // blocks via kernel-level Mach port messaging (zero CPU) until the
+  // service signals it is available, preventing a crash loop.
+  if (process.platform === 'darwin' && CONTAINER_RUNTIME_BIN === 'container') {
+    try {
+      const waiterBin = path.join(__dirname, 'darwin', 'wait-for-xpc-service');
+      execSync(
+        `"${waiterBin}" ${APPLE_CONTAINER_XPC_SERVICE} 120`,
+        {
+          stdio: 'pipe',
+          timeout: 130_000, // service timeout (120s) + buffer
+        },
+      );
+      logger.debug('Apple Container runtime XPC service available');
+    } catch (err) {
+      logger.warn(
+        { err },
+        'Timed out waiting for Apple Container XPC service — falling through to runtime check',
+      );
+      // Intentionally fall through — the runtime check below will
+      // produce a user-facing diagnostic if the service is still unavailable.
+    }
+  }
+
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} info`, {
       stdio: 'pipe',
