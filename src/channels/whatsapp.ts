@@ -5,6 +5,7 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  WAMessageStubType,
   WASocket,
   downloadMediaMessage,
   fetchLatestWaWebVersion,
@@ -25,6 +26,7 @@ import {
   getLastGroupSync,
   setLastGroupSync,
   updateChatName,
+  getMessageContent,
   deleteMessages,
   deleteAllMessages,
 } from '../db.js';
@@ -332,9 +334,9 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            // Transcribe voice notes
+            // Transcribe audio messages (voice notes and forwarded audio)
             let voiceTranscript = '';
-            if (normalized.audioMessage?.ptt) {
+            if (normalized.audioMessage) {
               try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
                 if (buffer instanceof Buffer) {
@@ -416,14 +418,30 @@ export class WhatsAppChannel implements Channel {
         deleteAllMessages(event.jid);
         logger.info({ jid: event.jid }, 'Cleared all messages for chat');
       } else {
-        // Specific messages deleted (delete for me or delete for everyone)
+        // Specific messages deleted (delete for me)
         const keys = event.keys
           .filter((k) => k.id && k.remoteJid)
           .map((k) => ({ id: k.id!, chatJid: k.remoteJid! }));
         if (keys.length > 0) {
+          this.markAttachmentsDeleted(keys);
           deleteMessages(keys);
           logger.info({ count: keys.length }, 'Deleted messages from DB');
         }
+      }
+    });
+
+    // "Delete for everyone" arrives as a messages.update with REVOKE stub
+    this.sock.ev.on('messages.update', (updates) => {
+      for (const update of updates) {
+        if (update.update?.messageStubType !== WAMessageStubType.REVOKE)
+          continue;
+        const key = update.key;
+        if (!key.id || !key.remoteJid) continue;
+        const chatJid = key.remoteJid;
+        const id = key.id;
+        this.markAttachmentsDeleted([{ id, chatJid }]);
+        deleteMessages([{ id, chatJid }]);
+        logger.info({ chatJid, id }, 'Message revoked (delete for everyone)');
       }
     });
 
@@ -552,6 +570,41 @@ export class WhatsAppChannel implements Channel {
       logger.info({ count }, 'Group metadata synced');
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
+    }
+  }
+
+  private markAttachmentsDeleted(
+    keys: { id: string; chatJid: string }[],
+  ): void {
+    const groups = this.opts.registeredGroups();
+    for (const { id, chatJid } of keys) {
+      const group = groups[chatJid];
+      if (!group) continue;
+      const content = getMessageContent(id, chatJid);
+      if (!content) continue;
+      const match = content.match(
+        /\[(?:Image|Video|Document|Audio) saved: \/workspace\/group\/attachments\/(.+?)\]/,
+      );
+      if (!match) continue;
+      const filename = match[1];
+      const groupDir = resolveGroupFolderPath(group.folder);
+      const filePath = path.join(groupDir, 'attachments', filename);
+      const deletedPath = path.join(
+        groupDir,
+        'attachments',
+        `deleted-${filename}`,
+      );
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.renameSync(filePath, deletedPath);
+          logger.info({ chatJid, filename }, 'Attachment renamed as deleted');
+        }
+      } catch (err) {
+        logger.warn(
+          { err, chatJid, filename },
+          'Failed to rename deleted attachment',
+        );
+      }
     }
   }
 
