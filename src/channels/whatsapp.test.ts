@@ -27,6 +27,12 @@ vi.mock('../db.js', () => ({
   updateChatName: vi.fn(),
 }));
 
+// Mock transcription (disabled by default in tests)
+vi.mock('../transcription.js', () => ({
+  isTranscriptionAvailable: vi.fn(() => false),
+  transcribeAudio: vi.fn(),
+}));
+
 // Mock fs
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -87,6 +93,7 @@ vi.mock('@whiskeysockets/baileys', () => {
     fetchLatestWaWebVersion: vi
       .fn()
       .mockResolvedValue({ version: [2, 3000, 0] }),
+    downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from('audio-data')),
     normalizeMessageContent: vi.fn((content: unknown) => content),
     makeCacheableSignalKeyStore: vi.fn((keys: unknown) => keys),
     useMultiFileAuthState: vi.fn().mockResolvedValue({
@@ -533,7 +540,7 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
+    it('handles voice note with transcription unavailable', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -555,8 +562,13 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Skipped — no text content to process
-      expect(opts.onMessage).not.toHaveBeenCalled();
+      // Voice message delivered with unavailable notice
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Voice message - transcription unavailable]',
+        }),
+      );
     });
 
     it('uses sender JID when pushName is absent', async () => {

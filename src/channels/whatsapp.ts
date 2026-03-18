@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
@@ -26,6 +27,10 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import {
+  isTranscriptionAvailable,
+  transcribeAudio,
+} from '../transcription.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -203,12 +208,44 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
+            let content =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
               '';
+
+            // Voice message transcription
+            if (!content && normalized.audioMessage) {
+              if (isTranscriptionAvailable()) {
+                try {
+                  const stream = await downloadMediaMessage(
+                    msg,
+                    'buffer',
+                    {},
+                    {
+                      logger,
+                      reuploadRequest: this.sock.updateMediaMessage,
+                    },
+                  );
+                  const transcription = await transcribeAudio(
+                    stream as Buffer,
+                    'voice.ogg',
+                  );
+                  if (transcription) {
+                    content = `[Voice: ${transcription}]`;
+                  }
+                } catch (err) {
+                  logger.warn(
+                    { err },
+                    'Failed to download/transcribe WhatsApp voice',
+                  );
+                }
+              }
+              if (!content) {
+                content = '[Voice message - transcription unavailable]';
+              }
+            }
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;
