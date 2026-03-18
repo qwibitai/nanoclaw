@@ -16,6 +16,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { Bot, Context } from 'grammy';
+import { markdownToFormattable } from '@gramio/format/markdown';
 import { registerChannel } from './registry.js';
 import { readEnvFile } from '../env.js';
 import { DATA_DIR, MAX_ATTACHMENT_SIZE } from '../config.js';
@@ -565,6 +566,7 @@ class TelegramMultiBotChannel implements Channel {
     text: string,
     sender?: string,
     messageThreadId?: number,
+    parseMode?: string,
   ): Promise<void> {
     const chatId = jid.replace('tg:', '');
 
@@ -616,41 +618,38 @@ class TelegramMultiBotChannel implements Channel {
       return;
     }
 
-    // Build send options — include message_thread_id for Forum/Topics support
-    // Explicit messageThreadId (from IPC) takes priority over cached thread ID
+    // Build base send options — include message_thread_id for Forum/Topics support
     const threadId = messageThreadId ?? this.jidToThreadId.get(jid);
-    const sendOpts: Record<string, unknown> = { parse_mode: 'HTML' };
+    const baseOpts: { message_thread_id?: number } = {};
     if (threadId) {
-      sendOpts.message_thread_id = threadId;
+      baseOpts.message_thread_id = threadId;
     }
 
     // Helper: send with retry on transient errors (504, 429, network)
-    // Falls back to plain text if MarkdownV2 parsing fails (400)
     const sendWithRetry = async (
       targetChatId: string,
-      chunk: string,
+      sendText: string,
       opts: Record<string, unknown>,
       maxRetries = 3,
     ) => {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          await instance!.bot.api.sendMessage(targetChatId, chunk, opts);
+          await instance!.bot.api.sendMessage(targetChatId, sendText, opts);
           return;
         } catch (err: any) {
           const code = err?.error_code || err?.status;
 
-          // HTML parse error → fallback to plain text (strip tags)
-          if (code === 400 && opts.parse_mode === 'HTML') {
+          // Entity/parse error → fallback to plain text (no entities, no parse_mode)
+          if (code === 400) {
             logger.warn(
               { chatId: targetChatId },
-              'HTML parse failed, falling back to plain text',
+              'Entity send failed, falling back to plain text',
             );
-            const plainOpts = { ...opts, parse_mode: undefined };
             try {
               await instance!.bot.api.sendMessage(
                 targetChatId,
-                stripHtmlTags(chunk),
-                plainOpts,
+                sendText,
+                baseOpts,
               );
             } catch {
               // last resort: ignore
@@ -676,18 +675,21 @@ class TelegramMultiBotChannel implements Channel {
               { chatId: targetChatId, attempt, code, err: err?.message || err },
               'Telegram sendMessage failed permanently',
             );
-            return; // Don't crash — just drop the message
+            return;
           }
         }
       }
     };
 
-    // Split into shorter messages at paragraph boundaries, then send with HTML
+    // Split into shorter messages, convert each chunk to entities, then send
     const chunks = splitMessage(text);
     for (let i = 0; i < chunks.length; i++) {
-      const htmlChunk = markdownToHtml(chunks[i]);
-      await sendWithRetry(chatId, htmlChunk, sendOpts);
-      // Small delay between chunks to preserve ordering
+      const { text: plainText, entities } = markdownToFormattable(chunks[i]);
+      const opts = {
+        ...baseOpts,
+        ...(entities.length > 0 ? { entities } : {}),
+      };
+      await sendWithRetry(chatId, plainText, opts);
       if (i < chunks.length - 1) {
         await new Promise((r) => setTimeout(r, 300));
       }
