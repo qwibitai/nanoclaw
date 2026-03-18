@@ -196,7 +196,7 @@ function extractContainerRuntime(): {
 }
 
 // Generate the full contract
-function generateContract(): object {
+export function generateContract(): object {
   const pkg = JSON.parse(readFile('package.json'));
 
   return {
@@ -216,50 +216,55 @@ function generateContract(): object {
   };
 }
 
-// Main
-const mode = process.argv[2] || 'generate';
-const contractPath = path.join(ROOT, 'contract.json');
+// CLI entry point — only runs when executed directly, not when imported
+const isCli = process.argv[1]
+  ?.replace(/\.ts$/, '')
+  .endsWith('generate-contract');
+if (isCli) {
+  const mode = process.argv[2] || 'generate';
+  const contractPath = path.join(ROOT, 'contract.json');
 
-if (mode === 'check') {
-  const generated = generateContract();
-  // For check mode, compare surfaces only (ignore generatedAt and harnessVersion)
-  let existing: Record<string, unknown>;
-  try {
-    existing = JSON.parse(fs.readFileSync(contractPath, 'utf-8'));
-  } catch {
-    console.error('contract.json not found. Run: npm run contract:generate');
-    process.exit(1);
-  }
-
-  const genSurfaces = JSON.stringify(
-    (generated as Record<string, unknown>).surfaces,
-    null,
-    2,
-  );
-  const existSurfaces = JSON.stringify(existing.surfaces, null, 2);
-
-  if (genSurfaces !== existSurfaces) {
-    console.error('contract.json is out of sync with source code.');
-    console.error('Run: npm run contract:generate');
-    console.error('');
-    // Show what changed
-    const genLines = genSurfaces.split('\n');
-    const existLines = existSurfaces.split('\n');
-    const maxLen = Math.max(genLines.length, existLines.length);
-    for (let i = 0; i < maxLen; i++) {
-      if (genLines[i] !== existLines[i]) {
-        if (existLines[i]) console.error(`- ${existLines[i]}`);
-        if (genLines[i]) console.error(`+ ${genLines[i]}`);
-      }
+  if (mode === 'check') {
+    const generated = generateContract();
+    // For check mode, compare surfaces only (ignore generatedAt and harnessVersion)
+    let existing: Record<string, unknown>;
+    try {
+      existing = JSON.parse(fs.readFileSync(contractPath, 'utf-8'));
+    } catch {
+      console.error('contract.json not found. Run: npm run contract:generate');
+      process.exit(1);
     }
-    process.exit(1);
-  }
 
-  console.log('contract.json is up to date.');
-} else {
-  const contract = generateContract();
-  fs.writeFileSync(contractPath, JSON.stringify(contract, null, 2) + '\n');
-  console.log(
-    `Generated contract.json (contractVersion: ${(contract as Record<string, unknown>).contractVersion})`,
-  );
+    const genSurfaces = JSON.stringify(
+      (generated as Record<string, unknown>).surfaces,
+      null,
+      2,
+    );
+    const existSurfaces = JSON.stringify(existing.surfaces, null, 2);
+
+    if (genSurfaces !== existSurfaces) {
+      console.error('contract.json is out of sync with source code.');
+      console.error('Run: npm run contract:generate');
+      console.error('');
+      // Show what changed
+      const genLines = genSurfaces.split('\n');
+      const existLines = existSurfaces.split('\n');
+      const maxLen = Math.max(genLines.length, existLines.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (genLines[i] !== existLines[i]) {
+          if (existLines[i]) console.error(`- ${existLines[i]}`);
+          if (genLines[i]) console.error(`+ ${genLines[i]}`);
+        }
+      }
+      process.exit(1);
+    }
+
+    console.log('contract.json is up to date.');
+  } else {
+    const contract = generateContract();
+    fs.writeFileSync(contractPath, JSON.stringify(contract, null, 2) + '\n');
+    console.log(
+      `Generated contract.json (contractVersion: ${(contract as Record<string, unknown>).contractVersion})`,
+    );
+  }
 }
