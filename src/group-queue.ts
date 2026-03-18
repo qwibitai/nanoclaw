@@ -165,11 +165,11 @@ export class GroupQueue {
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
+      fs.mkdirSync(inputDir, { recursive: true, mode: 0o777 });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }), { mode: 0o666 });
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
@@ -186,8 +186,8 @@ export class GroupQueue {
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      fs.mkdirSync(inputDir, { recursive: true, mode: 0o777 });
+      fs.writeFileSync(path.join(inputDir, '_close'), '', { mode: 0o666 });
     } catch {
       // ignore
     }
