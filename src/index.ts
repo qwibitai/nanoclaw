@@ -12,7 +12,7 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
+// DiscordChannel is dynamically imported below when DISCORD_BOT_TOKEN is set
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -752,9 +752,17 @@ async function main(): Promise<void> {
 
   // Create and connect channels
   if (DISCORD_BOT_TOKEN) {
-    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
-    channels.push(discord);
-    await discord.connect();
+    try {
+      const { DiscordChannel } = await import('./channels/discord.js');
+      const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
+      channels.push(discord);
+      await discord.connect();
+    } catch (err) {
+      logger.warn(
+        { err },
+        'Discord channel unavailable (discord.js not installed)',
+      );
+    }
   }
 
   if (!DISCORD_ONLY) {
