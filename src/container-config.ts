@@ -188,6 +188,10 @@ export function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
   const backendConfig = getAgentBackendConfig();
+  const containerEnv = readEnvFile([
+    'WEB_FETCH_INSECURE_TLS',
+    'WEB_FETCH_CA_BUNDLE',
+  ]);
 
   args.push('-e', `TZ=${TIMEZONE}`);
   args.push('-e', `NANOCLAW_AGENT_BACKEND=${backendConfig.backend}`);
@@ -199,6 +203,9 @@ export function buildContainerArgs(
     `${backendConfig.containerBaseUrlEnvVar}=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
   args.push('-e', `${backendConfig.containerCredentialEnvVar}=placeholder`);
+  for (const [key, value] of Object.entries(containerEnv)) {
+    if (value) args.push('-e', `${key}=${value}`);
+  }
 
   args.push(...hostGatewayArgs());
 

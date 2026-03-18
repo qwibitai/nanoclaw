@@ -33,6 +33,10 @@ const MAX_TOOL_LOOPS = 16;
 const MAX_TOOL_OUTPUT_CHARS = 120_000;
 const execFileAsync = promisify(execFile);
 const DEFAULT_WEB_TIMEOUT_MS = 45_000;
+const LEGACY_TOOL_REFUSAL_PATTERNS = [
+  /does not support NanoClaw tool execution yet/i,
+  /tools? are unavailable/i,
+];
 
 function ensureStateDir(): void {
   fs.mkdirSync(OPENAI_STATE_DIR, { recursive: true });
@@ -83,6 +87,10 @@ function loadAdditionalDirectoriesSummary(): string {
     .join('\n')}`;
 }
 
+function containsLegacyToolRefusal(text: string): boolean {
+  return LEGACY_TOOL_REFUSAL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 function buildPrompt(
   history: OpenAIHistoryTurn[],
   prompt: string,
@@ -99,9 +107,14 @@ function buildPrompt(
   const extraDirsSummary = loadAdditionalDirectoriesSummary();
   if (extraDirsSummary) sections.push(extraDirsSummary);
 
-  if (history.length > 0) {
+  const filteredHistory = history.filter(
+    (turn) =>
+      turn.role !== 'assistant' || !containsLegacyToolRefusal(turn.content),
+  );
+
+  if (filteredHistory.length > 0) {
     sections.push('Conversation so far:');
-    for (const turn of history) {
+    for (const turn of filteredHistory) {
       sections.push(
         `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}`,
       );
@@ -129,7 +142,6 @@ function getToolDefinitions(): unknown[] {
       name: 'shell',
       description:
         'Execute a shell command inside the container workspace. Use this for file inspection, search, edits, git commands, and local operations. This tool can also use curl for direct web requests if needed.',
-      strict: true,
       parameters: {
         type: 'object',
         properties: {
@@ -158,7 +170,6 @@ function getToolDefinitions(): unknown[] {
       name: 'web_fetch',
       description:
         'Fetch a URL from the web and return the response body. Use this for known pages or APIs.',
-      strict: true,
       parameters: {
         type: 'object',
         properties: {
@@ -181,7 +192,6 @@ function getToolDefinitions(): unknown[] {
       name: 'web_search',
       description:
         'Search the web for current information and return the result page HTML. Use this when you do not yet know the target URL.',
-      strict: true,
       parameters: {
         type: 'object',
         properties: {
@@ -242,6 +252,24 @@ function extractFunctionCalls(payload: unknown): ResponsesFunctionCall[] {
       typeof (item as { name?: unknown }).name === 'string' &&
       typeof (item as { arguments?: unknown }).arguments === 'string',
   );
+}
+
+function summarizeResponseOutput(payload: unknown): string {
+  const output = (payload as { output?: unknown[] } | null)?.output;
+  if (!Array.isArray(output) || output.length === 0) return 'none';
+  return output
+    .map((item) => {
+      const type =
+        item && typeof item === 'object' && 'type' in item
+          ? String((item as { type?: unknown }).type)
+          : 'unknown';
+      const status =
+        item && typeof item === 'object' && 'status' in item
+          ? String((item as { status?: unknown }).status)
+          : 'n/a';
+      return `${type}:${status}`;
+    })
+    .join(', ');
 }
 
 async function runShellTool(
@@ -323,7 +351,10 @@ async function runShellTool(
   }
 }
 
-async function runWebFetchTool(argsJson: string): Promise<string> {
+async function runWebFetchTool(
+  argsJson: string,
+  context: AgentTurnContext,
+): Promise<string> {
   let args: { url: string; timeout_ms?: number };
   try {
     args = JSON.parse(argsJson) as { url: string; timeout_ms?: number };
@@ -341,21 +372,40 @@ async function runWebFetchTool(argsJson: string): Promise<string> {
     return JSON.stringify({ ok: false, error: 'web_fetch requires a URL' });
   }
 
+  const curlArgs = [
+    '-L',
+    '--silent',
+    '--show-error',
+    '--max-time',
+    String(
+      Math.ceil((args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS) / 1000),
+    ),
+  ];
+  const env = Object.fromEntries(
+    Object.entries(context.agentEnv).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+  const insecureTls =
+    (context.agentEnv.WEB_FETCH_INSECURE_TLS || '').toLowerCase() === 'true';
+  const caBundle = context.agentEnv.WEB_FETCH_CA_BUNDLE?.trim();
+  if (insecureTls) {
+    curlArgs.push('--insecure');
+  } else if (caBundle) {
+    curlArgs.push('--cacert', caBundle);
+  }
+  curlArgs.push(url);
+
   try {
-    const { stdout, stderr } = await execFileAsync(
-      '/bin/bash',
-      [
-        '-lc',
-        `curl -L --silent --show-error --max-time ${Math.ceil(
-          (args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS) / 1000,
-        )} ${JSON.stringify(url)}`,
-      ],
-      {
-        cwd: '/workspace/group',
-        timeout: args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS,
-        maxBuffer: MAX_TOOL_OUTPUT_CHARS * 2,
-      },
+    context.log(
+      `OpenAI web_fetch: url=${url} insecure_tls=${insecureTls} ca_bundle=${caBundle || 'default'}`,
     );
+    const { stdout, stderr } = await execFileAsync('/usr/bin/curl', curlArgs, {
+      cwd: '/workspace/group',
+      timeout: args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS,
+      maxBuffer: MAX_TOOL_OUTPUT_CHARS * 2,
+      env,
+    });
 
     return JSON.stringify({
       ok: true,
@@ -382,7 +432,10 @@ async function runWebFetchTool(argsJson: string): Promise<string> {
   }
 }
 
-async function runWebSearchTool(argsJson: string): Promise<string> {
+async function runWebSearchTool(
+  argsJson: string,
+  context: AgentTurnContext,
+): Promise<string> {
   let args: { query: string; timeout_ms?: number };
   try {
     args = JSON.parse(argsJson) as { query: string; timeout_ms?: number };
@@ -407,6 +460,7 @@ async function runWebSearchTool(argsJson: string): Promise<string> {
       url: searchUrl,
       timeout_ms: args.timeout_ms || DEFAULT_WEB_TIMEOUT_MS,
     }),
+    context,
   );
 }
 
@@ -432,9 +486,16 @@ async function runOpenAITurn(
     authorization: `Bearer ${apiKey}`,
   };
   const tools = getToolDefinitions();
+  const conversationInput: unknown[] = [
+    {
+      type: 'message',
+      role: 'user',
+      content: compiledPrompt,
+    },
+  ];
   let requestBody: Record<string, unknown> = {
     model,
-    input: compiledPrompt,
+    input: conversationInput,
     tools,
   };
   let payload: unknown;
@@ -452,11 +513,18 @@ async function runOpenAITurn(
     }
 
     payload = (await response.json()) as unknown;
+    context.log(
+      `OpenAI response loop=${loop + 1} output=${summarizeResponseOutput(payload)}`,
+    );
     const functionCalls = extractFunctionCalls(payload);
     if (functionCalls.length === 0) break;
 
     context.log(`OpenAI requested ${functionCalls.length} tool call(s)`);
-    const toolOutputs = [];
+    const toolOutputs: Array<{
+      type: 'function_call_output';
+      call_id: string;
+      output: string;
+    }> = [];
     for (const call of functionCalls) {
       let output: string;
       switch (call.name) {
@@ -464,10 +532,10 @@ async function runOpenAITurn(
           output = await runShellTool(call.arguments, context);
           break;
         case 'web_fetch':
-          output = await runWebFetchTool(call.arguments);
+          output = await runWebFetchTool(call.arguments, context);
           break;
         case 'web_search':
-          output = await runWebSearchTool(call.arguments);
+          output = await runWebSearchTool(call.arguments, context);
           break;
         default:
           output = JSON.stringify({
@@ -483,19 +551,11 @@ async function runOpenAITurn(
       });
     }
 
-    const responseId =
-      (payload as { id?: unknown } | null)?.id &&
-      typeof (payload as { id?: unknown }).id === 'string'
-        ? (payload as { id: string }).id
-        : undefined;
-    if (!responseId) {
-      throw new Error('OpenAI response missing id for tool continuation');
-    }
+    conversationInput.push(...functionCalls, ...toolOutputs);
 
     requestBody = {
       model,
-      previous_response_id: responseId,
-      input: toolOutputs,
+      input: conversationInput,
       tools,
     };
   }
@@ -507,7 +567,12 @@ async function runOpenAITurn(
   const text = extractTextFromResponse(payload);
 
   state.history.push({ role: 'user', content: context.prompt });
-  state.history.push({ role: 'assistant', content: text });
+  state.history.push({
+    role: 'assistant',
+    content: containsLegacyToolRefusal(text)
+      ? 'Skipped legacy tool-refusal response.'
+      : text,
+  });
   saveSessionState(sessionId, state);
 
   context.emitOutput({
