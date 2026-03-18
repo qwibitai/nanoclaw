@@ -686,6 +686,8 @@ Case types:
       groupFolder,
       requestId,
       timestamp: new Date().toISOString(),
+      ...(args.gap_type ? { gapType: args.gap_type } : {}),
+      ...(args.signals ? { signals: args.signals } : {}),
     };
     if (args.customer_name) data.customer_name = args.customer_name;
     if (args.customer_phone) data.customer_phone = args.customer_phone;
@@ -710,11 +712,27 @@ Case types:
           ],
         };
       }
+      const parts = [
+        `Case created:\n  ID: ${result.id}\n  Name: ${result.name}\n  Workspace: ${result.workspace_path}${result.issue_url ? `\n  GitHub: ${result.issue_url}` : ''}`,
+      ];
+      if (result.priority) {
+        parts.push(
+          `  Priority: ${result.priority}${result.gap_type ? ` (gap: ${result.gap_type})` : ''}`,
+        );
+      }
+      if (result.meanwhile) {
+        parts.push(
+          `\nMeanwhile message for the customer: "${result.meanwhile}"`,
+        );
+      }
+      parts.push(
+        '\nThe case is now ACTIVE. Future messages about this topic will be routed to it.',
+      );
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Case created:\n  ID: ${result.id}\n  Name: ${result.name}\n  Workspace: ${result.workspace_path}${result.issue_url ? `\n  GitHub: ${result.issue_url}` : ''}\n\nThe case is now ACTIVE. Future messages about this topic will be routed to it.`,
+            text: parts.join('\n'),
           },
         ],
       };

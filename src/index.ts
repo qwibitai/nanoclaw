@@ -92,6 +92,7 @@ import { CASE_SYNC_ENABLED, CASE_SYNC_REPO } from './config.js';
 import { CaseSyncService, setActiveSyncService } from './case-backend.js';
 import { GitHubCaseSyncAdapter } from './case-backend-github.js';
 import { registerCaseMutationHook } from './cases.js';
+import { onCaseEscalationEvent } from './escalation-hook.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -1021,6 +1022,10 @@ async function main(): Promise<void> {
     process.once('SIGINT', () => syncService.stop());
     logger.info({ repo: CASE_SYNC_REPO }, 'Case sync enabled');
   }
+
+  // Register escalation mutation hook for observability logging
+  registerCaseMutationHook(onCaseEscalationEvent);
+  logger.info('Escalation mutation hook registered');
 
   loadState();
   restoreRemoteControl();

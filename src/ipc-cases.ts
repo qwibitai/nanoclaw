@@ -23,6 +23,18 @@ import { authorizeCaseCreation } from './case-auth.js';
 import { getCaseSyncService } from './case-backend.js';
 import { DATA_DIR } from './config.js';
 import {
+  computePriority,
+  loadEscalationConfig,
+  resolveNotificationTargets,
+} from './escalation.js';
+import type {
+  EscalationConfig,
+  PriorityLevel,
+  SignalContext,
+} from './escalation.js';
+import { dispatchEscalationNotifications } from './notification-dispatch.js';
+import type { EscalationNotification } from './notification-dispatch.js';
+import {
   createCaseWorkspace,
   generateCaseId,
   generateCaseName,
@@ -40,6 +52,65 @@ import { createGitHubIssue, DEV_CASE_ISSUE_REPO } from './github-api.js';
 import { logger } from './logger.js';
 import type { IpcDeps } from './ipc.js';
 import type { RegisteredGroup } from './types.js';
+
+/**
+ * Find and load escalation config from a group's vertical mounts.
+ * Scans additionalMounts for config/escalation.yaml files.
+ */
+function loadEscalationConfigForGroup(
+  group: RegisteredGroup | undefined,
+): EscalationConfig | null {
+  if (!group?.containerConfig?.additionalMounts) return null;
+
+  for (const mount of group.containerConfig.additionalMounts) {
+    const hostPath = mount.hostPath.startsWith('~')
+      ? path.join(process.env.HOME || '', mount.hostPath.slice(1))
+      : mount.hostPath;
+    const configPath = path.join(hostPath, 'config', 'escalation.yaml');
+    const config = loadEscalationConfig(configPath);
+    if (config) {
+      logger.info(
+        { configPath, group: group.name },
+        'Loaded escalation config from vertical mount',
+      );
+      return config;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Auto-detect escalation signals from case creation context.
+ */
+function detectSignals(
+  config: EscalationConfig,
+  initiator: string,
+  isMain: boolean,
+  explicitSignals?: Record<string, boolean>,
+): SignalContext {
+  const signals: SignalContext = { ...explicitSignals };
+
+  if (config.signals.admin_initiated && !('admin_initiated' in signals)) {
+    const isAdmin = config.admins.some(
+      (a) =>
+        a.name.toLowerCase() === initiator.toLowerCase() ||
+        a.email?.toLowerCase() === initiator.toLowerCase() ||
+        a.telegram === initiator,
+    );
+    signals.admin_initiated = isAdmin;
+  }
+
+  if (config.signals.main_channel && !('main_channel' in signals)) {
+    signals.main_channel = isMain;
+  }
+
+  if (config.signals.customer_waiting && !('customer_waiting' in signals)) {
+    signals.customer_waiting = false;
+  }
+
+  return signals;
+}
 
 /**
  * Handle a case-related IPC task. Returns true if handled, false if not a case type.
@@ -265,6 +336,8 @@ async function handleCaseCreate(
     chatJid?: string;
     initiator?: string;
     githubIssue?: number;
+    gapType?: string;
+    signals?: Record<string, boolean>;
   };
   if (!d.description) {
     logger.warn({ sourceGroup }, 'case_create missing description');
@@ -407,6 +480,57 @@ async function handleCaseCreate(
     id,
   );
 
+  // Escalation: compute priority if gap_type is provided
+  let computedPriority: PriorityLevel | null = null;
+  let computedScore = 0;
+  let escalationMeanwhile: string | undefined;
+  let escalationConfig: EscalationConfig | null = null;
+  if (d.gapType) {
+    const group = Object.values(registeredGroups).find(
+      (g) => g.folder === sourceGroup,
+    );
+    escalationConfig = loadEscalationConfigForGroup(group);
+    if (escalationConfig && escalationConfig.gap_types[d.gapType]) {
+      const signals = detectSignals(
+        escalationConfig,
+        d.initiator || 'agent',
+        isMain,
+        d.signals,
+      );
+      try {
+        const priorityResult = computePriority(
+          escalationConfig,
+          d.gapType,
+          signals,
+        );
+        computedPriority = priorityResult.level;
+        computedScore = priorityResult.score;
+        const gapConfig = escalationConfig.gap_types[d.gapType];
+        escalationMeanwhile = escalationConfig.meanwhile?.[gapConfig.status];
+        logger.info(
+          {
+            caseId: id,
+            gapType: d.gapType,
+            priority: computedPriority,
+            score: priorityResult.score,
+            signals,
+          },
+          'Escalation priority computed for new case',
+        );
+      } catch (err) {
+        logger.warn(
+          { err, caseId: id, gapType: d.gapType },
+          'Failed to compute escalation priority',
+        );
+      }
+    } else if (escalationConfig) {
+      logger.warn(
+        { gapType: d.gapType, caseId: id },
+        'Unknown gap type in escalation config, skipping priority computation',
+      );
+    }
+  }
+
   const newCase: Case = {
     id,
     group_folder: sourceGroup,
@@ -437,8 +561,8 @@ async function handleCaseCreate(
     customer_phone: (data.customer_phone as string) || null,
     customer_email: (data.customer_email as string) || null,
     customer_org: (data.customer_org as string) || null,
-    priority: null,
-    gap_type: null,
+    priority: computedPriority,
+    gap_type: d.gapType || null,
   };
 
   insertCase(newCase);
@@ -466,8 +590,40 @@ async function handleCaseCreate(
       workspace_path: workspacePath,
       github_issue: githubIssue,
       issue_url: issueUrl,
+      ...(computedPriority ? { priority: computedPriority } : {}),
+      ...(d.gapType ? { gap_type: d.gapType } : {}),
+      ...(escalationMeanwhile ? { meanwhile: escalationMeanwhile } : {}),
     }),
   );
+
+  // Dispatch escalation notifications if priority was computed
+  if (computedPriority && escalationConfig && d.gapType) {
+    const targets = resolveNotificationTargets(
+      escalationConfig,
+      computedPriority,
+    );
+    if (targets.length > 0) {
+      const notification: EscalationNotification = {
+        caseName: name,
+        caseId: id,
+        description: d.description,
+        gapType: d.gapType,
+        gapDescription: escalationConfig.gap_types[d.gapType]?.description,
+        priority: computedPriority,
+        score: computedScore,
+        sourceGroup,
+        context: d.context,
+      };
+      dispatchEscalationNotifications(notification, targets, deps).catch(
+        (err) => {
+          logger.error(
+            { err, caseId: id },
+            'Failed to dispatch escalation notifications',
+          );
+        },
+      );
+    }
+  }
 
   const notifyJid =
     caseType === 'dev'
