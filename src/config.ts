@@ -3,6 +3,12 @@ import path from 'path';
 
 import { readEnvFile } from './env.js';
 
+// Instance isolation: when NANOCLAW_INSTANCE is set (e.g. "staging"),
+// all conflicting resources (dirs, ports, container names, service names)
+// are namespaced so multiple instances can run side-by-side on one machine.
+// When unset, behavior is identical to before — zero regression risk.
+export const INSTANCE_ID = process.env.NANOCLAW_INSTANCE || '';
+
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
@@ -45,12 +51,16 @@ export const SENDER_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'sender-allowlist.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+// Instance-namespaced directories: store/ → store-staging/, etc.
+const instanceSuffix = INSTANCE_ID ? `-${INSTANCE_ID}` : '';
+export const STORE_DIR = path.resolve(PROJECT_ROOT, `store${instanceSuffix}`);
+export const GROUPS_DIR = path.resolve(PROJECT_ROOT, `groups${instanceSuffix}`);
+export const DATA_DIR = path.resolve(PROJECT_ROOT, `data${instanceSuffix}`);
 
+// Instance-namespaced container image: nanoclaw-agent:latest → nanoclaw-agent:staging
+const defaultImageTag = INSTANCE_ID || 'latest';
 export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+  process.env.CONTAINER_IMAGE || `nanoclaw-agent:${defaultImageTag}`;
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
@@ -59,11 +69,15 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+// Instance-namespaced port: prod=3001, any instance gets 3002 to avoid collision
+const defaultProxyPort = INSTANCE_ID ? '3002' : '3001';
 export const CREDENTIAL_PROXY_PORT = parseInt(
-  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  process.env.CREDENTIAL_PROXY_PORT || defaultProxyPort,
   10,
 );
 export const IPC_POLL_INTERVAL = 1000;
+// Instance-namespaced container name prefix: nanoclaw- → nanoclaw-staging-
+export const CONTAINER_NAME_PREFIX = `nanoclaw${instanceSuffix}-`;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,

@@ -10,6 +10,7 @@ import path from 'path';
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_NAME_PREFIX,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
@@ -330,7 +331,7 @@ export async function runContainerAgent(
     caseWorkspacePath: input.caseWorkspacePath,
   });
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  const containerName = `${CONTAINER_NAME_PREFIX}${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName, {
     caseId: input.caseId,
     caseName: input.caseName,

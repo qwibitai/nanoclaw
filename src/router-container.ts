@@ -17,6 +17,7 @@ import path from 'path';
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_NAME_PREFIX,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   TIMEZONE,
@@ -237,7 +238,7 @@ async function runRouterContainer(
   }
 
   // Build container args — minimal mounts, no group folders
-  const containerName = `nanoclaw-router-${Date.now()}`;
+  const containerName = `${CONTAINER_NAME_PREFIX}router-${Date.now()}`;
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -409,7 +410,7 @@ export async function stopRouterContainer(): Promise<void> {
   try {
     const { execSync } = await import('child_process');
     const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw-router- --format '{{.Names}}'`,
+      `${CONTAINER_RUNTIME_BIN} ps --filter name=${CONTAINER_NAME_PREFIX}router- --format '{{.Names}}'`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
     const containers = output.trim().split('\n').filter(Boolean);

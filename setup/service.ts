@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { INSTANCE_ID } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import {
   getPlatform,
@@ -19,6 +20,12 @@ import {
   isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+// Instance-aware naming: nanoclaw → nanoclaw-staging
+const SERVICE_NAME = INSTANCE_ID ? `nanoclaw-${INSTANCE_ID}` : 'nanoclaw';
+const PLIST_LABEL = INSTANCE_ID
+  ? `com.nanoclaw.${INSTANCE_ID}`
+  : 'com.nanoclaw';
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -77,7 +84,7 @@ function setupLaunchd(
     homeDir,
     'Library',
     'LaunchAgents',
-    'com.nanoclaw.plist',
+    `${PLIST_LABEL}.plist`,
   );
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
@@ -86,7 +93,7 @@ function setupLaunchd(
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nanoclaw</string>
+    <string>${PLIST_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
@@ -106,9 +113,9 @@ function setupLaunchd(
         <string>${homeDir}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
+    <string>${projectRoot}/logs/${SERVICE_NAME}.log</string>
     <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
+    <string>${projectRoot}/logs/${SERVICE_NAME}.error.log</string>
 </dict>
 </plist>`;
 
@@ -128,7 +135,7 @@ function setupLaunchd(
   let serviceLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
-    serviceLoaded = output.includes('com.nanoclaw');
+    serviceLoaded = output.includes(PLIST_LABEL);
   } catch {
     // launchctl list failed
   }
@@ -162,15 +169,33 @@ function setupLinux(
 /**
  * Kill any orphaned nanoclaw node processes left from previous runs or debugging.
  * Prevents connection conflicts when two instances connect to the same channel simultaneously.
+ * Instance-aware: only kills processes matching the current instance to avoid
+ * disrupting other running instances (e.g. staging setup won't kill production).
  */
 function killOrphanedProcesses(projectRoot: string): void {
   try {
-    execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
-      stdio: 'ignore',
-    });
-    logger.info('Stopped any orphaned nanoclaw processes');
+    // Build a pattern that matches the specific instance.
+    // For production (no INSTANCE_ID): match index.js but exclude any with NANOCLAW_INSTANCE set.
+    // For named instances: match processes that have NANOCLAW_INSTANCE={id} in their env.
+    if (INSTANCE_ID) {
+      // Kill only processes with this specific instance ID in their environment
+      execSync(
+        `pgrep -f '${projectRoot}/dist/index\\.js' | xargs -r -I{} sh -c 'grep -qz "NANOCLAW_INSTANCE=${INSTANCE_ID}" /proc/{}/environ 2>/dev/null && kill {}' || true`,
+        { stdio: 'ignore' },
+      );
+    } else {
+      // Kill processes that do NOT have NANOCLAW_INSTANCE set (production only)
+      execSync(
+        `pgrep -f '${projectRoot}/dist/index\\.js' | xargs -r -I{} sh -c '! grep -qz "NANOCLAW_INSTANCE=" /proc/{}/environ 2>/dev/null && kill {}' || true`,
+        { stdio: 'ignore' },
+      );
+    }
+    logger.info(
+      { instance: INSTANCE_ID || 'production' },
+      'Stopped any orphaned nanoclaw processes',
+    );
   } catch {
-    // pkill not available or no orphans
+    // pgrep/xargs not available or no orphans
   }
 }
 
@@ -213,7 +238,7 @@ function setupSystemd(
   let systemctlPrefix: string;
 
   if (runningAsRoot) {
-    unitPath = '/etc/systemd/system/nanoclaw.service';
+    unitPath = `/etc/systemd/system/${SERVICE_NAME}.service`;
     systemctlPrefix = 'systemctl';
     logger.info('Running as root — installing system-level systemd unit');
   } else {
@@ -229,12 +254,16 @@ function setupSystemd(
     }
     const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
     fs.mkdirSync(unitDir, { recursive: true });
-    unitPath = path.join(unitDir, 'nanoclaw.service');
+    unitPath = path.join(unitDir, `${SERVICE_NAME}.service`);
     systemctlPrefix = 'systemctl --user';
   }
 
+  const instanceEnvLine = INSTANCE_ID
+    ? `\nEnvironment=NANOCLAW_INSTANCE=${INSTANCE_ID}`
+    : '';
+
   const unit = `[Unit]
-Description=NanoClaw Personal Assistant
+Description=NanoClaw Personal Assistant${INSTANCE_ID ? ` (${INSTANCE_ID})` : ''}
 After=network.target
 
 [Service]
@@ -244,9 +273,9 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
-StandardOutput=append:${projectRoot}/logs/nanoclaw.log
-StandardError=append:${projectRoot}/logs/nanoclaw.error.log
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin${instanceEnvLine}
+StandardOutput=append:${projectRoot}/logs/${SERVICE_NAME}.log
+StandardError=append:${projectRoot}/logs/${SERVICE_NAME}.error.log
 
 [Install]
 WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
@@ -273,13 +302,13 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   }
 
   try {
-    execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable ${SERVICE_NAME}`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl enable failed');
   }
 
   try {
-    execSync(`${systemctlPrefix} start nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} start ${SERVICE_NAME}`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl start failed');
   }
@@ -287,7 +316,9 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   // Verify
   let serviceLoaded = false;
   try {
-    execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} is-active ${SERVICE_NAME}`, {
+      stdio: 'ignore',
+    });
     serviceLoaded = true;
   } catch {
     // Not active
@@ -312,12 +343,12 @@ function setupNohupFallback(
 ): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
-  const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
-  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const wrapperPath = path.join(projectRoot, `start-${SERVICE_NAME}.sh`);
+  const pidFile = path.join(projectRoot, `${SERVICE_NAME}.pid`);
 
   const lines = [
     '#!/bin/bash',
-    '# start-nanoclaw.sh — Start NanoClaw without systemd',
+    `# start-${SERVICE_NAME}.sh — Start NanoClaw${INSTANCE_ID ? ` (${INSTANCE_ID})` : ''} without systemd`,
     `# To stop: kill \\$(cat ${pidFile})`,
     '',
     'set -euo pipefail',
@@ -334,14 +365,17 @@ function setupNohupFallback(
     '  fi',
     'fi',
     '',
-    'echo "Starting NanoClaw..."',
+    `echo "Starting NanoClaw${INSTANCE_ID ? ` (${INSTANCE_ID})` : ''}..."`,
+    ...(INSTANCE_ID
+      ? [`export NANOCLAW_INSTANCE=${JSON.stringify(INSTANCE_ID)}`]
+      : []),
     `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
-    `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
-    `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
+    `  >> ${JSON.stringify(projectRoot + `/logs/${SERVICE_NAME}.log`)} \\`,
+    `  2>> ${JSON.stringify(projectRoot + `/logs/${SERVICE_NAME}.error.log`)} &`,
     '',
     `echo $! > ${JSON.stringify(pidFile)}`,
-    'echo "NanoClaw started (PID $!)"',
-    `echo "Logs: tail -f ${projectRoot}/logs/nanoclaw.log"`,
+    `echo "NanoClaw${INSTANCE_ID ? ` (${INSTANCE_ID})` : ''} started (PID $!)"`,
+    `echo "Logs: tail -f ${projectRoot}/logs/${SERVICE_NAME}.log"`,
   ];
   const wrapper = lines.join('\n') + '\n';
 

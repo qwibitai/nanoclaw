@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Mock config
+vi.mock('./config.js', () => ({
+  CONTAINER_NAME_PREFIX: 'nanoclaw-',
+}));
+
 // Mock logger
 vi.mock('./logger.js', () => ({
   logger: {
