@@ -489,6 +489,16 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Detect stale session errors returned as result messages
+      if (message.subtype === 'error_during_execution') {
+        const errorText = textResult || (message as { error?: string }).error || '';
+        if (errorText.includes('No conversation found') || (errorText.includes('session') && errorText.includes('not found'))) {
+          ipcPolling = false;
+          throw new Error(`Claude Code returned an error result: ${errorText}`);
+        }
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -582,7 +592,23 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, governedTools, auditInterceptor, resumeAt);
+      let queryResult: { newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean };
+      try {
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, governedTools, auditInterceptor, resumeAt);
+      } catch (queryErr) {
+        const errMsg = queryErr instanceof Error ? queryErr.message : String(queryErr);
+        // Self-heal: if session not found, clear session and retry fresh
+        if (errMsg.includes('No conversation found') || errMsg.includes('session') && errMsg.includes('not found')) {
+          log(`Stale session detected (${sessionId}). Clearing and retrying with fresh session.`);
+          sessionId = undefined;
+          resumeAt = undefined;
+          // Signal to host that session was cleared so it updates its records
+          writeOutput({ status: 'success', result: null, newSessionId: '__session_cleared__' });
+          continue;
+        }
+        throw queryErr; // Re-throw non-session errors
+      }
+
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

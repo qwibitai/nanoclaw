@@ -30,11 +30,14 @@ PENDING_DIR = ATLAS_DIR / "host-tasks" / "pending"
 COMPLETED_DIR = ATLAS_DIR / "host-tasks" / "completed"
 OUTPUTS_DIR = ATLAS_DIR / "host-tasks" / "outputs"
 AUDIT_DIR = ATLAS_DIR / "audit"
+NANOCLAW_DIR = Path.home() / "nanoclaw"
+IPC_DIR = NANOCLAW_DIR / "data" / "ipc" / "atlas_main" / "messages"
 
 # Config
 POLL_INTERVAL = 5  # seconds
 TASK_TIMEOUT = 300  # 5 minutes max per task
 MAX_OUTPUT_SIZE = 50_000  # chars to keep in result summary
+AUTH_ERROR_PATTERNS = ["authentication_error", "OAuth token has expired", "401", "token expired"]
 
 # Tier restrictions
 TIER_READONLY_FLAG = "--allowedTools Read,Glob,Grep,WebSearch,WebFetch"
@@ -43,6 +46,41 @@ TIER_READONLY_FLAG = "--allowedTools Read,Glob,Grep,WebSearch,WebFetch"
 def log(msg: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"[{ts}] {msg}", flush=True)
+
+
+def send_telegram_alert(message: str) -> None:
+    """Send an alert to CEO via NanoClaw's IPC system (atlas_main group)."""
+    try:
+        IPC_DIR.mkdir(parents=True, exist_ok=True)
+        # Read main group JID from NanoClaw DB
+        import sqlite3
+        db_path = NANOCLAW_DIR / "store" / "messages.db"
+        if not db_path.exists():
+            log(f"Cannot send Telegram alert — DB not found at {db_path}")
+            return
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute("SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1").fetchone()
+        conn.close()
+        if not row:
+            log("Cannot send Telegram alert — no main group registered")
+            return
+        main_jid = row[0]
+
+        alert_file = IPC_DIR / f"alert-{int(time.time() * 1000)}.json"
+        alert_file.write_text(json.dumps({
+            "type": "message",
+            "chatJid": main_jid,
+            "text": message,
+        }))
+        log(f"Telegram alert sent via IPC: {message[:100]}...")
+    except Exception as e:
+        log(f"Failed to send Telegram alert: {e}")
+
+
+def is_auth_error(stdout: str, stderr: str) -> bool:
+    """Detect authentication failures in claude -p output."""
+    combined = (stdout + stderr).lower()
+    return any(pattern.lower() in combined for pattern in AUTH_ERROR_PATTERNS)
 
 
 def log_audit(entity: str, event: dict) -> None:
@@ -178,6 +216,24 @@ def process_task(task_path: Path) -> None:
         stdout = result.stdout or ""
         stderr = result.stderr or ""
         exit_code = result.returncode
+
+        # Detect auth failure — alert CEO immediately, don't silently fail
+        if is_auth_error(stdout, stderr):
+            auth_msg = (
+                "*Host-Executor Auth Failure*\n\n"
+                f"Task `{task_id}` for {entity} failed due to expired authentication.\n\n"
+                "Run on your laptop:\n"
+                "`scp ~/.claude/.credentials.json root@5.78.190.56:/home/atlas/.claude/.credentials.json`\n\n"
+                "Or SSH and run:\n"
+                "`/home/atlas/scripts/refresh-claude-auth.sh`"
+            )
+            send_telegram_alert(auth_msg)
+            write_result(task_id, entity, "error", exit_code,
+                         "Authentication expired. CEO alerted on Telegram.",
+                         [], False)
+            task_path.unlink()
+            log(f"Task {task_id} failed: auth expired. CEO alerted.")
+            return
 
         # Truncate output for result summary
         result_summary = stdout[:MAX_OUTPUT_SIZE]

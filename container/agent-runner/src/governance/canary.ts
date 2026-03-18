@@ -52,11 +52,33 @@ export function runPreflightChecks(entity: string): PreflightResult {
       for (const check of checks) {
         if (!check.pattern.test(constitution)) {
           // Canary failure — set passive mode
+          const failureReason = `Canary failure: ${check.name}`;
+          const failureDetail = `Check "${check.description}" failed.\nExpected pattern: ${check.pattern}\nConstitution length: ${constitution.length} chars`;
           try {
             const stateDir = path.join(ATLAS_STATE_DIR, 'state');
             fs.mkdirSync(stateDir, { recursive: true });
-            fs.writeFileSync(modePath, JSON.stringify({ mode: 'passive', reason: `Canary failure: ${check.name}`, timestamp: new Date().toISOString() }));
+            fs.writeFileSync(modePath, JSON.stringify({ mode: 'passive', reason: failureReason, timestamp: new Date().toISOString() }));
           } catch { /* best effort */ }
+
+          // ALERT CEO on Telegram immediately via IPC
+          try {
+            const ipcDir = '/workspace/ipc/messages';
+            fs.mkdirSync(ipcDir, { recursive: true });
+            const alertMsg = `*CANARY FAILURE — Atlas going passive*\n\n` +
+              `Check: ${check.description}\n` +
+              `Pattern: \`${check.pattern.source}\`\n` +
+              `Result: NOT FOUND in constitution.md\n\n` +
+              `Atlas is now in passive mode. All autonomous actions stopped.\n` +
+              `To restore: send /reset-mode from Telegram.`;
+            const alertFile = path.join(ipcDir, `canary-alert-${Date.now()}.json`);
+            // Use the container's chatJid to route the alert
+            const chatJid = process.env.NANOCLAW_CHAT_JID || '';
+            fs.writeFileSync(alertFile, JSON.stringify({
+              type: 'message',
+              chatJid,
+              text: alertMsg,
+            }));
+          } catch { /* best effort — alert is non-blocking */ }
 
           logGovernanceEvent({
             entity,

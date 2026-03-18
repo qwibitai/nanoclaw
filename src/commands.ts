@@ -63,6 +63,8 @@ export function handleCommand(text: string): CommandResult {
       return { handled: true, response: handleReject(args) };
     case '/quota':
       return { handled: true, response: handleQuota() };
+    case '/reset-mode':
+      return { handled: true, response: handleResetMode() };
     default:
       return { handled: false };
   }
@@ -217,6 +219,40 @@ function handleQuota(): string {
   }
 
   return lines.join('\n');
+}
+
+function handleResetMode(): string {
+  try {
+    const stateDir = path.dirname(MODE_PATH);
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    // Read current mode first
+    let previousMode = 'unknown';
+    try {
+      if (fs.existsSync(MODE_PATH)) {
+        const data = JSON.parse(fs.readFileSync(MODE_PATH, 'utf-8'));
+        previousMode = data.mode || 'unknown';
+      }
+    } catch { /* ignore */ }
+
+    if (previousMode === 'active') {
+      return 'Mode is already active. No reset needed.';
+    }
+
+    // Write active mode
+    fs.writeFileSync(MODE_PATH, JSON.stringify({
+      mode: 'active',
+      previous_mode: previousMode,
+      reset_by: 'telegram_command',
+      reset_at: new Date().toISOString(),
+    }, null, 2));
+
+    logger.info({ previousMode }, 'Mode reset to active via /reset-mode command');
+    return `Mode reset: ${previousMode} → active\nAll autonomous operations restored.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error resetting mode: ${msg}`;
+  }
 }
 
 // --- Helper functions ---

@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -303,6 +304,16 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
+        if (output.newSessionId === '__session_cleared__') {
+          // Agent-runner detected stale session and self-healed — clear our side too
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+          logger.info(
+            { group: group.name },
+            'Stale session cleared by agent-runner (self-heal)',
+          );
+          return;
+        }
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
@@ -333,6 +344,16 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Self-heal: if error is session-related, clear stale session so next retry starts fresh
+      const errText = output.error || '';
+      if (errText.includes('No conversation found') || errText.includes('session') || errText.includes('Session')) {
+        delete sessions[group.folder];
+        setSession(group.folder, '');
+        logger.warn(
+          { group: group.name },
+          'Session-related error detected — cleared stale session for next retry',
+        );
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
