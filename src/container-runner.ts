@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -100,15 +101,36 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+  }
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
+  // Global memory directory (read-only for all groups)
+  // Only directory mounts are supported, not file mounts
+  const globalDir = path.join(GROUPS_DIR, 'global');
+  if (fs.existsSync(globalDir)) {
+    mounts.push({
+      hostPath: globalDir,
+      containerPath: '/workspace/global',
+      readonly: true,
+    });
+    // WAL-mode SQLite databases require a writable directory even for read-only
+    // access (to create the -shm shared memory file). Override the read-only
+    // parent mount for just the .mnemon subdirectory, and ensure the directories
+    // are world-writable so Docker rootless uid mapping allows the container
+    // node user to create WAL files.
+    const globalMnemonDir = path.join(globalDir, '.mnemon');
+    if (fs.existsSync(globalMnemonDir)) {
+      fs.chmodSync(globalMnemonDir, 0o777);
+      // Recursively chmod data subdirs (data/, data/default/) but not the DB file
+      for (const sub of fs.readdirSync(globalMnemonDir, { recursive: true, withFileTypes: true })) {
+        if (sub.isDirectory()) {
+          const fullPath = path.join(sub.parentPath ?? (sub as unknown as { path: string }).path, sub.name);
+          fs.chmodSync(fullPath, 0o777);
+        }
+      }
       mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
+        hostPath: globalMnemonDir,
+        containerPath: '/workspace/global/.mnemon',
+        readonly: false,
       });
     }
   }
@@ -179,6 +201,17 @@ function buildVolumeMounts(
     containerPath: '/home/node/.mnemon',
     readonly: false,
   });
+
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const homeDir = os.homedir();
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
