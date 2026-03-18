@@ -17,7 +17,7 @@
 
 **Purpose**: Database migration and type system changes that all user stories depend on
 
-- [ ] T001 Add `created_tz: string` field to `ScheduledTask` interface in `src/types.ts`
+- [x] T001 Add `created_tz: string` field to `ScheduledTask` interface in `src/types.ts`
 - [ ] T002 Add database migration for `created_tz` column with `DEFAULT 'UTC'` in `src/db.ts` `createSchema()` function, after the existing `context_mode` migration block
 
 **Checkpoint**: Type system and database schema are updated. All existing tests still pass.

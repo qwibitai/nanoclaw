@@ -159,6 +159,7 @@ describe('pause_task authorization', () => {
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
     createTask({
       id: 'task-other',
@@ -171,6 +172,7 @@ describe('pause_task authorization', () => {
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
   });
 
@@ -220,6 +222,7 @@ describe('resume_task authorization', () => {
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'paused',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
   });
 
@@ -269,6 +272,7 @@ describe('cancel_task authorization', () => {
       next_run: null,
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
 
     await processTaskIpc(
@@ -292,6 +296,7 @@ describe('cancel_task authorization', () => {
       next_run: null,
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
 
     await processTaskIpc(
@@ -315,6 +320,7 @@ describe('cancel_task authorization', () => {
       next_run: null,
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
+      created_tz: 'UTC',
     });
 
     await processTaskIpc(
