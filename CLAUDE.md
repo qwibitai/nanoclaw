@@ -140,6 +140,8 @@ The container buildkit caches the build context aggressively. `--no-cache` alone
 ## Active Technologies
 - TypeScript 5.x (Node.js, ESM) + grammy (Telegram), whisper.cpp (transcription), qmd (vault search), better-sqlite3 (001-obsidian-journal-audio-linking)
 - Obsidian vault on filesystem (`~/Obsidian/pj-private-vault/pj-private-vault/`), SQLite for message state (001-obsidian-journal-audio-linking)
+- TypeScript 5.x (Node.js, ESM) + cron-parser 5.x, better-sqlite3, pino (logging) (002-fix-digest-timezone)
+- SQLite via better-sqlite3 (`store/messages.db`) (002-fix-digest-timezone)
 
 ## Recent Changes
 - 001-obsidian-journal-audio-linking: Added TypeScript 5.x (Node.js, ESM) + grammy (Telegram), whisper.cpp (transcription), qmd (vault search), better-sqlite3
