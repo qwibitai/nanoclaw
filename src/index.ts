@@ -73,6 +73,40 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+const SEND_RETRY_ATTEMPTS = 3;
+const SEND_RETRY_BASE_DELAY_MS = 2000;
+
+/**
+ * Retry wrapper for outbound messages. Retries on transient network errors
+ * (ETIMEDOUT, ECONNRESET, ECONNREFUSED, EAI_AGAIN, EPIPE) and 5xx responses.
+ */
+async function sendWithRetry(
+  ch: Channel,
+  jid: string,
+  text: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < SEND_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await ch.sendMessage(jid, text);
+      return;
+    } catch (err: any) {
+      const isLast = attempt === SEND_RETRY_ATTEMPTS - 1;
+      const code = err?.error?.code || err?.code || '';
+      const isTransient =
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|EPIPE/i.test(code) ||
+        (err?.error_code && err.error_code >= 500);
+      if (isLast || !isTransient) throw err;
+      logger.warn(
+        { jid, attempt: attempt + 1, code },
+        'Send failed, retrying',
+      );
+      await new Promise((r) =>
+        setTimeout(r, SEND_RETRY_BASE_DELAY_MS * (attempt + 1)),
+      );
+    }
+  }
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -223,7 +257,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        try {
+          await sendWithRetry(channel, chatJid, text);
+        } catch (err) {
+          logger.error(
+            { group: group.name, err },
+            'Failed to deliver agent output after retries',
+          );
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -611,14 +652,14 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await sendWithRetry(channel, jid, text);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return sendWithRetry(channel, jid, text);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
