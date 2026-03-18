@@ -26,10 +26,8 @@ import { researchCommand } from '../commands/research.js';
 import { buildCommand } from '../commands/build.js';
 import { statusCommand } from '../commands/status.js';
 
-const { DISCORD_TOKEN, DISCORD_CONTROL_CHANNEL_ID: CONTROL_CHANNEL_ID } = readEnvFile([
-  'DISCORD_TOKEN',
-  'DISCORD_CONTROL_CHANNEL_ID',
-]);
+const { DISCORD_TOKEN, DISCORD_CONTROL_CHANNEL_ID: CONTROL_CHANNEL_ID } =
+  readEnvFile(['DISCORD_TOKEN', 'DISCORD_CONTROL_CHANNEL_ID']);
 
 export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   if (!DISCORD_TOKEN) {
@@ -186,8 +184,21 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                 activeContainers,
               );
             } else {
-              // Research and build commands
-              await command.execute(interaction, opts.onMessage);
+              // Research and build commands.
+              // Wrap onMessage to upsert the chats row first — slash commands
+              // create threads before any messageCreate fires, so the FK on
+              // messages.chat_jid would fail without this.
+              const safeOnMessage = (chatJid: string, msg: any) => {
+                opts.onChatMetadata(
+                  chatJid,
+                  msg.timestamp ?? new Date().toISOString(),
+                  msg.sender_name ?? chatJid,
+                  'discord',
+                  true,
+                );
+                opts.onMessage(chatJid, msg);
+              };
+              await command.execute(interaction, safeOnMessage);
             }
           } catch (err) {
             logger.error(
