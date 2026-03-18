@@ -280,6 +280,19 @@ export async function buildVolumeMounts(
     });
   }
 
+  // ms-mcp token cache: MSAL token caches live in ~/.ms-mcp/ on host.
+  // ms-mcp reads TOKEN_CACHE_PATH=~/.ms-mcp/token-cache-*.json — inside
+  // the container ~ resolves to /home/node.  Read-write is required because
+  // MSAL silently refreshes expired tokens and writes them back.
+  const msMcpCache = path.join(homeDir, '.ms-mcp');
+  if (fs.existsSync(msMcpCache)) {
+    mounts.push({
+      hostPath: msMcpCache,
+      containerPath: '/home/node/.ms-mcp',
+      readonly: false,
+    });
+  }
+
   return mounts;
 }
 
@@ -427,7 +440,9 @@ export async function runContainerAgent(
           while ((traceIdx = parseBuffer.indexOf(TRACE_MARKER)) !== -1) {
             const lineEnd = parseBuffer.indexOf('\n', traceIdx);
             if (lineEnd === -1) break;
-            const jsonStr = parseBuffer.slice(traceIdx + TRACE_MARKER.length, lineEnd).trim();
+            const jsonStr = parseBuffer
+              .slice(traceIdx + TRACE_MARKER.length, lineEnd)
+              .trim();
             parseBuffer = parseBuffer.slice(lineEnd + 1);
             try {
               const ev = JSON.parse(jsonStr);
