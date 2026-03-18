@@ -2035,3 +2035,38 @@ export function recentMemories(groupFolder: string, topK = 6): Memory[] {
     )
     .all(groupFolder, topK) as Memory[];
 }
+
+// --- Cross-group retrieval (for personal/main groups) ---
+
+export function countAllMemories(): number {
+  const row = db.prepare('SELECT COUNT(*) AS c FROM memories').get() as {
+    c: number;
+  };
+  return row.c;
+}
+
+export function searchMemoriesVecAllGroups(
+  queryEmbedding: Float32Array,
+  topK = 6,
+): Memory[] {
+  return db
+    .prepare(
+      `SELECT m.id, m.group_folder, m.type, m.name, m.description, m.content, m.created_at, m.updated_at
+       FROM vec_memories v
+       JOIN memories m ON m.id = v.memory_id
+       WHERE v.embedding MATCH ?
+         AND k = ?
+       ORDER BY v.distance
+       LIMIT ?`,
+    )
+    .all(Buffer.from(queryEmbedding.buffer), topK, topK) as Memory[];
+}
+
+export function recentMemoriesAllGroups(topK = 6): Memory[] {
+  return db
+    .prepare(
+      `SELECT id, group_folder, type, name, description, content, created_at, updated_at
+       FROM memories ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(topK) as Memory[];
+}

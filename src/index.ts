@@ -90,6 +90,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { extractMemoriesAsync } from './memory-extractor.js';
 import { getMemoryBlock } from './memory-store.js';
 import {
   ensureDailyNotifierTask,
@@ -762,7 +763,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const latestMessageText =
     missedMessages[missedMessages.length - 1]?.content ?? '';
-  const memoryBlock = await getMemoryBlock(group.folder, latestMessageText);
+  const crossGroup = group.containerConfig?.globalContext !== false;
+  const memoryBlock = await getMemoryBlock(
+    group.folder,
+    latestMessageText,
+    crossGroup,
+  );
 
   const prompt =
     memoryBlock +
@@ -856,6 +862,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let agentResponseText = '';
 
   // For Discord top-level messages (new threads), pre-generate a Haiku title
   // in parallel with the agent run. This is used as a fallback when the agent
@@ -924,6 +931,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
         // Strip <internal> and <thread-title> blocks
         const text = stripInternalTags(raw);
+        agentResponseText += text + '\n';
         logger.info(
           { group: group.name },
           `Agent output: ${raw.slice(0, 200)}`,
@@ -1061,6 +1069,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Success — persist the cursor advance now that the container has completed.
   saveState();
+
+  // Fire-and-forget memory extraction from the conversation
+  extractMemoriesAsync(group.folder, missedMessages, agentResponseText);
 
   // If we truncated at a second trigger, re-enqueue so the next trigger gets its
   // own container. Use setImmediate so this runs after runForGroup's finally block

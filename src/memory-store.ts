@@ -1,4 +1,5 @@
 import {
+  countAllMemories,
   countMemories,
   deleteMemoryById,
   getMemoryById,
@@ -6,7 +7,9 @@ import {
   insertMemoryEmbedding,
   listMemories,
   recentMemories,
+  recentMemoriesAllGroups,
   searchMemoriesVec,
+  searchMemoriesVecAllGroups,
   updateMemoryFields,
 } from './db.js';
 import { generateEmbedding } from './embedding.js';
@@ -88,32 +91,46 @@ export function formatMemoryBlock(memories: Memory[]): string {
   return `<memories>\n${items}\n</memories>\n`;
 }
 
+/**
+ * Retrieve relevant memories and format as XML block for prompt injection.
+ *
+ * @param crossGroup — When true (personal/main groups), retrieves from ALL groups.
+ *   When false (isolated groups like Illysium Slack), scoped to own group only.
+ */
 export async function getMemoryBlock(
   groupFolder: string,
   queryText: string,
+  crossGroup = false,
 ): Promise<string> {
   try {
-    // Fast-path: skip embedding call if group has no memories
-    if (countMemories(groupFolder) === 0) return '';
+    // Fast-path: skip embedding call if no memories exist
+    const count = crossGroup ? countAllMemories() : countMemories(groupFolder);
+    if (count === 0) return '';
+
+    const fetchRecent = () =>
+      crossGroup
+        ? recentMemoriesAllGroups(TOP_K)
+        : recentMemories(groupFolder, TOP_K);
 
     const embedding = await generateEmbedding(queryText);
     let memories: Memory[];
     if (embedding) {
       try {
-        memories = searchMemoriesVec(groupFolder, embedding, TOP_K);
+        memories = crossGroup
+          ? searchMemoriesVecAllGroups(embedding, TOP_K)
+          : searchMemoriesVec(groupFolder, embedding, TOP_K);
         if (memories.length === 0) {
-          // No embeddings stored yet (async generation pending) — fall back to recent
-          memories = recentMemories(groupFolder, TOP_K);
+          memories = fetchRecent();
         }
       } catch (err) {
         logger.warn(
           { err },
           'vec_memories search failed, falling back to recent',
         );
-        memories = recentMemories(groupFolder, TOP_K);
+        memories = fetchRecent();
       }
     } else {
-      memories = recentMemories(groupFolder, TOP_K);
+      memories = fetchRecent();
     }
     return formatMemoryBlock(memories);
   } catch (err) {
