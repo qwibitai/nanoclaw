@@ -419,7 +419,12 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
+      | 'created_tz'
     >
   >,
 ): void {
@@ -445,6 +450,10 @@ export function updateTask(
   if (updates.status !== undefined) {
     fields.push('status = ?');
     values.push(updates.status);
+  }
+  if (updates.created_tz !== undefined) {
+    fields.push('created_tz = ?');
+    values.push(updates.created_tz);
   }
 
   if (fields.length === 0) return;
