@@ -71,3 +71,7 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Atlas governance state directory (host-level, not mounted into containers)
+// Containers see this at /workspace/extra/atlas-state via mounts
+export const ATLAS_STATE_DIR = path.join(HOME_DIR, '.atlas');

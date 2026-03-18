@@ -13,10 +13,19 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/atlas_main/
+!groups/atlas_gpg/
+!groups/atlas_crownscape/
 groups/main/*
 groups/global/*
+groups/atlas_main/*
+groups/atlas_gpg/*
+groups/atlas_crownscape/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/atlas_main/CLAUDE.md
+!groups/atlas_gpg/CLAUDE.md
+!groups/atlas_crownscape/CLAUDE.md
 
 # Secrets
 *.keys.json
@@ -24,6 +33,7 @@ groups/global/*
 
 # Temp files
 .tmp-*
+build-state.json
 
 # OS
 .DS_Store

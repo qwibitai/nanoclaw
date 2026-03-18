@@ -51,6 +51,7 @@ import {
   startRemoteControl,
   stopRemoteControl,
 } from './remote-control.js';
+import { handleCommand } from './commands.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -546,6 +547,20 @@ async function main(): Promise<void> {
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // Atlas commands — intercept from main group before storage (zero LLM cost)
+      if (registeredGroups[chatJid]?.isMain && trimmed.startsWith('/')) {
+        const result = handleCommand(trimmed);
+        if (result.handled && result.response) {
+          const channel = findChannel(channels, chatJid);
+          if (channel) {
+            channel.sendMessage(chatJid, result.response).catch((err) =>
+              logger.error({ err, chatJid }, 'Command response send error'),
+            );
+          }
+          return;
+        }
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
