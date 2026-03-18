@@ -97,6 +97,15 @@ src/github-issues.test.ts" ""
 assert_contains "agent-runner excluded → allow" "Test coverage check" "$(run_hook_stderr "$HOOK" "gh pr merge 42")"
 
 echo ""
+echo "=== .test-util.ts files are excluded from source coverage checks ==="
+
+setup_gh_git_mocks "src/test-helpers.test-util.ts
+src/github-issues.ts
+src/github-issues.test.ts" ""
+
+assert_contains "test-util excluded → allow" "Test coverage check" "$(run_hook_stderr "$HOOK" "gh pr merge 42")"
+
+echo ""
 echo "=== Prefixed test does NOT match unrelated source ==="
 
 # ipc-github-issues.test.ts should NOT count as coverage for config.ts

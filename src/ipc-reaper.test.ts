@@ -8,7 +8,7 @@ import {
   updateCase,
   removeWorktreeLock,
 } from './cases.js';
-import { makeCase } from './test-helpers.js';
+import { makeCase } from './test-helpers.test-util.js';
 
 beforeEach(() => {
   _initTestDatabase();

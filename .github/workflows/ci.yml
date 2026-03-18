@@ -38,19 +38,24 @@ jobs:
           fetch-depth: 0
 
       - name: Check test coverage for changed source files
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
 
-          # Get changed source files (exclude tests, config, docs, hooks, container agent-runner)
+          # Get changed source files (exclude tests, test utilities, config, docs, hooks, container agent-runner)
           CHANGED_SRC=$(git diff --name-only "$BASE"..."$HEAD" -- \
             '*.ts' '*.js' '*.tsx' '*.jsx' | \
-            grep -vE '(\.(test|spec)\.|__tests__|\.config\.|vitest\.|CLAUDE\.md|\.claude/|container/agent-runner/|\.husky/)' || true)
+            grep -vE '(\.(test|spec|test-util)\.|__tests__|\.config\.|vitest\.|CLAUDE\.md|\.claude/|container/agent-runner/|\.husky/)' || true)
 
           if [ -z "$CHANGED_SRC" ]; then
             echo "No source files changed — skipping test coverage check."
             exit 0
           fi
+
+          # Parse test-exceptions from PR body
+          EXCEPTIONS=$(echo "$PR_BODY" | sed -n '/^```test-exceptions/,/^```/p' | grep -v '^```' | cut -d: -f1 | xargs)
 
           # Get changed test files
           CHANGED_TESTS=$(git diff --name-only "$BASE"..."$HEAD" -- \
@@ -66,7 +71,13 @@ jobs:
             basename=$(basename "$src_file" | sed 's/\.\(ts\|js\|tsx\|jsx\)$//')
 
             FOUND=false
-            if [ -n "$CHANGED_TESTS" ]; then
+
+            # Check test-exceptions from PR body
+            if [ -n "$EXCEPTIONS" ] && echo "$EXCEPTIONS" | grep -qF "$src_file"; then
+              FOUND=true
+            fi
+
+            if [ "$FOUND" = false ] && [ -n "$CHANGED_TESTS" ]; then
               # Match: exact test file, prefixed test file, or __tests__ directory
               if echo "$CHANGED_TESTS" | grep -qE "(${basename}[\.-](test|spec)\.|${basename}-[a-z0-9-]+\.(test|spec)\.|$(dirname "$src_file")/__tests__/)"; then
                 FOUND=true
@@ -101,7 +112,11 @@ jobs:
           echo "Before merging, ensure:"
           echo "  1. Unit tests cover the actual changes"
           echo "  2. If no tests exist for a module, write them"
-          echo "  3. Or document why tests aren't needed in the PR description"
+          echo "  3. To exempt files that genuinely don't need test changes, add to your PR body:"
+          echo ""
+          echo '  ```test-exceptions'
+          echo '  src/file.ts: reason why no tests needed'
+          echo '  ```'
           exit 1
 
       - name: Check PR body has verification section

@@ -13,7 +13,7 @@ import {
   checkWorktreeLock,
   pruneCaseWorkspace,
 } from './cases.js';
-import { makeCase } from './test-helpers.js';
+import { makeCase } from './test-helpers.test-util.js';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'wt-lock-test-'));

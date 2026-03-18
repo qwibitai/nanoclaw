@@ -29,7 +29,7 @@ ALL_CHANGED=$(get_pr_changed_files "$CMD_LINE" "$IS_MERGE")
 # container/agent-runner/src/ runs inside containers — tested via smoke tests, not host unit tests
 CHANGED_SRC=$(echo "$ALL_CHANGED" | \
   grep -E '\.(ts|js|tsx|jsx)$' | \
-  grep -vE '(\.test\.|\.spec\.|__tests__|\.config\.|vitest\.|CLAUDE\.md|\.claude/|container/agent-runner/)' || true)
+  grep -vE '(\.test\.|\.spec\.|\.test-util\.|__tests__|\.config\.|vitest\.|CLAUDE\.md|\.claude/|container/agent-runner/)' || true)
 
 # Get changed test files
 CHANGED_TESTS=$(echo "$ALL_CHANGED" | \

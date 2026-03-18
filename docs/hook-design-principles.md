@@ -226,3 +226,49 @@ Every enforcement system MUST have:
 5. **Allowlist tests** — Verify allowed actions pass through
 
 Test file naming: `test-{hook-name}.sh` for unit tests, `test-{system}-e2e.sh` for integration.
+
+## CI Policy Enforcement (Level 3)
+
+CI workflows are the highest enforcement level — they run on every PR and cannot be bypassed by the agent. They complement hooks (which enforce during development) by enforcing at merge time.
+
+### Test coverage policy (pr-policy)
+
+Every changed source file must have a corresponding test file change in the same PR. This is checked by the `pr-policy` job in `.github/workflows/ci.yml`.
+
+**Exclusion patterns** (not considered source files):
+- `.test.ts`, `.spec.ts` — test files
+- `.test-util.ts` — test utility files
+- `.config.`, `vitest.` — configuration files
+- `.claude/`, `container/agent-runner/`, `.husky/` — infrastructure directories
+
+**Escape hatch**: `test-exceptions` fenced block in the PR body. When a source file change genuinely doesn't need test changes, the author declares it publicly:
+
+````markdown
+```test-exceptions
+src/ipc.ts: 2-line field addition, covered by existing insertCase tests
+src/config.ts: constant change, no logic to test
+```
+````
+
+Properties:
+- Visible in PR body — reviewer sees every exemption
+- Unique fence language — no false positives from other code blocks
+- `file: reason` format — structured, parseable
+- Preserved in git history via PR body — auditable
+- No elevated permissions needed — but justification is public
+
+**When NOT to use test-exceptions**:
+- New functions or methods — always need tests
+- Logic changes — always need tests
+- Bug fixes — the test proves the fix works
+
+### File naming convention
+
+| File type | Pattern | Example |
+|-----------|---------|---------|
+| Source | `{name}.ts` | `src/cases.ts` |
+| Unit test | `{name}.test.ts` | `src/cases.test.ts` |
+| Integration test | `{name}.integration.test.ts` | `src/download-coalesce.integration.test.ts` |
+| Test utility | `{name}.test-util.ts` | `src/test-helpers.test-util.ts` |
+
+Test utilities (`.test-util.ts`) contain shared helpers, factories, and fixtures used by multiple test files. They are excluded from the source file coverage check because they are test infrastructure, not production code.
