@@ -12,7 +12,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 CLAUDE_WT="$REPO_ROOT/scripts/claude-wt.sh"
 source "$SCRIPT_DIR/test-helpers.sh"
 

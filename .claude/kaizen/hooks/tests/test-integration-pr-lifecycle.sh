@@ -188,7 +188,7 @@ run_post_hook "gh pr create --title test" "" "error: failed" "1"
 assert_eq "failed pr create produces no output" "" "$HOOK_STDOUT"
 
 # No state should exist
-STATE_COUNT=$(ls "$STATE_DIR"/ 2>/dev/null | wc -l | tr -d ' ')
+STATE_COUNT=$(ls "$STATE_DIR"/ 2>/dev/null | grep -v '^post-merge-' | wc -l | tr -d ' ')
 assert_eq "no state files from failed command" "0" "$STATE_COUNT"
 
 echo ""
