@@ -60,7 +60,7 @@ describe('GmailChannel', () => {
       expect(ch.name).toBe('gmail');
     });
 
-it('defaults with no options provided', () => {
+    it('defaults with no options provided', () => {
       const ch = new GmailChannel(makeOpts());
       expect(ch.name).toBe('gmail');
     });
