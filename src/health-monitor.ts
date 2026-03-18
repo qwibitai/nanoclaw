@@ -80,8 +80,6 @@ async function pollSource(
     const status = await source.checkHealth();
     if (status) {
       const previous = lastHealthState.get(source.name) ?? null;
-      lastHealthState.set(source.name, status.healthy);
-      deps.setState(`health_status_${source.name}`, String(status.healthy));
 
       // Only post on state transitions or first-check-unhealthy
       const shouldPost = previous !== null ? previous !== status.healthy : !status.healthy;
@@ -89,13 +87,25 @@ async function pollSource(
       if (shouldPost) {
         const embed = formatHealthStatusEmbed(status, previous);
         const jids = resolveJids(deps.config, "health_status", source.name);
+        let anySendSucceeded = false;
         for (const jid of jids) {
           try {
             await deps.sendEmbed(jid, embed);
+            anySendSucceeded = true;
           } catch (err) {
             logger.error({ jid, source: source.name, err }, "Health monitor: sendEmbed failed");
           }
         }
+        // Only commit new state if delivery succeeded (or no JIDs to send to).
+        // If all sends failed, keep previous state so the transition retries next poll.
+        if (anySendSucceeded || jids.length === 0) {
+          lastHealthState.set(source.name, status.healthy);
+          deps.setState(`health_status_${source.name}`, String(status.healthy));
+        }
+      } else {
+        // No transition — still commit current state (idempotent, no notification needed)
+        lastHealthState.set(source.name, status.healthy);
+        deps.setState(`health_status_${source.name}`, String(status.healthy));
       }
     }
   } catch (err) {
@@ -109,18 +119,22 @@ async function pollSource(
     const rawCursor = deps.getState(cursorKey) ?? null;
     const { events, cursor: newCursor } = await source.fetchEvents(rawCursor);
 
-    if (newCursor !== null) {
-      deps.setState(cursorKey, newCursor);
-    }
-
-    // On first run (rawCursor was null), skip posting — cursor was just initialized
-    if (rawCursor !== null) {
+    // On first run (rawCursor was null), skip posting — cursor was just initialized.
+    // Commit cursor immediately since there's nothing to deliver.
+    if (rawCursor === null) {
+      if (newCursor !== null) {
+        deps.setState(cursorKey, newCursor);
+      }
+    } else {
+      let allDelivered = true;
       for (const event of events) {
         const embed = formatEventEmbed(event);
         const jids = resolveJids(deps.config, event.type, source.name);
+        let eventDelivered = jids.length === 0;
         for (const jid of jids) {
           try {
             await deps.sendEmbed(jid, embed);
+            eventDelivered = true;
           } catch (err) {
             logger.error(
               { jid, source: source.name, eventType: event.type, err },
@@ -128,6 +142,14 @@ async function pollSource(
             );
           }
         }
+        if (!eventDelivered) {
+          allDelivered = false;
+        }
+      }
+      // Only advance cursor after successful delivery.
+      // If any event failed all sends, keep old cursor to retry next poll.
+      if (allDelivered && newCursor !== null) {
+        deps.setState(cursorKey, newCursor);
       }
     }
   } catch (err) {

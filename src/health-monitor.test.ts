@@ -256,6 +256,72 @@ describe("Health Monitor", () => {
 
       expect(deps.setState).toHaveBeenCalledWith("health_status_test", "true");
     });
+
+    it("does NOT commit new state when all transition sends fail", async () => {
+      const state = new Map<string, string>();
+      state.set("health_status_test", "true"); // Previous: healthy
+
+      const source = createMockSource("test", {
+        checkHealth: vi.fn().mockResolvedValue({
+          source: "test",
+          healthy: false,
+          message: "Down",
+          checkedAt: new Date(),
+        }),
+      });
+
+      const sendEmbed = vi.fn().mockRejectedValue(new Error("Discord down"));
+
+      const deps = createDeps({
+        sources: [source],
+        sendEmbed,
+        getState: vi.fn((key: string) => state.get(key)),
+        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // State should remain "true" (healthy) since delivery failed
+      expect(state.get("health_status_test")).toBe("true");
+    });
+
+    it("retries transition notification on next poll after send failure", async () => {
+      const state = new Map<string, string>();
+      state.set("health_status_test", "true");
+
+      const source = createMockSource("test", {
+        checkHealth: vi.fn().mockResolvedValue({
+          source: "test",
+          healthy: false,
+          message: "Down",
+          checkedAt: new Date(),
+        }),
+      });
+
+      // First call fails, second succeeds
+      const sendEmbed = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Discord down"))
+        .mockResolvedValue(undefined);
+
+      const deps = createDeps({
+        sources: [source],
+        sendEmbed,
+        getState: vi.fn((key: string) => state.get(key)),
+        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // First poll: send failed, state not committed
+      expect(state.get("health_status_test")).toBe("true");
+
+      // Second poll: send succeeds, transition delivered
+      await vi.advanceTimersByTimeAsync(300000);
+      expect(state.get("health_status_test")).toBe("false");
+    });
   });
 
   // --- Event cursor ---
@@ -334,6 +400,86 @@ describe("Health Monitor", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(deps.setState).toHaveBeenCalledWith("events_cursor_test", '{"offset":105}');
+    });
+
+    it("does NOT advance cursor when all event sends fail", async () => {
+      const state = new Map<string, string>();
+      state.set("events_cursor_test", '{"offset":100}');
+      state.set("health_status_test", "true");
+
+      const source = createMockSource("test", {
+        fetchEvents: vi.fn().mockResolvedValue({
+          events: [
+            {
+              source: "test",
+              type: "phase_completed",
+              timestamp: "t",
+              title: "Phase completed",
+              data: {},
+            },
+          ],
+          cursor: '{"offset":101}',
+        }),
+      });
+
+      const sendEmbed = vi.fn().mockRejectedValue(new Error("Discord down"));
+
+      const deps = createDeps({
+        sources: [source],
+        sendEmbed,
+        getState: vi.fn((key: string) => state.get(key)),
+        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Cursor should remain at old value since delivery failed
+      expect(state.get("events_cursor_test")).toBe('{"offset":100}');
+    });
+
+    it("retries event delivery on next poll after send failure", async () => {
+      const state = new Map<string, string>();
+      state.set("events_cursor_test", '{"offset":100}');
+      state.set("health_status_test", "true");
+
+      const source = createMockSource("test", {
+        fetchEvents: vi.fn().mockResolvedValue({
+          events: [
+            {
+              source: "test",
+              type: "phase_completed",
+              timestamp: "t",
+              title: "Phase completed",
+              data: {},
+            },
+          ],
+          cursor: '{"offset":101}',
+        }),
+      });
+
+      // First call fails, second succeeds
+      const sendEmbed = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Discord down"))
+        .mockResolvedValue(undefined);
+
+      const deps = createDeps({
+        sources: [source],
+        sendEmbed,
+        getState: vi.fn((key: string) => state.get(key)),
+        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // First poll: cursor not advanced
+      expect(state.get("events_cursor_test")).toBe('{"offset":100}');
+
+      // Second poll: delivery succeeds, cursor advances
+      await vi.advanceTimersByTimeAsync(300000);
+      expect(state.get("events_cursor_test")).toBe('{"offset":101}');
     });
 
     it("handles empty event list gracefully", async () => {
