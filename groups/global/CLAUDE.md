@@ -19,6 +19,11 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+**IMPORTANT — avoid double responses:** Your final text output is ALSO sent to the user. This means if you use `send_message` to say something, and then say the same thing in your final output, the user receives it twice. Rules:
+- If you used `send_message` to acknowledge a task ("On it!"), do NOT repeat that acknowledgment in your final output.
+- If you used `send_message` to send the complete result, wrap your final output entirely in `<internal>` tags.
+- Only output text at the end if it adds new information not already sent via `send_message`.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:
@@ -29,7 +34,7 @@ If part of your output is internal reasoning rather than something for the user,
 Here are the key findings from the research...
 ```
 
-Text inside `<internal>` tags is logged but not sent to the user. If you've already sent the key information via `send_message`, you can wrap the recap in `<internal>` to avoid sending it again.
+Text inside `<internal>` tags is logged but not sent to the user.
 
 ### Sub-agents and teammates
 
