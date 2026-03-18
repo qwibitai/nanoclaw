@@ -15,8 +15,9 @@ Every piece of work is a **case**. Cases provide isolated containers, sessions, 
 - Kaizen: on completion, agents reflect on impediments and suggest dev improvements.
 - With 2+ active cases, Haiku routes incoming messages to the right case.
 - Replies are prefixed `[case: name]` in Telegram.
-- **All dev work MUST be in a case with its own worktree.** Never modify code in main checkout.
+- **All dev work MUST be in a case with its own worktree.** Never modify code in main checkout. Enforced by `enforce-case-exists.sh` (L2 hook — blocks source edits in worktrees without a case).
 - Case naming: `YYMMDD-HHMM-kebab-description` (e.g., `260315-1430-fix-auth`)
+- **Kaizen case naming:** `YYMMDD-HHMM-kNN-kebab-description` (e.g., `260318-2107-k21-fix-newline-prefix`). The `kNN` embeds the kaizen issue number, making it visible in branch names and `git worktree list`.
 
 ## Harness / Vertical Architecture
 

@@ -15,6 +15,22 @@ A spec is a hypothesis written in the past. This skill bridges the gap between "
 
 **The key insight:** Specs rot. The codebase has changed. Understanding has deepened. Things that seemed important when the spec was written may be irrelevant now. Things the spec didn't anticipate may be obvious now. The spec's value is the *problem taxonomy and direction*, not the specific solutions it proposed.
 
+## Case Gate — MANDATORY before writing any code
+
+Before touching any source code, verify a case exists. The `enforce-case-exists.sh` hook (Level 2) will block edits in worktrees without a case, but you should create the case proactively rather than being blocked.
+
+**Checklist:**
+1. **Case exists in DB** for the current branch:
+   ```bash
+   BRANCH=$(git rev-parse --abbrev-ref HEAD) node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare('SELECT name, status, github_issue FROM cases WHERE branch_name = ?').all(process.env.BRANCH), null, 2))"
+   ```
+2. **Case has `github_issue` linked** (when working on a kaizen issue)
+3. **Case status is `ACTIVE`**
+
+If any check fails, create the case via `case_create` IPC before proceeding. For kaizen issues, always pass `githubIssue` to link the case to the existing issue.
+
+**Naming convention for kaizen work:** `YYMMDD-HHMM-kNN-kebab-description` (e.g., `260318-2107-k21-fix-newline-prefix`). The `kNN` segment embeds the kaizen issue number, making it visible in worktree names, branch names, and `git worktree list` output — even if the DB step is somehow skipped.
+
 ## The Five-Step Algorithm
 
 Before touching code, apply these steps to the spec itself. This is adapted from the algorithm used at Tesla/SpaceX for manufacturing process improvement — but it applies even more forcefully to specifications, because specs are pure thought-stuff with no physical constraints preventing deletion and simplification.

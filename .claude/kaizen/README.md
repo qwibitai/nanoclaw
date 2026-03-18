@@ -39,6 +39,7 @@ These are registered in `.claude/settings.json` and fire on Claude Code tool-use
 | `enforce-pr-review-stop.sh` | Stop | Gate | Yes | Block agent from finishing with pending review |
 | `enforce-case-worktree.sh` | PreToolUse(Bash) | Advisory | No | Warn before commit/push outside worktree |
 | `enforce-worktree-writes.sh` | PreToolUse(Edit/Write) | Gate | Yes | Block source edits in main checkout |
+| `enforce-case-exists.sh` | PreToolUse(Edit/Write) | Gate | Yes | Block source edits in worktrees without a case |
 | `check-test-coverage.sh` | PreToolUse(Bash) | Advisory | No | Warn when source changes lack tests |
 | `check-verification.sh` | PreToolUse(Bash) | Advisory | No | Warn about missing verification section |
 | `check-dirty-files.sh` | PreToolUse(Bash) | Gate | Yes | Block push/PR create with dirty files |

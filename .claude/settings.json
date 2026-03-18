@@ -52,6 +52,11 @@
           },
           {
             "type": "command",
+            "command": "./.claude/kaizen/hooks/enforce-case-exists.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "./.claude/kaizen/hooks/enforce-pr-review-tools.sh",
             "timeout": 10
           }
