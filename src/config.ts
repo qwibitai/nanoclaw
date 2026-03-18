@@ -6,11 +6,15 @@
  * - docs/FORK_OVERVIEW.md
  */
 import { createHash } from "crypto";
+import fs from "fs";
 import os from "os";
 import path from "path";
 
 import { readEnvFile } from "./env.js";
 import { CONFIG_ROOT, PROJECT_ROOT } from "./runtime-paths.js";
+
+// Re-export path roots so existing consumers don't need import changes
+export { APP_DIR, DATA_DIR } from "./runtime-paths.js";
 
 export const INSTANCE_ID =
   process.env.NANOCLAW_INSTANCE_ID ||
@@ -34,25 +38,27 @@ export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts.
-// GROUPS_DIR can be relocated via NANOCLAW_CONFIG_ROOT.
 const HOME_DIR = process.env.HOME || os.homedir();
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  ".config",
-  "nanoclaw",
-  "mount-allowlist.json",
+// Security allowlists: prefer CONFIG_ROOT, fall back to legacy ~/.config/nanoclaw/
+function resolveConfigWithLegacy(filename: string): string {
+  const configPath = path.join(CONFIG_ROOT, filename);
+  if (fs.existsSync(configPath)) return configPath;
+  return path.join(HOME_DIR, ".config", "nanoclaw", filename);
+}
+
+export const MOUNT_ALLOWLIST_PATH = resolveConfigWithLegacy("mount-allowlist.json");
+export const SENDER_ALLOWLIST_PATH = resolveConfigWithLegacy("sender-allowlist.json");
+
+export const STORE_DIR = path.resolve(
+  process.env.NANOCLAW_STORE_DIR || path.join(PROJECT_ROOT, "store"),
 );
-export const SENDER_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  ".config",
-  "nanoclaw",
-  "sender-allowlist.json",
-);
-export const STORE_DIR = path.resolve(PROJECT_ROOT, "store");
 export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
-export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
+
+// Docker mount source overrides — when NanoClaw runs in a container,
+// Docker -v sources must be host paths, not container-internal paths.
+export const CONTAINER_HOST_CONFIG_DIR = process.env.CONTAINER_HOST_CONFIG_DIR || "";
+export const CONTAINER_HOST_DATA_DIR = process.env.CONTAINER_HOST_DATA_DIR || "";
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name] || envConfig[name];
@@ -65,7 +71,7 @@ function parseIntEnv(name: string, fallback: number): number {
 }
 
 export const CHANNEL_CONNECT_TIMEOUT = parseIntEnv("CHANNEL_CONNECT_TIMEOUT", 30000);
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "nanoclaw-agent:latest";
+export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "";
 export const CONTAINER_TIMEOUT = parseIntEnv("CONTAINER_TIMEOUT", 1800000);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseIntEnv("CONTAINER_MAX_OUTPUT_SIZE", 10485760); // 10MB default
 export const CREDENTIAL_PROXY_PORT = parseIntEnv("CREDENTIAL_PROXY_PORT", 3001);

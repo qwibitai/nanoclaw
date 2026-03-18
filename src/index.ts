@@ -66,6 +66,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from "./sender-allowlist.js";
+import { syncProjectMeta } from "./project-meta.js";
 import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
@@ -680,6 +681,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info("Database initialized");
   loadState();
+  syncProjectMeta();
 
   const tanrenClient = createTanrenClient();
   if (tanrenClient) {

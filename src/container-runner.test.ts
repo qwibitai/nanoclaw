@@ -6,8 +6,10 @@ import { PassThrough } from "stream";
 const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
 const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
-// Mock config
-vi.mock("./config.js", () => ({
+// Mutable mock data — override per-test via direct assignment
+const mockConfig = vi.hoisted(() => ({
+  CONTAINER_HOST_CONFIG_DIR: "",
+  CONTAINER_HOST_DATA_DIR: "",
   CONTAINER_IMAGE: "nanoclaw-agent:latest",
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
@@ -17,6 +19,45 @@ vi.mock("./config.js", () => ({
   IDLE_TIMEOUT: 1800000, // 30min
   INSTANCE_ID: "test1234",
   TIMEZONE: "America/Los_Angeles",
+  APP_DIR: "/tmp/nanoclaw-test-app",
+}));
+
+const mockRuntime = vi.hoisted(() => ({
+  CREDENTIAL_PROXY_EXTERNAL_URL: "",
+  AGENT_NETWORK: "",
+  CONTAINER_HOST_GATEWAY: "host.docker.internal",
+  CONTAINER_RUNTIME_BIN: "docker",
+  hostGatewayArgs: () => [] as string[],
+  readonlyMountArgs: (h: string, c: string) => ["-v", `${h}:${c}:ro`],
+  stopContainer: (name: string) => `docker stop ${name}`,
+}));
+
+const mockRuntimePaths = vi.hoisted(() => ({
+  APP_DIR: "/tmp/nanoclaw-test-app",
+  CONFIG_ROOT: "/tmp/nanoclaw-test-groups",
+  DATA_DIR: "/tmp/nanoclaw-test-data",
+}));
+
+// Mock config
+vi.mock("./config.js", () => mockConfig);
+
+// Mock runtime-paths
+vi.mock("./runtime-paths.js", () => mockRuntimePaths);
+
+// Mock container-runtime — return the hoisted object directly so property
+// mutations in individual tests are visible to the module under test.
+vi.mock("./container-runtime.js", () => mockRuntime);
+
+// Mock credential-proxy
+vi.mock("./credential-proxy.js", () => ({
+  detectAuthMode: () => "api-key",
+}));
+
+// Mock auth-circuit-breaker
+vi.mock("./auth-circuit-breaker.js", () => ({
+  isAuthError: vi.fn(() => false),
+  recordAuthFailure: vi.fn(),
+  recordAuthSuccess: vi.fn(),
 }));
 
 // Mock logger
@@ -109,8 +150,34 @@ function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: Co
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
+/** Reset mutable mock values to defaults between tests */
+function resetMocks() {
+  mockConfig.CONTAINER_HOST_CONFIG_DIR = "";
+  mockConfig.CONTAINER_HOST_DATA_DIR = "";
+  mockConfig.CONTAINER_IMAGE = "nanoclaw-agent:latest";
+  mockConfig.CONTAINER_MAX_OUTPUT_SIZE = 10485760;
+  mockConfig.CONTAINER_TIMEOUT = 1800000;
+  mockConfig.CREDENTIAL_PROXY_PORT = 3001;
+  mockConfig.DATA_DIR = "/tmp/nanoclaw-test-data";
+  mockConfig.GROUPS_DIR = "/tmp/nanoclaw-test-groups";
+  mockConfig.IDLE_TIMEOUT = 1800000;
+  mockConfig.INSTANCE_ID = "test1234";
+  mockConfig.TIMEZONE = "America/Los_Angeles";
+  mockConfig.APP_DIR = "/tmp/nanoclaw-test-app";
+
+  mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "";
+  mockRuntime.AGENT_NETWORK = "";
+  mockRuntime.CONTAINER_HOST_GATEWAY = "host.docker.internal";
+  mockRuntime.CONTAINER_RUNTIME_BIN = "docker";
+
+  mockRuntimePaths.APP_DIR = "/tmp/nanoclaw-test-app";
+  mockRuntimePaths.CONFIG_ROOT = "/tmp/nanoclaw-test-groups";
+  mockRuntimePaths.DATA_DIR = "/tmp/nanoclaw-test-data";
+}
+
 describe("container-runner tanren passthrough", () => {
   beforeEach(() => {
+    resetMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     vi.mocked(spawn).mockClear();
@@ -178,6 +245,7 @@ describe("container-runner tanren passthrough", () => {
 
 describe("container-runner instance label", () => {
   beforeEach(() => {
+    resetMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     vi.mocked(spawn).mockClear();
@@ -203,6 +271,7 @@ describe("container-runner instance label", () => {
 
 describe("container-runner timeout behavior", () => {
   beforeEach(() => {
+    resetMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
   });
@@ -286,6 +355,7 @@ describe("container-runner timeout behavior", () => {
 
 describe("container-runner agent-runner sync", () => {
   beforeEach(() => {
+    resetMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     vi.mocked(spawn).mockClear();
@@ -353,6 +423,316 @@ describe("container-runner agent-runner sync", () => {
     // Existing files should NOT have been overwritten
     expect(copiedFiles.some((f) => f.endsWith("agent.ts"))).toBe(false);
     expect(copiedFiles.some((f) => f.endsWith("tools.ts"))).toBe(false);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner AGENT_NETWORK", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT include --network flag when AGENT_NETWORK is empty", async () => {
+    mockRuntime.AGENT_NETWORK = "";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).not.toContain("--network");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("includes --network flag when AGENT_NETWORK is set", async () => {
+    mockRuntime.AGENT_NETWORK = "my-network";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const networkIdx = spawnArgs.indexOf("my-network");
+    expect(networkIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[networkIdx - 1]).toBe("--network");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner CREDENTIAL_PROXY_EXTERNAL_URL", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses host gateway URL when CREDENTIAL_PROXY_EXTERNAL_URL is empty", async () => {
+    mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
+    expect(baseUrlArg).toBe(
+      `ANTHROPIC_BASE_URL=http://host.docker.internal:${mockConfig.CREDENTIAL_PROXY_PORT}`,
+    );
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("uses CREDENTIAL_PROXY_EXTERNAL_URL as ANTHROPIC_BASE_URL when set", async () => {
+    mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "http://nanoclaw:3001";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
+    expect(baseUrlArg).toBe("ANTHROPIC_BASE_URL=http://nanoclaw:3001");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner volume mount overrides", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.statSync).mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("rewrites config-rooted mount sources when CONTAINER_HOST_CONFIG_DIR is set", async () => {
+    mockConfig.CONTAINER_HOST_CONFIG_DIR = "/host/config";
+    // The group folder path resolves under GROUPS_DIR which is under CONFIG_ROOT
+    // resolveGroupFolderPath => GROUPS_DIR/test-group => /tmp/nanoclaw-test-groups/test-group
+    // resolveHostPath should rewrite since GROUPS_DIR is under CONFIG_ROOT
+
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Find volume mount args that contain the host config path rewrite
+    const volumeArgs = spawnArgs.filter((arg) => arg.includes("/host/config"));
+    // The group folder mount should be rewritten from /tmp/nanoclaw-test-groups/test-group
+    // to /host/config/test-group (CONFIG_ROOT = GROUPS_DIR in test, so relative path is just "test-group")
+    expect(volumeArgs.length).toBeGreaterThan(0);
+    expect(volumeArgs.some((a) => a.includes("/host/config/test-group"))).toBe(true);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("rewrites data-rooted mount sources when CONTAINER_HOST_DATA_DIR is set", async () => {
+    mockConfig.CONTAINER_HOST_DATA_DIR = "/host/data";
+
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Data-rooted mounts (sessions, cache, ipc) should be rewritten
+    const volumeArgs = spawnArgs.filter((arg) => arg.includes("/host/data"));
+    expect(volumeArgs.length).toBeGreaterThan(0);
+    // uv cache mount is under DATA_DIR/cache/uv/test-group
+    expect(volumeArgs.some((a) => a.includes("/host/data/cache/uv/test-group"))).toBe(true);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("uses original paths when neither override is set", async () => {
+    mockConfig.CONTAINER_HOST_CONFIG_DIR = "";
+    mockConfig.CONTAINER_HOST_DATA_DIR = "";
+
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Group mount should use the original path
+    const groupMountArg = spawnArgs.find(
+      (arg) =>
+        arg.includes("/tmp/nanoclaw-test-groups/test-group") && arg.includes("/workspace/group"),
+    );
+    expect(groupMountArg).toBeDefined();
+    // Should NOT contain any host override paths
+    expect(spawnArgs.every((arg) => !arg.includes("/host/"))).toBe(true);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner main group mounts", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.statSync).mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("mounts project-meta read-only when the directory exists", async () => {
+    const projectMetaDir = "/tmp/nanoclaw-test-data/project-meta";
+
+    vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
+      const s = p.toString();
+      if (s === projectMetaDir) return true;
+      return false;
+    });
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, { ...testInput, isMain: true }, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // project-meta should be mounted read-only at /workspace/project
+    const projectMount = spawnArgs.find(
+      (arg) => arg.includes("project-meta") && arg.includes("/workspace/project"),
+    );
+    expect(projectMount).toBeDefined();
+    expect(projectMount).toContain(":ro");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("skips project-meta mount when directory does not exist", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, { ...testInput, isMain: true }, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const projectMount = spawnArgs.find((arg) => arg.includes("/workspace/project"));
+    expect(projectMount).toBeUndefined();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("mounts cross-group directory read-only for main group", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, { ...testInput, isMain: true }, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Cross-group mount: GROUPS_DIR -> /workspace/groups (ro)
+    const crossGroupMount = spawnArgs.find(
+      (arg) => arg.includes("/tmp/nanoclaw-test-groups") && arg.includes("/workspace/groups"),
+    );
+    expect(crossGroupMount).toBeDefined();
+    expect(crossGroupMount).toContain(":ro");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("mounts own group folder as writable for main group", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, { ...testInput, isMain: true }, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Main group gets its own folder at /workspace/group (writable, no :ro)
+    const ownGroupMount = spawnArgs.find(
+      (arg) =>
+        arg.includes("/tmp/nanoclaw-test-groups/test-group") &&
+        arg.includes("/workspace/group") &&
+        !arg.includes("/workspace/groups"),
+    );
+    expect(ownGroupMount).toBeDefined();
+    expect(ownGroupMount).not.toContain(":ro");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("does NOT mount cross-group directory for non-main groups", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, { ...testInput, isMain: false }, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const crossGroupMount = spawnArgs.find((arg) => arg.includes("/workspace/groups"));
+    expect(crossGroupMount).toBeUndefined();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner CONTAINER_IMAGE validation", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("throws when CONTAINER_IMAGE is empty", async () => {
+    mockConfig.CONTAINER_IMAGE = "";
+
+    await expect(runContainerAgent(testGroup, testInput, () => {})).rejects.toThrow(
+      "CONTAINER_IMAGE is required",
+    );
+  });
+
+  it("does not throw when CONTAINER_IMAGE is set", async () => {
+    mockConfig.CONTAINER_IMAGE = "nanoclaw-agent:latest";
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    // Should have spawned successfully
+    expect(vi.mocked(spawn)).toHaveBeenCalled();
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);

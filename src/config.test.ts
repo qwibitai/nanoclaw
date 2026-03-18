@@ -61,6 +61,7 @@ describe("parseIntEnv validation", () => {
 describe("config path resolution", () => {
   afterEach(() => {
     delete process.env.NANOCLAW_CONFIG_ROOT;
+    delete process.env.NANOCLAW_STORE_DIR;
     vi.resetModules();
   });
 
@@ -73,6 +74,69 @@ describe("config path resolution", () => {
     process.env.NANOCLAW_CONFIG_ROOT = "/tmp/nanoclaw-config";
     const mod = await import("./config.js");
     expect(mod.GROUPS_DIR).toBe("/tmp/nanoclaw-config/groups");
+  });
+
+  it("defaults STORE_DIR to PROJECT_ROOT/store", async () => {
+    const mod = await import("./config.js");
+    expect(mod.STORE_DIR).toBe(path.resolve(process.cwd(), "store"));
+  });
+
+  it("respects NANOCLAW_STORE_DIR env var", async () => {
+    process.env.NANOCLAW_STORE_DIR = "/data/store";
+    const mod = await import("./config.js");
+    expect(mod.STORE_DIR).toBe("/data/store");
+  });
+});
+
+describe("containerization config", () => {
+  afterEach(() => {
+    delete process.env.CONTAINER_IMAGE;
+    delete process.env.CONTAINER_HOST_CONFIG_DIR;
+    delete process.env.CONTAINER_HOST_DATA_DIR;
+    vi.resetModules();
+  });
+
+  it("CONTAINER_IMAGE is empty when env var is unset", async () => {
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_IMAGE).toBe("");
+  });
+
+  it("CONTAINER_IMAGE reads from env var", async () => {
+    process.env.CONTAINER_IMAGE = "ghcr.io/user/nanoclaw-agent:latest";
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_IMAGE).toBe("ghcr.io/user/nanoclaw-agent:latest");
+  });
+
+  it("CONTAINER_HOST_CONFIG_DIR defaults to empty", async () => {
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_CONFIG_DIR).toBe("");
+  });
+
+  it("CONTAINER_HOST_CONFIG_DIR reads from env var", async () => {
+    process.env.CONTAINER_HOST_CONFIG_DIR = "/host/config";
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_CONFIG_DIR).toBe("/host/config");
+  });
+
+  it("CONTAINER_HOST_DATA_DIR defaults to empty", async () => {
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_DATA_DIR).toBe("");
+  });
+
+  it("CONTAINER_HOST_DATA_DIR reads from env var", async () => {
+    process.env.CONTAINER_HOST_DATA_DIR = "/host/data";
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_DATA_DIR).toBe("/host/data");
+  });
+
+  it("re-exports APP_DIR from runtime-paths", async () => {
+    const mod = await import("./config.js");
+    expect(mod.APP_DIR).toBe(process.cwd());
+  });
+
+  it("re-exports DATA_DIR from runtime-paths", async () => {
+    const mod = await import("./config.js");
+    expect(mod.DATA_DIR).toBe(path.join(process.cwd(), "data"));
   });
 });
 

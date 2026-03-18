@@ -12,6 +12,8 @@ import fs from "fs";
 import path from "path";
 
 import {
+  CONTAINER_HOST_CONFIG_DIR,
+  CONTAINER_HOST_DATA_DIR,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -25,8 +27,10 @@ import {
 import { resolveGroupFolderPath, resolveGroupIpcPath } from "./group-folder.js";
 import { logger } from "./logger.js";
 import {
+  AGENT_NETWORK,
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  CREDENTIAL_PROXY_EXTERNAL_URL,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
@@ -34,6 +38,7 @@ import {
 import { detectAuthMode } from "./credential-proxy.js";
 import { validateAdditionalMounts } from "./mount-security.js";
 import { isAuthError, recordAuthFailure, recordAuthSuccess } from "./auth-circuit-breaker.js";
+import { APP_DIR, CONFIG_ROOT } from "./runtime-paths.js";
 import { RegisteredGroup } from "./types.js";
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -64,44 +69,62 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+/**
+ * Translate a container-internal path to its host-side equivalent for Docker -v sources.
+ * When NanoClaw runs inside a container, its internal paths (/config/groups/..., /data/sessions/...)
+ * differ from the host paths Docker needs. CONTAINER_HOST_CONFIG_DIR and CONTAINER_HOST_DATA_DIR
+ * provide the host-side equivalents. On bare metal, returns the path unchanged.
+ */
+function resolveHostPath(internalPath: string): string {
+  if (CONTAINER_HOST_CONFIG_DIR) {
+    const rel = path.relative(CONFIG_ROOT, internalPath);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+      return path.join(CONTAINER_HOST_CONFIG_DIR, rel);
+    }
+  }
+  if (CONTAINER_HOST_DATA_DIR) {
+    const rel = path.relative(DATA_DIR, internalPath);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+      return path.join(CONTAINER_HOST_DATA_DIR, rel);
+    }
+  }
+  return internalPath;
+}
+
 function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
-    // Read-only prevents the agent from modifying host application code
-    // (src/, dist/, package.json, etc.) which would bypass the sandbox
-    // entirely on next restart.
-    mounts.push({
-      hostPath: projectRoot,
-      containerPath: "/workspace/project",
-      readonly: true,
-    });
-
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, ".env");
-    if (fs.existsSync(envFile)) {
+    // Project meta: synced CLAUDE.md, docs/, skills/ from APP_DIR at startup.
+    // Gives agent access to project instructions without mounting the full code tree.
+    const projectMetaDir = path.join(DATA_DIR, "project-meta");
+    if (fs.existsSync(projectMetaDir)) {
       mounts.push({
-        hostPath: "/dev/null",
-        containerPath: "/workspace/project/.env",
+        hostPath: resolveHostPath(projectMetaDir),
+        containerPath: "/workspace/project",
         readonly: true,
       });
     }
 
-    // Main also gets its group folder as the working directory
+    // Cross-group visibility: all groups directory read-only.
+    // Main agent can browse other groups' CLAUDE.md for coordination.
     mounts.push({
-      hostPath: groupDir,
+      hostPath: resolveHostPath(GROUPS_DIR),
+      containerPath: "/workspace/groups",
+      readonly: true,
+    });
+
+    // Main also gets its own group folder as the working directory
+    mounts.push({
+      hostPath: resolveHostPath(groupDir),
       containerPath: "/workspace/group",
       readonly: false,
     });
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: groupDir,
+      hostPath: resolveHostPath(groupDir),
       containerPath: "/workspace/group",
       readonly: false,
     });
@@ -111,7 +134,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     const globalDir = path.join(GROUPS_DIR, "global");
     if (fs.existsSync(globalDir)) {
       mounts.push({
-        hostPath: globalDir,
+        hostPath: resolveHostPath(globalDir),
         containerPath: "/workspace/global",
         readonly: true,
       });
@@ -122,7 +145,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   const uvCacheDir = path.join(DATA_DIR, "cache", "uv", group.folder);
   fs.mkdirSync(uvCacheDir, { recursive: true });
   mounts.push({
-    hostPath: uvCacheDir,
+    hostPath: resolveHostPath(uvCacheDir),
     containerPath: "/home/node/.cache/uv",
     readonly: false,
   });
@@ -156,7 +179,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), "container", "skills");
+  const skillsSrc = path.join(APP_DIR, "container", "skills");
   const skillsDst = path.join(groupSessionsDir, "skills");
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
@@ -167,7 +190,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     }
   }
   mounts.push({
-    hostPath: groupSessionsDir,
+    hostPath: resolveHostPath(groupSessionsDir),
     containerPath: "/home/node/.claude",
     readonly: false,
   });
@@ -179,7 +202,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   fs.mkdirSync(path.join(groupIpcDir, "tasks"), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, "input"), { recursive: true });
   mounts.push({
-    hostPath: groupIpcDir,
+    hostPath: resolveHostPath(groupIpcDir),
     containerPath: "/workspace/ipc",
     readonly: false,
   });
@@ -187,7 +210,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(projectRoot, "container", "agent-runner", "src");
+  const agentRunnerSrc = path.join(APP_DIR, "container", "agent-runner", "src");
   const groupAgentRunnerDir = path.join(DATA_DIR, "sessions", group.folder, "agent-runner-src");
   if (fs.existsSync(agentRunnerSrc)) {
     fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
@@ -199,7 +222,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     }
   }
   mounts.push({
-    hostPath: groupAgentRunnerDir,
+    hostPath: resolveHostPath(groupAgentRunnerDir),
     containerPath: "/app/src",
     readonly: false,
   });
@@ -229,7 +252,11 @@ function buildContainerArgs(
   args.push("-e", `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push("-e", `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+  if (CREDENTIAL_PROXY_EXTERNAL_URL) {
+    args.push("-e", `ANTHROPIC_BASE_URL=${CREDENTIAL_PROXY_EXTERNAL_URL}`);
+  } else {
+    args.push("-e", `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+  }
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
@@ -264,6 +291,11 @@ function buildContainerArgs(
     args.push("-e", "HOME=/home/node");
   }
 
+  // Attach to a specific Docker network (for sibling container communication)
+  if (AGENT_NETWORK) {
+    args.push("--network", AGENT_NETWORK);
+  }
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
@@ -272,6 +304,12 @@ function buildContainerArgs(
     }
   }
 
+  if (!CONTAINER_IMAGE) {
+    throw new Error(
+      "CONTAINER_IMAGE is required. Set it in .env or environment " +
+        "(e.g., CONTAINER_IMAGE=nanoclaw-agent:latest)",
+    );
+  }
   args.push(CONTAINER_IMAGE);
 
   return args;

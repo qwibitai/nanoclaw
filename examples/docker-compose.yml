@@ -1,0 +1,55 @@
+# Reference Docker Compose for NanoClaw
+#
+# Three-root model:
+#   APP_DIR  = /app (baked into image, immutable)
+#   CONFIG   = ./config (bind mount from homelab repo, has groups/, allowlists)
+#   DATA     = ./data (bind mount for runtime state: db, sessions, cache, logs)
+#
+# Secrets: use a separate env_file for API keys (not committed to git).
+# See env.secrets.example for the template.
+
+services:
+  nanoclaw:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-your-username}/nanoclaw:latest
+    # build: .  # Uncomment to build locally instead of pulling from GHCR
+    restart: unless-stopped
+
+    # Non-secret config
+    env_file: env.example
+
+    environment:
+      # Three-root paths (inside the container)
+      - NANOCLAW_APP_DIR=/app
+      - NANOCLAW_CONFIG_ROOT=/config
+      - NANOCLAW_DATA_DIR=/data
+      - NANOCLAW_STORE_DIR=/data/store
+
+      # Host-side paths for agent container mounts (Docker -v sources must be host paths).
+      # These MUST match the absolute host paths of the bind mounts below.
+      - CONTAINER_HOST_CONFIG_DIR=${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR to absolute host path of ./config}
+      - CONTAINER_HOST_DATA_DIR=${HOST_DATA_DIR:?Set HOST_DATA_DIR to absolute host path of ./data}
+
+      # Credential proxy networking (sibling container mode)
+      - CREDENTIAL_PROXY_EXTERNAL_URL=http://nanoclaw:3001
+      - AGENT_NETWORK=nanoclaw_default
+
+    volumes:
+      # Docker socket for spawning sibling agent containers
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Config: groups/, allowlists, non-secret .env (from homelab repo)
+      - ./config:/config:ro
+
+      # Data: runtime state (sessions, cache, IPC, logs, database)
+      - ./data:/data
+
+    networks:
+      - default
+
+    # Secrets: mount as a separate env_file (gitignored in homelab)
+    # env_file:
+    #   - .env.secrets
+
+networks:
+  default:
+    name: nanoclaw_default

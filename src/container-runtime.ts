@@ -15,13 +15,25 @@ export const CONTAINER_RUNTIME_BIN = "docker";
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY = "host.docker.internal";
 
+/** Full URL agents use to reach the credential proxy (e.g., http://nanoclaw:3001).
+ * When set, used as ANTHROPIC_BASE_URL in agent containers instead of auto-detect. */
+export const CREDENTIAL_PROXY_EXTERNAL_URL = process.env.CREDENTIAL_PROXY_EXTERNAL_URL || "";
+
+/** Docker network to attach agent containers to (e.g., nanoclaw_default).
+ * When set, passes --network to docker run. */
+export const AGENT_NETWORK = process.env.AGENT_NETWORK || "";
+
 /**
  * Address the credential proxy binds to.
  * Docker Engine (Linux/WSL): bind to the docker0 bridge IP — containers reach it
  *   via host.docker.internal which resolves to the bridge gateway.
  * Docker Desktop (macOS/WSL): 127.0.0.1 — the VM routes host.docker.internal to loopback.
+ * When CREDENTIAL_PROXY_EXTERNAL_URL is set: bind to 0.0.0.0 so the proxy is
+ *   reachable from Docker networks (sibling container mode).
  */
-export const PROXY_BIND_HOST = process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+export const PROXY_BIND_HOST =
+  process.env.CREDENTIAL_PROXY_HOST ||
+  (CREDENTIAL_PROXY_EXTERNAL_URL ? "0.0.0.0" : detectProxyBindHost());
 
 function detectProxyBindHost(): string {
   if (os.platform() === "darwin") return "127.0.0.1";

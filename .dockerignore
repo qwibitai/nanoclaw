@@ -1,0 +1,12 @@
+.git
+node_modules
+dist
+data
+store
+groups
+*.db
+.env
+.env.*
+.turbo
+.claude
+.husky

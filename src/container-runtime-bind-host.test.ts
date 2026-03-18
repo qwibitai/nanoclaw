@@ -4,6 +4,8 @@ type NetIf = ReturnType<(typeof import("os"))["networkInterfaces"]>;
 
 async function loadRuntime(opts: {
   envHost?: string;
+  externalUrl?: string;
+  agentNetwork?: string;
   platform?: NodeJS.Platform;
   hasWslInterop?: boolean;
   ifaces?: NetIf;
@@ -13,6 +15,12 @@ async function loadRuntime(opts: {
 
   if (opts.envHost) process.env.CREDENTIAL_PROXY_HOST = opts.envHost;
   else delete process.env.CREDENTIAL_PROXY_HOST;
+
+  if (opts.externalUrl) process.env.CREDENTIAL_PROXY_EXTERNAL_URL = opts.externalUrl;
+  else delete process.env.CREDENTIAL_PROXY_EXTERNAL_URL;
+
+  if (opts.agentNetwork) process.env.AGENT_NETWORK = opts.agentNetwork;
+  else delete process.env.AGENT_NETWORK;
 
   const logger = {
     debug: vi.fn(),
@@ -61,6 +69,8 @@ describe("PROXY_BIND_HOST", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.CREDENTIAL_PROXY_HOST;
+    delete process.env.CREDENTIAL_PROXY_EXTERNAL_URL;
+    delete process.env.AGENT_NETWORK;
   });
 
   it("binds to docker0 IPv4 on Linux when available", async () => {
@@ -109,5 +119,48 @@ describe("PROXY_BIND_HOST", () => {
     const { runtime } = await loadRuntime({ ifacesThrow: true });
 
     expect(runtime.PROXY_BIND_HOST).toBe("127.0.0.1");
+  });
+
+  it("binds to 0.0.0.0 when CREDENTIAL_PROXY_EXTERNAL_URL is set", async () => {
+    const { runtime } = await loadRuntime({
+      externalUrl: "http://nanoclaw:3001",
+      ifaces: {} as NetIf,
+    });
+
+    expect(runtime.PROXY_BIND_HOST).toBe("0.0.0.0");
+  });
+
+  it("CREDENTIAL_PROXY_HOST takes precedence over CREDENTIAL_PROXY_EXTERNAL_URL", async () => {
+    const { runtime } = await loadRuntime({
+      envHost: "192.168.1.1",
+      externalUrl: "http://nanoclaw:3001",
+      ifaces: {} as NetIf,
+    });
+
+    expect(runtime.PROXY_BIND_HOST).toBe("192.168.1.1");
+  });
+
+  it("exports AGENT_NETWORK from env", async () => {
+    const { runtime } = await loadRuntime({
+      agentNetwork: "my-network",
+      ifaces: {} as NetIf,
+    });
+
+    expect(runtime.AGENT_NETWORK).toBe("my-network");
+  });
+
+  it("AGENT_NETWORK defaults to empty string", async () => {
+    const { runtime } = await loadRuntime({ ifaces: {} as NetIf });
+
+    expect(runtime.AGENT_NETWORK).toBe("");
+  });
+
+  it("exports CREDENTIAL_PROXY_EXTERNAL_URL from env", async () => {
+    const { runtime } = await loadRuntime({
+      externalUrl: "http://nanoclaw:3001",
+      ifaces: {} as NetIf,
+    });
+
+    expect(runtime.CREDENTIAL_PROXY_EXTERNAL_URL).toBe("http://nanoclaw:3001");
   });
 });
