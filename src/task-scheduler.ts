@@ -249,6 +249,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: resolveAssistantName(group.containerConfig),
+        tone: group.containerConfig?.tone,
         model: group.containerConfig?.model
           ? MODEL_ALIASES[group.containerConfig.model.toLowerCase()] ||
             group.containerConfig.model

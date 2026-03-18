@@ -1145,6 +1145,7 @@ async function runAgent(
         assistantName: resolveAssistantName(group.containerConfig),
         model,
         effort,
+        tone: group.containerConfig?.tone,
         attachments,
       },
       (proc, containerName) =>
@@ -1218,6 +1219,7 @@ async function runAgent(
               assistantName: resolveAssistantName(group.containerConfig),
               model,
               effort,
+              tone: group.containerConfig?.tone,
               attachments,
             },
             (proc, containerName) =>

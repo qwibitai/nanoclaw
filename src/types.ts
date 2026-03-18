@@ -48,6 +48,7 @@ export interface ContainerConfig {
   // Connection-specific snowflake filters connections.toml to only allowed sections + keys.
   // Scope-specific github reads GITHUB_TOKEN_<SCOPE> from .env instead of global GITHUB_TOKEN.
   tools?: string[];
+  tone?: string; // Default tone profile name (e.g. "assistant", "engineering"). Read from tone-profiles/{name}.md
   globalContext?: boolean; // Mount groups/global/ into container (default true; set false for shared groups)
   enableThreadSessions?: boolean; // Default true for Discord/Slack; set false to disable
   sessionIdleResetHours?: number; // Override global idle reset (0 = never auto-reset)

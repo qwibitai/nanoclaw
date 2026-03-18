@@ -600,6 +600,7 @@ export interface ContainerInput {
   assistantName?: string;
   model?: string;
   effort?: string;
+  tone?: string;
   secrets?: Record<string, string>;
   tools?: string[];
   attachments?: ContainerAttachment[];
@@ -1531,6 +1532,18 @@ function buildVolumeMounts(
         });
       }
     }
+  }
+
+  // Mount tone profiles into all containers (read-only).
+  // This is independent of globalContext — even isolated groups need tone access
+  // for the get_tone_profile MCP tool to work.
+  const toneProfilesDir = path.join(projectRoot, 'tone-profiles');
+  if (fs.existsSync(toneProfilesDir)) {
+    mounts.push({
+      hostPath: toneProfilesDir,
+      containerPath: '/workspace/tone-profiles',
+      readonly: true,
+    });
   }
 
   // Thread workspace: mount thread-specific directory for thread sessions.

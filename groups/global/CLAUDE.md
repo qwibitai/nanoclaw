@@ -218,48 +218,22 @@ Your workspace is a temporary worktree — it gets cleaned up after your session
 The host has a safety net that rescues unpushed commits to `rescue/` branches, but don't rely on it — push your own work explicitly.
 ## Tone Profiles
 
-Tone profiles define how to write — whether drafting emails as Dave or responding as the agent. Stored at `tone-profiles/` in the NanoClaw repo (readable at `/workspace/project/tone-profiles/` in main group containers).
+Tone profiles define how to write — whether drafting emails as Dave or responding as the agent. Your default tone is set in the system prompt at boot. Use the `get_tone_profile` MCP tool to load the full profile when you need it.
+
+### When to load the full profile
+
+- **Email drafting** (polish/rewrite, auto-draft replies) — always load via `get_tone_profile`. Use `get_tone_profile("selection-guide")` to pick the right Dave-voice profile based on the recipient.
+- **Tone override** ("use X tone") — load the requested profile via `get_tone_profile`. If no file exists, interpret X as an ad-hoc style hint.
+- **Casual conversation** — the one-liner default in your system prompt is sufficient. Don't load the full profile for every message.
+
+### Per-Response vs Per-Session Override
+
+- **Per-response**: "use X tone for this message" / "make this formal" — applies once, then reverts to your default.
+- **Per-session**: "switch to X tone" / "use X tone from now on" — persists for the rest of this thread.
 
 ### Available Profiles
 
-| Profile | File | Voice Owner | Used For |
-|---------|------|-------------|----------|
-| Professional | `professional.md` | Dave | External contacts, leadership, vendors |
-| Collaborative | `collaborative.md` | Dave | Peers, consulting clients, partners |
-| Direct | `direct.md` | Dave | Internal team, engineers, personal |
-| Engineering | `engineering.md` | Agent | Slack engineering channels |
-| Assistant | `assistant.md` | Agent | Discord channels (Jarvis/Friday) |
-| Medieval | `medieval.md` | Agent | Humor override only, by request |
-
-### Group Defaults
-
-Use this table to determine the default tone for your current group. Read the corresponding profile file before drafting or responding.
-
-| Group | Default Profile | Notes |
-|-------|----------------|-------|
-| personal | assistant | Jarvis/Friday energy for Discord |
-| sunday | assistant | Discord — use professional for email drafts |
-| illysium | engineering | Slack with engineers |
-| axis-labs | assistant | Discord |
-| number-drinks | assistant | Discord |
-| dirt-market | assistant | Discord |
-| xerus | assistant | Discord |
-| nanoclaw-dev | assistant | Discord |
-| whatsapp_main | assistant | WhatsApp — skip emoji formatting |
-| telegram_main | assistant | Telegram |
-
-For **email drafting** (polish/rewrite, auto-draft replies), always use the selection guide (`tone-profiles/selection-guide.md`) to pick the right Dave-voice profile based on the recipient — not the group default.
-
-### Per-Response Override
-
-The user can override the tone for any single message:
-- "use professional tone" / "make this formal"
-- "use collaborative tone"
-- "use direct tone" / "make this brief"
-- "use engineering tone"
-- "use medieval tone" / "ye olde"
-
-The override applies to the current response only. Group default resumes next interaction.
+Use `list_tone_profiles` to see current profiles. Known profiles: professional, collaborative, direct, engineering, assistant, medieval.
 
 ## Response Style
 
