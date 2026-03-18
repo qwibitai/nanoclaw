@@ -20,6 +20,22 @@ import {
 } from './platform.js';
 import { emitStatus } from './status.js';
 
+function getServicePath(homeDir: string): string {
+  return (
+    process.env.PATH || `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`
+  );
+}
+
+function getExtraServiceEnv(): Record<string, string> {
+  const vars: Record<string, string> = {};
+  const candidates = ['NODE_OPTIONS', 'CREDENTIAL_PROXY_HOST'];
+  for (const key of candidates) {
+    const value = process.env[key]?.trim();
+    if (value) vars[key] = value;
+  }
+  return vars;
+}
+
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const platform = getPlatform();
@@ -73,6 +89,8 @@ function setupLaunchd(
   nodePath: string,
   homeDir: string,
 ): void {
+  const servicePath = getServicePath(homeDir);
+  const extraEnv = getExtraServiceEnv();
   const plistPath = path.join(
     homeDir,
     'Library',
@@ -101,9 +119,15 @@ function setupLaunchd(
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
+        <string>${servicePath}</string>
         <key>HOME</key>
         <string>${homeDir}</string>
+${Object.entries(extraEnv)
+  .map(
+    ([key, value]) =>
+      `        <key>${key}</key>\n        <string>${value}</string>`,
+  )
+  .join('\n')}
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -206,6 +230,8 @@ function setupSystemd(
   nodePath: string,
   homeDir: string,
 ): void {
+  const servicePath = getServicePath(homeDir);
+  const extraEnv = getExtraServiceEnv();
   const runningAsRoot = isRoot();
 
   // Root uses system-level service, non-root uses user-level
@@ -245,7 +271,10 @@ Restart=always
 RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${servicePath}
+${Object.entries(extraEnv)
+  .map(([key, value]) => `Environment=${key}=${value}`)
+  .join('\n')}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -311,6 +340,8 @@ function setupNohupFallback(
   nodePath: string,
   homeDir: string,
 ): void {
+  const servicePath = getServicePath(homeDir);
+  const extraEnv = getExtraServiceEnv();
   logger.warn('No systemd detected — generating nohup wrapper script');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
@@ -322,6 +353,11 @@ function setupNohupFallback(
     `# To stop: kill \\$(cat ${pidFile})`,
     '',
     'set -euo pipefail',
+    '',
+    `export PATH=${JSON.stringify(servicePath)}`,
+    ...Object.entries(extraEnv).map(
+      ([key, value]) => `export ${key}=${JSON.stringify(value)}`,
+    ),
     '',
     `cd ${JSON.stringify(projectRoot)}`,
     '',
