@@ -2,6 +2,7 @@
   "defaults": ["general"],
   "overrides": {
     "agent-browser": ["coding", "general"],
+    "image-gen": ["general", "creative"],
     "chart": ["general", "creative"],
     "openscad": ["coding", "engineering"],
     "brainstorming": ["coding", "creative"],
@@ -17,6 +18,7 @@
     "using-superpowers": ["coding", "general"],
     "verification-before-completion": ["coding"],
     "writing-plans": ["coding"],
-    "writing-skills": ["coding"]
+    "writing-skills": ["coding"],
+    "github-ops": ["coding", "general"]
   }
 }
