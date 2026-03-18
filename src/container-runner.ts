@@ -28,10 +28,16 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { createTask } from './db.js';
+import { CROSS_CHANNEL_DIGEST_PROMPT } from './watcher-registration.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+// Session-end digest refresh deduplication
+let lastDigestRefreshAt = 0;
+const DIGEST_REFRESH_DEBOUNCE_MS = 30_000;
 
 export interface ContainerInput {
   prompt: string;
@@ -201,7 +207,11 @@ function buildVolumeMounts(
 
   // Cross-channel shared context: all groups get this mount.
   // Main (digest writer) needs read-write; other groups read-only.
-  const sharedCrossChannelDir = path.join(projectRoot, 'shared', 'cross-channel');
+  const sharedCrossChannelDir = path.join(
+    projectRoot,
+    'shared',
+    'cross-channel',
+  );
   if (fs.existsSync(sharedCrossChannelDir)) {
     mounts.push({
       hostPath: sharedCrossChannelDir,
@@ -583,6 +593,43 @@ export async function runContainerAgent(
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
         });
         return;
+      }
+
+      // Session-end digest refresh: enqueue a one-shot task to refresh the
+      // cross-channel digest when a real conversation ends (not scheduled tasks).
+      if (hadStreamingOutput && !input.isScheduledTask) {
+        const now = Date.now();
+        if (now - lastDigestRefreshAt >= DIGEST_REFRESH_DEBOUNCE_MS) {
+          lastDigestRefreshAt = now;
+          try {
+            createTask({
+              id: 'cross-channel-digest-refresh-' + now,
+              group_folder: 'main',
+              chat_jid: 'slack:D0AM0RZ7HB2',
+              schedule_type: 'once',
+              schedule_value: '0',
+              context_mode: 'isolated',
+              next_run: new Date().toISOString(),
+              status: 'active',
+              created_at: new Date().toISOString(),
+              prompt: CROSS_CHANNEL_DIGEST_PROMPT,
+            });
+            logger.info(
+              { group: group.name },
+              'Enqueued cross-channel digest refresh after session end',
+            );
+          } catch (err) {
+            logger.warn(
+              { group: group.name, error: err },
+              'Failed to enqueue digest refresh task',
+            );
+          }
+        } else {
+          logger.debug(
+            { group: group.name },
+            'Skipped digest refresh (debounce)',
+          );
+        }
       }
 
       // Streaming mode: wait for output chain to settle, return completion marker

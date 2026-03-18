@@ -30,7 +30,7 @@ Format as a concise daily report:
 
 Keep it concise. Only elaborate on errors if there are notable patterns.`;
 
-const CROSS_CHANNEL_DIGEST_PROMPT = `You are generating a cross-channel context digest. This runs automatically — do NOT post any message to the chat.
+export const CROSS_CHANNEL_DIGEST_PROMPT = `You are generating a cross-channel context digest. This runs automatically — do NOT post any message to the chat.
 
 ## Step 1: Read recent conversations
 
