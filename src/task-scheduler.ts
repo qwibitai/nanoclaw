@@ -8,6 +8,7 @@ import {
   TASK_IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { MessageLogger } from './message-logger.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -181,6 +182,7 @@ export interface SchedulerDependencies {
     containerId: string,
   ) => void;
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
+  messageLogger?: MessageLogger;
 }
 
 async function runTask(
@@ -373,6 +375,21 @@ async function runTask(
                 'Failed to store outbound message for conversation history',
               );
             }
+            // Also log to persistent memory.db for cross-session search (Phase 19).
+            // streamedOutput.result at this point has already passed through
+            // formatOutbound() in the sendMessage lambda, so [SILENT] content
+            // is already stripped before reaching here.
+            deps.messageLogger?.logMessage({
+              id: `gchat-out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              chat_jid: activeTask.chat_jid,
+              thread_id: activeTask.thread_id ?? null,
+              sender: ASSISTANT_NAME,
+              sender_name: ASSISTANT_NAME,
+              channel: 'google-chat',
+              direction: 'outbound',
+              content: streamedOutput.result,
+              timestamp: new Date().toISOString(),
+            });
           }
 
           scheduleClose();

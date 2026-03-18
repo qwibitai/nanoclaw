@@ -5,10 +5,12 @@ import {
   ASSISTANT_NAME,
   DATA_DIR,
   IDLE_TIMEOUT,
+  MEMORY_DB_PATH,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { MessageLogger } from './message-logger.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -586,9 +588,15 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Initialise persistent memory logger — writes every inbound/outbound message
+  // to memory.db in the shared volume for cross-session search (Phase 19).
+  const messageLogger = new MessageLogger(MEMORY_DB_PATH);
+  logger.info({ path: MEMORY_DB_PATH }, 'MessageLogger initialised');
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    messageLogger.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -616,6 +624,21 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      // Also log to persistent memory.db for cross-session search (Phase 19).
+      const channel = chatJid.startsWith('gchat:') || chatJid.startsWith('spaces/')
+        ? 'google-chat'
+        : 'whatsapp';
+      messageLogger.logMessage({
+        id: msg.id,
+        chat_jid: msg.chat_jid,
+        thread_id: msg.thread_id ?? null,
+        sender: msg.sender,
+        sender_name: msg.sender_name,
+        channel,
+        direction: msg.is_from_me ? 'outbound' : 'inbound',
+        content: msg.content,
+        timestamp: msg.timestamp,
+      });
     },
     onChatMetadata: (
       chatJid: string,
@@ -653,6 +676,7 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
+    messageLogger,
     onProcess: (groupJid, proc, containerName, groupFolder, containerId) =>
       queue.registerProcess(
         groupJid,
@@ -668,7 +692,26 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text, threadId);
+      if (text) {
+        await channel.sendMessage(jid, text, threadId);
+        // Log outbound message to persistent memory.db.
+        // [SILENT] messages are filtered out by formatOutbound() above —
+        // text is always non-empty here, so [SILENT] content never reaches memory.db.
+        messageLogger.logMessage({
+          id: `wa-out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          chat_jid: jid,
+          thread_id: threadId ?? null,
+          sender: 'Holly',
+          sender_name: 'Holly',
+          channel:
+            jid.startsWith('gchat:') || jid.startsWith('spaces/')
+              ? 'google-chat'
+              : 'whatsapp',
+          direction: 'outbound',
+          content: text,
+          timestamp: new Date().toISOString(),
+        });
+      }
     },
   });
   startIpcWatcher({
