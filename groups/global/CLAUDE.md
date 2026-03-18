@@ -34,7 +34,7 @@ If part of your output is internal reasoning rather than something for the user,
 Here are the key findings from the research...
 ```
 
-Text inside `<internal>` tags is logged but not sent to the user.
+Text inside `<internal>` tags is logged but not sent to the user. If you've already sent the key information via `send_message`, you MUST wrap any recap or follow-up in `<internal>` tags to avoid a double response. Only use `send_message` for genuinely long-running tasks where there's a meaningful gap before the result — for quick responses, just respond directly without calling `send_message` first.
 
 ### Sub-agents and teammates
 
