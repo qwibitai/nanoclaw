@@ -15,6 +15,7 @@ import {
   ensureContainerRuntimeRunning,
   PROXY_BIND_HOST,
 } from './container-runtime.js';
+
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -320,10 +321,10 @@ export async function initApp(): Promise<void> {
     queue,
     onProcess: (
       groupJid: string,
-      proc: import('child_process').ChildProcess,
-      containerName: string,
+      _proc: unknown,
+      sessionName: string,
       groupFolder: string,
-    ) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    ) => queue.registerProcess(groupJid, _proc, sessionName, groupFolder),
     sendMessage: async (jid: string, rawText: string) => {
       const channel = findChannel(channels, jid);
       if (!channel) {

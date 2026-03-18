@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
@@ -66,8 +65,8 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
-    proc: ChildProcess,
-    containerName: string,
+    proc: unknown,
+    sessionName: string,
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;

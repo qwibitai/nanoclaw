@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,8 +20,8 @@ interface GroupState {
   runningTaskId: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
-  process: ChildProcess | null;
-  containerName: string | null;
+  /** tmux session name (null when no session is running) */
+  sessionName: string | null;
   groupFolder: string | null;
   retryCount: number;
 }
@@ -45,8 +44,7 @@ export class GroupQueue {
         runningTaskId: null,
         pendingMessages: false,
         pendingTasks: [],
-        process: null,
-        containerName: null,
+        sessionName: null,
         groupFolder: null,
         retryCount: 0,
       };
@@ -131,13 +129,12 @@ export class GroupQueue {
 
   registerProcess(
     groupJid: string,
-    proc: ChildProcess,
-    containerName: string,
+    _proc: unknown,
+    sessionName: string,
     groupFolder?: string,
   ): void {
     const state = this.getGroup(groupJid);
-    state.process = proc;
-    state.containerName = containerName;
+    state.sessionName = sessionName;
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
@@ -223,8 +220,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
-      state.process = null;
-      state.containerName = null;
+      state.sessionName = null;
       state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
@@ -252,8 +248,7 @@ export class GroupQueue {
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
-      state.process = null;
-      state.containerName = null;
+      state.sessionName = null;
       state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
@@ -347,19 +342,19 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
+    // Count active sessions but don't kill them — they'll finish on their own
+    // via idle timeout or session timeout.
     // This prevents WhatsApp reconnection restarts from killing working agents.
-    const activeContainers: string[] = [];
+    const activeSessions: string[] = [];
     for (const [_jid, state] of this.groups) {
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
+      if (state.sessionName) {
+        activeSessions.push(state.sessionName);
       }
     }
 
     logger.info(
-      { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      { activeCount: this.activeCount, detachedSessions: activeSessions },
+      'GroupQueue shutting down (sessions detached, not killed)',
     );
   }
 }

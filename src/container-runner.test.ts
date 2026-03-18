@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -8,7 +6,6 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   CREDENTIAL_PROXY_PORT: 3001,
@@ -51,8 +48,12 @@ vi.mock('fs', async () => {
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => false })),
+      statSync: vi.fn(() => ({ isDirectory: () => false, size: 0 })),
       copyFileSync: vi.fn(),
+      openSync: vi.fn(() => 99),
+      readSync: vi.fn(() => 0),
+      closeSync: vi.fn(),
+      unlinkSync: vi.fn(),
     },
   };
 });
@@ -62,49 +63,36 @@ vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
-// Create a controllable fake ChildProcess
-function createFakeProcess() {
-  const proc = new EventEmitter() as EventEmitter & {
-    stdin: PassThrough;
-    stdout: PassThrough;
-    stderr: PassThrough;
-    kill: ReturnType<typeof vi.fn>;
-    pid: number;
-  };
-  proc.stdin = new PassThrough();
-  proc.stdout = new PassThrough();
-  proc.stderr = new PassThrough();
-  proc.kill = vi.fn();
-  proc.pid = 12345;
-  return proc;
-}
+// Mock container-runtime
+vi.mock('./container-runtime.js', () => ({
+  hasSession: vi.fn(() => false),
+  stopSession: vi.fn((name: string) => `tmux kill-session -t ${name}`),
+}));
 
-let fakeProc: ReturnType<typeof createFakeProcess>;
-
-// Mock child_process.spawn
+// Mock child_process
+const mockExecSync = vi.fn();
 vi.mock('child_process', async () => {
   const actual =
     await vi.importActual<typeof import('child_process')>('child_process');
   return {
     ...actual,
-    spawn: vi.fn(() => fakeProc),
+    execSync: (...args: unknown[]) => mockExecSync(...args),
     exec: vi.fn(
       (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
         if (cb) cb(null);
-        return new EventEmitter();
+        return {};
       },
     ),
   };
 });
 
 import fs from 'fs';
-import { spawn } from 'child_process';
 import {
   buildVolumeMounts,
   runContainerAgent,
   ContainerOutput,
-  VolumeMount,
 } from './container-runner.js';
+import { hasSession } from './container-runtime.js';
 import type { RegisteredGroup } from './types.js';
 import fsActual from 'fs';
 
@@ -122,120 +110,45 @@ const testInput = {
   isMain: false,
 };
 
-function emitOutputMarker(
-  proc: ReturnType<typeof createFakeProcess>,
-  output: ContainerOutput,
-) {
-  const json = JSON.stringify(output);
-  proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
-}
-
-describe('global CLAUDE.md mount', () => {
+describe('tmux session runner', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    fakeProc = createFakeProcess();
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    vi.mocked(spawn).mockClear();
+    // Mock agent-runner dist exists
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      if (String(p).includes('agent-runner/dist/index.js')) return true;
+      return false;
+    });
+    mockExecSync.mockReturnValue('');
+    vi.mocked(hasSession).mockReturnValue(false);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  function getSpawnArgs(): string[] {
-    const calls = vi.mocked(spawn).mock.calls;
-    return calls[calls.length - 1][1] as string[];
-  }
-
-  it('mounts global dir read-only for non-main groups when it exists', async () => {
-    vi.mocked(fs.existsSync).mockImplementation((p) => {
-      if (String(p).endsWith('/global')) return true;
-      return false;
+  it('spawns tmux session and detects completion', async () => {
+    // hasSession returns true initially, then false (session ended)
+    let pollCount = 0;
+    vi.mocked(hasSession).mockImplementation(() => {
+      pollCount++;
+      return pollCount <= 2;
     });
 
-    const resultPromise = runContainerAgent(
-      testGroup,
-      { ...testInput, isMain: false },
-      () => {},
-    );
-
-    // Let it spawn
-    await vi.advanceTimersByTimeAsync(10);
-
-    const args = getSpawnArgs();
-    const globalMountIdx = args.findIndex(
-      (a) => typeof a === 'string' && a.includes('/global') && a.includes('/workspace/global'),
-    );
-    expect(globalMountIdx).toBeGreaterThan(-1);
-    // Should be read-only (bind mount with ro)
-    const mountArg = args[globalMountIdx];
-    expect(mountArg).toContain(':ro');
-
-    // Clean up
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-  });
-
-  it('mounts global dir read-only for main groups when it exists', async () => {
-    vi.mocked(fs.existsSync).mockImplementation((p) => {
-      if (String(p).endsWith('/global')) return true;
-      return false;
+    // Simulate output file containing sentinel markers
+    const outputData = `${OUTPUT_START_MARKER}\n{"status":"success","result":"hello","newSessionId":"sess-1"}\n${OUTPUT_END_MARKER}\n`;
+    let statCalls = 0;
+    vi.mocked(fs.statSync).mockImplementation(() => {
+      statCalls++;
+      return { size: statCalls > 1 ? outputData.length : 0, isDirectory: () => false } as fs.Stats;
+    });
+    vi.mocked(fs.openSync).mockReturnValue(99);
+    vi.mocked(fs.readSync).mockImplementation((_fd, buffer: ArrayBufferView) => {
+      const data = Buffer.from(outputData);
+      data.copy(Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+      return data.length;
     });
 
-    const resultPromise = runContainerAgent(
-      { ...testGroup, isMain: true },
-      { ...testInput, isMain: true },
-      () => {},
-    );
-
-    await vi.advanceTimersByTimeAsync(10);
-
-    const args = getSpawnArgs();
-    const globalMountIdx = args.findIndex(
-      (a) => typeof a === 'string' && a.includes('/global') && a.includes('/workspace/global'),
-    );
-    expect(globalMountIdx).toBeGreaterThan(-1);
-
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-  });
-
-  it('skips global mount when directory does not exist', async () => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-
-    const resultPromise = runContainerAgent(
-      testGroup,
-      { ...testInput, isMain: false },
-      () => {},
-    );
-
-    await vi.advanceTimersByTimeAsync(10);
-
-    const args = getSpawnArgs();
-    const hasGlobalMount = args.some(
-      (a) => typeof a === 'string' && a.includes('/workspace/global'),
-    );
-    expect(hasGlobalMount).toBe(false);
-
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-  });
-});
-
-describe('container-runner timeout behavior', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    fakeProc = createFakeProcess();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
       testGroup,
@@ -244,82 +157,44 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output with a result
-    emitOutputMarker(fakeProc, {
-      status: 'success',
-      result: 'Here is my response',
-      newSessionId: 'session-123',
-    });
-
-    // Let output processing settle
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
-    await vi.advanceTimersByTimeAsync(1830000);
-
-    // Emit close event (as if container was stopped by the timeout)
-    fakeProc.emit('close', 137);
-
-    // Let the promise resolve
-    await vi.advanceTimersByTimeAsync(10);
+    // Advance timers to allow polling
+    await vi.advanceTimersByTimeAsync(2000);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
-    expect(result.newSessionId).toBe('session-123');
+    expect(result.newSessionId).toBe('sess-1');
     expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
+      expect.objectContaining({ result: 'hello' }),
+    );
+
+    // Verify tmux new-session was called
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('tmux new-session -d -s nanoclaw-test-group-'),
+      expect.any(Object),
     );
   });
 
   it('timeout with no output resolves as error', async () => {
-    const onOutput = vi.fn(async () => {});
+    // Session stays alive until timeout
+    vi.mocked(hasSession).mockReturnValue(true);
+    vi.mocked(fs.statSync).mockReturnValue({ size: 0, isDirectory: () => false } as fs.Stats);
+
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
       () => {},
-      onOutput,
     );
 
-    // No output emitted — fire the hard timeout
+    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
     await vi.advanceTimersByTimeAsync(1830000);
 
-    // Emit close event
-    fakeProc.emit('close', 137);
-
-    await vi.advanceTimersByTimeAsync(10);
+    // Session killed, now returns false
+    vi.mocked(hasSession).mockReturnValue(false);
+    await vi.advanceTimersByTimeAsync(1000);
 
     const result = await resultPromise;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
-    expect(onOutput).not.toHaveBeenCalled();
-  });
-
-  it('normal exit after output resolves as success', async () => {
-    const onOutput = vi.fn(async () => {});
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
-
-    // Emit output
-    emitOutputMarker(fakeProc, {
-      status: 'success',
-      result: 'Done',
-      newSessionId: 'session-456',
-    });
-
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Normal exit (no timeout)
-    fakeProc.emit('close', 0);
-
-    await vi.advanceTimersByTimeAsync(10);
-
-    const result = await resultPromise;
-    expect(result.status).toBe('success');
-    expect(result.newSessionId).toBe('session-456');
   });
 });
 
@@ -327,7 +202,6 @@ describe('buildVolumeMounts MCP credential mounts', () => {
   const mockedFs = vi.mocked(fsActual);
 
   beforeEach(() => {
-    // existsSync returns true for MCP credential paths
     mockedFs.existsSync.mockImplementation((p: fsActual.PathLike) => {
       const s = String(p);
       if (s.includes('.gmail-mcp') || s.includes('.x-mcp')) return true;
@@ -383,7 +257,6 @@ describe('buildVolumeMounts MCP credential mounts', () => {
       },
     };
 
-    // isMain=true simulates the typical scheduled-task invocation path
     const mounts = buildVolumeMounts(group, true);
     const mcpMounts = mounts.filter((m) =>
       m.containerPath.startsWith('/workspace/mcp-credentials/'),

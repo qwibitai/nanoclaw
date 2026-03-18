@@ -17,9 +17,8 @@ vi.mock('child_process', () => ({
 }));
 
 import {
-  CONTAINER_RUNTIME_BIN,
-  readonlyMountArgs,
-  stopContainer,
+  stopSession,
+  hasSession,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
 } from './container-runtime.js';
@@ -31,46 +30,55 @@ beforeEach(() => {
 
 // --- Pure functions ---
 
-describe('readonlyMountArgs', () => {
-  it('returns -v flag with :ro suffix', () => {
-    const args = readonlyMountArgs('/host/path', '/container/path');
-    expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+describe('stopSession', () => {
+  it('returns tmux kill-session command', () => {
+    expect(stopSession('nanoclaw-test-123')).toBe(
+      'tmux kill-session -t nanoclaw-test-123',
+    );
   });
 });
 
-describe('stopContainer', () => {
-  it('returns stop command using CONTAINER_RUNTIME_BIN', () => {
-    expect(stopContainer('nanoclaw-test-123')).toBe(
-      `${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`,
+describe('hasSession', () => {
+  it('returns true when session exists', () => {
+    mockExecSync.mockReturnValueOnce('');
+    expect(hasSession('nanoclaw-test-123')).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'tmux has-session -t nanoclaw-test-123',
+      expect.objectContaining({ timeout: 5000 }),
     );
+  });
+
+  it('returns false when session does not exist', () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('session not found');
+    });
+    expect(hasSession('nanoclaw-test-123')).toBe(false);
   });
 });
 
 // --- ensureContainerRuntimeRunning ---
 
 describe('ensureContainerRuntimeRunning', () => {
-  it('does nothing when runtime is already running', () => {
-    mockExecSync.mockReturnValueOnce('');
+  it('does nothing when tmux is available', () => {
+    mockExecSync.mockReturnValueOnce('tmux 3.4');
 
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
+    expect(mockExecSync).toHaveBeenCalledWith('tmux -V', {
       stdio: 'pipe',
       timeout: 10000,
     });
-    expect(logger.debug).toHaveBeenCalledWith(
-      'Container runtime already running',
-    );
+    expect(logger.debug).toHaveBeenCalledWith('Tmux runtime available');
   });
 
-  it('throws when docker info fails', () => {
+  it('throws when tmux is not found', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('Cannot connect to the Docker daemon');
+      throw new Error('tmux: command not found');
     });
 
     expect(() => ensureContainerRuntimeRunning()).toThrow(
-      'Container runtime is required but failed to start',
+      'tmux is required but not found',
     );
     expect(logger.error).toHaveBeenCalled();
   });
@@ -79,31 +87,48 @@ describe('ensureContainerRuntimeRunning', () => {
 // --- cleanupOrphans ---
 
 describe('cleanupOrphans', () => {
-  it('stops orphaned nanoclaw containers', () => {
-    // docker ps returns container names, one per line
+  it('stops orphaned nanoclaw tmux sessions', () => {
+    // tmux list-sessions returns session names, one per line
     mockExecSync.mockReturnValueOnce(
       'nanoclaw-group1-111\nnanoclaw-group2-222\n',
     );
-    // stop calls succeed
+    // kill-session calls succeed
     mockExecSync.mockReturnValue('');
 
     cleanupOrphans();
 
-    // ps + 2 stop calls
+    // list-sessions + 2 kill-session calls
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
-      `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group1-111`,
+      'tmux kill-session -t nanoclaw-group1-111',
       { stdio: 'pipe' },
     );
     expect(mockExecSync).toHaveBeenNthCalledWith(
       3,
-      `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group2-222`,
+      'tmux kill-session -t nanoclaw-group2-222',
       { stdio: 'pipe' },
     );
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group2-222'] },
-      'Stopped orphaned containers',
+      'Stopped orphaned tmux sessions',
+    );
+  });
+
+  it('ignores non-nanoclaw sessions', () => {
+    mockExecSync.mockReturnValueOnce(
+      'my-other-session\nnanoclaw-group1-111\nwork-session\n',
+    );
+    mockExecSync.mockReturnValue('');
+
+    cleanupOrphans();
+
+    // list-sessions + 1 kill-session (only nanoclaw- prefixed)
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(mockExecSync).toHaveBeenNthCalledWith(
+      2,
+      'tmux kill-session -t nanoclaw-group1-111',
+      { stdio: 'pipe' },
     );
   });
 
@@ -116,26 +141,26 @@ describe('cleanupOrphans', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
-  it('warns and continues when ps fails', () => {
+  it('warns and continues when list-sessions fails', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('docker not available');
+      throw new Error('tmux not available');
     });
 
     cleanupOrphans(); // should not throw
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
-      'Failed to clean up orphaned containers',
+      'Failed to clean up orphaned sessions',
     );
   });
 
-  it('continues stopping remaining containers when one stop fails', () => {
+  it('continues stopping remaining sessions when one kill fails', () => {
     mockExecSync.mockReturnValueOnce('nanoclaw-a-1\nnanoclaw-b-2\n');
-    // First stop fails
+    // First kill fails
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
     });
-    // Second stop succeeds
+    // Second kill succeeds
     mockExecSync.mockReturnValueOnce('');
 
     cleanupOrphans(); // should not throw
@@ -143,7 +168,7 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
-      'Stopped orphaned containers',
+      'Stopped orphaned tmux sessions',
     );
   });
 });
