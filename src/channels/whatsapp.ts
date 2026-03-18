@@ -6,7 +6,6 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
-  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -25,6 +24,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
   Channel,
   OnInboundMessage,
@@ -33,28 +33,6 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:8083';
-
-async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string | null> {
-  const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
-  const tmpFile = path.join('/tmp', `nanoclaw-stt-${Date.now()}.${ext}`);
-  try {
-    fs.writeFileSync(tmpFile, audioBuffer);
-    const response = await new Promise<string>((resolve, reject) => {
-      exec(
-        `curl -s -X POST "${WHISPER_URL}/transcribe" -F "file=@${tmpFile}" -F "language=de" --max-time 30`,
-        (err, stdout) => { if (err) reject(err); else resolve(stdout); },
-      );
-    });
-    const data = JSON.parse(response) as { text?: string };
-    return data.text?.trim() || null;
-  } catch (err) {
-    logger.warn({ err }, 'Whisper STT error');
-    return null;
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-  }
-}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -233,19 +211,13 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Transcribe PTT/audio messages via Whisper STT
-          let isVoiceMessage = false;
-          if (!content && normalized.audioMessage) {
-            const isPtt = (normalized.audioMessage as Record<string, unknown>)?.ptt === true;
-            isVoiceMessage = isPtt;
-            try {
-              const audioBuffer = (await downloadMediaMessage(msg, 'buffer', {})) as Buffer;
-              const mimeType = normalized.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
-              const transcribed = await transcribeAudio(audioBuffer, mimeType);
-              if (transcribed) {
-                content = `[Sprachnachricht]: ${transcribed}`;
-              }
-            } catch (err) {
-              logger.warn({ err, chatJid }, 'Failed to download/transcribe audio');
+          const voiceMsg = isVoiceMessage(msg);
+          if (!content && voiceMsg) {
+            const transcribed = await transcribeAudioMessage(msg);
+            if (transcribed) {
+              content = `[Sprachnachricht]: ${transcribed}`;
+            } else {
+              content = '[Voice Message - transcription unavailable]';
             }
           }
 
@@ -273,7 +245,7 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
-            is_voice_message: isVoiceMessage,
+            is_voice_message: voiceMsg,
           });
         }
       }
