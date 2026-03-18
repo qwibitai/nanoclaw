@@ -12,6 +12,12 @@
 # Dev branches are still blocked — all dev work must happen in worktrees.
 # Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 #
+# Skip in CI — automated workflows (fork-sync, merge-forward) legitimately
+# push skill branches from a non-worktree checkout.
+if [ "$CI" = "true" ]; then
+  exit 0
+fi
+
 # Worktrees have git-dir != git-common-dir.
 GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null)
 GIT_COMMON_PATH=$(git rev-parse --git-common-dir 2>/dev/null)
