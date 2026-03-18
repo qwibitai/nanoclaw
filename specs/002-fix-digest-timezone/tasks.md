@@ -76,7 +76,7 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T016 [P] [US2] Write test: new task created via IPC includes `created_tz` set to current TIMEZONE — call `processTaskIpc` with a `schedule_task` payload, read back the task row and verify `created_tz` matches `TIMEZONE` in `src/ipc-auth.test.ts`
+- [x] T016 [P] [US2] Write test: new task created via IPC includes `created_tz` set to current TIMEZONE — call `processTaskIpc` with a `schedule_task` payload, read back the task row and verify `created_tz` matches `TIMEZONE` in `src/ipc-auth.test.ts`
 - [ ] T017 [P] [US2] Write test: pre-migration rows have `created_tz = 'UTC'` — create a task without specifying `created_tz`, verify the database default is `'UTC'` in `src/db.test.ts`
 
 ### Implementation for User Story 2

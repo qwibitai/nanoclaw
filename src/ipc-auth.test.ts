@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
+import { TIMEZONE } from './config.js';
 import {
   _initTestDatabase,
   createTask,
@@ -680,5 +681,28 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- schedule_task created_tz ---
+
+describe('schedule_task created_tz', () => {
+  it('new task created via IPC includes created_tz set to current TIMEZONE', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'daily digest',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].created_tz).toBe(TIMEZONE);
   });
 });
