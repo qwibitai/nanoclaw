@@ -68,6 +68,10 @@ RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\
 COPY scad-render.sh /usr/local/bin/scad-render
 RUN chmod +x /usr/local/bin/scad-render
 
+# Copy skills catalog (local + marketplace plugins + index)
+# Owned by root, read-only to container's node user — catalog is reference-only
+COPY skills-catalog/ /skills-catalog/
+
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
 
