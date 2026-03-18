@@ -509,6 +509,16 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Only the account owner (messages sent from the device itself) may start
+    // remote control. Any other member of the main group is denied.
+    if (!msg.is_from_me) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Remote control rejected: sender is not the account owner',
+      );
+      return;
+    }
+
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
