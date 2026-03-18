@@ -455,6 +455,16 @@ export function updateTask(
   ).run(...values);
 }
 
+export function updateTaskTimezone(
+  id: string,
+  nextRun: string,
+  createdTz: string,
+): void {
+  db.prepare(
+    `UPDATE scheduled_tasks SET next_run = ?, created_tz = ? WHERE id = ?`,
+  ).run(nextRun, createdTz, id);
+}
+
 export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);

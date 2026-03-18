@@ -30,8 +30,8 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T003 Write test for `updateTaskTimezone(id, nextRun, createdTz)` in `src/db.test.ts` — verify atomic UPDATE of `next_run` and `created_tz` in a single statement
-- [ ] T004 Implement `updateTaskTimezone(id, nextRun, createdTz)` function in `src/db.ts` — single `UPDATE scheduled_tasks SET next_run = ?, created_tz = ? WHERE id = ?`
+- [x] T003 Write test for `updateTaskTimezone(id, nextRun, createdTz)` in `src/db.test.ts` — verify atomic UPDATE of `next_run` and `created_tz` in a single statement
+- [x] T004 Implement `updateTaskTimezone(id, nextRun, createdTz)` function in `src/db.ts` — single `UPDATE scheduled_tasks SET next_run = ?, created_tz = ? WHERE id = ?`
 - [ ] T005 Extend `updateTask()` in `src/db.ts` to accept `created_tz` in its `updates` parameter type (add to the `Pick<>` union)
 - [ ] T006 Extend `createTask()` in `src/db.ts` to include `created_tz` in the INSERT column list and values
 

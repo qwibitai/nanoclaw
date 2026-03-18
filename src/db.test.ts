@@ -13,6 +13,7 @@ import {
   storeChatMetadata,
   storeMessage,
   updateTask,
+  updateTaskTimezone,
 } from './db.js';
 
 beforeEach(() => {
@@ -449,6 +450,40 @@ describe('message query LIMIT', () => {
       50,
     );
     expect(messages).toHaveLength(10);
+  });
+});
+
+// --- updateTaskTimezone ---
+
+describe('updateTaskTimezone', () => {
+  it('atomically updates next_run and created_tz in a single statement', () => {
+    createTask({
+      id: 'tz-task-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'daily digest',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: '2026-03-17T09:00:00.000Z',
+      status: 'active',
+      created_at: '2026-03-16T00:00:00.000Z',
+      created_tz: 'UTC',
+    });
+
+    const newNextRun = '2026-03-17T14:00:00.000Z';
+    const newTz = 'America/Chicago';
+
+    updateTaskTimezone('tz-task-1', newNextRun, newTz);
+
+    const task = getTaskById('tz-task-1');
+    expect(task).toBeDefined();
+    expect(task!.next_run).toBe(newNextRun);
+    expect(task!.created_tz).toBe(newTz);
+    // Verify other fields are untouched
+    expect(task!.prompt).toBe('daily digest');
+    expect(task!.status).toBe('active');
+    expect(task!.schedule_value).toBe('0 9 * * *');
   });
 });
 
