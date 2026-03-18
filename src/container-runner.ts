@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -198,6 +199,27 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Mount IMAP accounts.
+  // Global shared accounts (~/.imap-mcp/) → /home/node/.imap-mcp-global/
+  // Local per-channel accounts (~/.imap-mcp-{folder}/) → /home/node/.imap-mcp-local/
+  // The MCP server merges both so the agent sees all available accounts.
+  const globalImapDir = path.join(os.homedir(), '.imap-mcp');
+  if (fs.existsSync(globalImapDir)) {
+    mounts.push({
+      hostPath: globalImapDir,
+      containerPath: '/home/node/.imap-mcp-global',
+      readonly: true,
+    });
+  }
+  const perGroupImapDir = path.join(os.homedir(), `.imap-mcp-${group.folder}`);
+  if (fs.existsSync(perGroupImapDir)) {
+    mounts.push({
+      hostPath: perGroupImapDir,
+      containerPath: '/home/node/.imap-mcp-local',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
