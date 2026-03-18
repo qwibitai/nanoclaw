@@ -185,17 +185,28 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
               );
             } else {
               // Research and build commands.
-              // Wrap onMessage to upsert the chats row first — slash commands
-              // create threads before any messageCreate fires, so the FK on
-              // messages.chat_jid would fail without this.
+              // Wrap onMessage to ensure the thread is registered as a group
+              // before its first message is stored — slash commands create
+              // threads before any messageCreate fires, so neither the FK on
+              // messages.chat_jid nor the registeredGroups lookup would work
+              // without this.
               const safeOnMessage = (chatJid: string, msg: any) => {
-                opts.onChatMetadata(
-                  chatJid,
-                  msg.timestamp ?? new Date().toISOString(),
-                  msg.sender_name ?? chatJid,
-                  'discord',
-                  true,
-                );
+                const timestamp = msg.timestamp ?? new Date().toISOString();
+                const threadName = msg.sender_name ?? chatJid;
+                // Upsert the chats row (FK requirement)
+                opts.onChatMetadata(chatJid, timestamp, threadName, 'discord', true);
+                // Auto-register thread as a non-main group if not already known
+                if (!opts.registeredGroups()[chatJid]) {
+                  const folder = `thread_${chatJid}`;
+                  opts.onRegisterGroup(chatJid, {
+                    name: threadName,
+                    folder,
+                    trigger: `@${client.user?.username ?? 'Andy'}`,
+                    added_at: timestamp,
+                    requiresTrigger: false,
+                    isMain: false,
+                  });
+                }
                 opts.onMessage(chatJid, msg);
               };
               await command.execute(interaction, safeOnMessage);
