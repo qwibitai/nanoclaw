@@ -1,0 +1,127 @@
+{
+  "$schema": "https://nanoclaw.dev/contract.schema.json",
+  "contractVersion": 1,
+  "harnessVersion": "1.2.17",
+  "generatedAt": "2026-03-18T05:40:01Z",
+  "surfaces": {
+    "mcpTools": [
+      "add_case_comment",
+      "attach_case_artifact",
+      "cancel_task",
+      "case_mark_active",
+      "case_mark_blocked",
+      "case_mark_done",
+      "case_suggest_dev",
+      "create_case",
+      "create_github_issue",
+      "list_cases",
+      "list_tasks",
+      "pause_task",
+      "register_group",
+      "resume_task",
+      "route_decision",
+      "schedule_task",
+      "send_document",
+      "send_image",
+      "send_message",
+      "update_task"
+    ],
+    "ipcTypes": [
+      "cancel_task",
+      "case_add_comment",
+      "case_create",
+      "case_heartbeat",
+      "case_mark_active",
+      "case_mark_blocked",
+      "case_mark_done",
+      "case_mark_reviewed",
+      "case_prune",
+      "case_suggest_dev",
+      "case_unlock",
+      "case_update_activity",
+      "create_github_issue",
+      "document",
+      "image",
+      "message",
+      "pause_task",
+      "refresh_groups",
+      "register_group",
+      "resume_task",
+      "schedule_task",
+      "update_task"
+    ],
+    "mountPaths": [
+      "/app/src",
+      "/home/node/.claude",
+      "/home/node/.gmail-mcp",
+      "/workspace/case",
+      "/workspace/global",
+      "/workspace/group",
+      "/workspace/ipc",
+      "/workspace/project",
+      "/workspace/project/.env"
+    ],
+    "envVars": [
+      "AGENT_BROWSER_EXECUTABLE_PATH",
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_BASE_URL",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "HOME",
+      "NANOCLAW_CASE_ID",
+      "NANOCLAW_CASE_NAME",
+      "NANOCLAW_CASE_TYPE",
+      "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH",
+      "TZ"
+    ],
+    "configSchema": {
+      "config/escalation.yaml": "Escalation policy: admins, gap types, priority signals, notification rules",
+      "config/materials.json": "Material definitions, pricing (vertical-specific schema)"
+    },
+    "caseSyncAdapter": [
+      "addComment",
+      "closeCase",
+      "createCase",
+      "updateCase"
+    ],
+    "containerRuntime": {
+      "baseImage": "node:22-slim",
+      "systemPackages": [
+        "chromium",
+        "curl",
+        "fonts-liberation",
+        "fonts-noto-cjk",
+        "fonts-noto-color-emoji",
+        "gh",
+        "ghostscript",
+        "git",
+        "libasound2",
+        "libatk-bridge2.0-0",
+        "libcups2",
+        "libdrm2",
+        "libgbm1",
+        "libgtk-3-0",
+        "libnss3",
+        "libpangocairo-1.0-0",
+        "libx11-xcb1",
+        "libxcomposite1",
+        "libxdamage1",
+        "libxrandr2",
+        "libxshmfence1",
+        "poppler-utils",
+        "python3",
+        "python3-pip"
+      ],
+      "pythonPackages": [
+        "Pillow>=10.0",
+        "pikepdf>=9.0",
+        "pymupdf>=1.24.0"
+      ],
+      "globalNpmPackages": [
+        "@anthropic-ai/claude-code",
+        "agent-browser"
+      ]
+    }
+  }
+}

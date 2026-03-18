@@ -17,7 +17,9 @@
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "contract:generate": "tsx scripts/generate-contract.ts",
+    "contract:check": "tsx scripts/generate-contract.ts check"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
