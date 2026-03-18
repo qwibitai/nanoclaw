@@ -3,12 +3,14 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
- * Two auth modes:
- *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
- *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ * Three auth modes:
+ *   API key:    Proxy injects x-api-key on every request (Anthropic).
+ *   OAuth:      Container CLI exchanges its placeholder token for a temp
+ *               API key via /api/oauth/claude_cli/create_api_key.
+ *               Proxy injects real OAuth token on that exchange request;
+ *               subsequent requests carry the temp key which is valid as-is.
+ *   Novita:     Proxy injects Authorization: Bearer header with Novita API key,
+ *               routing to https://api.novita.ai/openai (OpenAI-compatible).
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -17,7 +19,7 @@ import { request as httpRequest, RequestOptions } from 'http';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+export type AuthMode = 'api-key' | 'oauth' | 'novita-api-key';
 
 export interface ProxyConfig {
   authMode: AuthMode;
@@ -32,15 +34,30 @@ export function startCredentialProxy(
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
+    'NOVITA_API_KEY',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  // Novita mode: use Novita API endpoint with Novita API key
+  let authMode: AuthMode = 'api-key';
+  if (secrets.NOVITA_API_KEY) {
+    authMode = 'novita-api-key';
+  } else if (secrets.ANTHROPIC_API_KEY) {
+    authMode = 'api-key';
+  } else {
+    authMode = 'oauth';
+  }
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  // Determine upstream URL based on auth mode
+  let upstreamUrl: URL;
+  if (authMode === 'novita-api-key') {
+    upstreamUrl = new URL('https://api.novita.ai/openai');
+  } else {
+    upstreamUrl = new URL(
+      secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+    );
+  }
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -62,7 +79,11 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        if (authMode === 'api-key') {
+        if (authMode === 'novita-api-key') {
+          // Novita API key mode: inject Authorization header with Bearer token
+          delete headers['authorization'];
+          headers['authorization'] = `Bearer ${secrets.NOVITA_API_KEY}`;
+        } else if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
@@ -120,6 +141,12 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'NOVITA_API_KEY']);
+  if (secrets.NOVITA_API_KEY) {
+    return 'novita-api-key';
+  } else if (secrets.ANTHROPIC_API_KEY) {
+    return 'api-key';
+  } else {
+    return 'oauth';
+  }
 }

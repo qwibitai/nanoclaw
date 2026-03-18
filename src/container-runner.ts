@@ -231,8 +231,11 @@ function buildContainerArgs(
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
   // OAuth mode:   SDK exchanges placeholder token for temp API key,
   //               proxy injects real OAuth token on that exchange request.
+  // Novita mode:  SDK sends Authorization header, proxy replaces with real Novita key.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else if (authMode === 'novita-api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
