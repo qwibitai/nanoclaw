@@ -30,7 +30,9 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Conflict resolution**: opens only conflicted files, resolves the conflict markers, keeps your local customizations intact.
 
-**Validation**: runs `npm run build` and `npm test`.
+**Auto-merge audit**: after resolving conflicts, diffs every auto-merged file against the backup tag to catch silently dropped code. Git auto-merge can delete functions, loops, or blocks when upstream restructures code — even if our side depends on them — because git only conflicts when *both* sides change the same lines. This step catches those silent deletions before they reach production.
+
+**Validation**: runs `npm run build`, `npm test`, and a container smoke test (`docker run`) to verify the agent-runner works end-to-end inside the container.
 
 **Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
@@ -171,10 +173,46 @@ If it gets messy (more than 3 rounds of conflicts):
   - `git rebase --abort`
   - Recommend merge instead.
 
+# Step 4.5: Auto-merge audit (catch silent code drops)
+
+Git auto-merge silently deletes code when upstream removes lines that our side didn't modify.
+This is dangerous: functions, variable assignments, and critical loops can vanish without
+any conflict marker. TypeScript compilation and tests may still pass because the *syntax*
+is valid — only runtime behavior breaks.
+
+**Critical files to audit** (these contain custom logic that upstream may restructure):
+- `container/agent-runner/src/index.ts` — secrets injection, hooks, MCP server building
+- `src/container-runner.ts` — credential scoping, mount building, container args
+- `src/index.ts` — session management, thread isolation, model override
+
+For each critical file, run:
+```
+git diff <backup-tag-from-step-1> HEAD -- <file>
+```
+
+Review the diff for:
+1. **Deleted functions** — any function that existed in our code but is now gone
+2. **Deleted assignments** — loops or statements that populated variables (e.g., `sdkEnv[key] = value`)
+3. **Deleted imports** — imports we added that upstream didn't have
+4. **Changed comments that hint at deleted code** — e.g., "credentials injected by proxy" replacing "credentials injected via stdin"
+
+If deletions are found:
+- Check if the deleted code was intentional (we decided not to keep it during conflict resolution)
+- If NOT intentional: restore it from the backup tag, show the user what was restored
+- If uncertain: ask the user
+
+Do NOT skip this step. The most dangerous merge bugs are the ones that compile clean.
+
 # Step 5: Validation
 Run:
 - `npm run build`
 - `npm test` (do not fail the flow if tests are not configured)
+- Container smoke test:
+  ```
+  ./container/build.sh
+  echo '{"prompt":"respond with OK","groupFolder":"test","chatJid":"test@test","isMain":false,"secrets":{"ANTHROPIC_API_KEY":"test"}}' | timeout 30 docker run -i nanoclaw-agent:latest 2>&1
+  ```
+  The container should start, compile the agent-runner, and attempt to call the API (it will fail auth with a test key, but it should NOT fail with a TypeScript compilation error or missing function). If the output contains `error TS` or `Cannot find name`, the agent-runner has missing code from auto-merge — go back to Step 4.5.
 
 If build fails:
 - Show the error.
