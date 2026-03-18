@@ -279,9 +279,7 @@ export function exportReaction(
     if (!reaction.emoji) {
       // Reaction removed
       searchDb
-        .prepare(
-          `DELETE FROM reactions WHERE message_id = ? AND sender = ?`,
-        )
+        .prepare(`DELETE FROM reactions WHERE message_id = ? AND sender = ?`)
         .run(reaction.message_id, reaction.sender);
     } else {
       // Upsert reaction (one reaction per user per message)
