@@ -199,6 +199,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Cross-channel shared context: all groups get this mount.
+  // Main (digest writer) needs read-write; other groups read-only.
+  const sharedCrossChannelDir = path.join(projectRoot, 'shared', 'cross-channel');
+  if (fs.existsSync(sharedCrossChannelDir)) {
+    mounts.push({
+      hostPath: sharedCrossChannelDir,
+      containerPath: '/workspace/extra/cross-channel',
+      readonly: !isMain,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -217,6 +228,18 @@ function buildContainerArgs(
   containerName: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Resource limits: prevent runaway containers from exhausting host
+  args.push('--memory', '512m', '--cpus', '2');
+
+  // Service Bot: GitHub token for Issues/PRs API (read from host .env, never hardcoded)
+  const githubToken = process.env.GITHUB_TOKEN || '';
+  if (githubToken) {
+    args.push('-e', 'GITHUB_TOKEN=' + githubToken);
+  }
+
+  // Service Bot: SSH config path for tools that SSH to managed hosts
+  args.push('-e', 'SERVICE_BOT_SSH_CONFIG=/workspace/extra/service-ssh/config');
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
