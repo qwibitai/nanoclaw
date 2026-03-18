@@ -20,6 +20,45 @@ const PORT = process.env.MC_PORT || 8080;
 const ATLAS_DIR = path.join(require('os').homedir(), '.atlas');
 const NANOCLAW_DB = path.join(__dirname, '..', 'store', 'messages.db');
 
+// --- Basic auth from .env ---
+function loadEnvAuth() {
+  const envPath = path.join(__dirname, '..', '.env');
+  let user = process.env.MISSION_CONTROL_USER;
+  let pass = process.env.MISSION_CONTROL_PASS;
+  if (!user || !pass) {
+    try {
+      const envContent = fs.readFileSync(envPath, 'utf-8');
+      for (const line of envContent.split('\n')) {
+        const [key, ...rest] = line.split('=');
+        const val = rest.join('=').trim();
+        if (key.trim() === 'MISSION_CONTROL_USER') user = val;
+        if (key.trim() === 'MISSION_CONTROL_PASS') pass = val;
+      }
+    } catch { /* no .env — auth disabled */ }
+  }
+  return { user, pass };
+}
+
+const AUTH = loadEnvAuth();
+const AUTH_ENABLED = !!(AUTH.user && AUTH.pass);
+
+function checkAuth(req, res) {
+  if (!AUTH_ENABLED) return true;
+  const header = req.headers['authorization'];
+  if (!header || !header.startsWith('Basic ')) {
+    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Atlas Mission Control"' });
+    res.end('Authentication required');
+    return false;
+  }
+  const decoded = Buffer.from(header.slice(6), 'base64').toString();
+  const [user, ...passParts] = decoded.split(':');
+  const pass = passParts.join(':');
+  if (user === AUTH.user && pass === AUTH.pass) return true;
+  res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Atlas Mission Control"' });
+  res.end('Invalid credentials');
+  return false;
+}
+
 // --- Data readers ---
 
 function readJson(filePath) {
@@ -328,6 +367,8 @@ function renderPage(data) {
 // --- Server ---
 
 const server = http.createServer((req, res) => {
+  if (!checkAuth(req, res)) return;
+
   if (req.url !== '/' && req.url !== '/index.html') {
     res.writeHead(404);
     res.end('Not found');
@@ -369,5 +410,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Atlas Mission Control running at http://0.0.0.0:${PORT}`);
+  console.log(`Atlas Mission Control running at http://0.0.0.0:${PORT} (auth: ${AUTH_ENABLED ? 'enabled' : 'DISABLED — set MISSION_CONTROL_USER and MISSION_CONTROL_PASS in .env'})`);
 });
