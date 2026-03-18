@@ -156,6 +156,11 @@ export class DiscordChannel implements Channel {
           }
         }
 
+        // If already in bot thread and message explicitly mentions bot, ensure activeConversation is set
+        if (isInBotThread && TRIGGER_PATTERN.test(content)) {
+          this.activeConversation.add(chatJid);
+        }
+
         // Handle attachments — store placeholders so the agent knows something was sent
         if (message.attachments.size > 0) {
           const attachmentDescriptions = [...message.attachments.values()].map(

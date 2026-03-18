@@ -3,6 +3,7 @@
   "overrides": {
     "agent-browser": ["coding", "general"],
     "image-gen": ["general", "creative"],
+    "chart": ["general", "creative"],
     "openscad": ["coding", "engineering"],
     "brainstorming": ["coding", "creative"],
     "dispatching-parallel-agents": ["coding", "general"],
