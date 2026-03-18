@@ -116,7 +116,7 @@
 - [x] T023 Run full test suite (`npm test`) — verify all existing and new tests pass
 - [x] T024 Run type checker (`npm run typecheck`) — verify zero type errors
 - [x] T025 Run linter — verify zero lint errors
-- [ ] T026 Run build (`npm run build`) — verify clean compilation
+- [x] T026 Run build (`npm run build`) — verify clean compilation
 - [ ] T027 Run quickstart.md validation: verify `created_tz` column exists in store/messages.db with correct default, and check startup logs for rehydration entries
 
 ---
