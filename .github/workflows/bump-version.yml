@@ -18,15 +18,31 @@ jobs:
       - uses: actions/checkout@v6
         with:
           token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
 
-      - name: Bump patch version
+      - name: Determine version bump type
+        id: bump-type
         run: |
-          npm version patch --no-git-tag-version
+          # Check commit messages in this push for breaking change signals.
+          # Conventional commits: "feat!:", "fix!:", or "BREAKING CHANGE:" in body.
+          COMMITS=$(git log --format="%s%n%b" ${{ github.event.before }}..${{ github.sha }})
+          if echo "$COMMITS" | grep -qE '^(feat|fix|refactor|perf)!:|BREAKING CHANGE:'; then
+            echo "bump=minor" >> "$GITHUB_OUTPUT"
+            echo "Breaking change detected — will bump minor version"
+          else
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+            echo "No breaking changes — will bump patch version"
+          fi
+
+      - name: Bump version
+        run: |
+          npm version ${{ steps.bump-type.outputs.bump }} --no-git-tag-version
           git add package.json package-lock.json
           git diff --cached --quiet && exit 0
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           VERSION=$(node -p "require('./package.json').version")
-          git commit -m "chore: bump version to $VERSION"
+          BUMP_TYPE=${{ steps.bump-type.outputs.bump }}
+          git commit -m "chore: bump ${BUMP_TYPE} version to $VERSION"
           git pull --rebase
           git push
