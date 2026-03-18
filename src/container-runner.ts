@@ -29,6 +29,50 @@ import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
+/**
+ * Copy skills from the catalog into a group's .claude/skills/ directory,
+ * filtered by the group's category tags.
+ */
+export function copySkillsForGroup(
+  catalogDir: string,
+  skillsDst: string,
+  groupSkills: string[],
+): void {
+  const catalogFile = path.join(catalogDir, 'catalog.json');
+  if (!fs.existsSync(catalogFile)) {
+    // Fallback: no catalog, copy all local skills (backwards compat)
+    const localDir = path.join(catalogDir, 'local');
+    if (fs.existsSync(localDir)) {
+      for (const skillDir of fs.readdirSync(localDir)) {
+        const srcDir = path.join(localDir, skillDir);
+        if (!fs.statSync(srcDir).isDirectory()) continue;
+        fs.cpSync(srcDir, path.join(skillsDst, skillDir), { recursive: true });
+      }
+    }
+    return;
+  }
+
+  const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf-8'));
+  const skills: Array<{ name: string; categories: string[]; path: string }> =
+    catalog.skills || [];
+
+  for (const skill of skills) {
+    // Check if any of the group's categories match any of the skill's categories
+    const matches = skill.categories.some((cat: string) =>
+      groupSkills.includes(cat),
+    );
+    if (!matches) continue;
+
+    // Resolve the catalog path: /skills-catalog/... → catalogDir/...
+    const relativePath = skill.path.replace(/^\/skills-catalog\//, '');
+    const srcDir = path.join(catalogDir, relativePath);
+    if (!fs.existsSync(srcDir)) continue;
+
+    const dstDir = path.join(skillsDst, skill.name);
+    fs.cpSync(srcDir, dstDir, { recursive: true });
+  }
+}
+
 /** Recursively chown a directory and its contents. */
 function chownRecursive(dir: string, uid: number, gid: number): void {
   try {
@@ -163,17 +207,10 @@ function buildVolumeMounts(
     );
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  const catalogDir = path.join(process.cwd(), 'container', 'skills-catalog');
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
-  }
+  const groupSkills = group.skills || ['general'];
+  copySkillsForGroup(catalogDir, skillsDst, groupSkills);
   // Ensure the container's node user (uid 1000) can write session data
   chownRecursive(groupSessionsDir, 1000, 1000);
   mounts.push({
