@@ -24,9 +24,7 @@ Discord
   ↓ キューイング（チャンネルごとに直列化）
 コンテナ起動
   ↓ stdin経由でプロンプト送信
-agent-runner（sdk/modelを見て分岐）
-  ├─ sdk: "claude"    → Claude Agent SDK
-  └─ sdk: "opencode"  → @opencode-ai/sdk
+agent-runner（Claude Agent SDK）
   ↓ 応答
 stdout経由で応答受信
   ↓
@@ -125,7 +123,7 @@ Claude Agent SDK
 
 SDKに委譲。自前実装不要。
 
-- `sdk: "claude"` → Claude Agent SDKのエージェントループ
+- Claude Agent SDKのエージェントループに全面委譲
 
 ### Agent Teams
 
@@ -218,34 +216,22 @@ NanoClawのXMLフォーマットを踏襲。プロバイダー問わず使える
 
 ## コンテナ設計
 
-### 認証方式（SDK別）
+### 認証方式
 
-| sdk | 認証方式 |
-|---|---|
-| `claude` | NanoClawと同様にCredential Proxy経由（本物のトークンをコンテナに渡さない） |
-| `opencode` | Credential Proxy不要。opencodeサーバー自身が`~/.local/share/opencode/auth.json`を管理 |
-
-**opencode SDKの場合**、opencodeサーバープロセス（Bunランタイム）がLLMプロバイダへのAPI呼び出しを直接行う。クライアント（SDK）は本物の認証情報を持たない。コンテナ内でopencodeサーバーを起動し、auth.jsonをマウントするだけでよい。
+Credential Proxy（ホスト側）経由でAPIアクセス。本物のトークンはコンテナに渡さない（NanoClawと同方式）。
 
 ### コンテナ構成
 
 - コンテナ内は全権限（Bash・ネットワーク含め全許可）
-- **Claude SDKモード**: Credential Proxy（ホスト側）経由でAPIアクセス。本物のトークンはコンテナに渡さない
-- **opencode SDKモード**: `~/.local/share/opencode/auth.json`をコンテナにマウント。opencodeサーバーが直接管理
+- Credential Proxy経由でAPIアクセス（本物のトークンはコンテナに渡さない）
 - グループフォルダをマウント（会話履歴・設定ファイルの永続化）
-- mainグループはプロジェクトルートも読み取り専用でマウント
 
 ### entrypoint.shの起動フロー
 
 ```
 entrypoint.sh
-  ├─ opencodeサーバーをバックグラウンドで起動（sdkに関わらず常時）
-  └─ agent-runner起動（sdk/modelに応じて分岐）
-      ├─ sdk: "claude"  → Claude Agent SDK（Credential Proxy経由）
-      └─ sdk: "opencode" → opencode SDK（localhost:4096のopencodeサーバーに接続）
+  └─ agent-runner起動（Claude Agent SDK）
 ```
-
-Claude SDKモード時もopencodeサーバーは起動したままで問題ない（ポートを使わないだけ）。
 
 **参考**: `nanoclaw/src/container-runner.ts`
 
