@@ -13,15 +13,23 @@ export function escapeXml(s: string): string {
 export function formatMessages(
   messages: NewMessage[],
   timezone: string,
+  channel?: Channel,
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+  const channelAttr = channel?.formattingInstructions
+    ? ` channel="${escapeXml(channel.name)}"`
+    : '';
+  const header = `<context timezone="${escapeXml(timezone)}"${channelAttr} />\n`;
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  const formattingBlock = channel?.formattingInstructions
+    ? `<channel_formatting>\n${channel.formattingInstructions}\n</channel_formatting>\n`
+    : '';
+
+  return `${header}${formattingBlock}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

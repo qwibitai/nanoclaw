@@ -7,7 +7,7 @@ import {
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from './types.js';
+import { Channel, NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -120,6 +120,48 @@ describe('formatMessages', () => {
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('<context timezone="America/New_York" />');
+  });
+});
+
+describe('formatMessages with channel formatting', () => {
+  const TZ = 'UTC';
+
+  it('injects channel_formatting when channel has formattingInstructions', () => {
+    const channel = {
+      name: 'discord',
+      formattingInstructions: 'Use **bold** for emphasis',
+      connect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => true,
+      ownsJid: () => true,
+      disconnect: async () => {},
+    } as Channel;
+
+    const result = formatMessages([makeMsg()], TZ, channel);
+    expect(result).toContain('<channel_formatting>');
+    expect(result).toContain('Use **bold** for emphasis');
+    expect(result).toContain('channel="discord"');
+  });
+
+  it('omits channel_formatting when channel has no formattingInstructions', () => {
+    const channel = {
+      name: 'telegram',
+      connect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => true,
+      ownsJid: () => true,
+      disconnect: async () => {},
+    } as Channel;
+
+    const result = formatMessages([makeMsg()], TZ, channel);
+    expect(result).not.toContain('<channel_formatting>');
+    expect(result).not.toContain('channel=');
+  });
+
+  it('works without channel parameter (backward compatible)', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('<channel_formatting>');
+    expect(result).toContain('<context timezone=');
   });
 });
 

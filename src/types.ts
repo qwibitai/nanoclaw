@@ -87,6 +87,8 @@ export interface FileAttachment {
 
 export interface Channel {
   name: string;
+  /** Channel-specific formatting rules, injected into prompts at runtime. */
+  formattingInstructions?: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
   isConnected(): boolean;
