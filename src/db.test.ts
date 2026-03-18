@@ -110,7 +110,7 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(1);
   });
 
-  it('upserts on duplicate id+chat_jid', () => {
+  it('ignores duplicate id+chat_jid (first write wins)', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     store({
@@ -137,7 +137,7 @@ describe('storeMessage', () => {
       'Andy',
     );
     expect(messages).toHaveLength(1);
-    expect(messages[0].content).toBe('updated');
+    expect(messages[0].content).toBe('original');
   });
 });
 

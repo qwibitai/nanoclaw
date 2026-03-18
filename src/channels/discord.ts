@@ -85,6 +85,7 @@ export class DiscordChannel implements Channel {
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
+      try {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
 
@@ -229,6 +230,9 @@ export class DiscordChannel implements Channel {
         { chatJid, chatName, sender: senderName },
         'Discord message stored',
       );
+      } catch (err) {
+        logger.error({ err, messageId: message.id }, 'Unhandled error in Discord message handler');
+      }
     });
 
     // Handle errors gracefully

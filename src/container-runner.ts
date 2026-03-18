@@ -228,11 +228,17 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  // Container runs as node (uid 1000) and needs write access to IPC subdirs
+  // Container runs as node (uid 1000) and needs write access to IPC subdirs.
+  // Use 0o770 (not 0o777) so other local users cannot inject/read IPC files.
   for (const sub of ['messages', 'tasks', 'input', 'files']) {
     const dir = path.join(groupIpcDir, sub);
     fs.mkdirSync(dir, { recursive: true });
-    fs.chmodSync(dir, 0o777);
+    try {
+      fs.chownSync(dir, 1000, 1000);
+    } catch {
+      // Best-effort — may fail if not running as root
+    }
+    fs.chmodSync(dir, 0o770);
   }
   mounts.push({
     hostPath: groupIpcDir,

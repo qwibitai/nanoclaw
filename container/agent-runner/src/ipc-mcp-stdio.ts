@@ -369,6 +369,24 @@ Use this after generating output files (renders, archives, exports) to share the
       };
     }
 
+    // Restrict file paths to safe prefixes to prevent exfiltration of
+    // container-internal files (e.g., /proc/self/environ, /home/node/.claude/)
+    const ALLOWED_PREFIXES = ['/workspace/', '/tmp/'];
+    const blocked = args.files.filter(
+      (f) => !ALLOWED_PREFIXES.some((p) => path.normalize(f.path).startsWith(p)),
+    );
+    if (blocked.length > 0) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `File paths must be under /workspace/ or /tmp/: ${blocked.map((f) => f.path).join(', ')}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Copy files that aren't on a mounted path into /workspace/ipc/files/
     // so the host can access them. Only /workspace/* paths are mounted.
     const resolvedFiles = args.files.map((f) => {
