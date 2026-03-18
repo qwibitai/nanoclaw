@@ -1,6 +1,6 @@
 ---
 name: openscad
-description: Create 3D models with OpenSCAD — write .scad files, render to PNG preview, and send results back to chat. Use when asked to model, design, create, or visualize 3D objects, parts, or shapes.
+description: Create 3D models with OpenSCAD. ONLY trigger when the user explicitly asks to 3D model, 3D print, or design a physical/printable object (e.g. "make a 3D model of X", "design a Gridfinity insert", "create something I can print"). Do NOT trigger for charts, images, diagrams, general "create" requests, or anything that doesn't specifically involve 3D geometry or printing.
 ---
 
 # 3D Modeling with OpenSCAD
