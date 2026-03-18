@@ -1,9 +1,11 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -90,6 +92,54 @@ function loadState(): void {
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
+}
+
+/**
+ * Invalidate sessions for groups whose CLAUDE.md has changed.
+ * The SDK caches system prompts per session — if CLAUDE.md changes,
+ * the old session still uses the old prompt. This detects changes
+ * and clears stale sessions so the next container loads fresh.
+ */
+function invalidateStaleClaudeMdSessions(): void {
+  const hashKey = 'claudemd_hashes';
+  const stored = getRouterState(hashKey);
+  let oldHashes: Record<string, string> = {};
+  try {
+    oldHashes = stored ? JSON.parse(stored) : {};
+  } catch { /* reset on corruption */ }
+
+  const newHashes: Record<string, string> = {};
+  let invalidated = 0;
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    try {
+      const claudeMdPath = path.join(GROUPS_DIR, group.folder, 'CLAUDE.md');
+      if (!fs.existsSync(claudeMdPath)) continue;
+
+      const content = fs.readFileSync(claudeMdPath, 'utf-8');
+      const hash = crypto.createHash('md5').update(content).digest('hex');
+      newHashes[group.folder] = hash;
+
+      if (oldHashes[group.folder] && oldHashes[group.folder] !== hash) {
+        // CLAUDE.md changed — clear this group's session
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+        invalidated++;
+        logger.info(
+          { group: group.name, folder: group.folder },
+          'CLAUDE.md changed — session invalidated for fresh system prompt',
+        );
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  if (invalidated > 0 || JSON.stringify(newHashes) !== JSON.stringify(oldHashes)) {
+    setRouterState(hashKey, JSON.stringify(newHashes));
+  }
+
+  if (invalidated > 0) {
+    logger.info({ count: invalidated }, 'Stale CLAUDE.md sessions invalidated');
+  }
 }
 
 function saveState(): void {
@@ -497,6 +547,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  invalidateStaleClaudeMdSessions();
   restoreRemoteControl();
 
   // Start credential proxy (containers route API calls through this)
