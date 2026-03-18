@@ -25,7 +25,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { detectAuthMode, readVertexConfig } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -222,20 +222,36 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  const proxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`;
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
   // OAuth mode:   SDK exchanges placeholder token for temp API key,
   //               proxy injects real OAuth token on that exchange request.
+  // Vertex mode:  SDK sends requests to proxy with no real auth,
+  //               proxy injects Google Bearer token and forwards to Vertex AI.
   const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  if (authMode === 'vertex') {
+    const vertexConfig = readVertexConfig();
+    if (!vertexConfig) {
+      throw new Error(
+        'Vertex AI mode requires CLOUD_ML_REGION and ANTHROPIC_VERTEX_PROJECT_ID in .env',
+      );
+    }
+    args.push('-e', 'CLAUDE_CODE_USE_VERTEX=1');
+    args.push('-e', `CLOUD_ML_REGION=${vertexConfig.region}`);
+    args.push('-e', `ANTHROPIC_VERTEX_PROJECT_ID=${vertexConfig.projectId}`);
+    // Point the SDK's Vertex client at our proxy instead of the real endpoint
+    args.push('-e', `ANTHROPIC_VERTEX_BASE_URL=${proxyUrl}`);
+    // Skip Google auth inside the container — the proxy handles it
+    args.push('-e', 'CLAUDE_CODE_SKIP_VERTEX_AUTH=1');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    args.push('-e', `ANTHROPIC_BASE_URL=${proxyUrl}`);
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
