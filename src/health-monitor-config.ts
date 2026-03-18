@@ -23,7 +23,7 @@ export interface HealthMonitorConfig {
 
 const DEFAULTS: HealthMonitorConfig = {
   enabled: false,
-  pollIntervalMs: 60000,
+  pollIntervalMs: 300000,
   sources: {},
   defaultRoutes: [],
 };

@@ -23,7 +23,7 @@ describe("loadHealthMonitorConfig", () => {
     const config = loadHealthMonitorConfig("/nonexistent/path.json");
     expect(config).toEqual({
       enabled: false,
-      pollIntervalMs: 60000,
+      pollIntervalMs: 300000,
       sources: {},
       defaultRoutes: [],
     });
@@ -61,7 +61,7 @@ describe("loadHealthMonitorConfig", () => {
 
     const config = loadHealthMonitorConfig("/path.json");
     expect(config.enabled).toBe(false);
-    expect(config.pollIntervalMs).toBe(60000);
+    expect(config.pollIntervalMs).toBe(300000);
     expect(config.sources).toEqual({});
     expect(config.defaultRoutes).toEqual([]);
   });
@@ -124,7 +124,7 @@ describe("validateConfig", () => {
 describe("resolveJids", () => {
   const baseConfig: HealthMonitorConfig = {
     enabled: true,
-    pollIntervalMs: 60000,
+    pollIntervalMs: 300000,
     sources: {
       tanren: {
         enabled: true,
@@ -161,7 +161,7 @@ describe("resolveJids", () => {
   it("returns empty when no route matches", () => {
     const config: HealthMonitorConfig = {
       enabled: true,
-      pollIntervalMs: 60000,
+      pollIntervalMs: 300000,
       sources: {},
       defaultRoutes: [{ eventTypes: ["specific_type"], jids: ["dc:1"] }],
     };
@@ -171,7 +171,7 @@ describe("resolveJids", () => {
   it("first matching rule wins (no duplicates)", () => {
     const config: HealthMonitorConfig = {
       enabled: true,
-      pollIntervalMs: 60000,
+      pollIntervalMs: 300000,
       sources: {
         tanren: {
           enabled: true,

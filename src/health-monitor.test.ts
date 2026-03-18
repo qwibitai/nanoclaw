@@ -34,7 +34,7 @@ function createMockSource(name: string, overrides?: Partial<HealthSource>): Heal
 function createConfig(overrides?: Partial<HealthMonitorConfig>): HealthMonitorConfig {
   return {
     enabled: true,
-    pollIntervalMs: 60000,
+    pollIntervalMs: 300000,
     sources: {
       test: {
         enabled: true,
@@ -85,7 +85,7 @@ describe("Health Monitor", () => {
       expect(source.checkHealth).toHaveBeenCalledTimes(1);
 
       // Advance to next poll
-      await vi.advanceTimersByTimeAsync(60000);
+      await vi.advanceTimersByTimeAsync(300000);
       expect(source.checkHealth).toHaveBeenCalledTimes(2);
     });
 
@@ -375,7 +375,7 @@ describe("Health Monitor", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // Should still schedule next poll
-      await vi.advanceTimersByTimeAsync(60000);
+      await vi.advanceTimersByTimeAsync(300000);
       expect(source.checkHealth).toHaveBeenCalledTimes(2);
     });
 
@@ -389,7 +389,7 @@ describe("Health Monitor", () => {
       startHealthMonitor(deps);
       await vi.advanceTimersByTimeAsync(0);
 
-      await vi.advanceTimersByTimeAsync(60000);
+      await vi.advanceTimersByTimeAsync(300000);
       expect(source.fetchEvents).toHaveBeenCalledTimes(2);
     });
 
@@ -420,7 +420,7 @@ describe("Health Monitor", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // Monitor should not crash — next poll should work
-      await vi.advanceTimersByTimeAsync(60000);
+      await vi.advanceTimersByTimeAsync(300000);
       expect(source.checkHealth).toHaveBeenCalledTimes(2);
     });
 
