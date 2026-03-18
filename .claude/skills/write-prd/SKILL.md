@@ -169,6 +169,32 @@ What can be built in parallel? What's the MVP vs the full vision?
 - **Name residual risks.** No design is perfect. Calling out what's NOT solved builds trust and prevents false confidence.
 - **Link decisions to their rationale.** When you chose option A over B, say why. When you deferred something, say why it's safe to defer.
 
+### Progressive detail — the most important writing principle
+
+**Detail the problem space fully. Detail solutions only at the current level.**
+
+A spec should define the problem taxonomy with high resolution — what the levels are, what capabilities each level requires, where we are today. Think Kardashev scale (energy), SAE levels (autonomous driving), or CMMI (process maturity). The taxonomy itself is the most valuable artifact. It gives shared vocabulary and direction.
+
+But solution detail should be *progressive*: dense for the level we're at or about to reach, sketched for the next level, and deliberately left open beyond that.
+
+**Example of what this looks like:**
+
+If a system is at Level 3 of a 10-level taxonomy:
+- **Level 3 (current):** Full problem analysis. Concrete solution design. Implementation-ready detail.
+- **Level 4 (next):** Problem defined. Rough solution outline. Key open questions identified.
+- **Level 5-7 (horizon):** Problem described. Solution left as "we will need X capability." No design.
+- **Level 8-10 (vision):** One sentence each. The impossible ideal we climb toward.
+
+**Why this matters:**
+- Premature specification is the root of all evil. Designing a Level 10 solution while at Level 3 produces speculative architecture that constrains future thinking without providing current value.
+- The problem taxonomy ages well. The Kardashev scale was defined in 1964 and is still useful. The specific engineering designs from 1964 are not.
+- Progressive detail naturally creates open questions — "what does Level 6 look like in practice?" — which is exactly what a spec should leave for future work.
+- When you reach Level 4, you refine its section with full detail and sketch Level 5. The spec evolves as understanding deepens.
+
+**Anti-pattern: "Coverage Dashboard."** If you're at L1 (instructions in a doc), don't design the CI-integrated dashboard that auto-generates coverage matrices. Instead: define the *need* ("we need a way to see where we are"), note the *current state* ("today it's a manual Markdown table"), and leave the solution as an open question for when you're actually at the level where a dashboard makes sense.
+
+**The test:** For every solution paragraph, ask: "Are we at the level where this solution is the next step?" If no, replace the solution with a problem statement and an open question.
+
 ## Phase 4: Create the GitHub Issue
 
 The issue is the epic anchor. Keep it short — the spec document has the details.
@@ -255,6 +281,7 @@ Things this skill is NOT for:
 - **Bug fixes.** The bug IS the spec. Fix it, write tests, move on.
 - **Implementation planning for an approved spec.** That's task breakdown, not discovery. Use `/plan-work` to break a spec into PRs and issues.
 - **Ongoing documentation.** This produces a point-in-time spec. It will evolve during implementation via subsequent PRs.
+- **Designing solutions for distant levels.** If you define a 10-level taxonomy and you're at level 3, don't design the level 8 solution. Define what level 8 *requires* (the problem), not how to build it (the solution). Leave it as an open question.
 
 ## Tips for the Implementor (Meta)
 
@@ -265,6 +292,24 @@ When you're the future agent picking up a spec created by this skill:
 3. **The spec is a starting point, not a contract.** Implementation will reveal things the spec didn't anticipate. Update the spec as you go (new PRs, not edits to the original).
 4. **Respect the "Why" sections.** If you're tempted to take a shortcut that contradicts the stated reasoning, stop and think. The reasoning exists because someone thought hard about it. If you still disagree, raise it — don't silently diverge.
 
+## Write for Deletion
+
+A spec will be subjected to the five-step algorithm when implementation begins (`/implement-spec`): question requirements, delete, simplify, accelerate, automate. Write your spec expecting this. Specifically:
+
+- **Make sections independently evaluable.** Each section should be deletable without breaking the rest. If someone applies step 2 (delete) and removes the "Coverage Dashboard" section, the remaining spec should still make sense.
+- **Separate the problem taxonomy from proposed solutions.** The taxonomy (what the levels are, what capabilities each level requires) ages well and is hard to delete. The proposed solutions age poorly and should be easy to delete. Keep them in distinct sections.
+- **Mark confidence levels.** "This is the problem" vs "this is one way to solve it" vs "this is a guess." The implementor needs to know which parts to trust and which to re-examine.
+- **Don't bury decisions in prose.** Make them findable, so step 1 (question requirements) can be done efficiently. Tables and explicit "Decision: X because Y" callouts are better than decisions embedded in paragraphs.
+
+The best spec is one where an implementor can read it, delete 40% of it, and still have a clear direction. If deleting any section makes the spec incoherent, the spec is too tightly coupled.
+
 ## What Comes Next
 
-After the spec is merged and reviewed, use **`/plan-work`** to break the initiative into independent, sequenced PRs — one PR, one issue. That skill takes the spec you wrote here and produces a dependency graph, risk assessment, and GitHub sub-issues ready for dev cases.
+After the spec is merged and reviewed:
+- Use **`/accept-case`** to evaluate whether to proceed, gather incidents, and find low-hanging fruit.
+- Use **`/implement-spec`** to bridge spec to code — re-examine against current reality, apply the five-step algorithm, and execute incrementally.
+- Use **`/plan-work`** when implementation is too big for one PR — break into independent, sequenced PRs with dependency graph and sub-issues.
+
+### Recursive Kaizen
+
+These skills are the improvement system. The improvement system should improve itself. After using `/write-prd`, reflect: did the spec help implementation or constrain it? Was the progressive detail at the right granularity? Did the problem taxonomy age well? Capture these observations in kaizen reflections — they're the raw material for improving how we write specs. See `/implement-spec` for the fuller picture.

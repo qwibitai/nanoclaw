@@ -130,7 +130,11 @@ The mechanism for storing and surfacing this doesn't exist yet. That's a separat
 
 ## Integration with other skills
 
-- After accept-case, use `/kaizen` for the actual implementation lifecycle
-- If the case needs a spec, use `/write-prd` — but only if Phase 1-3 showed the problem is genuinely complex
+- After accept-case, use `/implement-spec` to bridge spec to code (applies the five-step algorithm: question, delete, simplify, accelerate, automate)
+- If the case needs a spec first, use `/write-prd` — but only if Phase 1-3 showed the problem is genuinely complex
 - If the case is ready for implementation, use `/plan-work` to break it into PRs
 - Lessons learned feed back into future accept-case evaluations
+
+## Recursive Kaizen
+
+This skill is part of the improvement system. Apply it to itself: after evaluating a case, reflect on whether the evaluation process helped or got in the way. Did Phase 1 (gather incidents) reveal the right things? Did Phase 3 (low-hanging fruit) find something the spec missed? Was Phase 5 (ask the admin) worth the admin's time? These observations, captured in kaizen reflections, are the raw material for improving this skill. See `/implement-spec` for the fuller picture of recursive kaizen.

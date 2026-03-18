@@ -204,3 +204,4 @@ Before declaring the plan done, check:
 | Deferring risk assessment | High-risk items surface early so they can be split or de-risked |
 | Duplicating details in sub-issues | Sub-issues are thin pointers — epic has details, spec has rationale |
 | Acceptance criteria in sub-issues | Keep in epic's dependency table — one place to update |
+| Planning distant levels in detail | If a spec defines a 10-level taxonomy and you're at level 3, only plan PRs for levels 3-4. Leave levels 5+ as future work on the epic. The spec defines the *problem* at all levels but solutions only for the current horizon. |
