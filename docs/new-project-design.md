@@ -246,6 +246,17 @@ NanoClawのコンテナ設計を踏襲。
 - グループフォルダをマウント（会話履歴・設定ファイルの永続化）
 - mainグループはプロジェクトルートも読み取り専用でマウント
 
+### entrypoint.shの起動フロー
+
+```
+entrypoint.sh
+  ├─ opencodeサーバーをバックグラウンドで起動（常時）
+  └─ agent-runner起動（sdk/modelに応じて分岐）
+```
+
+opencodeサーバーはsdkに関わらず常に起動しておく。
+Claude SDKモード時はポートを使わないだけで問題ない。
+
 **参考**: `nanoclaw/src/container-runner.ts`
 
 ---
