@@ -1,6 +1,6 @@
 ---
 name: implement-spec
-description: Take a spec from PRD to working code. Re-examines the spec against current reality, applies the five-step algorithm (question, delete, simplify, accelerate, automate), finds concrete next steps, and executes. Triggers on "implement spec", "implement prd", "start implementation", "pick up spec", "execute spec".
+description: Take a spec from PRD to working code. Re-examines the spec against current reality, applies the five-step algorithm (question, delete, simplify, accelerate, automate), finds concrete next steps, and executes. Triggers on "implement spec", "implement prd", "start implementation", "pick up spec", "execute spec". ALSO triggers on greenlight phrases after discussing concrete work — "lets do it", "go ahead", "build it", "start on this", "do it", "make it happen", "go for it", "ship it", "yes do it". If a specific piece of work (issue, PR, case, spec) was just discussed and the user gives a go-ahead, this skill drives the implementation. Always create a case first (all dev work must be in a case with its own worktree per CLAUDE.md).
 ---
 
 # Implement Spec — From PRD to Working Code

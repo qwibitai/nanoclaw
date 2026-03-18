@@ -1,6 +1,6 @@
 ---
 name: accept-case
-description: Evaluate a kaizen case before implementation — gather incidents, find low-hanging fruit, critique specs, get admin input, record lessons. Triggers on "accept case", "evaluate kaizen", "should we do this", "triage kaizen".
+description: Evaluate a kaizen case before implementation — gather incidents, find low-hanging fruit, critique specs, get admin input, record lessons. Triggers on "accept case", "evaluate kaizen", "should we do this", "triage kaizen". ALSO triggers when browsing/selecting work — "look at issue #N", "check this PR", "what should we work on", "pick up kaizen #N", "find low hanging fruit", "which case", "what's next", "prioritize", or any discussion of a specific GitHub issue, PR, or kaizen case that precedes implementation.
 ---
 
 # Accept Case — Kaizen Case Evaluation

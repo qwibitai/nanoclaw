@@ -147,6 +147,29 @@ Cases and kaizen are **strongly integrated but conceptually distinct**:
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 | `/kaizen` | Recursive process improvement — escalation framework (Level 1→2→3) |
 
+### Dev work skill chain — MUST follow this workflow
+
+When the conversation involves **selecting, evaluating, or starting dev work**, activate the right skills in sequence. Do NOT jump straight to writing code.
+
+```
+User discusses an issue, PR, case, or spec
+  → /accept-case  (evaluate: is this the right work? what's the low-hanging fruit?)
+
+User greenlights: "lets do it", "go ahead", "build it", "do it", "yes", etc.
+  → /implement-spec  (five-step algorithm, create case + worktree, then execute)
+
+Work is large enough to need multiple PRs
+  → /plan-work  (break into sequenced PRs with dependency graph)
+
+Work is done
+  → /kaizen  (reflect on impediments, suggest improvements)
+```
+
+**Key triggers to recognize:**
+- **Browsing/selecting work:** "look at issue #N", "check PR #N", "what should we work on", "find low hanging fruit", "what's next" → `/accept-case`
+- **Greenlighting work:** "lets do it", "go ahead", "build it", "start on this", "ship it", "make it happen" → `/implement-spec`
+- **All dev work MUST be in a case.** If `/implement-spec` activates, create a case with worktree before writing any code.
+
 ## Dev Agent Policies (Kaizen)
 
 These policies were learned from past mistakes. Follow them strictly.
