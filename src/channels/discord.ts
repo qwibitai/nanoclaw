@@ -21,12 +21,15 @@ import {
 import { Channel, OnInboundMessage, OnChatMetadata } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { logger } from '../logger.js';
+import { readEnvFile } from '../env.js';
 import { researchCommand } from '../commands/research.js';
 import { buildCommand } from '../commands/build.js';
 import { statusCommand } from '../commands/status.js';
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CONTROL_CHANNEL_ID = process.env.DISCORD_CONTROL_CHANNEL_ID;
+const { DISCORD_TOKEN, DISCORD_CONTROL_CHANNEL_ID: CONTROL_CHANNEL_ID } = readEnvFile([
+  'DISCORD_TOKEN',
+  'DISCORD_CONTROL_CHANNEL_ID',
+]);
 
 export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   if (!DISCORD_TOKEN) {
@@ -35,7 +38,9 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   }
 
   if (!CONTROL_CHANNEL_ID) {
-    logger.warn('DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel');
+    logger.warn(
+      'DISCORD_CONTROL_CHANNEL_ID not set, Atlas needs a control channel',
+    );
     return null;
   }
 
@@ -141,15 +146,17 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
       if (connected) return;
 
       client.on('ready', async () => {
-        logger.info(
-          { user: client.user?.tag },
-          'Discord bot connected',
-        );
+        logger.info({ user: client.user?.tag }, 'Discord bot connected');
         connected = true;
 
         // Set bot status
         client.user?.setPresence({
-          activities: [{ name: 'Deep Research & Autonomous Building', type: ActivityType.Custom }],
+          activities: [
+            {
+              name: 'Deep Research & Autonomous Building',
+              type: ActivityType.Custom,
+            },
+          ],
           status: 'online',
         });
 
@@ -164,25 +171,41 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
         if (interaction.isChatInputCommand()) {
           const command = commands.get(interaction.commandName);
           if (!command) {
-            logger.warn({ command: interaction.commandName }, 'Unknown command');
+            logger.warn(
+              { command: interaction.commandName },
+              'Unknown command',
+            );
             return;
           }
 
           try {
             if (interaction.commandName === 'status') {
-              await command.execute(interaction, opts.registeredGroups(), activeContainers);
+              await command.execute(
+                interaction,
+                opts.registeredGroups(),
+                activeContainers,
+              );
             } else {
               // Research and build commands
               await command.execute(interaction, opts.onMessage);
             }
           } catch (err) {
-            logger.error({ err, command: interaction.commandName }, 'Command execution failed');
+            logger.error(
+              { err, command: interaction.commandName },
+              'Command execution failed',
+            );
             const errorMessage = `Failed to execute command: ${err instanceof Error ? err.message : 'Unknown error'}`;
 
             if (interaction.deferred || interaction.replied) {
-              await interaction.followUp({ content: errorMessage, ephemeral: true });
+              await interaction.followUp({
+                content: errorMessage,
+                ephemeral: true,
+              });
             } else {
-              await interaction.reply({ content: errorMessage, ephemeral: true });
+              await interaction.reply({
+                content: errorMessage,
+                ephemeral: true,
+              });
             }
           }
         }
@@ -273,10 +296,9 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
 
       // Register commands globally (takes up to 1 hour to propagate)
       // For faster testing, use guild-specific registration instead
-      const data = await rest.put(
-        Routes.applicationCommands(client.user.id),
-        { body: commandData },
-      );
+      const data = await rest.put(Routes.applicationCommands(client.user.id), {
+        body: commandData,
+      });
 
       logger.info({ count: commandData.length }, 'Slash commands registered');
     } catch (err) {
@@ -294,13 +316,15 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
       if (interaction.customId === 'show-spec') {
         // Show current CLAUDE.md spec (if it exists)
         await interaction.followUp({
-          content: '📄 The spec is being maintained in the conversation above. Review the thread to see the current specification.',
+          content:
+            '📄 The spec is being maintained in the conversation above. Review the thread to see the current specification.',
           ephemeral: true,
         });
       } else if (interaction.customId === 'start-build') {
         // Trigger autonomous build mode
         await interaction.followUp({
-          content: '🚀 **Starting autonomous build...**\n\nThe builder agent will now implement the specification. This may take several minutes.',
+          content:
+            '🚀 **Starting autonomous build...**\n\nThe builder agent will now implement the specification. This may take several minutes.',
         });
 
         // Send build trigger message
@@ -309,19 +333,24 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
           chat_jid: interaction.channelId,
           sender: interaction.user.id,
           sender_name: interaction.user.username,
-          content: '[BUILD_MODE] Begin autonomous implementation of the CLAUDE.md specification.',
+          content:
+            '[BUILD_MODE] Begin autonomous implementation of the CLAUDE.md specification.',
           timestamp: new Date().toISOString(),
           is_from_me: false,
           is_bot_message: false,
         });
       } else if (interaction.customId === 'cancel-build') {
         await interaction.followUp({
-          content: '❌ Build cancelled. The thread will remain open for reference.',
+          content:
+            '❌ Build cancelled. The thread will remain open for reference.',
           ephemeral: true,
         });
       }
     } catch (err) {
-      logger.error({ err, customId: interaction.customId }, 'Button interaction failed');
+      logger.error(
+        { err, customId: interaction.customId },
+        'Button interaction failed',
+      );
     }
   }
 
