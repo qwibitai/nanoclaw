@@ -64,8 +64,16 @@ export interface ScheduledTask {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
-  status: 'active' | 'paused' | 'completed';
+  status: 'active' | 'paused' | 'completed' | 'suspended' | 'resuming';
   created_at: string;
+}
+
+export interface SuspendedTask {
+  group_folder: string;
+  task_id: string;
+  session_id: string;
+  resume_at: string; // lastAssistantUuid
+  suspended_at: string;
 }
 
 export interface TaskRunLog {

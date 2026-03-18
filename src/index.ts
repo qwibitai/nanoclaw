@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  INTERRUPT_HARD_KILL_DELAY,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -27,14 +28,18 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  clearSuspendedTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getAllSuspendedTasks,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
   getRouterState,
+  getSuspendedTask,
+  getTaskById,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -57,7 +62,11 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  resumeSuspendedTask,
+  startSchedulerLoop,
+} from './task-scheduler.js';
+import type { SchedulerDependencies } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -409,6 +418,41 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
+          // Suspend task container for user message — instant responsiveness.
+          if (queue.isTaskContainer(chatJid)) {
+            if (queue.isIdleWaiting(chatJid)) {
+              // Task already finished its work and is idle-waiting for the
+              // close timer. Close it immediately (no suspend needed —
+              // next_run advances normally) and queue the message.
+              logger.info(
+                { chatJid },
+                'Closing idle task container for user message',
+              );
+              queue.closeStdin(chatJid);
+            } else {
+              // Task is actively working — suspend it
+              logger.info(
+                { chatJid },
+                'Suspending task container for user message',
+              );
+              queue.interruptAgent(chatJid);
+              if (!queue.getInterruptCallback(chatJid)) {
+                const hardKillTimer = setTimeout(() => {
+                  logger.warn({ chatJid }, 'Task suspend hard-kill timer fired');
+                  queue.hardKill(chatJid);
+                  queue.setInterruptCallback(chatJid, null);
+                }, INTERRUPT_HARD_KILL_DELAY);
+                queue.setInterruptCallback(chatJid, () =>
+                  clearTimeout(hardKillTimer),
+                );
+              }
+            }
+            // Enqueue IMMEDIATELY so pendingMessages is set before the task
+            // container exits and drainGroup runs.
+            queue.enqueueMessageCheck(chatJid);
+            continue;
+          }
+
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
@@ -462,6 +506,42 @@ function recoverPendingMessages(): void {
       );
       queue.enqueueMessageCheck(chatJid);
     }
+  }
+}
+
+function recoverSuspendedTasks(schedulerDeps: SchedulerDependencies): void {
+  const allSuspended = getAllSuspendedTasks();
+  for (const st of allSuspended) {
+    const task = getTaskById(st.task_id);
+    if (!task || task.status !== 'suspended') {
+      clearSuspendedTask(st.task_id);
+      logger.info(
+        { taskId: st.task_id, status: task?.status },
+        'Recovery: discarded stale suspended task',
+      );
+      continue;
+    }
+    // Set suspendedTaskId and trigger a drain. We use triggerDrain()
+    // instead of enqueueTask() to avoid creating a concrete pending task
+    // that would duplicate with the drain-synthesized resume job.
+    // Find the chatJid for this group folder
+    const chatJid = Object.entries(registeredGroups).find(
+      ([, g]) => g.folder === st.group_folder,
+    )?.[0];
+    if (!chatJid) {
+      clearSuspendedTask(st.task_id);
+      logger.warn(
+        { taskId: st.task_id, groupFolder: st.group_folder },
+        'Recovery: no registered group for suspended task',
+      );
+      continue;
+    }
+    queue.setSuspendedTaskId(chatJid, st.task_id);
+    queue.triggerDrain(chatJid);
+    logger.info(
+      { groupFolder: st.group_folder, taskId: st.task_id },
+      'Recovery: marked suspended task for resume',
+    );
   }
 }
 
@@ -598,7 +678,7 @@ async function main(): Promise<void> {
   }
 
   // Start subsystems (independently of connection handler)
-  startSchedulerLoop({
+  const schedulerDeps: SchedulerDependencies = {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
@@ -613,7 +693,25 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+  };
+  startSchedulerLoop(schedulerDeps);
+
+  // Wire suspended task resume into drain callback
+  queue.setResumeSuspendedFn(async (groupJid: string) => {
+    const groupFolder = registeredGroups[groupJid]?.folder;
+    if (!groupFolder) {
+      queue.setSuspendedTaskId(groupJid, null);
+      return;
+    }
+    const suspended = getSuspendedTask(groupFolder);
+    if (!suspended) {
+      queue.setSuspendedTaskId(groupJid, null);
+      return;
+    }
+    await resumeSuspendedTask(suspended, schedulerDeps);
   });
+
+  recoverSuspendedTasks(schedulerDeps);
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);

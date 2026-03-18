@@ -1,8 +1,9 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -19,12 +20,14 @@ interface GroupState {
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
+  suspendedTaskId: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  interruptCallback: (() => void) | null;
 }
 
 export class GroupQueue {
@@ -32,6 +35,8 @@ export class GroupQueue {
   private activeCount = 0;
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
+    null;
+  private resumeSuspendedFn: ((groupJid: string) => Promise<void>) | null =
     null;
   private shuttingDown = false;
 
@@ -43,12 +48,14 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskContainer: false,
         runningTaskId: null,
+        suspendedTaskId: null,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        interruptCallback: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -57,6 +64,83 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  setResumeSuspendedFn(fn: (groupJid: string) => Promise<void>): void {
+    this.resumeSuspendedFn = fn;
+  }
+
+  setSuspendedTaskId(groupJid: string, taskId: string | null): void {
+    this.getGroup(groupJid).suspendedTaskId = taskId;
+  }
+
+  getSuspendedTaskId(groupJid: string): string | null {
+    return this.getGroup(groupJid).suspendedTaskId;
+  }
+
+  isTaskContainer(groupJid: string): boolean {
+    const state = this.getGroup(groupJid);
+    return state.active && state.isTaskContainer;
+  }
+
+  isIdleWaiting(groupJid: string): boolean {
+    const state = this.getGroup(groupJid);
+    return state.active && state.idleWaiting;
+  }
+
+  /**
+   * Write an interrupt sentinel to signal the container to abort immediately.
+   * Returns true if the sentinel was written (active container exists).
+   */
+  interruptAgent(groupJid: string): boolean {
+    const state = this.getGroup(groupJid);
+    if (!state.active || !state.groupFolder) return false;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_interrupt'), '');
+      logger.info({ groupJid }, 'Interrupt sentinel written');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Hard-kill the container process (used when agent doesn't exit gracefully).
+   */
+  hardKill(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.active) return;
+
+    if (state.containerName) {
+      logger.warn(
+        { groupJid, containerName: state.containerName },
+        'Hard-killing container',
+      );
+      execFile(
+        CONTAINER_RUNTIME_BIN,
+        ['stop', state.containerName],
+        { timeout: 10000 },
+        (err) => {
+          if (err && state.process && !state.process.killed) {
+            logger.warn({ groupJid }, 'Container stop failed, sending SIGKILL');
+            state.process.kill('SIGKILL');
+          }
+        },
+      );
+    } else if (state.process && !state.process.killed) {
+      state.process.kill('SIGKILL');
+    }
+  }
+
+  setInterruptCallback(groupJid: string, cb: (() => void) | null): void {
+    this.getGroup(groupJid).interruptCallback = cb;
+  }
+
+  getInterruptCallback(groupJid: string): (() => void) | null {
+    return this.getGroup(groupJid).interruptCallback;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -249,6 +333,14 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      // Clear interrupt callback (e.g. hard-kill timer) to prevent it from
+      // killing the NEXT container spawned for this group.
+      const interruptCleanup = state.interruptCallback;
+      if (interruptCleanup) {
+        interruptCleanup();
+        state.interruptCallback = null;
+      }
+
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
@@ -283,29 +375,64 @@ export class GroupQueue {
     }, delayMs);
   }
 
+  /**
+   * Trigger a drain cycle for a group without setting pendingMessages.
+   * Used by startup recovery to resume suspended tasks without falsely
+   * claiming there are pending messages. Respects concurrency limits.
+   */
+  triggerDrain(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (state.active) return; // Will drain when current work finishes
+    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+      // At capacity — add to waiting queue so drain fires when a slot opens
+      if (!this.waitingGroups.includes(groupJid)) {
+        this.waitingGroups.push(groupJid);
+      }
+      return;
+    }
+    this.drainGroup(groupJid);
+  }
+
   private drainGroup(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
 
-    // Tasks first (they won't be re-discovered from SQLite like messages)
+    // Drain priority: (1) messages, (2) suspended tasks, (3) scheduled tasks
+    if (state.pendingMessages) {
+      this.runForGroup(groupJid, 'drain').catch((err) =>
+        logger.error(
+          { groupJid, err },
+          'Unhandled error in runForGroup (drain)',
+        ),
+      );
+      return;
+    }
+
+    // Suspended task resume — higher priority than scheduled tasks
+    if (state.suspendedTaskId && this.resumeSuspendedFn) {
+      const taskId = state.suspendedTaskId;
+      const resumeFn = this.resumeSuspendedFn;
+      this.runTask(groupJid, {
+        id: `resume-${taskId}`,
+        groupJid,
+        fn: () => resumeFn(groupJid),
+      }).catch((err) =>
+        logger.error(
+          { groupJid, taskId, err },
+          'Unhandled error in resume suspended task',
+        ),
+      );
+      return;
+    }
+
+    // Then remaining pending tasks (scheduled)
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
       this.runTask(groupJid, task).catch((err) =>
         logger.error(
           { groupJid, taskId: task.id, err },
           'Unhandled error in runTask (drain)',
-        ),
-      );
-      return;
-    }
-
-    // Then pending messages
-    if (state.pendingMessages) {
-      this.runForGroup(groupJid, 'drain').catch((err) =>
-        logger.error(
-          { groupJid, err },
-          'Unhandled error in runForGroup (drain)',
         ),
       );
       return;
@@ -323,20 +450,33 @@ export class GroupQueue {
       const nextJid = this.waitingGroups.shift()!;
       const state = this.getGroup(nextJid);
 
-      // Prioritize tasks over messages
-      if (state.pendingTasks.length > 0) {
+      // Same priority as drainGroup: messages > suspended > scheduled
+      if (state.pendingMessages) {
+        this.runForGroup(nextJid, 'drain').catch((err) =>
+          logger.error(
+            { groupJid: nextJid, err },
+            'Unhandled error in runForGroup (waiting)',
+          ),
+        );
+      } else if (state.suspendedTaskId && this.resumeSuspendedFn) {
+        const taskId = state.suspendedTaskId;
+        const resumeFn = this.resumeSuspendedFn;
+        this.runTask(nextJid, {
+          id: `resume-${taskId}`,
+          groupJid: nextJid,
+          fn: () => resumeFn(nextJid),
+        }).catch((err) =>
+          logger.error(
+            { groupJid: nextJid, taskId, err },
+            'Unhandled error in resume suspended task (waiting)',
+          ),
+        );
+      } else if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
         this.runTask(nextJid, task).catch((err) =>
           logger.error(
             { groupJid: nextJid, taskId: task.id, err },
             'Unhandled error in runTask (waiting)',
-          ),
-        );
-      } else if (state.pendingMessages) {
-        this.runForGroup(nextJid, 'drain').catch((err) =>
-          logger.error(
-            { groupJid: nextJid, err },
-            'Unhandled error in runForGroup (waiting)',
           ),
         );
       }

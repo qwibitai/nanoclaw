@@ -9,17 +9,20 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  clearSuspendedTask,
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
+  saveSuspendedTask,
+  setTaskStatus,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup, ScheduledTask } from './types.js';
+import { RegisteredGroup, ScheduledTask, SuspendedTask } from './types.js';
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -75,9 +78,15 @@ export interface SchedulerDependencies {
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
+interface ResumeParams {
+  sessionId: string;
+  resumeAt: string;
+}
+
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
+  resume?: ResumeParams,
 ): Promise<void> {
   const startTime = Date.now();
   let groupDir: string;
@@ -104,7 +113,7 @@ async function runTask(
   fs.mkdirSync(groupDir, { recursive: true });
 
   logger.info(
-    { taskId: task.id, group: task.group_folder },
+    { taskId: task.id, group: task.group_folder, resuming: !!resume },
     'Running scheduled task',
   );
 
@@ -148,11 +157,18 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  let wasInterrupted = false;
+  let lastSessionId: string | undefined;
+  let lastAssistantUuid: string | undefined;
 
   // For group context mode, use the group's current session
+  // Resume params override session selection
   const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const sessionId = resume
+    ? resume.sessionId
+    : task.context_mode === 'group'
+      ? sessions[task.group_folder]
+      : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -174,6 +190,7 @@ async function runTask(
       {
         prompt: task.prompt,
         sessionId,
+        resumeAt: resume?.resumeAt,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
         isMain,
@@ -183,6 +200,36 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        // Track session and resume state for suspend/resume
+        if (streamedOutput.newSessionId) {
+          lastSessionId = streamedOutput.newSessionId;
+        }
+        if (streamedOutput.lastAssistantUuid) {
+          lastAssistantUuid = streamedOutput.lastAssistantUuid;
+        }
+
+        if (streamedOutput.status === 'interrupted') {
+          wasInterrupted = true;
+          // Save suspend state if we have the necessary info
+          if (lastSessionId && lastAssistantUuid) {
+            saveSuspendedTask({
+              group_folder: task.group_folder,
+              task_id: task.id,
+              session_id: lastSessionId,
+              resume_at: lastAssistantUuid,
+              suspended_at: new Date().toISOString(),
+            });
+            setTaskStatus(task.id, 'suspended');
+            deps.queue.setSuspendedTaskId(task.chat_jid, task.id);
+            logger.info(
+              { taskId: task.id, groupFolder: task.group_folder, sessionId: lastSessionId },
+              'Task suspended for user message',
+            );
+          }
+          scheduleClose();
+          return;
+        }
+
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
@@ -200,6 +247,54 @@ async function runTask(
     );
 
     if (closeTimer) clearTimeout(closeTimer);
+
+    // Capture session info from final output (may not have reached streaming callback)
+    if (output.newSessionId) lastSessionId = output.newSessionId;
+    if (output.lastAssistantUuid) lastAssistantUuid = output.lastAssistantUuid;
+
+    // Check final output for interrupted status too.
+    // Also check if the abort error was caught (agent-runner exits cleanly
+    // after abort but streaming callback may not have seen 'interrupted').
+    if (
+      !wasInterrupted &&
+      (output.status === 'interrupted' || output.status === 'error')
+    ) {
+      const isAbortError =
+        output.status === 'interrupted' ||
+        (output.error?.includes('aborted') ?? false);
+      if (isAbortError) {
+        wasInterrupted = true;
+      }
+    }
+
+    // Save suspend state if interrupted and we have session info
+    if (wasInterrupted && lastSessionId && lastAssistantUuid) {
+      // Only save if not already saved by streaming callback
+      if (!deps.queue.getSuspendedTaskId(task.chat_jid)) {
+        saveSuspendedTask({
+          group_folder: task.group_folder,
+          task_id: task.id,
+          session_id: lastSessionId,
+          resume_at: lastAssistantUuid,
+          suspended_at: new Date().toISOString(),
+        });
+        setTaskStatus(task.id, 'suspended');
+        deps.queue.setSuspendedTaskId(task.chat_jid, task.id);
+        logger.info(
+          { taskId: task.id, groupFolder: task.group_folder, sessionId: lastSessionId },
+          'Task suspended for user message (from final output)',
+        );
+      }
+    }
+
+    if (wasInterrupted) {
+      // Don't advance next_run or log as completed — task will resume
+      logger.info(
+        { taskId: task.id, durationMs: Date.now() - startTime },
+        'Task interrupted (will resume)',
+      );
+      return;
+    }
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
@@ -274,6 +369,46 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   };
 
   loop();
+}
+
+/**
+ * Resume a previously suspended task.
+ * Validates that the task still exists and is in suspended state.
+ */
+export async function resumeSuspendedTask(
+  suspended: SuspendedTask,
+  deps: SchedulerDependencies,
+): Promise<void> {
+  const task = getTaskById(suspended.task_id);
+  if (!task || task.status !== 'suspended') {
+    logger.info(
+      { taskId: suspended.task_id, status: task?.status },
+      'Suspended task no longer valid, discarding',
+    );
+    clearSuspendedTask(suspended.task_id);
+    deps.queue.setSuspendedTaskId(suspended.group_folder, null);
+    return;
+  }
+
+  setTaskStatus(task.id, 'resuming');
+  logger.info(
+    { taskId: task.id, groupFolder: suspended.group_folder },
+    'Resuming suspended task',
+  );
+
+  await runTask(task, deps, {
+    sessionId: suspended.session_id,
+    resumeAt: suspended.resume_at,
+  });
+
+  // Only clear suspend state if the task wasn't re-suspended during resume.
+  // If runTask was interrupted again, it already saved new suspend state —
+  // clearing here would lose it.
+  const currentTask = getTaskById(suspended.task_id);
+  if (currentTask?.status !== 'suspended') {
+    clearSuspendedTask(suspended.task_id);
+    deps.queue.setSuspendedTaskId(suspended.group_folder, null);
+  }
 }
 
 /** @internal - for tests only. */
