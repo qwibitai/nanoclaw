@@ -42,6 +42,11 @@ function parseIntEnv(envVar: string | undefined, fallback: number): number {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+export const PR_POLL_INTERVAL = parseIntEnv(
+  process.env.PR_POLL_INTERVAL,
+  300000,
+); // 5 minutes default
+
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseIntEnv(
