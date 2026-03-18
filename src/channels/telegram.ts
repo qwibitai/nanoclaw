@@ -421,6 +421,7 @@ class TelegramMultiBotChannel implements Channel {
         instance?.botUserId != null &&
         ctx.message.from.id === instance.botUserId,
       attachments: attachments.length > 0 ? attachments : undefined,
+      replyTo: ctx.message.reply_to_message?.text,
     };
 
     this.onMessage(jid, msg);

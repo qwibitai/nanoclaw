@@ -61,6 +61,7 @@ export interface NewMessage {
   is_from_me?: boolean;
   is_bot_message?: boolean;
   attachments?: Attachment[];
+  replyTo?: string;  // 被回复消息的文字内容（如果有）
 }
 
 export interface ScheduledTask {
