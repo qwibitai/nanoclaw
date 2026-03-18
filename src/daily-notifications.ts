@@ -5,6 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   createTask,
+  getBacklog,
   getBacklogResolvedSince,
   getShipLogSince,
   getTaskById,
@@ -174,6 +175,11 @@ export interface ActivitySummary {
     title: string;
     status: string;
   }>;
+  openBacklog: Array<{
+    title: string;
+    priority: string;
+    status: string;
+  }>;
 }
 
 /**
@@ -189,6 +195,10 @@ export async function getActivitySummary(
 ): Promise<ActivitySummary> {
   const shipped = getShipLogSince(folder, since);
   const resolved = getBacklogResolvedSince(folder, since);
+  const openItems = [
+    ...getBacklog(folder, 'in_progress'),
+    ...getBacklog(folder, 'open'),
+  ];
   const config = getContainerConfigForFolder(groups, folder);
   const watchGithub = config?.watchGithub ?? [];
   const tokenKey = resolveGithubTokenKey(config?.tools);
@@ -229,6 +239,11 @@ export async function getActivitySummary(
       title: item.title,
       status: item.status,
     })),
+    openBacklog: openItems.map((item) => ({
+      title: item.title,
+      priority: item.priority,
+      status: item.status,
+    })),
   };
 }
 
@@ -258,9 +273,14 @@ export async function sendDailySummaries(
   );
 
   for (const { folder, summary } of summaries) {
-    const { shipped, teamPRs, resolved } = summary;
+    const { shipped, teamPRs, resolved, openBacklog } = summary;
 
-    if (shipped.length === 0 && teamPRs.length === 0 && resolved.length === 0)
+    if (
+      shipped.length === 0 &&
+      teamPRs.length === 0 &&
+      resolved.length === 0 &&
+      openBacklog.length === 0
+    )
       continue;
 
     const lines: string[] = [`📋 **Daily Summary** — ${folder}`];
@@ -285,6 +305,20 @@ export async function sendDailySummaries(
       for (const item of resolved) {
         const emoji = item.status === 'resolved' ? '✅' : '🚫';
         lines.push(`${emoji} ${item.title}`);
+      }
+    }
+
+    if (openBacklog.length > 0) {
+      lines.push(`\n📌 **Open Backlog** (${openBacklog.length}):`);
+      for (const item of openBacklog) {
+        const priorityEmoji =
+          item.priority === 'high'
+            ? '🔴'
+            : item.priority === 'medium'
+              ? '🟡'
+              : '⚪';
+        const statusTag = item.status === 'in_progress' ? ' [in progress]' : '';
+        lines.push(`${priorityEmoji} ${item.title}${statusTag}`);
       }
     }
 
