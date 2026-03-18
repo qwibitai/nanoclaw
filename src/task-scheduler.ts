@@ -287,6 +287,8 @@ export function rehydrateTaskTimezones(timezone: string): void {
   const tasks = getCronTasksForRehydration(timezone);
 
   for (const task of tasks) {
+    const oldNextRun = task.next_run;
+    const oldTz = task.created_tz;
     const newNextRun = CronExpressionParser.parse(task.schedule_value, {
       tz: timezone,
     })
@@ -295,6 +297,16 @@ export function rehydrateTaskTimezones(timezone: string): void {
 
     if (newNextRun) {
       updateTaskTimezone(task.id, newNextRun, timezone);
+      logger.info(
+        {
+          taskId: task.id,
+          oldNextRun,
+          newNextRun,
+          oldTz,
+          newTz: timezone,
+        },
+        'Rehydrated cron task timezone',
+      );
     }
   }
 }

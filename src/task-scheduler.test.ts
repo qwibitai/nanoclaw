@@ -1,7 +1,19 @@
 import { CronExpressionParser } from 'cron-parser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Mock logger to capture log calls for verification
+vi.mock('./logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
+import { logger } from './logger.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
@@ -336,5 +348,59 @@ describe('rehydrateTaskTimezones', () => {
     expect(task).toBeDefined();
     expect(task!.next_run).toBe(utcNextRun);
     expect(task!.created_tz).toBe('UTC');
+  });
+
+  it('logs each correction with taskId, oldNextRun, newNextRun, oldTz, and newTz at info level', () => {
+    // Create a cron task under UTC that will need correction
+    const utcNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'UTC',
+    })
+      .next()
+      .toISOString();
+
+    createTask({
+      id: 'log-correction-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'daily digest',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: utcNextRun,
+      status: 'active',
+      created_at: '2026-03-17T00:00:00.000Z',
+      created_tz: 'UTC',
+    });
+
+    // Clear any previous log calls
+    vi.mocked(logger.info).mockClear();
+
+    // Run rehydration under America/Chicago
+    rehydrateTaskTimezones('America/Chicago');
+
+    // Compute expected new next_run
+    const expectedNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'America/Chicago',
+    })
+      .next()
+      .toISOString();
+
+    // Verify logger.info was called with correction details
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const correctionCall = infoCalls.find(
+      (call) =>
+        typeof call[0] === 'object' &&
+        call[0] !== null &&
+        'taskId' in call[0] &&
+        (call[0] as Record<string, unknown>).taskId === 'log-correction-1',
+    );
+
+    expect(correctionCall).toBeDefined();
+    const logData = correctionCall![0] as Record<string, unknown>;
+    expect(logData.taskId).toBe('log-correction-1');
+    expect(logData.oldNextRun).toBe(utcNextRun);
+    expect(logData.newNextRun).toBe(expectedNextRun);
+    expect(logData.oldTz).toBe('UTC');
+    expect(logData.newTz).toBe('America/Chicago');
   });
 });

@@ -97,7 +97,7 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T019 [P] [US3] Write test: rehydration logs each correction with taskId, oldNextRun, newNextRun, oldTz, and newTz at info level in `src/task-scheduler.test.ts`
+- [x] T019 [P] [US3] Write test: rehydration logs each correction with taskId, oldNextRun, newNextRun, oldTz, and newTz at info level in `src/task-scheduler.test.ts`
 - [ ] T020 [P] [US3] Write test: rehydration emits summary log when 0 tasks corrected (no correction entries, only summary) in `src/task-scheduler.test.ts`
 
 ### Implementation for User Story 3
