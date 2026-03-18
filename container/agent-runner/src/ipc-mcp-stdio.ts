@@ -671,6 +671,18 @@ Case types:
       .describe(
         'Customer organization or business name, if mentioned in the conversation.',
       ),
+    gap_type: z
+      .string()
+      .optional()
+      .describe(
+        'Escalation gap type from the vertical escalation config (e.g., "missing_info", "approval_needed"). Triggers priority computation.',
+      ),
+    signals: z
+      .record(z.boolean())
+      .optional()
+      .describe(
+        'Explicit escalation signal overrides (e.g., { "customer_waiting": true }). Auto-detected signals are merged in.',
+      ),
   },
   async (args) => {
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
