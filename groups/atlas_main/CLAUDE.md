@@ -92,8 +92,8 @@ When you receive a coding task that involves modifying project files:
 ## Cross-Entity Access
 
 As the main group, you can:
-- Read all entity profiles at /workspace/extra/atlas-entities/
-- Read all agent definitions at /workspace/extra/atlas-agents/
+- Read all entity profiles at /workspace/extra/atlas-state/entities/
+- Read all agent definitions at /workspace/extra/atlas-state/agents/
 - Send messages to any registered group via mcp__nanoclaw__send_message
 - Schedule tasks for any group via IPC
 
@@ -182,5 +182,5 @@ CEO has FULL READ-WRITE access to all departments.
 | /workspace/extra/atlas-state | ~/.atlas/ | read-write |
 | /workspace/extra/shared | ~/.atlas/shared/ | read-write |
 | /workspace/extra/projects | /home/atlas/projects/ | read-only |
-| /workspace/extra/atlas-entities | ~/.atlas/entities/ | read-only |
-| /workspace/extra/atlas-agents | ~/.atlas/agents/ | read-only |
+| /workspace/extra/atlas-state/entities | ~/.atlas/entities/ | read-only (via atlas-state mount) |
+| /workspace/extra/atlas-state/agents | ~/.atlas/agents/ | read-only (via atlas-state mount) |
