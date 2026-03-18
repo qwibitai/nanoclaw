@@ -28,7 +28,13 @@ function getServicePath(homeDir: string): string {
 
 function getExtraServiceEnv(): Record<string, string> {
   const vars: Record<string, string> = {};
-  const candidates = ['NODE_OPTIONS', 'CREDENTIAL_PROXY_HOST'];
+  const candidates = [
+    'NODE_OPTIONS',
+    'CREDENTIAL_PROXY_HOST',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+  ];
   for (const key of candidates) {
     const value = process.env[key]?.trim();
     if (value) vars[key] = value;

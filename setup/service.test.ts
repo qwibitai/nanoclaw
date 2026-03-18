@@ -188,6 +188,7 @@ describe('systemd unit generation', () => {
       {
         NODE_OPTIONS: '--require=/workspace/nanoclaw/dns-bootstrap.cjs',
         CREDENTIAL_PROXY_HOST: '127.0.0.1',
+        ANTHROPIC_API_KEY: 'sk-ant-test',
       },
     );
 
@@ -196,6 +197,7 @@ describe('systemd unit generation', () => {
       'Environment=NODE_OPTIONS=--require=/workspace/nanoclaw/dns-bootstrap.cjs',
     );
     expect(unit).toContain('Environment=CREDENTIAL_PROXY_HOST=127.0.0.1');
+    expect(unit).toContain('Environment=ANTHROPIC_API_KEY=sk-ant-test');
   });
 });
 
