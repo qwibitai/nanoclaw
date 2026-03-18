@@ -72,12 +72,7 @@ export function stopContainerAsync(
   name: string,
   callback: (err: Error | null) => void,
 ): void {
-  execFile(
-    CONTAINER_RUNTIME_BIN,
-    ['stop', name],
-    { timeout: 15000 },
-    callback,
-  );
+  execFile(CONTAINER_RUNTIME_BIN, ['stop', name], { timeout: 15000 }, callback);
 }
 
 /** Ensure the container runtime is running, starting it if needed. */

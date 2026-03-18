@@ -26,6 +26,7 @@ import {
   stopContainerAsync,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -309,6 +310,25 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Inject GitHub credentials if configured (for gh CLI and git operations)
+  const ghSecrets = readEnvFile([
+    'GH_TOKEN',
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+  ]);
+  if (ghSecrets.GH_TOKEN) {
+    args.push('-e', `GH_TOKEN=${ghSecrets.GH_TOKEN}`);
+    args.push('-e', `GITHUB_TOKEN=${ghSecrets.GH_TOKEN}`);
+  }
+  if (ghSecrets.GIT_AUTHOR_NAME) {
+    args.push('-e', `GIT_AUTHOR_NAME=${ghSecrets.GIT_AUTHOR_NAME}`);
+    args.push('-e', `GIT_COMMITTER_NAME=${ghSecrets.GIT_AUTHOR_NAME}`);
+  }
+  if (ghSecrets.GIT_AUTHOR_EMAIL) {
+    args.push('-e', `GIT_AUTHOR_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
+    args.push('-e', `GIT_COMMITTER_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
   }
 
   // Runtime-specific args for host gateway resolution

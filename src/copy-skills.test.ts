@@ -20,15 +20,25 @@ describe('copySkillsForGroup', () => {
       path.join(catalogDir, 'catalog.json'),
       JSON.stringify({
         skills: [
-          { name: 'agent-browser', categories: ['coding', 'general'], path: '/skills-catalog/local/agent-browser' },
-          { name: 'tdd', categories: ['coding'], path: '/skills-catalog/plugins/superpowers/tdd' },
+          {
+            name: 'agent-browser',
+            categories: ['coding', 'general'],
+            path: '/skills-catalog/local/agent-browser',
+          },
+          {
+            name: 'tdd',
+            categories: ['coding'],
+            path: '/skills-catalog/plugins/superpowers/tdd',
+          },
         ],
       }),
     );
 
     // Copy with ["general"] — should only get agent-browser
     copySkillsForGroup(catalogDir, destDir, ['general']);
-    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(
+      true,
+    );
     expect(fs.existsSync(path.join(destDir, 'tdd', 'SKILL.md'))).toBe(false);
 
     fs.rmSync(catalogDir, { recursive: true });
@@ -50,14 +60,24 @@ describe('copySkillsForGroup', () => {
       path.join(catalogDir, 'catalog.json'),
       JSON.stringify({
         skills: [
-          { name: 'agent-browser', categories: ['coding', 'general'], path: '/skills-catalog/local/agent-browser' },
-          { name: 'tdd', categories: ['coding'], path: '/skills-catalog/plugins/superpowers/tdd' },
+          {
+            name: 'agent-browser',
+            categories: ['coding', 'general'],
+            path: '/skills-catalog/local/agent-browser',
+          },
+          {
+            name: 'tdd',
+            categories: ['coding'],
+            path: '/skills-catalog/plugins/superpowers/tdd',
+          },
         ],
       }),
     );
 
     copySkillsForGroup(catalogDir, destDir, ['coding']);
-    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(
+      true,
+    );
     expect(fs.existsSync(path.join(destDir, 'tdd', 'SKILL.md'))).toBe(true);
 
     fs.rmSync(catalogDir, { recursive: true });
@@ -73,7 +93,9 @@ describe('copySkillsForGroup', () => {
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Browser');
 
     copySkillsForGroup(catalogDir, destDir, ['general']);
-    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'agent-browser', 'SKILL.md'))).toBe(
+      true,
+    );
 
     fs.rmSync(catalogDir, { recursive: true });
     fs.rmSync(destDir, { recursive: true });
