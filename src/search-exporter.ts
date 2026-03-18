@@ -87,6 +87,15 @@ const SEARCH_SCHEMA = `
     INSERT INTO collections_fts(rowid, title, content)
     VALUES (new.rowid, new.title, new.content);
   END;
+
+  CREATE TABLE IF NOT EXISTS reactions (
+    message_id  TEXT NOT NULL,
+    sender      TEXT NOT NULL,
+    sender_name TEXT,
+    emoji       TEXT NOT NULL,
+    timestamp   TEXT NOT NULL,
+    PRIMARY KEY (message_id, sender)
+  );
 `;
 
 function openSearchDb(dbPath: string): Database.Database {
@@ -241,6 +250,62 @@ export function exportMessage(
     logger.error(
       { groupFolder, msgId: msg.id, err },
       'Real-time search export failed',
+    );
+  } finally {
+    searchDb?.close();
+  }
+}
+
+/**
+ * Export a reaction to the group's search.db in real time.
+ * If emoji is empty/null, the reaction is removed.
+ */
+export function exportReaction(
+  groupFolder: string,
+  reaction: {
+    message_id: string;
+    sender: string;
+    sender_name?: string;
+    emoji: string | null;
+    timestamp: string;
+  },
+): void {
+  const searchDbPath = path.join(GROUPS_DIR, groupFolder, 'search.db');
+  let searchDb: Database.Database | null = null;
+
+  try {
+    searchDb = openSearchDb(searchDbPath);
+
+    if (!reaction.emoji) {
+      // Reaction removed
+      searchDb
+        .prepare(
+          `DELETE FROM reactions WHERE message_id = ? AND sender = ?`,
+        )
+        .run(reaction.message_id, reaction.sender);
+    } else {
+      // Upsert reaction (one reaction per user per message)
+      searchDb
+        .prepare(
+          `INSERT INTO reactions (message_id, sender, sender_name, emoji, timestamp)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(message_id, sender) DO UPDATE SET
+             emoji = excluded.emoji,
+             sender_name = excluded.sender_name,
+             timestamp = excluded.timestamp`,
+        )
+        .run(
+          reaction.message_id,
+          reaction.sender,
+          reaction.sender_name || reaction.sender.split('@')[0],
+          reaction.emoji,
+          reaction.timestamp,
+        );
+    }
+  } catch (err) {
+    logger.error(
+      { groupFolder, messageId: reaction.message_id, err },
+      'Real-time reaction export failed',
     );
   } finally {
     searchDb?.close();

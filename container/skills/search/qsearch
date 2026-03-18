@@ -10,6 +10,8 @@
  *   qsearch --collection=<name> <query>        Search a collection
  *   qsearch --top=N --offset=N <query>         Paginate results
  *   qsearch collections                        List collections
+ *   qsearch reactions                          Reaction summary
+ *   qsearch reactions <sender|emoji>           Search reactions
  *   qsearch index --collection=<name> <path>   Index documents
  *   qsearch rm --collection=<name> [path]      Remove from index
  */
@@ -39,6 +41,9 @@ function parseArgs(argv) {
 
   if (positional[0] === 'collections') {
     args.command = 'collections';
+  } else if (positional[0] === 'reactions') {
+    args.command = 'reactions';
+    args.query = positional.slice(1).join(' ') || null;
   } else if (positional[0] === 'index') {
     args.command = 'index';
     args.path = positional[1] || null;
@@ -209,6 +214,55 @@ function indexCollection(db, collection, dirPath) {
   console.log(`\nIndexed ${indexed} file(s) into collection '${collection}'`);
 }
 
+function searchReactions(db, query, topN, offset) {
+  if (!query) {
+    // List all reactions summary
+    const rows = db.prepare(`
+      SELECT r.emoji, COUNT(*) as count, GROUP_CONCAT(DISTINCT r.sender_name) as reactors
+      FROM reactions r
+      GROUP BY r.emoji
+      ORDER BY count DESC
+    `).all();
+
+    if (rows.length === 0) {
+      console.log('No reactions recorded.');
+      return;
+    }
+
+    console.log('Reaction summary:\n');
+    for (const row of rows) {
+      console.log(`  ${row.emoji}  ×${row.count}  — ${row.reactors}`);
+    }
+    return;
+  }
+
+  // Search: find messages reacted to by a sender or with a specific emoji
+  const rows = db.prepare(`
+    SELECT r.emoji, r.sender_name AS reactor, r.timestamp AS reaction_time,
+           m.sender_name AS author, m.content, m.timestamp AS message_time
+    FROM reactions r
+    JOIN messages m ON m.id = r.message_id
+    WHERE r.sender_name LIKE ? OR r.emoji = ?
+    ORDER BY r.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(`%${query}%`, query, topN, offset);
+
+  if (rows.length === 0) {
+    console.log(`No reactions found for: "${query}"`);
+    return;
+  }
+
+  console.log(`Found ${rows.length} reaction(s) matching "${query}":\n`);
+  for (const row of rows) {
+    const date = new Date(row.message_time).toLocaleString('en-CA', {
+      timeZone: process.env.TZ || 'UTC',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    console.log(`${row.emoji} by ${row.reactor} on [${date}] ${row.author}:\n${row.content}\n`);
+  }
+}
+
 function removeFromCollection(db, collection, filePath) {
   if (!collection) {
     console.error('Error: --collection=<name> is required.');
@@ -251,6 +305,13 @@ function main() {
     const db = ensureDb();
     try {
       listCollections(db);
+    } finally {
+      db.close();
+    }
+  } else if (args.command === 'reactions') {
+    const db = ensureDb();
+    try {
+      searchReactions(db, args.query, args.top, args.offset);
     } finally {
       db.close();
     }

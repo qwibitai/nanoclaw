@@ -59,6 +59,8 @@ Commands:
 • qsearch --top=20 --offset=20 "topic" — paginate results
 • qsearch --collection=name "topic" — search a collection
 • qsearch collections — list available collections
+• qsearch reactions — reaction summary (emoji counts and who reacted)
+• qsearch reactions "sender or emoji" — find messages a person reacted to
 • qsearch index --collection=name /workspace/group/collections/name/ — index docs
 • qsearch rm --collection=name [path] — unindex docs
 
