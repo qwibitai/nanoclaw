@@ -201,16 +201,35 @@ CHECKLIST
 
 MAX_ROUNDS=4
 
-# TRIGGER 4: gh pr merge — clean up state file
+# TRIGGER 4: gh pr merge — clean up state file and prompt summary
 if $IS_PR_MERGE; then
   # Try to find state by PR URL from output, or fall back to most recent active
   MERGE_PR_URL=$(echo "$STDOUT" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  if [ -z "$MERGE_PR_URL" ]; then
+    # gh pr merge --auto may not print the URL; extract from command args
+    MERGE_PR_URL=$(echo "$CMD_LINE" | grep -oE 'https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+' | head -1)
+  fi
   if [ -n "$MERGE_PR_URL" ]; then
     STATE_FILE=$(pr_url_to_state_file "$MERGE_PR_URL")
   else
     STATE_FILE=$(find_active_state)
   fi
   cleanup_state
+
+  cat <<EOF
+
+🎉 PR merged successfully.
+
+Now report to the user:
+1. **What was achieved** — summarize the changes and their impact in 2-3 sentences
+2. **Post-merge action needed** — classify per CLAUDE.md "Post-Merge: Deploy & Maintenance Policy":
+   - CLAUDE.md/docs only → no action, active on next conversation
+   - src/ changes → needs \`npm run build\` + service restart (~10s downtime)
+   - container/Dockerfile → needs \`./container/build.sh\` + restart
+   - package.json deps → needs \`npm install\` + build + restart
+3. **Sync main** — remind to run: \`git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge origin/main --no-edit\`
+
+EOF
   exit 0
 fi
 
@@ -328,6 +347,21 @@ EOF
   # passed. If the agent pushes again, that triggers the next round.
   # If they don't push, the "passed" status stops further nags.
   write_state "$PR_URL" "$ROUND" "passed"
+
+  cat <<EOF
+
+✅ REVIEW PASSED (round $ROUND/$MAX_ROUNDS)
+
+Now report to the user:
+1. **What this PR achieves** — summarize the changes and their purpose in 2-3 sentences
+2. **PR status** — ready to merge, link: $PR_URL
+3. **Post-merge action needed** — classify per CLAUDE.md "Post-Merge: Deploy & Maintenance Policy":
+   - CLAUDE.md/docs only → no action needed
+   - src/ changes → needs \`npm run build\` + service restart (~10s downtime)
+   - container/Dockerfile → needs \`./container/build.sh\` + restart
+   - package.json deps → needs \`npm install\` + build + restart
+
+EOF
   exit 0
 fi
 
