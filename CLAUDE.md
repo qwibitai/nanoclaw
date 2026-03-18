@@ -49,6 +49,17 @@ NanoClaw (harness, public)              Verticals (private repos)
 - **Verticals are mounted into containers** at `/workspace/extra/{name}/`
 - **Work agents** get read-only tools, read-write data. **Dev agents** modify code in worktrees.
 
+### Vertical configuration contract
+
+Verticals provide domain-specific configuration via files in their `config/` directory, mounted into containers at `/workspace/extra/{name}/config/`. The harness reads these files and acts on them. This keeps deployment-specific config portable with the repo — no host-level reconfiguration when moving between machines.
+
+| Config file | Purpose | Docs |
+|-------------|---------|------|
+| `config/escalation.yaml` | Escalation policy: admins, gap types, priority signals, notification rules | See `escalation.example.yaml` in any vertical |
+| `config/materials.json` | Material definitions, pricing | Vertical-specific |
+
+The pattern: **harness provides mechanism, vertical provides policy**. The harness knows HOW to create cases, compute priority, and send notifications. The vertical knows WHO the admins are, WHAT gaps matter, and WHEN to notify.
+
 ### IP protection (future)
 
 - Vertical repos: private (domain knowledge, customer data)
