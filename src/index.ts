@@ -182,7 +182,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        m.content.startsWith('[Voice message]') ||
+        m.content.includes('[Voice message]') ||
         (triggerPattern.test(m.content.trim()) &&
           (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))),
     );
@@ -417,7 +417,7 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                m.content.startsWith('[Voice message]') ||
+                m.content.includes('[Voice message]') ||
                 (triggerPattern.test(m.content.trim()) &&
                   (m.is_from_me ||
                     isTriggerAllowed(chatJid, m.sender, allowlistCfg))),

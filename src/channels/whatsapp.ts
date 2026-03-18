@@ -31,6 +31,7 @@ import {
   deleteAllMessages,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { exportReaction } from '../search-exporter.js';
 import {
   Channel,
   OnInboundMessage,
@@ -442,6 +443,32 @@ export class WhatsAppChannel implements Channel {
         this.markAttachmentsDeleted([{ id, chatJid }]);
         deleteMessages([{ id, chatJid }]);
         logger.info({ chatJid, id }, 'Message revoked (delete for everyone)');
+      }
+    });
+
+    this.sock.ev.on('messages.reaction', (reactions) => {
+      const groups = this.opts.registeredGroups();
+      for (const { key, reaction } of reactions) {
+        const chatJid = key.remoteJid;
+        if (!chatJid || !key.id) continue;
+        const group = groups[chatJid];
+        if (!group) continue;
+        const sender = reaction.key?.participant || reaction.key?.remoteJid || '';
+        exportReaction(group.folder, {
+          message_id: key.id,
+          sender,
+          sender_name: sender.split('@')[0],
+          emoji: reaction.text || null,
+          timestamp: reaction.senderTimestampMs
+            ? new Date(
+                Number(reaction.senderTimestampMs),
+              ).toISOString()
+            : new Date().toISOString(),
+        });
+        logger.info(
+          { chatJid, messageId: key.id, emoji: reaction.text, sender },
+          reaction.text ? 'Reaction saved' : 'Reaction removed',
+        );
       }
     });
 
