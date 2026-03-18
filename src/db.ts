@@ -36,6 +36,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -612,19 +613,31 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  let containerConfig;
+  try {
+    containerConfig = row.container_config
+      ? JSON.parse(row.container_config)
+      : undefined;
+  } catch {
+    logger.warn({ jid: row.jid }, 'Invalid container_config JSON, ignoring');
+  }
+  let skills: string[] = ['general'];
+  try {
+    skills = row.skills ? JSON.parse(row.skills) : ['general'];
+  } catch {
+    logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
+  }
   return {
     jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
-    skills: row.skills ? JSON.parse(row.skills) : ['general'],
+    skills,
   };
 }
 
@@ -669,18 +682,33 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    let containerConfig;
+    try {
+      containerConfig = row.container_config
+        ? JSON.parse(row.container_config)
+        : undefined;
+    } catch {
+      logger.warn(
+        { jid: row.jid },
+        'Invalid container_config JSON, ignoring',
+      );
+    }
+    let skills: string[] = ['general'];
+    try {
+      skills = row.skills ? JSON.parse(row.skills) : ['general'];
+    } catch {
+      logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
+    }
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
+      containerConfig,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
-      skills: row.skills ? JSON.parse(row.skills) : ['general'],
+      skills,
     };
   }
   return result;

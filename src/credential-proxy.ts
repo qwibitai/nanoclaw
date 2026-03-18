@@ -45,10 +45,24 @@ export function startCredentialProxy(
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {
+    const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
+      let bodySize = 0;
+      req.on('data', (c) => {
+        bodySize += c.length;
+        if (bodySize > MAX_BODY_SIZE) {
+          req.destroy();
+          if (!res.headersSent) {
+            res.writeHead(413);
+            res.end('Request body too large');
+          }
+          return;
+        }
+        chunks.push(c);
+      });
       req.on('end', () => {
+        if (bodySize > MAX_BODY_SIZE) return;
         const body = Buffer.concat(chunks);
         const headers: Record<string, string | number | string[] | undefined> =
           {

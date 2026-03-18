@@ -48,5 +48,5 @@ export function findChannel(
   channels: Channel[],
   jid: string,
 ): Channel | undefined {
-  return channels.find((c) => c.ownsJid(jid));
+  return channels.find((c) => c.ownsJid(jid) && c.isConnected());
 }

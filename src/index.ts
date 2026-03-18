@@ -271,6 +271,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  _retried = false,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -344,7 +345,14 @@ async function runAgent(
         );
         delete sessions[group.folder];
         deleteSession(group.folder);
-        return runAgent(group, prompt, chatJid, onOutput);
+        if (_retried) {
+          logger.error(
+            { group: group.name },
+            'Session expired again after retry, giving up',
+          );
+          return 'error';
+        }
+        return runAgent(group, prompt, chatJid, onOutput, true);
       }
 
       logger.error(
@@ -638,7 +646,10 @@ async function main(): Promise<void> {
     sendFile: (jid, files, caption) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      if (!channel.sendFile) throw new Error(`Channel ${channel.name} does not support file sending`);
+      if (!channel.sendFile)
+        throw new Error(
+          `Channel ${channel.name} does not support file sending`,
+        );
       return channel.sendFile(jid, files, caption);
     },
     registeredGroups: () => registeredGroups,
