@@ -453,16 +453,15 @@ export class WhatsAppChannel implements Channel {
         if (!chatJid || !key.id) continue;
         const group = groups[chatJid];
         if (!group) continue;
-        const sender = reaction.key?.participant || reaction.key?.remoteJid || '';
+        const sender =
+          reaction.key?.participant || reaction.key?.remoteJid || '';
         exportReaction(group.folder, {
           message_id: key.id,
           sender,
           sender_name: sender.split('@')[0],
           emoji: reaction.text || null,
           timestamp: reaction.senderTimestampMs
-            ? new Date(
-                Number(reaction.senderTimestampMs),
-              ).toISOString()
+            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
             : new Date().toISOString(),
         });
         logger.info(
