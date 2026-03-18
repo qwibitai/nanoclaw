@@ -140,8 +140,38 @@ vi.mock("discord.js", () => {
   // Mock TextChannel type
   class TextChannel {}
 
+  // Mock EmbedBuilder
+  class EmbedBuilder {
+    data: Record<string, any> = {};
+    setTitle(t: string) {
+      this.data.title = t;
+      return this;
+    }
+    setDescription(d: string) {
+      this.data.description = d;
+      return this;
+    }
+    setColor(c: number) {
+      this.data.color = c;
+      return this;
+    }
+    addFields(...fields: any[]) {
+      this.data.fields = [...(this.data.fields || []), ...fields];
+      return this;
+    }
+    setFooter(f: any) {
+      this.data.footer = f;
+      return this;
+    }
+    setTimestamp(t: any) {
+      this.data.timestamp = t;
+      return this;
+    }
+  }
+
   return {
     Client: MockClient,
+    EmbedBuilder,
     Events,
     GatewayIntentBits,
     TextChannel,
@@ -1065,6 +1095,57 @@ describe("DiscordChannel", () => {
         2,
         "Restart failed via systemd-user: Restart command timed out after 30000ms: systemctl --user restart nanoclaw",
       );
+    });
+  });
+
+  // --- sendEmbed ---
+
+  describe("sendEmbed", () => {
+    it("sends embed via channel", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      await channel.sendEmbed("dc:1234567890123456", {
+        title: "Test Embed",
+        description: "Hello",
+        color: 0x00ff00,
+      });
+
+      expect(mockChannel.send).toHaveBeenCalledWith({
+        embeds: [expect.any(Object)],
+      });
+    });
+
+    it("throws when client not initialized", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+
+      await expect(channel.sendEmbed("dc:1234567890123456", { title: "Test" })).rejects.toThrow(
+        "Discord client not initialized",
+      );
+    });
+
+    it("strips dc: prefix from JID", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      await channel.sendEmbed("dc:9876543210", { title: "Test" });
+
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith("9876543210");
     });
   });
 

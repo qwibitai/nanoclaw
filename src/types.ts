@@ -78,6 +78,17 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Discord embed (channel-agnostic shape, maps 1:1 to Discord embed API) ---
+
+export interface DiscordEmbed {
+  title?: string;
+  description?: string;
+  color?: number;
+  fields?: Array<{ name: string; value: string; inline?: boolean }>;
+  footer?: { text: string };
+  timestamp?: string; // ISO 8601
+}
+
 // --- Channel abstraction ---
 
 export interface PurgeOptions {
@@ -98,6 +109,8 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: purge messages from a channel (admin cleanup).
   purgeMessages?(jid: string, options?: PurgeOptions): Promise<number>;
+  // Optional: send a rich embed (Discord). Channels without embed support use text fallback.
+  sendEmbed?(jid: string, embed: DiscordEmbed): Promise<void>;
 }
 
 /**

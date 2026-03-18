@@ -70,6 +70,11 @@ import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
+import { loadHealthMonitorConfig } from "./health-monitor-config.js";
+import { startHealthMonitor } from "./health-monitor.js";
+import type { HealthSource } from "./health-monitor.js";
+import { TanrenHealthSource } from "./health-sources/tanren.js";
+import { renderEmbedAsText } from "./health-embeds.js";
 import { Channel, NewMessage, PartialSendError, RegisteredGroup } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -762,6 +767,38 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal("No channels connected");
     process.exit(1);
+  }
+
+  // Start health monitor
+  const healthConfig = loadHealthMonitorConfig();
+  if (healthConfig.enabled) {
+    const healthSources: HealthSource[] = [];
+    if (tanrenClient && healthConfig.sources.tanren?.enabled) {
+      healthSources.push(new TanrenHealthSource(tanrenClient));
+    }
+    if (healthSources.length > 0) {
+      startHealthMonitor({
+        sources: healthSources,
+        sendEmbed: async (jid, embed) => {
+          const channel = findChannel(channels, jid);
+          if (!channel) {
+            logger.warn({ jid }, "Health monitor: no channel owns JID");
+            return;
+          }
+          if (channel.sendEmbed) {
+            await channel.sendEmbed(jid, embed);
+          } else {
+            await channel.sendMessage(jid, renderEmbedAsText(embed));
+          }
+        },
+        getState: (key) => getRouterState(`hm_${key}`),
+        setState: (key, value) => setRouterState(`hm_${key}`, value),
+        config: healthConfig,
+      });
+      logger.info({ sources: healthSources.map((s) => s.name) }, "Health monitor started");
+    }
+  } else {
+    logger.debug("Health monitor disabled");
   }
 
   // Start subsystems (independently of connection handler)
