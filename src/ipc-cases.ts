@@ -277,7 +277,27 @@ export async function processCaseIpc(
       return true;
 
     case 'case_create':
-      await handleCaseCreate(data, sourceGroup, isMain, deps, registeredGroups);
+      try {
+        await handleCaseCreate(
+          data,
+          sourceGroup,
+          isMain,
+          deps,
+          registeredGroups,
+        );
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Unhandled error in case_create — writing error result',
+        );
+        writeCaseErrorResult(data, sourceGroup, {
+          error: 'internal',
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Unknown error during case creation',
+        });
+      }
       return true;
 
     case 'case_suggest_dev':
@@ -322,6 +342,28 @@ export async function processCaseIpc(
   }
 }
 
+/**
+ * Write an error result file to case_results/ so the polling caller gets feedback.
+ * Exported for testing.
+ */
+export function writeCaseErrorResult(
+  data: Record<string, unknown>,
+  sourceGroup: string,
+  errorPayload: { error: string; message: string },
+): void {
+  const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'case_results');
+  fs.mkdirSync(resultDir, { recursive: true });
+  const rawReqId = data.requestId as string | undefined;
+  const safeReqId = rawReqId ? sanitizeRequestId(rawReqId) : '';
+  const resultFile = safeReqId
+    ? `${safeReqId}.json`
+    : `error-${Date.now()}.json`;
+  fs.writeFileSync(
+    path.join(resultDir, resultFile),
+    JSON.stringify(errorPayload),
+  );
+}
+
 async function handleCaseCreate(
   data: Record<string, unknown>,
   sourceGroup: string,
@@ -343,6 +385,10 @@ async function handleCaseCreate(
   };
   if (!d.description) {
     logger.warn({ sourceGroup }, 'case_create missing description');
+    writeCaseErrorResult(data, sourceGroup, {
+      error: 'validation',
+      message: 'case_create missing required field: description',
+    });
     return;
   }
 
