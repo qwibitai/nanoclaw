@@ -305,4 +305,36 @@ describe('rehydrateTaskTimezones', () => {
     expect(task!.next_run).toBe(onceNextRun);
     expect(task!.created_tz).toBe('UTC');
   });
+
+  it('skips completed cron tasks during rehydration', () => {
+    // Create a completed cron task with created_tz = 'UTC' (different from target tz)
+    const utcNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'UTC',
+    })
+      .next()
+      .toISOString();
+
+    createTask({
+      id: 'completed-cron-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'daily digest',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: utcNextRun,
+      status: 'completed',
+      created_at: '2026-03-17T00:00:00.000Z',
+      created_tz: 'UTC',
+    });
+
+    // Run rehydration under America/Chicago
+    rehydrateTaskTimezones('America/Chicago');
+
+    // Verify next_run is unchanged — completed tasks will never fire again
+    const task = getTaskById('completed-cron-1');
+    expect(task).toBeDefined();
+    expect(task!.next_run).toBe(utcNextRun);
+    expect(task!.created_tz).toBe('UTC');
+  });
 });
