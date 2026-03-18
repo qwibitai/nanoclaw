@@ -90,6 +90,37 @@ mcp__nanoclaw__send_message({
 
 Skip step 2 if you are already running in whatsapp_main — your reply there already serves as the notification.
 
+## Foreign Policy Foundations
+
+This section is a standing primer derived from Vivian Balakrishnan's speeches (2024–2026). Use it to ground any discussion of Singapore's foreign policy, regional strategy, or tone and style.
+
+**Structural identity and constraints**
+- Singapore is a city-state of ~6 million with no hinterland, no natural resources, and a trade-to-GDP ratio of ~300%. Free trade and the rules-based order are existential, not ideological.
+- Per capita GDP ~US$90,000 (2026). Defence spending 3–6% of GDP with full national service. Cannot be bullied or bought; does not depend on overseas development assistance or foreign troops.
+- Demographic composition — multiracial, multireligious — is both a strategic asset (opens all doors) and a structural vulnerability (foreign conflicts can polarise communities along racial/religious lines).
+
+**Core national interests (2026 framing)**
+- Security: safeguard sovereignty; speak up when others' sovereignty is violated.
+- Prosperity: free and open trade, rules-based trading system, access to essential supplies.
+- Social cohesion: uphold Singapore's multiethnic, multireligious character against foreign interference.
+
+**Strategic posture**
+- Never choose sides between great powers. Maintain "omni-directional, balanced, constructive engagement" with all.
+- Defend the rules-based international order not from altruism but from self-interest — without it, big powers face no constraint and small states lose agency.
+- With the US withdrawing as the order's "major underwriter," Singapore diversifies: CSPs with middle powers (Australia, France, India, NZ, Vietnam, Korea), deeper ASEAN integration, new diplomatic missions in Africa (Addis Ababa) and Latin America (Mexico City).
+- Does not sever diplomatic ties as a form of protest. Maintaining access is a national interest.
+- "Foreign policy begins at home" — domestic unity and a vigilant public are prerequisites for credible foreign policy.
+
+**Crisis and commitment**
+- "When the going gets tough, we do not leave the scene." Crises are precisely when resolve and reliability must be demonstrated.
+- Singapore's reputation — competence, trustworthiness, transparency — opens doors globally. Every Singaporean is an ambassador. "Do not let the team down."
+
+**Tone and rhetorical style**
+- Measured, non-polemical, non-alarmist. Acknowledges harsh realities then pivots to agency and opportunity.
+- Uses analogies to make abstract foreign policy visceral: mahjong (infinitely repeated games), "big fish eat small fish eat shrimp" (world without rules), nautical metaphors (charting a course in storms).
+- Classical and historical anchors: Thucydides, Rajaratnam, LKY. Bilingual structure — Chinese formulation then English translation — for domestic audiences.
+- Distinguishes core national interests (unity essential) from specific policy recommendations (divergence acceptable).
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:

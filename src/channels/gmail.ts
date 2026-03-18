@@ -2,10 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { google, gmail_v1 } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
+import { ImapFlow } from 'imapflow';
+import nodemailer from 'nodemailer';
 
-// isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -21,6 +20,15 @@ export interface GmailChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+interface GmailConfig {
+  email: string;
+  appPassword: string;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+}
+
 interface ThreadMeta {
   sender: string;
   senderName: string;
@@ -31,85 +39,52 @@ interface ThreadMeta {
 export class GmailChannel implements Channel {
   name = 'gmail';
 
-  private oauth2Client: OAuth2Client | null = null;
-  private gmail: gmail_v1.Gmail | null = null;
+  private config: GmailConfig | null = null;
   private opts: GmailChannelOpts;
-  private pollIntervalMs: number;
-  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private imapClient: ImapFlow | null = null;
   private processedIds = new Set<string>();
   private threadMeta = new Map<string, ThreadMeta>();
-  private consecutiveErrors = 0;
-  private userEmail = '';
+  private connected = false;
 
-  constructor(opts: GmailChannelOpts, pollIntervalMs = 60000) {
+  constructor(opts: GmailChannelOpts) {
     this.opts = opts;
-    this.pollIntervalMs = pollIntervalMs;
   }
 
   async connect(): Promise<void> {
-    const credDir = path.join(os.homedir(), '.gmail-mcp');
-    const keysPath = path.join(credDir, 'gcp-oauth.keys.json');
-    const tokensPath = path.join(credDir, 'credentials.json');
-
-    if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
+    const configPath = path.join(os.homedir(), '.gmail-mcp', 'config.json');
+    if (!fs.existsSync(configPath)) {
       logger.warn(
-        'Gmail credentials not found in ~/.gmail-mcp/. Skipping Gmail channel. Run /add-gmail to set up.',
+        'Gmail app-password config not found at ~/.gmail-mcp/config.json. Skipping Gmail channel.',
       );
       return;
     }
 
-    const keys = JSON.parse(fs.readFileSync(keysPath, 'utf-8'));
-    const tokens = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
+    this.config = JSON.parse(
+      fs.readFileSync(configPath, 'utf-8'),
+    ) as GmailConfig;
 
-    const clientConfig = keys.installed || keys.web || keys;
-    const { client_id, client_secret, redirect_uris } = clientConfig;
-    this.oauth2Client = new google.auth.OAuth2(
-      client_id,
-      client_secret,
-      redirect_uris?.[0],
+    // Verify credentials with a quick connect
+    const probe = this.makeImapClient();
+    try {
+      await probe.connect();
+      await probe.logout();
+    } catch (err) {
+      logger.error({ err }, 'Gmail IMAP connection failed');
+      this.config = null;
+      return;
+    }
+
+    logger.info(
+      { email: this.config.email },
+      'Gmail channel connected (IMAP IDLE)',
     );
-    this.oauth2Client.setCredentials(tokens);
-
-    // Persist refreshed tokens
-    this.oauth2Client.on('tokens', (newTokens) => {
-      try {
-        const current = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
-        Object.assign(current, newTokens);
-        fs.writeFileSync(tokensPath, JSON.stringify(current, null, 2));
-        logger.debug('Gmail OAuth tokens refreshed');
-      } catch (err) {
-        logger.warn({ err }, 'Failed to persist refreshed Gmail tokens');
-      }
-    });
-
-    this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
-
-    // Verify connection
-    const profile = await this.gmail.users.getProfile({ userId: 'me' });
-    this.userEmail = profile.data.emailAddress || '';
-    logger.info({ email: this.userEmail }, 'Gmail channel connected');
-
-    // Start polling with error backoff
-    const schedulePoll = () => {
-      const backoffMs = this.consecutiveErrors > 0
-        ? Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000)
-        : this.pollIntervalMs;
-      this.pollTimer = setTimeout(() => {
-        this.pollForMessages()
-          .catch((err) => logger.error({ err }, 'Gmail poll error'))
-          .finally(() => {
-            if (this.gmail) schedulePoll();
-          });
-      }, backoffMs);
-    };
-
-    // Initial poll
-    await this.pollForMessages();
-    schedulePoll();
+    this.connected = true;
+    // Run IDLE loop in background — does not block connect()
+    this.runIdleLoop();
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.gmail) {
+    if (!this.config) {
       logger.warn('Gmail not initialized');
       return;
     }
@@ -126,29 +101,25 @@ export class GmailChannel implements Channel {
       ? meta.subject
       : `Re: ${meta.subject}`;
 
-    const headers = [
-      `To: ${meta.sender}`,
-      `From: ${this.userEmail}`,
-      `Subject: ${subject}`,
-      `In-Reply-To: ${meta.messageId}`,
-      `References: ${meta.messageId}`,
-      'Content-Type: text/plain; charset=utf-8',
-      '',
-      text,
-    ].join('\r\n');
-
-    const encodedMessage = Buffer.from(headers)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    const transporter = nodemailer.createTransport({
+      host: this.config.smtpHost || 'smtp.gmail.com',
+      port: this.config.smtpPort || 587,
+      secure: false,
+      auth: {
+        user: this.config.email,
+        pass: this.config.appPassword,
+      },
+    });
 
     try {
-      await this.gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedMessage,
-          threadId,
+      await transporter.sendMail({
+        from: this.config.email,
+        to: meta.sender,
+        subject,
+        text,
+        headers: {
+          'In-Reply-To': meta.messageId,
+          References: meta.messageId,
         },
       });
       logger.info({ to: meta.sender, threadId }, 'Gmail reply sent');
@@ -158,7 +129,7 @@ export class GmailChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.gmail !== null;
+    return this.connected;
   }
 
   ownsJid(jid: string): boolean {
@@ -166,96 +137,135 @@ export class GmailChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
+    this.connected = false;
+    if (this.imapClient) {
+      try {
+        await this.imapClient.logout();
+      } catch {
+        /* ignore */
+      }
+      this.imapClient = null;
     }
-    this.gmail = null;
-    this.oauth2Client = null;
     logger.info('Gmail channel stopped');
   }
 
   // --- Private ---
 
-  private buildQuery(): string {
-    return 'is:unread category:primary';
+  private makeImapClient(): ImapFlow {
+    return new ImapFlow({
+      host: this.config!.imapHost || 'imap.gmail.com',
+      port: this.config!.imapPort || 993,
+      secure: true,
+      auth: {
+        user: this.config!.email,
+        pass: this.config!.appPassword,
+      },
+      logger: false,
+    });
   }
 
-  private async pollForMessages(): Promise<void> {
-    if (!this.gmail) return;
+  private async runIdleLoop(): Promise<void> {
+    let consecutiveErrors = 0;
+    while (this.connected) {
+      const client = this.makeImapClient();
+      this.imapClient = client;
+      try {
+        await client.connect();
+        await client.mailboxOpen('INBOX');
+        logger.debug('Gmail IDLE: connected, fetching unseen');
 
-    try {
-      const query = this.buildQuery();
-      const res = await this.gmail.users.messages.list({
-        userId: 'me',
-        q: query,
-        maxResults: 10,
-      });
+        // Fetch any unseen messages that arrived before we entered IDLE
+        await this.fetchUnseen(client);
+        consecutiveErrors = 0;
 
-      const messages = res.data.messages || [];
-
-      for (const stub of messages) {
-        if (!stub.id || this.processedIds.has(stub.id)) continue;
-        this.processedIds.add(stub.id);
-
-        await this.processMessage(stub.id);
+        // IDLE: resolves when the server signals new mail (or ~29-min server timeout)
+        while (this.connected) {
+          await client.idle();
+          if (!this.connected) break;
+          await this.fetchUnseen(client);
+        }
+      } catch (err) {
+        if (!this.connected) break; // normal shutdown
+        consecutiveErrors++;
+        const backoffMs = Math.min(
+          5000 * Math.pow(2, consecutiveErrors - 1),
+          5 * 60 * 1000,
+        );
+        logger.error(
+          { err, consecutiveErrors, retryMs: backoffMs },
+          'Gmail IDLE error, reconnecting',
+        );
+        try {
+          await client.logout();
+        } catch {
+          /* ignore */
+        }
+        this.imapClient = null;
+        await new Promise((r) => setTimeout(r, backoffMs));
       }
+    }
+    this.imapClient = null;
+  }
 
-      // Cap processed ID set to prevent unbounded growth
-      if (this.processedIds.size > 5000) {
-        const ids = [...this.processedIds];
-        this.processedIds = new Set(ids.slice(ids.length - 2500));
-      }
-
-      this.consecutiveErrors = 0;
-    } catch (err) {
-      this.consecutiveErrors++;
-      const backoffMs = Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000);
-      logger.error({ err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs }, 'Gmail poll failed');
+  private async fetchUnseen(client: ImapFlow): Promise<void> {
+    const uids = (await client.search({ seen: false }, { uid: true })) || [];
+    for (const uid of uids) {
+      const uidStr = String(uid);
+      if (this.processedIds.has(uidStr)) continue;
+      this.processedIds.add(uidStr);
+      await this.processMessage(client, uid);
+    }
+    // Cap processed ID set
+    if (this.processedIds.size > 5000) {
+      const ids = [...this.processedIds];
+      this.processedIds = new Set(ids.slice(ids.length - 2500));
     }
   }
 
-  private async processMessage(messageId: string): Promise<void> {
-    if (!this.gmail) return;
+  private async processMessage(client: ImapFlow, uid: number): Promise<void> {
+    const msg = await client.fetchOne(
+      String(uid),
+      { envelope: true, source: true },
+      { uid: true },
+    );
 
-    const msg = await this.gmail.users.messages.get({
-      userId: 'me',
-      id: messageId,
-      format: 'full',
-    });
+    if (!msg) return;
 
-    const headers = msg.data.payload?.headers || [];
-    const getHeader = (name: string) =>
-      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
-        ?.value || '';
+    const envelope = msg.envelope;
+    if (!envelope) return;
 
-    const from = getHeader('From');
-    const subject = getHeader('Subject');
-    const rfc2822MessageId = getHeader('Message-ID');
-    const threadId = msg.data.threadId || messageId;
-    const timestamp = new Date(
-      parseInt(msg.data.internalDate || '0', 10),
+    const from = envelope.from?.[0];
+    if (!from) return;
+
+    const senderEmail = from.address || '';
+    const senderName = from.name || senderEmail;
+
+    // Skip emails from self
+    if (senderEmail === this.config!.email) return;
+
+    const subject = envelope.subject || '(no subject)';
+    const timestamp = (
+      envelope.date ? new Date(envelope.date) : new Date()
     ).toISOString();
 
-    // Extract sender name and email
-    const senderMatch = from.match(/^(.+?)\s*<(.+?)>$/);
-    const senderName = senderMatch ? senderMatch[1].replace(/"/g, '') : from;
-    const senderEmail = senderMatch ? senderMatch[2] : from;
-
-    // Skip emails from self (our own replies)
-    if (senderEmail === this.userEmail) return;
-
-    // Extract body text
-    const body = this.extractTextBody(msg.data.payload);
+    // Parse raw source for Message-ID and body
+    const rawSource = msg.source?.toString('utf-8') || '';
+    const rfc2822MessageId =
+      this.extractHeader(rawSource, 'Message-ID') || `<${uid}@gmail>`;
+    const body = this.extractTextBody(rawSource);
 
     if (!body) {
-      logger.debug({ messageId, subject }, 'Skipping email with no text body');
+      logger.debug({ uid, subject }, 'Skipping email with no text body');
+      // Still mark as seen
+      await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
       return;
     }
 
+    // Use Message-ID as thread key (or In-Reply-To chain root — simplified here)
+    const threadId = rfc2822MessageId.replace(/[<>]/g, '');
+
     const chatJid = `gmail:${threadId}`;
 
-    // Cache thread metadata for replies
     this.threadMeta.set(threadId, {
       sender: senderEmail,
       senderName,
@@ -263,14 +273,10 @@ export class GmailChannel implements Channel {
       messageId: rfc2822MessageId,
     });
 
-    // Store chat metadata for group discovery
     this.opts.onChatMetadata(chatJid, timestamp, subject, 'gmail', false);
 
-    // Find the main group to deliver the email notification
     const groups = this.opts.registeredGroups();
-    const mainEntry = Object.entries(groups).find(
-      ([, g]) => g.isMain === true,
-    );
+    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
 
     if (!mainEntry) {
       logger.debug(
@@ -284,7 +290,7 @@ export class GmailChannel implements Channel {
     const content = `[Email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
 
     this.opts.onMessage(mainJid, {
-      id: messageId,
+      id: String(uid),
       chat_jid: mainJid,
       sender: senderEmail,
       sender_name: senderName,
@@ -295,13 +301,9 @@ export class GmailChannel implements Channel {
 
     // Mark as read
     try {
-      await this.gmail.users.messages.modify({
-        userId: 'me',
-        id: messageId,
-        requestBody: { removeLabelIds: ['UNREAD'] },
-      });
+      await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
     } catch (err) {
-      logger.warn({ messageId, err }, 'Failed to mark email as read');
+      logger.warn({ uid, err }, 'Failed to mark email as read');
     }
 
     logger.info(
@@ -310,42 +312,74 @@ export class GmailChannel implements Channel {
     );
   }
 
-  private extractTextBody(
-    payload: gmail_v1.Schema$MessagePart | undefined,
-  ): string {
-    if (!payload) return '';
+  private extractHeader(raw: string, name: string): string {
+    const match = raw.match(new RegExp(`^${name}:\\s*(.+)`, 'im'));
+    return match ? match[1].trim() : '';
+  }
 
-    // Direct text/plain body
-    if (payload.mimeType === 'text/plain' && payload.body?.data) {
-      return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+  private extractTextBody(raw: string, depth = 0): string {
+    if (depth > 10) return '';
+
+    // Split headers from body at the first blank line
+    const sep = raw.search(/\r?\n\r?\n/);
+    const headerPart = sep >= 0 ? raw.slice(0, sep) : raw;
+    const bodyPart = sep >= 0 ? raw.slice(sep).replace(/^\r?\n\r?\n/, '') : '';
+
+    const contentType = this.extractHeader(headerPart, 'Content-Type');
+    const encoding = this.extractHeader(
+      headerPart,
+      'Content-Transfer-Encoding',
+    );
+
+    if (contentType === '' || contentType.includes('text/plain')) {
+      return this.decodeBody(bodyPart, encoding).trim();
     }
 
-    // Multipart: search parts recursively
-    if (payload.parts) {
-      // Prefer text/plain
-      for (const part of payload.parts) {
-        if (part.mimeType === 'text/plain' && part.body?.data) {
-          return Buffer.from(part.body.data, 'base64').toString('utf-8');
-        }
-      }
-      // Recurse into nested multipart
-      for (const part of payload.parts) {
-        const text = this.extractTextBody(part);
+    if (contentType.includes('multipart/')) {
+      const boundaryMatch = contentType.match(/boundary="?([^";\r\n]+)"?/i);
+      if (!boundaryMatch) return '';
+      const boundary = boundaryMatch[1].trim();
+      // Split only the body part by boundary markers
+      const parts = bodyPart.split(
+        new RegExp(
+          `\r?\n--${this.escapeRegex(boundary)}(?:--)?(?:\r?\n|$)`,
+          'g',
+        ),
+      );
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        const text = this.extractTextBody(part, depth + 1);
         if (text) return text;
       }
     }
 
     return '';
   }
+
+  private decodeBody(body: string, encoding: string): string {
+    const enc = encoding.toLowerCase().trim();
+    if (enc === 'base64') {
+      return Buffer.from(body.replace(/\s/g, ''), 'base64').toString('utf-8');
+    }
+    if (enc === 'quoted-printable') {
+      return body
+        .replace(/=\r?\n/g, '')
+        .replace(/=([0-9A-F]{2})/gi, (_, h) =>
+          String.fromCharCode(parseInt(h, 16)),
+        );
+    }
+    return body;
+  }
+
+  private escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
 }
 
 registerChannel('gmail', (opts: ChannelOpts) => {
-  const credDir = path.join(os.homedir(), '.gmail-mcp');
-  if (
-    !fs.existsSync(path.join(credDir, 'gcp-oauth.keys.json')) ||
-    !fs.existsSync(path.join(credDir, 'credentials.json'))
-  ) {
-    logger.warn('Gmail: credentials not found in ~/.gmail-mcp/');
+  const configPath = path.join(os.homedir(), '.gmail-mcp', 'config.json');
+  if (!fs.existsSync(configPath)) {
+    logger.warn('Gmail: config.json not found in ~/.gmail-mcp/');
     return null;
   }
   return new GmailChannel(opts);

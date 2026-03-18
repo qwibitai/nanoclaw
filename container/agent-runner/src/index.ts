@@ -366,6 +366,17 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Load Gmail app-password credentials if present
+  const gmailConfigPath = '/home/node/.gmail-mcp/config.json';
+  let gmailCreds: { email: string; appPassword: string; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number } | null = null;
+  if (fs.existsSync(gmailConfigPath)) {
+    try {
+      gmailCreds = JSON.parse(fs.readFileSync(gmailConfigPath, 'utf-8'));
+    } catch {
+      // ignore malformed config
+    }
+  }
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -424,10 +435,20 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-        },
+        ...(gmailCreds ? {
+          gmail: {
+            command: 'npx',
+            args: ['-y', 'mcp-mail-server'],
+            env: {
+              EMAIL_USER: gmailCreds.email,
+              EMAIL_PASS: gmailCreds.appPassword,
+              IMAP_HOST: gmailCreds.imapHost || 'imap.gmail.com',
+              IMAP_PORT: String(gmailCreds.imapPort || 993),
+              SMTP_HOST: gmailCreds.smtpHost || 'smtp.gmail.com',
+              SMTP_PORT: String(gmailCreds.smtpPort || 587),
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

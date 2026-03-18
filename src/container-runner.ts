@@ -121,9 +121,15 @@ function buildVolumeMounts(
     if (fs.existsSync(globalMnemonDir)) {
       fs.chmodSync(globalMnemonDir, 0o777);
       // Recursively chmod data subdirs (data/, data/default/) but not the DB file
-      for (const sub of fs.readdirSync(globalMnemonDir, { recursive: true, withFileTypes: true })) {
+      for (const sub of fs.readdirSync(globalMnemonDir, {
+        recursive: true,
+        withFileTypes: true,
+      })) {
         if (sub.isDirectory()) {
-          const fullPath = path.join(sub.parentPath ?? (sub as unknown as { path: string }).path, sub.name);
+          const fullPath = path.join(
+            sub.parentPath ?? (sub as unknown as { path: string }).path,
+            sub.name,
+          );
           fs.chmodSync(fullPath, 0o777);
         }
       }

@@ -4,7 +4,11 @@ import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 
-import { downloadMediaMessage, WAMessage, WASocket } from '@whiskeysockets/baileys';
+import {
+  downloadMediaMessage,
+  WAMessage,
+  WASocket,
+} from '@whiskeysockets/baileys';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,20 +31,17 @@ async function transcribeWithWhisperCpp(
     fs.writeFileSync(tmpOgg, audioBuffer);
 
     // Convert ogg/opus to 16kHz mono WAV (required by whisper.cpp)
-    await execFileAsync('ffmpeg', [
-      '-i', tmpOgg,
-      '-ar', '16000',
-      '-ac', '1',
-      '-f', 'wav',
-      '-y', tmpWav,
-    ], { timeout: 30_000 });
+    await execFileAsync(
+      'ffmpeg',
+      ['-i', tmpOgg, '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', tmpWav],
+      { timeout: 30_000 },
+    );
 
-    const { stdout } = await execFileAsync(WHISPER_BIN, [
-      '-m', WHISPER_MODEL,
-      '-f', tmpWav,
-      '--no-timestamps',
-      '-nt',
-    ], { timeout: 60_000 });
+    const { stdout } = await execFileAsync(
+      WHISPER_BIN,
+      ['-m', WHISPER_MODEL, '-f', tmpWav, '--no-timestamps', '-nt'],
+      { timeout: 60_000 },
+    );
 
     const transcript = stdout.trim();
     return transcript || null;
@@ -49,7 +50,11 @@ async function transcribeWithWhisperCpp(
     return null;
   } finally {
     for (const f of [tmpOgg, tmpWav]) {
-      try { fs.unlinkSync(f); } catch { /* best effort cleanup */ }
+      try {
+        fs.unlinkSync(f);
+      } catch {
+        /* best effort cleanup */
+      }
     }
   }
 }
