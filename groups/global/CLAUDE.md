@@ -56,3 +56,20 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 - ```triple backticks``` for code
 
 No ## headings. No [links](url). No **double stars**.
+
+## Skills Catalog
+
+You have a catalog of available skills at `/skills-catalog/catalog.json`.
+Skills matching this group's categories are pre-loaded in `~/.claude/skills/`.
+
+If you need a skill that isn't pre-loaded, check the catalog and activate it:
+
+```bash
+# View available skills
+cat /skills-catalog/catalog.json | jq '.skills[] | {name, description, categories}'
+
+# Activate a skill
+cp -r /skills-catalog/<path-from-catalog> ~/.claude/skills/<skill-name>
+```
+
+Only activate skills you actually need for the current task.
