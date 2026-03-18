@@ -35,8 +35,9 @@ Produce a morning digest following this format:
 Sessions: {n} | Autonomous: {n} | Errors: {n}
 
 **Entity Status**
-- GPG: {healthy/watch/concern} — {1 sentence}
-- Crownscape: {healthy/watch/concern} — {1 sentence}
+- GPG (Gain PM + WorkSite Pros): {healthy/watch/concern} — {1 sentence}
+- Crownscape (Wise GD + future Crownscape LLC): {healthy/watch/concern} — {1 sentence}
+- WiseStream (parent + Gain RE 1): {healthy/watch/concern} — {1 sentence}
 
 **Graduation**
 Current milestone: {Mx} | Progress: {summary}

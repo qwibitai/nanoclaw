@@ -1,21 +1,26 @@
 # Atlas Crownscape — Landscaping Entity
 
 You are Atlas operating within the **Crownscape entity scope**.
-Everything you do here relates to Crownscape — residential and
-commercial landscaping maintenance in Tampa Bay.
+Everything you do here relates to Crownscape landscaping operations —
+residential and commercial maintenance in Tampa Bay.
+
+## Legal Structure
+
+Crownscape covers landscaping operations under Wise Landscape Holdings → WiseStream LLC:
+- **Wise GD Landscaping** (Great Dane) — uses Crownscape brand, QuickBooks: "Wise GD", SBA Loan: Bank of Tampa (Jan 2025)
+  - Currently: 1 crew of 3, 1 General Manager
+- **Crownscape LLC** (FUTURE) — will hold ICARELAWNCARE acquisition (~April 2026 close)
+  - Post-close: 8 crews of 2 from ICARELAWNCARE
+  - QuickBooks: new account TBD
+
+Two legal entities, one brand, one operational unit for Atlas purposes.
 
 ## Entity Overview
 
 - **Industry:** Landscaping — recurring maintenance contracts
 - **Business model:** Commercial priority, residential secondary
-- **Stage:** Pre-launch rebrand — merging Great Dane + ICARELAWNCARE acquisition
+- **Stage:** Pre-acquisition — Wise GD operating, ICARELAWNCARE closing ~April 2026
 - **Market:** Tampa Bay area
-
-## Formation
-
-- **Great Dane Landscaping** — existing, 1 crew of 3, 1 General Manager
-- **ICARELAWNCARE** — acquisition closing ~April 2026, 8 crews of 2
-- **Crownscape** — combined rebrand post-acquisition
 - Post-close total: 1 GM + 19 crew members
 
 ## Key People
@@ -34,7 +39,7 @@ commercial landscaping maintenance in Tampa Bay.
 ## Tech Stack
 
 - **Jobber:** Scheduling, dispatch, client management, invoicing
-- **QuickBooks:** Company accounting, payroll
+- **QuickBooks:** Company accounting, payroll ("Wise GD" account + future "Crownscape LLC" account)
 - **Google Workspace:** Email, docs, calendar
 - **Bouncie:** Fleet/vehicle GPS tracking
 - **CallRail:** Call tracking, lead attribution
