@@ -143,8 +143,30 @@ vi.mock('./group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn((f: string) => `/tmp/groups/${f}`),
 }));
 
-import { makeResponseDeps } from './index.js';
+import { makeResponseDeps, buildAckPrefix } from './index.js';
 import type { Channel } from './types.js';
+
+describe('buildAckPrefix', () => {
+  // INVARIANT: Case prefix must be a single-line prefix (space-separated, no newline)
+  // SUT: buildAckPrefix
+  // VERIFICATION: Prefix contains space separator, not newline
+  test('returns space-separated prefix for active case', () => {
+    const result = buildAckPrefix({ name: 'fix-auth' });
+    expect(result).toBe('[case: fix-auth] ');
+    expect(result).not.toContain('\n');
+  });
+
+  test('returns empty string when no case', () => {
+    expect(buildAckPrefix(null)).toBe('');
+    expect(buildAckPrefix(undefined)).toBe('');
+  });
+
+  test('prefix concatenates with emoji on one line', () => {
+    const message = `${buildAckPrefix({ name: 'my-case' })}⏳ Still working...`;
+    expect(message).toBe('[case: my-case] ⏳ Still working...');
+    expect(message.split('\n')).toHaveLength(1);
+  });
+});
 
 describe('makeResponseDeps', () => {
   // INVARIANT: makeResponseDeps produces deps with sendMessage wired to channel

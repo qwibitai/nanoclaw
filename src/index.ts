@@ -342,6 +342,13 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+/** Build the prefix for progress/ack messages when a case is active. */
+export function buildAckPrefix(
+  targetCase: { name: string } | null | undefined,
+): string {
+  return targetCase ? `[case: ${targetCase.name}] ` : '';
+}
+
 export function makeResponseDeps(channel: Channel): SendResponseDeps {
   return {
     sendMessage: (jid, text) => channel.sendMessage(jid, text),
@@ -550,7 +557,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Send immediate acknowledgment so users know we received their message.
   // Telegram typing indicators expire after 5s — not enough for container spawn.
-  const ackPrefix = targetCase ? `[case: ${targetCase.name}]\n` : '';
+  const ackPrefix = buildAckPrefix(targetCase);
   await channel
     .sendMessage(chatJid, `${ackPrefix}⏳`)
     .catch((err: unknown) =>
