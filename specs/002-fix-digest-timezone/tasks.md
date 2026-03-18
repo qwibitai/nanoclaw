@@ -98,12 +98,12 @@
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [x] T019 [P] [US3] Write test: rehydration logs each correction with taskId, oldNextRun, newNextRun, oldTz, and newTz at info level in `src/task-scheduler.test.ts`
-- [ ] T020 [P] [US3] Write test: rehydration emits summary log when 0 tasks corrected (no correction entries, only summary) in `src/task-scheduler.test.ts`
+- [x] T020 [P] [US3] Write test: rehydration emits summary log when 0 tasks corrected (no correction entries, only summary) in `src/task-scheduler.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Add info-level log entry in `rehydrateTaskTimezones()` for each corrected task with `{ taskId, oldNextRun, newNextRun, oldTz, newTz }` in `src/task-scheduler.ts`
-- [ ] T022 [US3] Add summary log at end of `rehydrateTaskTimezones()` with total corrected count in `src/task-scheduler.ts`
+- [x] T021 [US3] Add info-level log entry in `rehydrateTaskTimezones()` for each corrected task with `{ taskId, oldNextRun, newNextRun, oldTz, newTz }` in `src/task-scheduler.ts`
+- [x] T022 [US3] Add summary log at end of `rehydrateTaskTimezones()` with total corrected count in `src/task-scheduler.ts`
 
 **Checkpoint**: Corrections are logged with full audit trail. US3 acceptance scenarios 1-2 pass.
 

@@ -403,4 +403,55 @@ describe('rehydrateTaskTimezones', () => {
     expect(logData.oldTz).toBe('UTC');
     expect(logData.newTz).toBe('America/Chicago');
   });
+
+  it('emits summary log with 0 corrected when no tasks need correction', () => {
+    // Create a cron task already aligned with the target timezone
+    const chicagoNextRun = CronExpressionParser.parse('0 9 * * *', {
+      tz: 'America/Chicago',
+    })
+      .next()
+      .toISOString();
+
+    createTask({
+      id: 'already-correct-1',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'daily digest',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      next_run: chicagoNextRun,
+      status: 'active',
+      created_at: '2026-03-17T00:00:00.000Z',
+      created_tz: 'America/Chicago',
+    });
+
+    // Clear any previous log calls
+    vi.mocked(logger.info).mockClear();
+
+    // Run rehydration under the same timezone — no corrections needed
+    rehydrateTaskTimezones('America/Chicago');
+
+    // Verify no per-task correction log entries were emitted
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const correctionCalls = infoCalls.filter(
+      (call) =>
+        typeof call[0] === 'object' &&
+        call[0] !== null &&
+        'taskId' in call[0] &&
+        'oldNextRun' in (call[0] as Record<string, unknown>),
+    );
+    expect(correctionCalls).toHaveLength(0);
+
+    // Verify summary log was emitted with corrected count of 0
+    const summaryCalls = infoCalls.filter(
+      (call) =>
+        typeof call[0] === 'object' &&
+        call[0] !== null &&
+        'corrected' in (call[0] as Record<string, unknown>),
+    );
+    expect(summaryCalls).toHaveLength(1);
+    const summaryData = summaryCalls[0][0] as Record<string, unknown>;
+    expect(summaryData.corrected).toBe(0);
+  });
 });

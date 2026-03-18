@@ -285,6 +285,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
  */
 export function rehydrateTaskTimezones(timezone: string): void {
   const tasks = getCronTasksForRehydration(timezone);
+  let corrected = 0;
 
   for (const task of tasks) {
     const oldNextRun = task.next_run;
@@ -297,6 +298,7 @@ export function rehydrateTaskTimezones(timezone: string): void {
 
     if (newNextRun) {
       updateTaskTimezone(task.id, newNextRun, timezone);
+      corrected++;
       logger.info(
         {
           taskId: task.id,
@@ -309,6 +311,8 @@ export function rehydrateTaskTimezones(timezone: string): void {
       );
     }
   }
+
+  logger.info({ corrected }, 'Task timezone rehydration complete');
 }
 
 /** @internal - for tests only. */
