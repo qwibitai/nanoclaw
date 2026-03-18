@@ -40,6 +40,17 @@ function detectProxyBindHost(): string {
   return '0.0.0.0';
 }
 
+/**
+ * Hostname containers should use to reach the credential proxy.
+ * On a custom Docker network (NANOCLAW_DOCKER_NETWORK), agent containers
+ * are on the same network as the orchestrator and can reach it by container
+ * name ("NanoClaw") directly, without going through the host gateway.
+ */
+export function credentialProxyHost(): string {
+  if (process.env.NANOCLAW_DOCKER_NETWORK) return 'NanoClaw';
+  return CONTAINER_HOST_GATEWAY;
+}
+
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
   // On Linux, host.docker.internal isn't built-in — add it explicitly
