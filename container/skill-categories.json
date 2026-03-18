@@ -1,0 +1,7 @@
+{
+  "defaults": ["general"],
+  "overrides": {
+    "agent-browser": ["coding", "general"],
+    "openscad": ["coding", "engineering"]
+  }
+}
