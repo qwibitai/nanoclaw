@@ -379,10 +379,18 @@ This ensures hooks, settings, and CLAUDE.md changes take effect in the current s
 
 ## Database
 
-SQLite database at `store/messages.db` (path defined by `STORE_DIR` in `src/config.ts`). Uses `better-sqlite3` (NOT the `sqlite3` CLI, which is not installed). Query from the command line:
+SQLite database at `store/messages.db` (path defined by `STORE_DIR` in `src/config.ts`). Uses `better-sqlite3` (NOT the `sqlite3` CLI, which is not installed). **For cases, always use the CLI instead of raw SQL:**
 
 ```bash
-node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare('SELECT name, status, type FROM cases ORDER BY status').all(), null, 2))"
+node dist/cli-kaizen.js case-list                              # all cases
+node dist/cli-kaizen.js case-list --status active,blocked       # filter by status
+node dist/cli-kaizen.js case-by-branch <branch-name>            # find case for a branch
+node dist/cli-kaizen.js case-update-status <name> <status>      # update case status
+```
+
+For other tables, query via `better-sqlite3`:
+```bash
+node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare('SELECT * FROM messages ORDER BY timestamp DESC LIMIT 5').all(), null, 2))"
 ```
 
 Tables: `messages`, `chats`, `cases`, `sessions`, `api_usage`, `usage_categories`, `scheduled_tasks`, `task_run_logs`, `registered_groups`, `router_state`.

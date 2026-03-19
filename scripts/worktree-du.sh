@@ -205,15 +205,15 @@ analyze_worktrees() {
       state_parts="${state_parts} ${YELLOW}unpush($unpushed)${NC}"
     fi
 
-    # Case info
+    # Case info (via domain model CLI, not raw SQL)
     local case_str="${DIM}none${NC}"
-    local case_row
-    case_row=$(node -e "
-      const db = require('better-sqlite3')('$DB_PATH');
-      const r = db.prepare('SELECT status, github_issue FROM cases WHERE branch_name = ? ORDER BY created_at DESC LIMIT 1').get('$branch');
-      if (r) console.log(r.status + (r.github_issue ? ' #'+r.github_issue : ''));
-    " 2>/dev/null)
-    [ -n "$case_row" ] && case_str="$case_row"
+    local case_json
+    case_json=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-by-branch "$branch" 2>/dev/null)
+    if [ -n "$case_json" ] && [ "$case_json" != "null" ]; then
+      local case_row
+      case_row=$(echo "$case_json" | node -e "const c=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(c.status + (c.github_issue ? ' #'+c.github_issue : ''))" 2>/dev/null)
+      [ -n "$case_row" ] && case_str="$case_row"
+    fi
 
     printf "  %-42s %7s  %-18s %-22b %-28b %s\n" \
       "$name" "$size_str" "$branch_short" "$lock_str" "$state_parts" "$case_str"
@@ -256,40 +256,51 @@ analyze_cases() {
   echo -e "${BOLD}Cases${NC}"
   echo ""
 
-  # Counts by status
-  local counts
-  counts=$(node -e "
-    const db = require('better-sqlite3')('$DB_PATH');
-    const rows = db.prepare(\"SELECT status, COUNT(*) as n FROM cases GROUP BY status ORDER BY CASE status WHEN 'active' THEN 1 WHEN 'blocked' THEN 2 WHEN 'backlog' THEN 3 WHEN 'suggested' THEN 4 WHEN 'done' THEN 5 WHEN 'reviewed' THEN 6 WHEN 'pruned' THEN 7 END\").all();
-    rows.forEach(r => console.log('  ' + r.status + ': ' + r.n));
-  " 2>/dev/null)
-  echo "$counts"
+  # Counts by status (via domain model CLI)
+  local all_cases
+  all_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list 2>/dev/null)
+  if [ -n "$all_cases" ] && [ "$all_cases" != "[]" ]; then
+    echo "$all_cases" | node -e "
+      const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      const counts = {};
+      cases.forEach(c => { counts[c.status] = (counts[c.status] || 0) + 1; });
+      const order = ['active','blocked','backlog','suggested','done','reviewed','pruned'];
+      order.forEach(s => { if (counts[s]) console.log('  ' + s + ': ' + counts[s]); });
+    " 2>/dev/null
+  else
+    echo "  (no cases)"
+  fi
 
-  # Stale active cases
+  # Stale active cases (active/blocked but branch merged or worktree gone)
   echo ""
   echo -e "  ${BOLD}Stale active cases${NC} (active/blocked but branch merged or worktree gone):"
-  node -e "
-    const db = require('better-sqlite3')('$DB_PATH');
-    const fs = require('fs');
-    const { execSync } = require('child_process');
-    const merged = new Set(
-      execSync('git -C $PROJECT_ROOT branch --merged main', { encoding: 'utf8' })
-        .split('\n').map(b => b.replace(/^[* +]*/, '').trim()).filter(Boolean)
-    );
-    const active = db.prepare(\"SELECT * FROM cases WHERE status IN ('active','blocked')\").all();
-    let found = false;
-    for (const c of active) {
-      const reasons = [];
-      if (c.worktree_path && !fs.existsSync(c.worktree_path)) reasons.push('worktree gone');
-      if (c.branch_name && merged.has(c.branch_name)) reasons.push('branch merged');
-      if (reasons.length > 0) {
-        const issue = c.github_issue ? ' (#' + c.github_issue + ')' : '';
-        console.log('    ' + c.name + issue + ' — ' + reasons.join(', '));
-        found = true;
+  local active_cases
+  active_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list --status active,blocked 2>/dev/null)
+  if [ -n "$active_cases" ] && [ "$active_cases" != "[]" ]; then
+    echo "$active_cases" | node -e "
+      const fs = require('fs');
+      const { execSync } = require('child_process');
+      const merged = new Set(
+        execSync('git -C $PROJECT_ROOT branch --merged main', { encoding: 'utf8' })
+          .split('\n').map(b => b.replace(/^[* +]*/, '').trim()).filter(Boolean)
+      );
+      const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      let found = false;
+      for (const c of cases) {
+        const reasons = [];
+        if (c.worktree_path && !fs.existsSync(c.worktree_path)) reasons.push('worktree gone');
+        if (c.branch_name && merged.has(c.branch_name)) reasons.push('branch merged');
+        if (reasons.length > 0) {
+          const issue = c.github_issue ? ' (#' + c.github_issue + ')' : '';
+          console.log('    ' + c.name + issue + ' — ' + reasons.join(', '));
+          found = true;
+        }
       }
-    }
-    if (!found) console.log('    (none)');
-  " 2>/dev/null || echo "    (could not check)"
+      if (!found) console.log('    (none)');
+    " 2>/dev/null || echo "    (could not check)"
+  else
+    echo "    (none)"
+  fi
 }
 
 # Analyze open PRs
@@ -489,29 +500,38 @@ do_cleanup() {
     echo -e "  ${BOLD}Phase 5: Stale active cases → done${NC}"
     echo ""
 
-    node -e "
-      const db = require('better-sqlite3')('$DB_PATH');
-      const { execSync } = require('child_process');
-      const merged = new Set(
-        execSync('git -C $PROJECT_ROOT branch --merged main', { encoding: 'utf8' })
-          .split('\n').map(b => b.replace(/^[* +]*/, '').trim()).filter(Boolean)
-      );
-      const active = db.prepare(\"SELECT * FROM cases WHERE status IN ('active','blocked')\").all();
-      const dryRun = $( $DRY_RUN && echo true || echo false );
-      let count = 0;
-      for (const c of active) {
-        if (c.branch_name && merged.has(c.branch_name)) {
-          if (dryRun) {
-            console.log('    would mark done: ' + c.name);
-          } else {
-            db.prepare(\"UPDATE cases SET status = 'done', done_at = datetime('now') WHERE id = ?\").run(c.id);
-            console.log('    marked done: ' + c.name);
-          }
-          count++;
-        }
-      }
-      if (count === 0) console.log('    (none)');
-    " 2>/dev/null || echo "    (could not check)"
+    # Use domain model CLI for both reads and writes (triggers GitHub sync, reflection hooks)
+    local active_cases
+    active_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list --status active,blocked 2>/dev/null)
+    if [ -n "$active_cases" ] && [ "$active_cases" != "[]" ]; then
+      local stale_names
+      stale_names=$(echo "$active_cases" | node -e "
+        const { execSync } = require('child_process');
+        const merged = new Set(
+          execSync('git -C $PROJECT_ROOT branch --merged main', { encoding: 'utf8' })
+            .split('\n').map(b => b.replace(/^[* +]*/, '').trim()).filter(Boolean)
+        );
+        const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        cases.filter(c => c.branch_name && merged.has(c.branch_name))
+          .forEach(c => console.log(c.name));
+      " 2>/dev/null)
+
+      if [ -z "$stale_names" ]; then
+        echo "    (none)"
+      else
+        echo "$stale_names" | while IFS= read -r case_name; do
+          [ -z "$case_name" ] && continue
+          if $DRY_RUN; then
+            echo "    would mark done: $case_name"
+          else
+            node "$PROJECT_ROOT/dist/cli-kaizen.js" case-update-status "$case_name" done 2>/dev/null
+            echo "    marked done: $case_name"
+          fi
+        done
+      fi
+    else
+      echo "    (none)"
+    fi
   fi
 
   # Summary

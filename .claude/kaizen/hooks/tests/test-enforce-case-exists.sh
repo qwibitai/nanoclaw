@@ -48,13 +48,7 @@ else
   DB_PATH="$MAIN_ROOT/store/messages.db"
 
   if [ -f "$DB_PATH" ]; then
-    CASE_COUNT=$(node -e "
-      const db = require('better-sqlite3')('$DB_PATH');
-      const row = db.prepare(
-        \"SELECT COUNT(*) as cnt FROM cases WHERE branch_name = ? AND status IN ('suggested','backlog','active','blocked')\"
-      ).get('$BRANCH');
-      console.log(row.cnt);
-    " 2>/dev/null)
+    CASE_COUNT=$(node "$MAIN_ROOT/dist/cli-kaizen.js" case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
 
     if [ "$CASE_COUNT" -gt 0 ] 2>/dev/null; then
       # Case exists — source edits should be allowed
@@ -95,13 +89,7 @@ if [ "$GIT_DIR" != "$GIT_COMMON" ]; then
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
   if [ -f "$DB_PATH" ]; then
-    CASE_COUNT=$(node -e "
-      const db = require('better-sqlite3')('$DB_PATH');
-      const row = db.prepare(
-        \"SELECT COUNT(*) as cnt FROM cases WHERE branch_name = ? AND status IN ('suggested','backlog','active','blocked')\"
-      ).get('$BRANCH');
-      console.log(row.cnt);
-    " 2>/dev/null)
+    CASE_COUNT=$(node "$MAIN_ROOT/dist/cli-kaizen.js" case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
 
     if [ "$CASE_COUNT" -eq 0 ] 2>/dev/null; then
       for path in "src/index.ts" "container/Dockerfile" "package.json" "docs/README.md" "tsconfig.json"; do

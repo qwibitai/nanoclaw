@@ -64,36 +64,36 @@ find_project_root() {
   echo "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 
-# Query active case branches from the SQLite DB.
+# Query active case branches via domain model CLI (not raw SQL).
 # Returns one branch name per line.
 active_case_branches() {
   local project_root
   project_root=$(find_project_root)
-  local db_path="$project_root/store/messages.db"
-  if [ ! -f "$db_path" ]; then
+  local cli="$project_root/dist/cli-kaizen.js"
+  if [ ! -f "$cli" ]; then
     return 0
   fi
-  node -e "
-    const db = require('better-sqlite3')('$db_path');
-    const rows = db.prepare(\"SELECT DISTINCT branch_name FROM cases WHERE status IN ('suggested','backlog','active','blocked') AND branch_name IS NOT NULL\").all();
-    rows.forEach(r => console.log(r.branch_name));
-  " 2>/dev/null
+  node "$cli" case-list --status suggested,backlog,active,blocked 2>/dev/null | \
+    node -e "
+      const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      cases.filter(c => c.branch_name).forEach(c => console.log(c.branch_name));
+    " 2>/dev/null
 }
 
 # Get count of active cases (for soft cap calculation).
 active_case_count() {
   local project_root
   project_root=$(find_project_root)
-  local db_path="$project_root/store/messages.db"
-  if [ ! -f "$db_path" ]; then
+  local cli="$project_root/dist/cli-kaizen.js"
+  if [ ! -f "$cli" ]; then
     echo "0"
     return 0
   fi
-  node -e "
-    const db = require('better-sqlite3')('$db_path');
-    const row = db.prepare(\"SELECT COUNT(*) as cnt FROM cases WHERE status IN ('suggested','backlog','active','blocked')\").get();
-    console.log(row.cnt);
-  " 2>/dev/null || echo "0"
+  node "$cli" case-list --status suggested,backlog,active,blocked 2>/dev/null | \
+    node -e "
+      const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      console.log(cases.length);
+    " 2>/dev/null || echo "0"
 }
 
 # List active worktree branches.

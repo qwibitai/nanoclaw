@@ -25,11 +25,17 @@ import {
   createCasesSchema,
   generateCaseId,
   generateCaseName,
+  getActiveCaseByBranch,
+  getActiveCases,
   getActiveCasesByGithubIssue,
+  getAllCases,
+  getCaseByName,
+  getCasesByStatus,
   insertCase,
   resolveExistingWorktree,
+  updateCase,
 } from './cases.js';
-import type { Case, CaseType } from './cases.js';
+import type { Case, CaseStatus, CaseType } from './cases.js';
 import { resolveProjectRoot } from './resolve-project-root.js';
 
 const { owner, repo } = DEV_CASE_ISSUE_REPO;
@@ -193,6 +199,150 @@ export async function handleCaseCreate(
   console.log(JSON.stringify(result, null, 2));
 }
 
+// Case query deps (for DI in tests)
+export interface CaseQueryDeps {
+  initDb: () => void;
+  getAllCases: () => Case[];
+  getActiveCases: (chatJid?: string) => Case[];
+  getCasesByStatus: (status: CaseStatus) => Case[];
+  getActiveCaseByBranch: (branchName: string) => Case | undefined;
+  getCaseByName: (name: string) => Case | undefined;
+  updateCase: (
+    id: string,
+    updates: { status: CaseStatus; done_at?: string | null },
+  ) => void;
+}
+
+const defaultQueryDeps: CaseQueryDeps = {
+  initDb: initCasesDb,
+  getAllCases,
+  getActiveCases,
+  getCasesByStatus,
+  getActiveCaseByBranch,
+  getCaseByName,
+  updateCase,
+};
+
+const VALID_STATUSES: CaseStatus[] = [
+  'suggested',
+  'needs_approval',
+  'needs_input',
+  'backlog',
+  'active',
+  'blocked',
+  'done',
+  'reviewed',
+  'pruned',
+];
+
+export function handleCaseList(
+  args: string[],
+  deps: CaseQueryDeps = defaultQueryDeps,
+): void {
+  deps.initDb();
+
+  const statusRaw = getFlag(args, '--status');
+  const typeFilter = getFlag(args, '--type') as CaseType | undefined;
+
+  let cases: Case[];
+
+  if (statusRaw) {
+    // Support comma-separated statuses
+    const statuses = statusRaw.split(',') as CaseStatus[];
+    for (const s of statuses) {
+      if (!VALID_STATUSES.includes(s)) {
+        console.error(
+          `Error: invalid status '${s}'. Valid: ${VALID_STATUSES.join(', ')}`,
+        );
+        process.exit(1);
+      }
+    }
+    if (statuses.length === 1) {
+      cases = deps.getCasesByStatus(statuses[0]);
+    } else {
+      cases = statuses.flatMap((s) => deps.getCasesByStatus(s));
+    }
+  } else {
+    cases = deps.getAllCases();
+  }
+
+  if (typeFilter) {
+    cases = cases.filter((c) => c.type === typeFilter);
+  }
+
+  console.log(JSON.stringify(cases, null, 2));
+}
+
+export function handleCaseByBranch(
+  args: string[],
+  deps: CaseQueryDeps = defaultQueryDeps,
+): void {
+  const branchName = args[0];
+  if (!branchName) {
+    console.error(
+      'Usage: node dist/cli-kaizen.js case-by-branch <branch-name>',
+    );
+    process.exit(1);
+  }
+
+  deps.initDb();
+  const result = deps.getActiveCaseByBranch(branchName);
+
+  if (result) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    // Exit 0 with empty JSON — no case found is not an error
+    console.log('null');
+  }
+}
+
+export function handleCaseUpdateStatus(
+  args: string[],
+  deps: CaseQueryDeps = defaultQueryDeps,
+): void {
+  const name = args[0];
+  const newStatus = args[1] as CaseStatus | undefined;
+
+  if (!name || !newStatus) {
+    console.error(
+      'Usage: node dist/cli-kaizen.js case-update-status <name> <status>',
+    );
+    process.exit(1);
+  }
+
+  if (!VALID_STATUSES.includes(newStatus)) {
+    console.error(
+      `Error: invalid status '${newStatus}'. Valid: ${VALID_STATUSES.join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  deps.initDb();
+
+  const existing = deps.getCaseByName(name);
+  if (!existing) {
+    console.error(`Error: no case found with name '${name}'`);
+    process.exit(1);
+  }
+
+  const updates: { status: CaseStatus; done_at?: string | null } = {
+    status: newStatus,
+  };
+  if (newStatus === 'done') {
+    updates.done_at = new Date().toISOString();
+  }
+
+  deps.updateCase(existing.id, updates);
+
+  console.log(
+    JSON.stringify(
+      { name, previousStatus: existing.status, newStatus },
+      null,
+      2,
+    ),
+  );
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
 
@@ -205,11 +355,24 @@ async function main(): Promise<void> {
     console.error(
       '  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P]',
     );
+    console.error(
+      '  node dist/cli-kaizen.js case-list [--status S1,S2] [--type dev|work]',
+    );
+    console.error('  node dist/cli-kaizen.js case-by-branch <branch-name>');
+    console.error(
+      '  node dist/cli-kaizen.js case-update-status <name> <status>',
+    );
     process.exit(1);
   }
 
   if (command === 'case-create') {
     await handleCaseCreate(args);
+  } else if (command === 'case-list') {
+    handleCaseList(args);
+  } else if (command === 'case-by-branch') {
+    handleCaseByBranch(args);
+  } else if (command === 'case-update-status') {
+    handleCaseUpdateStatus(args);
   } else if (command === 'list') {
     const state = getFlag(args, '--state') as
       | 'open'
@@ -252,7 +415,9 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(result.issue, null, 2));
   } else {
     console.error(`Unknown command: ${command}`);
-    console.error('Available commands: list, view, case-create');
+    console.error(
+      'Available commands: list, view, case-create, case-list, case-by-branch, case-update-status',
+    );
     process.exit(1);
   }
 }

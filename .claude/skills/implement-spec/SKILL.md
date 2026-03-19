@@ -24,7 +24,7 @@ Before touching any source code, verify a case exists. The `enforce-case-exists.
 **Checklist:**
 1. **Case exists in DB** for the current branch:
    ```bash
-   BRANCH=$(git rev-parse --abbrev-ref HEAD) node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare('SELECT name, status, github_issue FROM cases WHERE branch_name = ?').all(process.env.BRANCH), null, 2))"
+   node dist/cli-kaizen.js case-by-branch "$(git rev-parse --abbrev-ref HEAD)"
    ```
 2. **Case has `github_issue` linked** (when working on a kaizen issue)
 3. **Case status is `ACTIVE`**

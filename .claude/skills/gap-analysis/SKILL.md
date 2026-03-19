@@ -32,8 +32,8 @@ gh issue list --repo Garsson-io/kaizen --state open --limit 100 --json number,ti
 # Recently closed issues (last 20) for pattern detection
 gh issue list --repo Garsson-io/kaizen --state closed --limit 20 --json number,title,labels,closedAt,body
 
-# Active cases and their linked issues
-node -e "const db=require('better-sqlite3')('/home/aviadr1/projects/nanoclaw/store/messages.db'); console.log(JSON.stringify(db.prepare(\"SELECT name, status, type, github_issue, description FROM cases WHERE status NOT IN ('pruned','done','reviewed') ORDER BY status\").all(), null, 2))"
+# Active cases and their linked issues (via domain model CLI, not raw SQL)
+node dist/cli-kaizen.js case-list --status suggested,backlog,active,blocked
 ```
 
 Also read:

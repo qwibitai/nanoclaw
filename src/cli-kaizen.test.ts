@@ -3,8 +3,15 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 
-import { handleCaseCreate, resolveMainStoreDir } from './cli-kaizen.js';
-import type { CaseCreateDeps } from './cli-kaizen.js';
+import {
+  handleCaseCreate,
+  handleCaseList,
+  handleCaseByBranch,
+  handleCaseUpdateStatus,
+  resolveMainStoreDir,
+} from './cli-kaizen.js';
+import type { CaseCreateDeps, CaseQueryDeps } from './cli-kaizen.js';
+import type { Case } from './cases.js';
 
 const exec = promisify(execFile);
 const CLI_SOURCE = path.resolve(__dirname, 'cli-kaizen.ts');
@@ -548,5 +555,308 @@ describe('handleCaseCreate with existing worktree', () => {
 
     errorSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: case-list returns cases from the domain model, filtered by status/type.
+// SUT: handleCaseList with injected deps
+// VERIFICATION: Verify correct domain functions are called and JSON output is produced.
+
+const FAKE_CASE: Case = {
+  id: 'case-1',
+  group_folder: 'main',
+  chat_jid: 'cli',
+  name: '260319-test-case',
+  description: 'Test case',
+  type: 'dev',
+  status: 'active',
+  blocked_on: null,
+  worktree_path: '/tmp/wt',
+  workspace_path: '/tmp/wt',
+  branch_name: 'case/test',
+  initiator: 'cli',
+  initiator_channel: null,
+  last_message: null,
+  last_activity_at: '2026-03-19T00:00:00Z',
+  conclusion: null,
+  created_at: '2026-03-19T00:00:00Z',
+  done_at: null,
+  reviewed_at: null,
+  pruned_at: null,
+  total_cost_usd: 0,
+  token_source: null,
+  time_spent_ms: 0,
+  github_issue: 42,
+  github_issue_url: 'https://github.com/Garsson-io/kaizen/issues/42',
+  customer_name: null,
+  customer_phone: null,
+  customer_email: null,
+  customer_org: null,
+  priority: null,
+  gap_type: null,
+};
+
+function makeQueryDeps(overrides?: Partial<CaseQueryDeps>): CaseQueryDeps {
+  return {
+    initDb: vi.fn(),
+    getAllCases: vi.fn().mockReturnValue([FAKE_CASE]),
+    getActiveCases: vi.fn().mockReturnValue([FAKE_CASE]),
+    getCasesByStatus: vi.fn().mockReturnValue([FAKE_CASE]),
+    getActiveCaseByBranch: vi.fn().mockReturnValue(FAKE_CASE),
+    getCaseByName: vi.fn().mockReturnValue(FAKE_CASE),
+    updateCase: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe('handleCaseList', () => {
+  test('lists all cases when no filters provided', () => {
+    const deps = makeQueryDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseList([], deps);
+
+    expect(deps.initDb).toHaveBeenCalled();
+    expect(deps.getAllCases).toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output).toHaveLength(1);
+    expect(output[0].name).toBe('260319-test-case');
+
+    logSpy.mockRestore();
+  });
+
+  test('filters by single status', () => {
+    const deps = makeQueryDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseList(['--status', 'active'], deps);
+
+    expect(deps.getCasesByStatus).toHaveBeenCalledWith('active');
+    expect(deps.getAllCases).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  test('filters by comma-separated statuses', () => {
+    const deps = makeQueryDeps({
+      getCasesByStatus: vi
+        .fn()
+        .mockImplementation((s) => (s === 'active' ? [FAKE_CASE] : [])),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseList(['--status', 'active,blocked'], deps);
+
+    expect(deps.getCasesByStatus).toHaveBeenCalledWith('active');
+    expect(deps.getCasesByStatus).toHaveBeenCalledWith('blocked');
+
+    logSpy.mockRestore();
+  });
+
+  test('filters by type', () => {
+    const workCase = { ...FAKE_CASE, type: 'work' as const, name: 'work-case' };
+    const deps = makeQueryDeps({
+      getAllCases: vi.fn().mockReturnValue([FAKE_CASE, workCase]),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseList(['--type', 'dev'], deps);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output).toHaveLength(1);
+    expect(output[0].type).toBe('dev');
+
+    logSpy.mockRestore();
+  });
+
+  test('rejects invalid status', () => {
+    const deps = makeQueryDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() => handleCaseList(['--status', 'invalid'], deps)).toThrow(
+      'process.exit(1)',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("invalid status 'invalid'"),
+    );
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: case-by-branch returns the active case for a branch, or null if none.
+// SUT: handleCaseByBranch with injected deps
+// VERIFICATION: Correct domain function called, JSON output matches.
+
+describe('handleCaseByBranch', () => {
+  test('returns case JSON when found', () => {
+    const deps = makeQueryDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseByBranch(['case/test'], deps);
+
+    expect(deps.getActiveCaseByBranch).toHaveBeenCalledWith('case/test');
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.name).toBe('260319-test-case');
+
+    logSpy.mockRestore();
+  });
+
+  test('returns null when no case found', () => {
+    const deps = makeQueryDeps({
+      getActiveCaseByBranch: vi.fn().mockReturnValue(undefined),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseByBranch(['some-branch'], deps);
+
+    expect(logSpy).toHaveBeenCalledWith('null');
+
+    logSpy.mockRestore();
+  });
+
+  test('requires branch name argument', () => {
+    const deps = makeQueryDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() => handleCaseByBranch([], deps)).toThrow('process.exit(1)');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('case-by-branch'),
+    );
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: case-update-status updates case status through the domain model
+// (which fires mutation hooks including GitHub sync), not raw SQL.
+// SUT: handleCaseUpdateStatus with injected deps
+// VERIFICATION: updateCase called with correct id and status; done_at set when status=done.
+
+describe('handleCaseUpdateStatus', () => {
+  test('updates status via domain model', () => {
+    const deps = makeQueryDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseUpdateStatus(['260319-test-case', 'done'], deps);
+
+    expect(deps.getCaseByName).toHaveBeenCalledWith('260319-test-case');
+    expect(deps.updateCase).toHaveBeenCalledWith(
+      'case-1',
+      expect.objectContaining({ status: 'done', done_at: expect.any(String) }),
+    );
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.previousStatus).toBe('active');
+    expect(output.newStatus).toBe('done');
+
+    logSpy.mockRestore();
+  });
+
+  test('does not set done_at for non-done status', () => {
+    const deps = makeQueryDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    handleCaseUpdateStatus(['260319-test-case', 'blocked'], deps);
+
+    expect(deps.updateCase).toHaveBeenCalledWith('case-1', {
+      status: 'blocked',
+    });
+
+    logSpy.mockRestore();
+  });
+
+  test('requires both name and status arguments', () => {
+    const deps = makeQueryDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() => handleCaseUpdateStatus(['260319-test-case'], deps)).toThrow(
+      'process.exit(1)',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('case-update-status'),
+    );
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test('rejects invalid status', () => {
+    const deps = makeQueryDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() =>
+      handleCaseUpdateStatus(['260319-test-case', 'bogus'], deps),
+    ).toThrow('process.exit(1)');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("invalid status 'bogus'"),
+    );
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test('errors when case not found', () => {
+    const deps = makeQueryDeps({
+      getCaseByName: vi.fn().mockReturnValue(undefined),
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() => handleCaseUpdateStatus(['nonexistent', 'done'], deps)).toThrow(
+      'process.exit(1)',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("no case found with name 'nonexistent'"),
+    );
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: CLI help and routing include the new case query subcommands.
+// SUT: CLI subprocess execution
+// VERIFICATION: Help text includes new commands; unknown command lists them.
+
+describe('cli-kaizen case query argument parsing', () => {
+  test('help includes case-list, case-by-branch, case-update-status', async () => {
+    try {
+      await exec('npx', ['tsx', CLI_SOURCE, '--help']);
+      expect.fail('should have exited with non-zero');
+    } catch (err: unknown) {
+      const error = err as { stderr: string };
+      expect(error.stderr).toContain('case-list');
+      expect(error.stderr).toContain('case-by-branch');
+      expect(error.stderr).toContain('case-update-status');
+    }
+  });
+
+  test('unknown command lists all available commands', async () => {
+    try {
+      await exec('npx', ['tsx', CLI_SOURCE, 'bogus']);
+      expect.fail('should have exited with non-zero');
+    } catch (err: unknown) {
+      const error = err as { stderr: string };
+      expect(error.stderr).toContain('case-list');
+      expect(error.stderr).toContain('case-by-branch');
+      expect(error.stderr).toContain('case-update-status');
+    }
   });
 });

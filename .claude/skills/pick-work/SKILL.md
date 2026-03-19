@@ -37,8 +37,8 @@ gh issue list --repo Garsson-io/kaizen --state open --label "status:backlog" --j
 
 **Active cases (cross-reference):**
 ```bash
-# Check active cases in the database for github_issue linkage
-node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare(\"SELECT name, status, github_issue, description FROM cases WHERE status IN ('active','backlog','blocked') AND github_issue IS NOT NULL\").all(), null, 2))"
+# Check active cases in the database for github_issue linkage (via domain model CLI)
+node dist/cli-kaizen.js case-list --status active,backlog,blocked
 ```
 
 **Open PRs (may indicate partial work):**

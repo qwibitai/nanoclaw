@@ -37,7 +37,8 @@ This is a conversation, not a checklist. The phases overlap. Use judgment about 
 
 2. **Active cases in database:** Is there a case linked to this issue?
    ```bash
-   node -e "const db=require('better-sqlite3')('store/messages.db'); console.log(JSON.stringify(db.prepare(\"SELECT name, status, type FROM cases WHERE github_issue = {N} AND status IN ('active','backlog','blocked')\").all(), null, 2))"
+   node dist/cli-kaizen.js case-list --status active,backlog,blocked
+   # Then filter by github_issue == {N} in the JSON output
    ```
 
 3. **Open PRs:** Are there PRs referencing this issue?

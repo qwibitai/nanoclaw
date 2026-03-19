@@ -38,9 +38,9 @@ git branch --merged main | grep -v '^\*\|main$'
 ```
 
 ### 5. Active Cases with Kaizen Issue Links
-Check the cases SQLite database for active/backlog cases linked to GitHub issues:
+Query active/backlog cases linked to GitHub issues via the domain model CLI:
 ```bash
-sqlite3 data/nanoclaw.db "SELECT name, status, github_issue FROM cases WHERE github_issue IS NOT NULL AND status IN ('suggested','backlog','active','blocked') ORDER BY github_issue"
+node dist/cli-kaizen.js case-list --status suggested,backlog,active,blocked
 ```
 
 ## Output Format

@@ -51,12 +51,18 @@ if [ -n "$UNMERGED" ]; then
   UNMERGED_COUNT=$(echo "$UNMERGED" | grep -c . 2>/dev/null || echo 0)
 fi
 
-# Check for active cases linked to kaizen issues
+# Check for active cases linked to kaizen issues (via domain model CLI, not raw SQL)
 KAIZEN_CASES=""
 KAIZEN_COUNT=0
-DB_PATH="data/nanoclaw.db"
-if [ -f "$DB_PATH" ]; then
-  KAIZEN_CASES=$(sqlite3 "$DB_PATH" "SELECT 'kaizen #' || github_issue || ' → ' || name || ' (' || status || ')' FROM cases WHERE github_issue IS NOT NULL AND status IN ('suggested','backlog','active','blocked') ORDER BY github_issue" 2>/dev/null)
+CLI_KAIZEN="node dist/cli-kaizen.js"
+CASES_JSON=$($CLI_KAIZEN case-list --status suggested,backlog,active,blocked 2>/dev/null)
+if [ -n "$CASES_JSON" ] && [ "$CASES_JSON" != "[]" ]; then
+  KAIZEN_CASES=$(echo "$CASES_JSON" | node -e "
+    const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    cases.filter(c => c.github_issue).forEach(c =>
+      console.log('kaizen #' + c.github_issue + ' → ' + c.name + ' (' + c.status + ')')
+    );
+  " 2>/dev/null)
   if [ -n "$KAIZEN_CASES" ]; then
     KAIZEN_COUNT=$(echo "$KAIZEN_CASES" | grep -c . 2>/dev/null || echo 0)
   fi
