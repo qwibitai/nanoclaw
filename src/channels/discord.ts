@@ -24,6 +24,8 @@ import { Channel, OnInboundMessage, OnChatMetadata } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { logger } from '../logger.js';
 import { readEnvFile } from '../env.js';
+import { RESEARCH_SYSTEM_PROMPT } from '../agents/research-prompt.js';
+import { BUILD_SYSTEM_PROMPT } from '../agents/build-prompt.js';
 import { researchCommand } from '../commands/research.js';
 import { buildCommand } from '../commands/build.js';
 import { statusCommand } from '../commands/status.js';
@@ -217,6 +219,14 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                     requiresTrigger: false,
                     isMain: false,
                   });
+                  // Write the appropriate CLAUDE.md so the agent knows its role
+                  const systemPrompt =
+                    interaction.commandName === 'research'
+                      ? RESEARCH_SYSTEM_PROMPT
+                      : BUILD_SYSTEM_PROMPT;
+                  const groupDir = path.join(process.cwd(), 'groups', folder);
+                  fs.mkdirSync(groupDir, { recursive: true });
+                  fs.writeFileSync(path.join(groupDir, 'CLAUDE.md'), systemPrompt);
                 }
                 opts.onMessage(chatJid, msg);
               };
@@ -285,7 +295,9 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                 reportsSent.add(jid);
                 await (discordChannel as any).send({
                   content: '📄 **Verified research report ready:**',
-                  files: [{ attachment: reportPath, name: 'research-report.md' }],
+                  files: [
+                    { attachment: reportPath, name: 'research-report.md' },
+                  ],
                 });
                 logger.info({ jid, reportPath }, 'Research report attached');
               }
