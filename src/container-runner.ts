@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { getAllChats } from './db.js';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -304,6 +305,10 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+  // Ensure generated/ exists for agent output files
+  fs.mkdirSync(path.join(groupDir, 'generated'), { recursive: true });
+  // Ensure downloaded/ exists for files the agent fetches during tasks
+  fs.mkdirSync(path.join(groupDir, 'downloaded'), { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -733,5 +738,24 @@ export function writeGroupsSnapshot(
       null,
       2,
     ),
+  );
+}
+
+/**
+ * Write known chats snapshot for the main group container to read.
+ * Only written for the main group — used by the list_chats MCP tool
+ * so the agent can look up JIDs by name before calling register_group.
+ */
+export function writeChatsSnapshot(groupFolder: string, isMain: boolean): void {
+  if (!isMain) return;
+
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const chats = getAllChats().filter((c) => c.jid !== '__group_sync__');
+  const chatsFile = path.join(groupIpcDir, 'chats_snapshot.json');
+  fs.writeFileSync(
+    chatsFile,
+    JSON.stringify({ chats, lastSync: new Date().toISOString() }, null, 2),
   );
 }
