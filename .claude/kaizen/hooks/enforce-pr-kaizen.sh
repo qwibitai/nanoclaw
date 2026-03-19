@@ -107,7 +107,10 @@ To clear this gate, submit a KAIZEN_IMPEDIMENTS JSON declaration:
   ]
   IMPEDIMENTS
 
-If no impediments found: echo 'KAIZEN_IMPEDIMENTS: []'
+If no impediments found: echo 'KAIZEN_IMPEDIMENTS: [] brief reason here'
+
+For trivial changes only: echo 'KAIZEN_NO_ACTION [category]: reason'
+  Categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 
 Allowed commands during reflection:
   gh issue create/comment, gh pr diff/view/comment/edit

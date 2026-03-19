@@ -71,24 +71,44 @@ assert_contains "output mentions gate cleared" "gate cleared" "$OUTPUT"
 assert_contains "output mentions impediment count" "1 impediment" "$OUTPUT"
 
 echo ""
-echo "=== Empty array KAIZEN_IMPEDIMENTS clears gate (no impediments) ==="
+echo "=== Empty array with reason clears gate (kaizen #140) ==="
 
 setup
 create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
 
-# INVARIANT: Empty array is valid — genuinely no impediments
+# INVARIANT: Empty array with reason is valid — genuinely no impediments
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS: [] straightforward bug fix'" \
+  "KAIZEN_IMPEDIMENTS: [] straightforward bug fix")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: empty KAIZEN_IMPEDIMENTS with reason cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: empty KAIZEN_IMPEDIMENTS with reason did NOT clear gate"
+  ((FAIL++))
+fi
+assert_contains "output mentions no impediments" "no impediments" "$OUTPUT"
+
+echo ""
+echo "=== Empty array WITHOUT reason does NOT clear gate (kaizen #140) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: Empty array without reason is rejected — forces justification
 OUTPUT=$(run_posttool_bash \
   "echo 'KAIZEN_IMPEDIMENTS: []'" \
   "KAIZEN_IMPEDIMENTS: []")
 
-if ! has_pr_kaizen_state; then
-  echo "  PASS: empty KAIZEN_IMPEDIMENTS cleared gate"
+if has_pr_kaizen_state; then
+  echo "  PASS: empty KAIZEN_IMPEDIMENTS without reason blocked"
   ((PASS++))
 else
-  echo "  FAIL: empty KAIZEN_IMPEDIMENTS did NOT clear gate"
+  echo "  FAIL: empty KAIZEN_IMPEDIMENTS without reason incorrectly cleared gate"
   ((FAIL++))
 fi
-assert_contains "output mentions no impediments" "no impediments" "$OUTPUT"
+assert_contains "output mentions reason required" "requires a reason" "$OUTPUT"
 
 echo ""
 echo "=== Multiple impediments with mixed dispositions clears gate ==="
@@ -286,24 +306,148 @@ else
 fi
 
 echo ""
-echo "=== Legacy KAIZEN_NO_ACTION still clears gate ==="
+echo "=== KAIZEN_NO_ACTION with valid category clears gate (kaizen #140) ==="
 
 setup
 create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
 
-# INVARIANT: Legacy declaration still works for backwards compatibility
+# INVARIANT: KAIZEN_NO_ACTION with valid category and reason clears gate
 OUTPUT=$(run_posttool_bash \
-  'echo "KAIZEN_NO_ACTION: straightforward config change" >/dev/null' \
-  "")
+  'echo "KAIZEN_NO_ACTION [docs-only]: updated README formatting"' \
+  "KAIZEN_NO_ACTION [docs-only]: updated README formatting")
 
 if ! has_pr_kaizen_state; then
-  echo "  PASS: KAIZEN_NO_ACTION cleared gate (legacy)"
+  echo "  PASS: KAIZEN_NO_ACTION [docs-only] cleared gate"
   ((PASS++))
 else
-  echo "  FAIL: KAIZEN_NO_ACTION did NOT clear gate"
+  echo "  FAIL: KAIZEN_NO_ACTION [docs-only] did NOT clear gate"
   ((FAIL++))
 fi
-assert_contains "output mentions legacy" "legacy" "$OUTPUT"
+assert_contains "output mentions no action needed" "no action needed" "$OUTPUT"
+
+echo ""
+echo "=== KAIZEN_NO_ACTION without category does NOT clear gate (kaizen #140) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: Legacy format (no category) is no longer accepted
+OUTPUT=$(run_posttool_bash \
+  'echo "KAIZEN_NO_ACTION: straightforward config change"' \
+  "KAIZEN_NO_ACTION: straightforward config change")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: KAIZEN_NO_ACTION without category blocked"
+  ((PASS++))
+else
+  echo "  FAIL: KAIZEN_NO_ACTION without category incorrectly cleared gate"
+  ((FAIL++))
+fi
+assert_contains "output mentions missing category" "Missing category" "$OUTPUT"
+
+echo ""
+echo "=== KAIZEN_NO_ACTION with invalid category does NOT clear gate ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: Only valid categories are accepted
+OUTPUT=$(run_posttool_bash \
+  'echo "KAIZEN_NO_ACTION [bugfix]: fixed a minor bug"' \
+  "KAIZEN_NO_ACTION [bugfix]: fixed a minor bug")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: KAIZEN_NO_ACTION with invalid category blocked"
+  ((PASS++))
+else
+  echo "  FAIL: KAIZEN_NO_ACTION with invalid category incorrectly cleared gate"
+  ((FAIL++))
+fi
+assert_contains "output mentions invalid category" "Invalid category" "$OUTPUT"
+
+echo ""
+echo "=== KAIZEN_NO_ACTION with category but no reason does NOT clear gate ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: A reason must be provided even with valid category
+OUTPUT=$(run_posttool_bash \
+  'echo "KAIZEN_NO_ACTION [typo]:"' \
+  "KAIZEN_NO_ACTION [typo]:")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: KAIZEN_NO_ACTION with no reason blocked"
+  ((PASS++))
+else
+  echo "  FAIL: KAIZEN_NO_ACTION with no reason incorrectly cleared gate"
+  ((FAIL++))
+fi
+assert_contains "output mentions missing reason" "Missing reason" "$OUTPUT"
+
+echo ""
+echo "=== All valid KAIZEN_NO_ACTION categories accepted ==="
+
+for category in docs-only formatting typo config-only test-only trivial-refactor; do
+  setup
+  create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+  OUTPUT=$(run_posttool_bash \
+    "echo \"KAIZEN_NO_ACTION [$category]: test reason\"" \
+    "KAIZEN_NO_ACTION [$category]: test reason")
+
+  if ! has_pr_kaizen_state; then
+    echo "  PASS: KAIZEN_NO_ACTION [$category] accepted"
+    ((PASS++))
+  else
+    echo "  FAIL: KAIZEN_NO_ACTION [$category] rejected"
+    ((FAIL++))
+  fi
+done
+
+echo ""
+echo "=== Audit log is written for no-action declarations ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# The hook resolves audit log relative to its own location
+# HOOK is set at top of file: "$(dirname "$0")/../pr-kaizen-clear.sh"
+HOOK_REAL_DIR="$(cd "$(dirname "$HOOK")" && pwd)"
+TEST_AUDIT_LOG="${HOOK_REAL_DIR}/../audit/no-action.log"
+rm -f "$TEST_AUDIT_LOG"
+
+OUTPUT=$(run_posttool_bash \
+  'echo "KAIZEN_NO_ACTION [typo]: fixed spelling in comment"' \
+  "KAIZEN_NO_ACTION [typo]: fixed spelling in comment")
+
+if [ -f "$TEST_AUDIT_LOG" ]; then
+  AUDIT_CONTENT=$(cat "$TEST_AUDIT_LOG")
+  if echo "$AUDIT_CONTENT" | grep -q "category=typo"; then
+    echo "  PASS: audit log written with category"
+    ((PASS++))
+  else
+    echo "  FAIL: audit log missing category"
+    echo "    content: $AUDIT_CONTENT"
+    ((FAIL++))
+  fi
+  if echo "$AUDIT_CONTENT" | grep -q "fixed spelling in comment"; then
+    echo "  PASS: audit log written with reason"
+    ((PASS++))
+  else
+    echo "  FAIL: audit log missing reason"
+    echo "    content: $AUDIT_CONTENT"
+    ((FAIL++))
+  fi
+else
+  echo "  FAIL: audit log file not created"
+  echo "    expected at: $TEST_AUDIT_LOG"
+  ((FAIL++))
+  ((FAIL++))
+fi
+# Clean up audit log after test
+rm -f "$TEST_AUDIT_LOG"
+rmdir "$(dirname "$TEST_AUDIT_LOG")" 2>/dev/null || true
 
 echo ""
 echo "=== gh issue create alone does NOT clear gate ==="
@@ -412,8 +556,8 @@ create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/43" "$CURREN
 
 # INVARIANT: Clearing only affects state for the current branch
 OUTPUT=$(run_posttool_bash \
-  "echo 'KAIZEN_IMPEDIMENTS: []'" \
-  "KAIZEN_IMPEDIMENTS: []")
+  "echo 'KAIZEN_IMPEDIMENTS: [] cross-worktree test'" \
+  "KAIZEN_IMPEDIMENTS: [] cross-worktree test")
 
 # PR 42 (other branch) should still exist
 if [ -f "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_42" ]; then

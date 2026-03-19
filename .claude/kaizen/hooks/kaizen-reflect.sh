@@ -121,7 +121,12 @@ Before moving on, reflect on the work that led to this PR:
    - **fixed-in-pr** — already fixed in this PR
    - **waived** — not worth filing (requires "reason": "why")
 
-   If you genuinely found NO impediments: `echo 'KAIZEN_IMPEDIMENTS: []'`
+   If you genuinely found NO impediments (include a reason):
+     `echo 'KAIZEN_IMPEDIMENTS: [] straightforward fix, no process issues'`
+
+   For trivial changes (typo, formatting, docs-only), you may also use:
+     `echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'`
+   Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 
    ⛔ You will be BLOCKED from non-kaizen commands until you submit
    a valid KAIZEN_IMPEDIMENTS declaration covering ALL impediments.
@@ -214,7 +219,12 @@ The PR has been merged. Reflect on the outcome:
    - **fixed-in-pr** — already fixed in this PR
    - **waived** — not worth filing (requires "reason": "why")
 
-   If you genuinely found NO impediments: `echo 'KAIZEN_IMPEDIMENTS: []'`
+   If you genuinely found NO impediments (include a reason):
+     `echo 'KAIZEN_IMPEDIMENTS: [] straightforward fix, no process issues'`
+
+   For trivial changes (typo, formatting, docs-only), you may also use:
+     `echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'`
+   Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 
    ⛔ You will be BLOCKED from non-kaizen commands until you submit
    a valid KAIZEN_IMPEDIMENTS declaration covering ALL impediments.

@@ -25,6 +25,9 @@ groups/global/*
 # Temp files
 .tmp-*
 
+# Kaizen audit logs (per-machine, not committed)
+.claude/kaizen/audit/
+
 # Python
 __pycache__/
 *.pyc
