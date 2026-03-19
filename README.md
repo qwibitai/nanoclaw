@@ -141,15 +141,19 @@ Skills we'd like to see:
 **Session Management**
 - `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
-## Linux / DigitalOcean
+## Linux / VPS
 
-NanoClaw runs on Linux (Ubuntu 22.04 / 24.04 LTS recommended). All channels work, including WhatsApp via pairing code (no browser needed on headless servers).
+NanoClaw runs on any Linux VPS (Ubuntu 22.04 / 24.04 LTS recommended) — DigitalOcean, Hetzner, Vultr, Linode, AWS EC2, GCP Compute Engine, and others. All channels work, including WhatsApp via pairing code (no browser needed on headless servers).
+
+**No firewall changes needed.** NanoClaw connects outbound to messaging platform servers (WhatsApp, Telegram, Discord, Slack). It does not listen on any ports.
 
 ### Minimum droplet / VM size
 
 1 vCPU, 1 GB RAM. 2 GB RAM recommended if running multiple channels.
 
 ### Prerequisites
+
+Works on x86-64 and ARM64 (e.g. Oracle Cloud Free Tier Ampere instances). The container image builds for the host architecture automatically.
 
 ```bash
 # 1. Docker CE
