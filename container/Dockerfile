@@ -139,8 +139,11 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+# Set ownership to node user (non-root) for writable directories.
+# chmod 777 on /home/node and .local so the container works when run
+# as the host UID (--user 1001:1001) for bind-mount compatibility.
+RUN chown -R node:node /workspace && chmod 777 /home/node \
+    && chmod -R 777 /home/node/.local
 
 # Claude Code user settings (applied via settingSources: ['user'])
 RUN mkdir -p /home/node/.claude && \
