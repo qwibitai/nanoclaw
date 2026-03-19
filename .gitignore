@@ -38,6 +38,9 @@ groups/telegram_atlas-marketing/*
 .tmp-*
 build-state.json
 
+# Python cache
+__pycache__/
+
 # OS
 .DS_Store
 
