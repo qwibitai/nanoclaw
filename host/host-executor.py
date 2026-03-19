@@ -21,9 +21,11 @@ import os
 import subprocess
 import sys
 import time
+import threading
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 # Paths
@@ -52,6 +54,147 @@ outage_started_at = 0.0
 outage_alert_sent = False
 HEALTH_CHECK_BACKOFF = [30, 60, 120, 300]  # seconds: 30s → 1m → 2m → 5m cap
 health_check_attempt = 0
+QUALITY_CHECK_PORT = 3002
+
+
+# --- Quality Check HTTP Server ---
+# Runs in a background thread. Containers POST response text here,
+# host-executor calls Haiku with the real API key, returns the score.
+# This avoids putting API keys in containers and works around OAuth
+# not being supported on the /v1/messages endpoint.
+
+def _load_anthropic_api_key() -> str:
+    """Read ANTHROPIC_API_KEY from ~/.atlas/.env or environment."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if key:
+        return key
+    env_path = ATLAS_DIR / ".env"
+    try:
+        for line in env_path.read_text().splitlines():
+            if line.startswith("ANTHROPIC_API_KEY="):
+                return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+def _call_haiku(response_text: str) -> dict:
+    """Call Haiku /v1/messages with direct API key. Returns parsed eval."""
+    api_key = _load_anthropic_api_key()
+    if not api_key:
+        return {"score": -1, "error": "ANTHROPIC_API_KEY not found in ~/.atlas/.env or env"}
+
+    # Import the quality check prompt from the container source if available,
+    # otherwise use a minimal fallback. The container source is the single
+    # source of truth for the prompt text.
+    prompt_file = NANOCLAW_DIR / "container" / "agent-runner" / "src" / "governance" / "response-interceptor.ts"
+    quality_prompt = None
+    try:
+        content = prompt_file.read_text()
+        # Extract the prompt between backtick-delimited string
+        start = content.find("const QUALITY_CHECK_PROMPT = `")
+        if start >= 0:
+            start = content.find("`", start) + 1
+            end = content.find("`;", start)
+            if end > start:
+                quality_prompt = content[start:end]
+    except Exception:
+        pass
+
+    if not quality_prompt:
+        quality_prompt = (
+            "You are a quality checker. Score this response 0-100 on plain language. "
+            "Return JSON: {\"score\": N, \"violations\": []}\n\n<response>\n{RESPONSE}\n</response>"
+        )
+
+    filled_prompt = quality_prompt.replace("{RESPONSE}", response_text[:4000])
+
+    body = json.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 512,
+        "messages": [{"role": "user", "content": filled_prompt}],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data.get("content", [{}])[0].get("text", "{}")
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            result = json.loads(text)
+            return result
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8")[:500]
+        except Exception:
+            pass
+        return {"score": -1, "error": f"HTTP {e.code}: {err_body}"}
+    except urllib.error.URLError as e:
+        return {"score": -3, "error": f"Network error: {e.reason}"}
+    except json.JSONDecodeError as e:
+        return {"score": -2, "error": f"JSON parse error: {str(e)}"}
+    except TimeoutError:
+        return {"score": -4, "error": "timeout"}
+    except Exception as e:
+        return {"score": -1, "error": str(e)}
+
+
+class QualityCheckHandler(BaseHTTPRequestHandler):
+    """Handles POST /quality-check from containers."""
+
+    def do_POST(self):
+        if self.path != "/quality-check":
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'{"error": "not found"}')
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            response_text = body.get("response", "")
+
+            if not response_text:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b'{"error": "missing response field"}')
+                return
+
+            result = _call_haiku(response_text)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode("utf-8"))
+
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(json.dumps({"score": -1, "error": str(e)}).encode("utf-8"))
+
+    def log_message(self, format, *args):
+        # Suppress default stderr logging — we use our own log()
+        pass
+
+
+def start_quality_check_server():
+    """Start the quality check HTTP server in a background thread."""
+    server = HTTPServer(("0.0.0.0", QUALITY_CHECK_PORT), QualityCheckHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log(f"Quality check server started on port {QUALITY_CHECK_PORT}")
 
 # Tier restrictions
 TIER_READONLY_FLAG = "--allowedTools Read,Glob,Grep,WebSearch,WebFetch"
@@ -510,6 +653,12 @@ def main() -> None:
     log(f"  Output:   {COMPLETED_DIR}")
     log(f"  Escalations: {SHARED_DIR}/*/escalations/")
     log(f"  Timeout:  {TASK_TIMEOUT}s per task")
+
+    # Start quality check HTTP server (used by container response interceptor)
+    try:
+        start_quality_check_server()
+    except Exception as e:
+        log(f"WARNING: Quality check server failed to start: {e}")
 
     # Ensure directories exist
     for d in [PENDING_DIR, COMPLETED_DIR, OUTPUTS_DIR]:

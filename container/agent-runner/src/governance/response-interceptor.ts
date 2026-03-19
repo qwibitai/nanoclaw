@@ -12,7 +12,6 @@
  */
 
 import http from 'http';
-import https from 'https';
 import fs from 'fs';
 import path from 'path';
 
@@ -79,48 +78,37 @@ Scoring:
 
 /**
  * Call Haiku to evaluate response quality.
- * Routes through the credential proxy (same as all API calls in the container).
+ * Routes through the host-executor's /quality-check endpoint, which has
+ * the real API key and calls Haiku directly. Containers never touch API keys.
+ *
+ * Why not call Anthropic directly from the container?
+ * - /v1/messages does not accept OAuth tokens (Anthropic limitation)
+ * - Containers don't have API keys (security: credential proxy handles SDK auth)
+ * - Host-executor runs on the VPS host with access to ~/.atlas/.env
  */
 async function callHaiku(responseText: string): Promise<QualityCheckResult> {
-  const baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
+  // The host-executor runs a quality-check server on port 3002.
+  // Containers reach the host via host.docker.internal.
+  const hostGateway = process.env.CONTAINER_HOST_GATEWAY || 'host.docker.internal';
+  const port = 3002;
+  const url = `http://${hostGateway}:${port}/quality-check`;
 
-  const prompt = QUALITY_CHECK_PROMPT.replace('{RESPONSE}', responseText.slice(0, 4000));
-
-  const body = JSON.stringify({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const body = JSON.stringify({ response: responseText.slice(0, 4000) });
+  const log = (msg: string) => console.error(`[response-interceptor] ${msg}`);
 
   return new Promise((resolve) => {
-    const url = new URL(`${baseUrl}/v1/messages`);
-    const isHttps = url.protocol === 'https:';
-    const transport = isHttps ? https : http;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    };
-
-    // The credential proxy in OAuth mode only replaces the Authorization header
-    // if the incoming request already has one. Send a placeholder so the proxy
-    // injects the real OAuth token. Without this, the request arrives at
-    // api.anthropic.com with no auth → 401.
-    // DO NOT send x-api-key — the Anthropic API checks it first and rejects
-    // "proxy-placeholder" before looking at the valid Authorization header.
-    headers['Authorization'] = 'Bearer proxy-placeholder';
-
-    const log = (msg: string) => console.error(`[response-interceptor] ${msg}`);
-
-    const req = transport.request(
+    const parsed = new URL(url);
+    const req = http.request(
       {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname,
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.pathname,
         method: 'POST',
-        headers,
-        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: 12000,
       },
       (res) => {
         let data = '';
@@ -128,18 +116,11 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
         res.on('end', () => {
           try {
             if (res.statusCode !== 200) {
-              log(`Haiku API returned ${res.statusCode}: ${data.slice(0, 200)}`);
-              // API error — let response through but log it
+              log(`Host quality-check returned ${res.statusCode}: ${data.slice(0, 200)}`);
               resolve({ pass: true, violations: [], score: -1 });
               return;
             }
-            const parsed = JSON.parse(data);
-            let text = parsed.content?.[0]?.text || '{}';
-            // Strip markdown fences if present
-            if (text.startsWith('```')) {
-              text = text.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim();
-            }
-            const result = JSON.parse(text);
+            const result = JSON.parse(data);
             const score = typeof result.score === 'number' ? result.score : 50;
             const violations: QualityViolation[] = Array.isArray(result.violations)
               ? result.violations.filter((v: QualityViolation) => v.rule && v.severity)
@@ -152,9 +133,8 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
               score,
             });
           } catch (err) {
-            log(`Haiku response parse error: ${err instanceof Error ? err.message : String(err)}`);
+            log(`Quality-check parse error: ${err instanceof Error ? err.message : String(err)}`);
             log(`Raw response: ${data.slice(0, 300)}`);
-            // Parse error — let response through but with distinguishable score
             resolve({ pass: true, violations: [], score: -2 });
           }
         });
@@ -162,13 +142,12 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
     );
 
     req.on('error', (err) => {
-      log(`Haiku network error: ${err.message}`);
-      // Network error — let response through but log
+      log(`Quality-check network error: ${err.message}`);
       resolve({ pass: true, violations: [], score: -3 });
     });
 
     req.on('timeout', () => {
-      log('Haiku request timed out (15s)');
+      log('Quality-check timed out (12s)');
       req.destroy();
       resolve({ pass: true, violations: [], score: -4 });
     });
