@@ -220,3 +220,8 @@ To remove Telegram integration:
 4. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
 5. Uninstall: `npm uninstall grammy`
 6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

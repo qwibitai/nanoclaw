@@ -324,3 +324,8 @@ Use the inline comment ID preserved during deduplication (Step 3b) to reply dire
 See [providers.md § Reply to Inline Comments](./resources/providers.md#reply-to-inline-comments) for provider-specific commands and reply format.
 
 Keep replies short (one line). If a reply fails, log it and continue.
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

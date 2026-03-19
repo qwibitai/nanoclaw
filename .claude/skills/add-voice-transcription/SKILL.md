@@ -146,3 +146,8 @@ Check logs for the specific error. Common causes:
 ### Agent doesn't respond to voice notes
 
 Verify the chat is registered and the agent is running. Voice transcription only runs for registered groups.
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

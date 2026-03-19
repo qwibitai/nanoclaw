@@ -382,3 +382,8 @@ To remove Agent Swarm support while keeping basic Telegram:
 6. Remove Agent Teams section from group CLAUDE.md files
 7. Remove `TELEGRAM_BOT_POOL` from `.env`, `data/env/env`, and launchd plist/systemd unit
 8. Rebuild: `npm run build && ./container/build.sh && launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist` (macOS) or `npm run build && ./container/build.sh && systemctl --user restart nanoclaw` (Linux)
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

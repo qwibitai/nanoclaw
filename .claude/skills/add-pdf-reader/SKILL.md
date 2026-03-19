@@ -102,3 +102,8 @@ The PDF may be scanned (image-based). pdftotext only handles text-based PDFs. Co
 ### WhatsApp PDF not detected
 
 Verify the message has `documentMessage` with `mimetype: application/pdf`. Some file-sharing apps send PDFs as generic files without the correct mimetype.
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

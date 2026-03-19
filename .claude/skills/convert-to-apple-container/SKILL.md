@@ -173,3 +173,8 @@ Check directory permissions on the host. The container runs as uid 1000.
 | `src/container-runner.ts` | .env shadow mount removed, main containers start as root with privilege drop |
 | `container/Dockerfile` | Entrypoint: `mount --bind` for .env shadowing, `setpriv` privilege drop |
 | `container/build.sh` | Default runtime: `docker` → `container` |
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
