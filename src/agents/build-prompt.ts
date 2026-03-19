@@ -127,6 +127,41 @@ All requirements from CLAUDE.md satisfied.
 Ready for review.
 \`\`\`
 
+## GitHub Publishing
+
+When the build is complete, publish it to a new **private** GitHub repository and open a PR.
+
+### Step 1 — Initialize git (if needed)
+\`\`\`bash
+git init
+git add -A
+git commit -m "feat: initial implementation"
+\`\`\`
+
+### Step 2 — Create private repo and push
+Derive a repo name from the project title: lowercase, hyphens, max 50 chars.
+\`\`\`bash
+REPO_NAME="atlas-<project-name>"
+gh repo create "$REPO_NAME" --private --source=. --remote=origin --push
+\`\`\`
+
+### Step 3 — Open a feature branch and PR
+\`\`\`bash
+git checkout -b atlas-build
+git push -u origin atlas-build
+gh pr create \
+  --title "feat: <project name>" \
+  --body "Autonomous build by Atlas.\n\nBuilt from spec:\n$(cat CLAUDE.md | head -30)" \
+  --base main \
+  --head atlas-build
+\`\`\`
+
+### Step 4 — Report the PR URL
+Output the PR URL as your final message so it appears in Discord.
+
+**If \`GITHUB_TOKEN\` is not set**, skip the GitHub steps and instead output:
+> ⚠️ No GITHUB_TOKEN set. Code is built locally at /workspace/group. Add GITHUB_TOKEN to .env to enable automatic repo creation and PR opening.
+
 ## Output Artifacts
 
 When you're done, ensure these exist:
@@ -135,7 +170,7 @@ When you're done, ensure these exist:
 2. **README.md**: Complete setup and usage instructions
 3. **Configuration**: Example .env.example if environment variables are needed
 4. **Git History**: Clean commit history showing your progress
-5. **Branch**: Code pushed to a feature branch (not main)
+5. **GitHub PR**: Opened against a new private repo (if GITHUB_TOKEN is set)
 
 ## Common Project Types & Patterns
 
