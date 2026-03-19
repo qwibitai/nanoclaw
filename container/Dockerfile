@@ -27,6 +27,10 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Set locale to UTF-8 so file writes default to UTF-8 encoding
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
