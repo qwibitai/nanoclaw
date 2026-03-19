@@ -44,6 +44,11 @@
             "type": "command",
             "command": "./.claude/kaizen/hooks/enforce-pr-kaizen.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/warn-code-quality.sh",
+            "timeout": 10
           }
         ]
       },

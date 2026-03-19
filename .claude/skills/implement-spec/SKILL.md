@@ -115,6 +115,19 @@ BODY
 
 This keeps the epic as a living dashboard. `/pick-work` reads the epic's "Next Step" to boost scoring for the recommended follow-up work.
 
+## Testability Pre-Flight — BEFORE writing code
+
+Before adding logic to an existing file, assess the testability cost. *"Avoiding overengineering is not a license to underengineer."*
+
+**For each file you're about to modify, ask:**
+- How many imports does this file have? (Check the import block at the top.)
+- If I add branching logic here, how many modules would I need to mock to test it?
+- If the answer is >3 mocks, **extract the new logic into a separate, testable function or file first** — then call it from the existing file.
+
+**This is not about scope reduction** — it's about doing the work in a way that's testable from the start, not discovering testability problems after the code and tests are written.
+
+**The signal to watch for:** You're about to add an if-branch to a 500+ line file with 10+ imports. Stop. Extract first, then add.
+
 ## The Implementation Loop
 
 After re-examining the spec, you have a refined understanding. Now execute:

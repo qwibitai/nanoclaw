@@ -209,6 +209,7 @@ If the answer to any of these is "no" or "I'm not sure," **file a kaizen issue a
 | `check-test-coverage.sh` | 2 | PreToolUse(Bash) | Warn when source changes lack tests |
 | `check-verification.sh` | 2 | PreToolUse(Bash) | Warn about missing verification section |
 | `check-dirty-files.sh` | 2 | PreToolUse(Bash) | Block push/PR create with dirty files |
+| `warn-code-quality.sh` | 2 | PreToolUse(Bash) | Warn on commit/PR: >3 mocks, >500 line files, jscpd duplication |
 | `verify-before-stop.sh` | 2 | Stop hook | Run tsc/vitest before agent finishes |
 | `check-cleanup-on-stop.sh` | 2 | Stop hook | Warn about orphaned worktree state |
 | `kaizen-reflect.sh` | 2 | PostToolUse(Bash) | Trigger kaizen reflection at workflow boundaries |
