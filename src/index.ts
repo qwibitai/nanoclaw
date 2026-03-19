@@ -462,7 +462,10 @@ async function startMessageLoop(): Promise<void> {
               );
           } else {
             // No active container or IPC rejected — enqueue for processing
-            logger.info({ chatJid }, 'sendMessage returned false, enqueuing for new container');
+            logger.info(
+              { chatJid },
+              'sendMessage returned false, enqueuing for new container',
+            );
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -687,7 +690,8 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      // Scheduled task results always go to the main channel, never a thread
+      if (text) await (channel.sendChannelMessage ?? channel.sendMessage).call(channel, jid, text);
     },
   });
   startPrWatcher({
@@ -703,7 +707,8 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      // PR watcher results always go to the main channel, never a thread
+      if (text) await (channel.sendChannelMessage ?? channel.sendMessage).call(channel, jid, text);
     },
     botGitHubUser: process.env.GIT_AUTHOR_NAME || undefined,
   });

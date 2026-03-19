@@ -42,7 +42,6 @@ export class DiscordChannel implements Channel {
   private activeThread = new Map<string, string>();
   private activeThreadLoaded = false;
   // JIDs with an active user-triggered conversation (not persisted — clears on restart)
-  // Prevents scheduled task output from going to a stale thread
   private activeConversation = new Set<string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
@@ -358,6 +357,26 @@ export class DiscordChannel implements Channel {
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
+    }
+  }
+
+  async sendChannelMessage(jid: string, text: string): Promise<void> {
+    if (!this.client) {
+      logger.warn('Discord client not initialized');
+      return;
+    }
+    try {
+      const channelId = jid.replace(/^dc:/, '');
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('send' in channel)) {
+        logger.warn({ jid }, 'Discord channel not found or not text-based');
+        return;
+      }
+      const textChannel = channel as TextChannel;
+      await this.sendChunked(textChannel, text);
+      logger.info({ jid, length: text.length }, 'Discord scheduled message sent to channel');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Discord channel message');
     }
   }
 
