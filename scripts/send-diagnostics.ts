@@ -296,7 +296,9 @@ async function main(): Promise<void> {
     const payload = buildPayload(event, systemInfo, data, success);
 
     if (dryRun) {
-      console.log(JSON.stringify(payload, null, 2));
+      // Strip secrets before showing to user
+      const { api_key, ...visible } = payload;
+      console.log(JSON.stringify(visible, null, 2));
       return;
     }
 
