@@ -181,6 +181,80 @@ else
 fi
 
 echo ""
+echo "=== Active review: gh api allowed (CI monitoring) ==="
+
+# INVARIANT: gh api calls are allowed during review gate (needed for CI monitoring)
+# SUT: enforce-pr-review.sh is_review_command allowlist
+OUTPUT=$(run_gate "gh api repos/Garsson-io/nanoclaw/commits/abc123/check-runs")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh api check-runs allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh api check-runs blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "gh api repos/Garsson-io/nanoclaw/check-runs/123/annotations")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh api annotations allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh api annotations blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "gh api repos/Garsson-io/nanoclaw/pulls/42 --jq '.state'")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh api with jq allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh api with jq blocked during review"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Active review: gh run view/list/watch allowed (CI monitoring) ==="
+
+# INVARIANT: gh run monitoring commands are allowed during review gate
+# SUT: enforce-pr-review.sh is_review_command allowlist
+OUTPUT=$(run_gate "gh run view 12345 --repo Garsson-io/nanoclaw")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh run view allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh run view blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "gh run list --repo Garsson-io/nanoclaw --limit 5")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh run list allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh run list blocked during review"
+  ((FAIL++))
+fi
+
+OUTPUT=$(run_gate "gh run watch 12345 --repo Garsson-io/nanoclaw")
+if [ -z "$OUTPUT" ]; then
+  echo "  PASS: gh run watch allowed during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh run watch blocked during review"
+  ((FAIL++))
+fi
+
+# gh run delete should still be blocked (destructive)
+OUTPUT=$(run_gate "gh run delete 12345")
+if is_denied "$OUTPUT"; then
+  echo "  PASS: gh run delete still blocked during review"
+  ((PASS++))
+else
+  echo "  FAIL: gh run delete NOT blocked during review"
+  ((FAIL++))
+fi
+
+echo ""
 echo "=== Active review: read-only filesystem commands allowed (kaizen #85, Fix C) ==="
 
 # INVARIANT: Read-only filesystem commands are allowed during review gate

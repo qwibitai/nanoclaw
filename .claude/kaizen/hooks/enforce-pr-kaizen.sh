@@ -11,6 +11,8 @@
 #   gh issue create (filing kaizen issues)
 #   echo "KAIZEN_NO_ACTION: ..." (explicit no-action declaration)
 #   gh pr view, gh pr diff, gh pr edit, gh pr comment (PR-related)
+#   gh api (read-only API calls — CI monitoring, PR status)
+#   gh run view, gh run list, gh run watch (CI monitoring)
 #   git diff, git log, git show, git status, git branch, git fetch
 #   ls, cat, stat, find, head, tail, wc, file (read-only)
 
@@ -50,6 +52,16 @@ is_kaizen_command() {
   if is_gh_pr_command "$cmd" "diff|view|comment|edit"; then
     return 0
   fi
+  # gh api — read-only API calls (CI monitoring, PR status checks)
+  if echo "$cmd" | sed 's/[|;&]\{1,\}/\n/g' | sed 's/^[[:space:]]*//' | \
+    grep -qE '^gh[[:space:]]+api[[:space:]]'; then
+    return 0
+  fi
+  # gh run view/list/watch — CI run monitoring
+  if echo "$cmd" | sed 's/[|;&]\{1,\}/\n/g' | sed 's/^[[:space:]]*//' | \
+    grep -qE '^gh[[:space:]]+run[[:space:]]+(view|list|watch)'; then
+    return 0
+  fi
   # git read-only commands
   if is_git_command "$cmd" "diff|log|show|status|branch|fetch"; then
     return 0
@@ -81,6 +93,7 @@ To clear this gate, do ONE of:
 
 Allowed commands during kaizen reflection:
   gh issue create, gh pr diff/view/comment/edit
+  gh api, gh run view/list/watch
   git diff, git log, git show, git status, git branch" \
   '{
     hookSpecificOutput: {

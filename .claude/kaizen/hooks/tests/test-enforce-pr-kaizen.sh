@@ -115,6 +115,49 @@ OUTPUT=$(run_pretool_hook "cat README.md")
 assert_eq "cat allowed" "" "$OUTPUT"
 
 echo ""
+echo "=== Kaizen gate active: gh api allowed (CI monitoring) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: gh api calls are allowed during kaizen gate (needed for CI monitoring)
+OUTPUT=$(run_pretool_hook "gh api repos/Garsson-io/nanoclaw/commits/abc123/check-runs")
+assert_eq "gh api check-runs allowed" "" "$OUTPUT"
+
+OUTPUT=$(run_pretool_hook "gh api repos/Garsson-io/nanoclaw/check-runs/123/annotations")
+assert_eq "gh api annotations allowed" "" "$OUTPUT"
+
+# Piped gh api should also work
+OUTPUT=$(run_pretool_hook "gh api repos/Garsson-io/nanoclaw/pulls/42 --jq '.state'")
+assert_eq "gh api with jq allowed" "" "$OUTPUT"
+
+echo ""
+echo "=== Kaizen gate active: gh run view/list/watch allowed (CI monitoring) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: gh run commands are allowed during kaizen gate (CI monitoring)
+OUTPUT=$(run_pretool_hook "gh run view 12345 --repo Garsson-io/nanoclaw")
+assert_eq "gh run view allowed" "" "$OUTPUT"
+
+OUTPUT=$(run_pretool_hook "gh run list --repo Garsson-io/nanoclaw --limit 5")
+assert_eq "gh run list allowed" "" "$OUTPUT"
+
+OUTPUT=$(run_pretool_hook "gh run watch 12345 --repo Garsson-io/nanoclaw")
+assert_eq "gh run watch allowed" "" "$OUTPUT"
+
+# gh run delete should still be blocked (destructive)
+OUTPUT=$(run_pretool_hook "gh run delete 12345")
+if is_denied "$OUTPUT"; then
+  echo "  PASS: gh run delete denied during kaizen gate"
+  ((PASS++))
+else
+  echo "  FAIL: gh run delete NOT denied"
+  ((FAIL++))
+fi
+
+echo ""
 echo "=== Cross-worktree isolation: only blocks own branch ==="
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
