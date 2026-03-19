@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    jq \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -30,8 +31,14 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser and claude-code globally.
+# Rename the real agent-browser binary so our wrapper can intercept calls
+# and transparently route to the host browser when CDP mode is enabled.
+RUN npm install -g agent-browser @anthropic-ai/claude-code \
+    && mv /usr/local/bin/agent-browser /usr/local/bin/agent-browser-real
+
+COPY tools/agent-browser /usr/local/bin/agent-browser
+RUN chmod +x /usr/local/bin/agent-browser
 
 # Create app directory
 WORKDIR /app

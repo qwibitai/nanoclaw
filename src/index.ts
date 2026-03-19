@@ -4,12 +4,14 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  HOST_BROWSER_CDP_ENABLED,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startHostBrowser, stopHostBrowser } from './host-browser.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -483,9 +485,19 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start host browser if enabled (agent-browser daemon with CDP)
+  if (HOST_BROWSER_CDP_ENABLED) {
+    try {
+      startHostBrowser();
+    } catch (err) {
+      logger.error({ err }, 'Failed to start host browser — CDP will be unavailable');
+    }
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (HOST_BROWSER_CDP_ENABLED) stopHostBrowser();
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();

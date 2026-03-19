@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Wrapper for agent-browser that transparently routes to the host Chrome
+# when HOST_BROWSER_CDP_URL is set. Otherwise delegates to the real binary.
+set -euo pipefail
+
+REAL_BIN="${AGENT_BROWSER_REAL_BIN:-/usr/local/bin/agent-browser-real}"
+
+if [ -n "${HOST_BROWSER_CDP_URL:-}" ]; then
+  exec "$REAL_BIN" --cdp "$HOST_BROWSER_CDP_URL" "$@"
+fi
+
+exec "$REAL_BIN" "$@"
