@@ -111,7 +111,7 @@ def _call_haiku(response_text: str) -> dict:
 
     body = json.dumps({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "messages": [{"role": "user", "content": filled_prompt}],
     }).encode("utf-8")
 
@@ -143,11 +143,23 @@ def _call_haiku(response_text: str) -> dict:
                 text = text[:json_end + 1]
             try:
                 result = json.loads(text)
-            except json.JSONDecodeError as e:
-                log(f"Haiku JSON parse failed: {e}")
-                log(f"Text length: {len(text)}, first 200: {repr(text[:200])}")
-                log(f"Last 200: {repr(text[-200:])}")
-                return {"score": -2, "error": f"JSON parse: {str(e)}", "raw_text": text[:500]}
+            except json.JSONDecodeError:
+                # Haiku response may be truncated at max_tokens.
+                # Try to salvage: close any open arrays/objects.
+                salvage = text.rstrip()
+                # Count unclosed brackets
+                opens = salvage.count("[") - salvage.count("]")
+                braces = salvage.count("{") - salvage.count("}")
+                salvage += "]" * max(opens, 0)
+                salvage += "}" * max(braces, 0)
+                try:
+                    result = json.loads(salvage)
+                    log(f"Haiku response truncated at {len(text)} chars — salvaged with bracket closing")
+                except json.JSONDecodeError as e2:
+                    log(f"Haiku JSON parse failed even after salvage: {e2}")
+                    log(f"Text length: {len(text)}, first 200: {repr(text[:200])}")
+                    log(f"Last 200: {repr(text[-200:])}")
+                    return {"score": -2, "error": f"JSON parse: {str(e2)}", "raw_text": text[:500]}
             return result
     except urllib.error.HTTPError as e:
         err_body = ""
