@@ -427,7 +427,7 @@ async function runQuery(
         },
         mcpvault: {
           command: 'node',
-          args: ['/app/node_modules/@bitbonsai/mcpvault/dist/server.js', '/workspace/vault'],
+          args: ['/app/node_modules/@bitbonsai/mcpvault/dist/server.js', '/workspace/extra/vault'],
         },
         'content-registry': {
           command: 'node',
