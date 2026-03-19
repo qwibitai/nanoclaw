@@ -210,7 +210,20 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                 );
                 // Auto-register thread as a non-main group if not already known
                 if (!opts.registeredGroups()[chatJid]) {
-                  const folder = `thread_${chatJid}`;
+                  // Build a human-readable folder name from the topic/description
+                  const inputText =
+                    interaction.options.getString('topic') ??
+                    interaction.options.getString('description') ??
+                    '';
+                  const slug = inputText
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-+|-+$/g, '')
+                    .slice(0, 40);
+                  const suffix = chatJid.slice(-6);
+                  const folder = slug
+                    ? `thread_${slug}-${suffix}`
+                    : `thread_${chatJid}`;
                   opts.onRegisterGroup(chatJid, {
                     name: threadName,
                     folder,
@@ -226,7 +239,10 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                       : BUILD_SYSTEM_PROMPT;
                   const groupDir = path.join(process.cwd(), 'groups', folder);
                   fs.mkdirSync(groupDir, { recursive: true });
-                  fs.writeFileSync(path.join(groupDir, 'CLAUDE.md'), systemPrompt);
+                  fs.writeFileSync(
+                    path.join(groupDir, 'CLAUDE.md'),
+                    systemPrompt,
+                  );
                 }
                 opts.onMessage(chatJid, msg);
               };
