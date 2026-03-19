@@ -363,6 +363,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText = '';
   let messageCount = 0;
   let resultCount = 0;
 
@@ -435,6 +436,15 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Collect assistant text as fallback for non-Anthropic models that return empty result field
+      const assistantMsg = message as { message?: { content?: Array<{ type: string; text?: string }> } };
+      if (assistantMsg.message?.content) {
+        const texts = assistantMsg.message.content
+          .filter((c) => c.type === 'text' && c.text)
+          .map((c) => c.text!)
+          .join('');
+        if (texts) lastAssistantText = texts;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -450,10 +460,13 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      // Fallback: use last assistant text if result field is empty (non-Anthropic models via OpenRouter)
+      const finalResult = textResult || lastAssistantText || null;
+      lastAssistantText = ''; // reset for next query
+      log(`Result #${resultCount}: subtype=${message.subtype}${finalResult ? ` text=${finalResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: finalResult,
         newSessionId
       });
     }
