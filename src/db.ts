@@ -189,21 +189,29 @@ function createSchema(database: Database.Database): void {
 
   // Migrate active_threads → thread_contexts
   try {
-    const hasActiveThreads = database.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='active_threads'"
-    ).get();
+    const hasActiveThreads = database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='active_threads'",
+      )
+      .get();
     if (hasActiveThreads) {
       const now = new Date().toISOString();
-      const rows = database.prepare('SELECT chat_jid, thread_id FROM active_threads').all() as Array<{ chat_jid: string; thread_id: string }>;
+      const rows = database
+        .prepare('SELECT chat_jid, thread_id FROM active_threads')
+        .all() as Array<{ chat_jid: string; thread_id: string }>;
       for (const row of rows) {
-        database.prepare(
-          `INSERT OR IGNORE INTO thread_contexts (chat_jid, thread_id, source, created_at, last_active_at)
-           VALUES (?, ?, 'mention', ?, ?)`
-        ).run(row.chat_jid, row.thread_id, now, now);
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO thread_contexts (chat_jid, thread_id, source, created_at, last_active_at)
+           VALUES (?, ?, 'mention', ?, ?)`,
+          )
+          .run(row.chat_jid, row.thread_id, now, now);
       }
       database.exec('DROP TABLE active_threads');
     }
-  } catch { /* migration already done */ }
+  } catch {
+    /* migration already done */
+  }
 }
 
 export function initDatabase(): void {
@@ -631,39 +639,51 @@ export interface CreateThreadContextInput {
 
 // --- Thread context CRUD ---
 
-export function createThreadContext(input: CreateThreadContextInput): ThreadContext {
+export function createThreadContext(
+  input: CreateThreadContextInput,
+): ThreadContext {
   const now = new Date().toISOString();
-  const result = db.prepare(
-    `INSERT INTO thread_contexts (chat_jid, thread_id, session_id, origin_message_id, source, task_id, created_at, last_active_at)
+  const result = db
+    .prepare(
+      `INSERT INTO thread_contexts (chat_jid, thread_id, session_id, origin_message_id, source, task_id, created_at, last_active_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    input.chatJid,
-    input.threadId ?? null,
-    input.sessionId ?? null,
-    input.originMessageId ?? null,
-    input.source,
-    input.taskId ?? null,
-    now,
-    now,
-  );
+    )
+    .run(
+      input.chatJid,
+      input.threadId ?? null,
+      input.sessionId ?? null,
+      input.originMessageId ?? null,
+      input.source,
+      input.taskId ?? null,
+      now,
+      now,
+    );
   return getThreadContextById(result.lastInsertRowid as number)!;
 }
 
 export function getThreadContextById(id: number): ThreadContext | undefined {
-  return db
-    .prepare('SELECT * FROM thread_contexts WHERE id = ?')
-    .get(id) as ThreadContext | undefined;
+  return db.prepare('SELECT * FROM thread_contexts WHERE id = ?').get(id) as
+    | ThreadContext
+    | undefined;
 }
 
-export function getThreadContextByThreadId(threadId: string): ThreadContext | undefined {
+export function getThreadContextByThreadId(
+  threadId: string,
+): ThreadContext | undefined {
   return db
-    .prepare('SELECT * FROM thread_contexts WHERE thread_id = ? ORDER BY last_active_at DESC, id DESC LIMIT 1')
+    .prepare(
+      'SELECT * FROM thread_contexts WHERE thread_id = ? ORDER BY last_active_at DESC, id DESC LIMIT 1',
+    )
     .get(threadId) as ThreadContext | undefined;
 }
 
-export function getThreadContextByOriginMessage(originMessageId: string): ThreadContext | undefined {
+export function getThreadContextByOriginMessage(
+  originMessageId: string,
+): ThreadContext | undefined {
   return db
-    .prepare('SELECT * FROM thread_contexts WHERE origin_message_id = ? ORDER BY created_at DESC LIMIT 1')
+    .prepare(
+      'SELECT * FROM thread_contexts WHERE origin_message_id = ? ORDER BY created_at DESC LIMIT 1',
+    )
     .get(originMessageId) as ThreadContext | undefined;
 }
 
@@ -686,6 +706,8 @@ export function updateThreadContext(
     values.push(updates.taskId);
   }
   if (fields.length === 0) return;
+  fields.push('last_active_at = ?');
+  values.push(new Date().toISOString());
   values.push(id);
   db.prepare(
     `UPDATE thread_contexts SET ${fields.join(', ')} WHERE id = ?`,
@@ -693,13 +715,19 @@ export function updateThreadContext(
 }
 
 export function touchThreadContext(id: number): void {
-  db.prepare(
-    'UPDATE thread_contexts SET last_active_at = ? WHERE id = ?',
-  ).run(new Date().toISOString(), id);
+  db.prepare('UPDATE thread_contexts SET last_active_at = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    id,
+  );
 }
 
-export function getActiveThreadContexts(chatJid: string, expiryHours: number): ThreadContext[] {
-  const cutoff = new Date(Date.now() - expiryHours * 60 * 60 * 1000).toISOString();
+export function getActiveThreadContexts(
+  chatJid: string,
+  expiryHours: number,
+): ThreadContext[] {
+  const cutoff = new Date(
+    Date.now() - expiryHours * 60 * 60 * 1000,
+  ).toISOString();
   return db
     .prepare(
       'SELECT * FROM thread_contexts WHERE chat_jid = ? AND last_active_at > ? ORDER BY last_active_at DESC, id DESC',

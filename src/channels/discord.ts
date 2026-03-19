@@ -39,7 +39,10 @@ export class DiscordChannel implements Channel {
   private opts: DiscordChannelOpts;
   private botToken: string;
   // Pending triggers: chatJid → { message, contextId } for creating Discord thread on first response
-  private pendingTrigger = new Map<string, { message: Message; contextId: number }>();
+  private pendingTrigger = new Map<
+    string,
+    { message: Message; contextId: number }
+  >();
   // JIDs with an active user-triggered conversation (not persisted — clears on restart)
   private activeConversation = new Set<string>();
   // Current send target: `{jid}:{threadId}` → ThreadContext (set by index.ts before streaming)
@@ -50,7 +53,11 @@ export class DiscordChannel implements Channel {
     this.opts = opts;
   }
 
-  setCurrentThreadContext(jid: string, threadId: string, context: ThreadContext | null): void {
+  setCurrentThreadContext(
+    jid: string,
+    threadId: string,
+    context: ThreadContext | null,
+  ): void {
     const key = `${jid}:${threadId}`;
     if (context) {
       this.currentSendTarget.set(key, context);
@@ -175,8 +182,11 @@ export class DiscordChannel implements Channel {
         if (isBotMentioned) {
           // New @mention → new thread context
           const ctx = createThreadContext({
-            chatJid, threadId: null, sessionId: null,
-            originMessageId: msgId, source: 'mention',
+            chatJid,
+            threadId: null,
+            sessionId: null,
+            originMessageId: msgId,
+            source: 'mention',
           });
           this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
           threadContextId = ctx.id;
@@ -187,13 +197,19 @@ export class DiscordChannel implements Channel {
             touchThreadContext(ctx.id);
             threadContextId = ctx.id;
           }
-        } else if (repliedToMessage && repliedToMessage.author.id === this.client?.user?.id) {
+        } else if (
+          repliedToMessage &&
+          repliedToMessage.author.id === this.client?.user?.id
+        ) {
           // Reply to bot message in channel
           let ctx = getThreadContextByOriginMessage(repliedToMessage.id);
           if (!ctx) {
             ctx = createThreadContext({
-              chatJid, threadId: null, sessionId: null,
-              originMessageId: repliedToMessage.id, source: 'reply',
+              chatJid,
+              threadId: null,
+              sessionId: null,
+              originMessageId: repliedToMessage.id,
+              source: 'reply',
             });
           }
           this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
@@ -413,12 +429,28 @@ export class DiscordChannel implements Channel {
         return undefined;
       }
       const textChannel = channel as TextChannel;
-      await this.sendChunked(textChannel, text);
+      // Send first chunk directly to capture the message ID
+      const MAX_LENGTH = 2000;
+      let splitAt = text.length;
+      if (text.length > MAX_LENGTH) {
+        splitAt = text.lastIndexOf('\n', MAX_LENGTH);
+        if (splitAt <= 0) splitAt = text.lastIndexOf(' ', MAX_LENGTH);
+        if (splitAt <= 0) splitAt = MAX_LENGTH;
+        const code = text.charCodeAt(splitAt - 1);
+        if (code >= 0xd800 && code <= 0xdbff) splitAt--;
+      }
+      const firstChunk = text.slice(0, splitAt);
+      const sentMessage = await textChannel.send(firstChunk);
+      // Send remaining chunks
+      const remaining = text.slice(splitAt).replace(/^\n/, '');
+      if (remaining) {
+        await this.sendChunked(textChannel, remaining);
+      }
       logger.info(
         { jid, length: text.length },
         'Discord scheduled message sent to channel',
       );
-      return undefined;
+      return sentMessage.id;
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord channel message');
       return undefined;

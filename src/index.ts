@@ -246,6 +246,7 @@ async function processGroupMessages(
   let hadError = false;
   let outputSentToUser = false;
 
+  const threadSessionId = threadContext?.session_id || undefined;
   const output = await runAgent(
     group,
     prompt,
@@ -288,10 +289,16 @@ async function processGroupMessages(
     },
     false,
     threadId,
+    threadSessionId,
   );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Clean up send target so future messages don't route to a stale thread
+  if (channel.name === 'discord' && threadId) {
+    (channel as any).setCurrentThreadContext(chatJid, threadId, null);
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -323,9 +330,10 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
   _retried = false,
   threadId?: string,
+  sessionOverride?: string,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = sessionOverride !== undefined ? sessionOverride : sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -356,8 +364,11 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          if (!sessionOverride) {
+            sessions[group.folder] = output.newSessionId;
+            setSession(group.folder, output.newSessionId);
+          }
+          // Thread context session update happens in processGroupMessages via onOutput callback
         }
         await onOutput(output);
       }
@@ -386,7 +397,7 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.newSessionId && !sessionOverride) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -410,7 +421,7 @@ async function runAgent(
           );
           return 'error';
         }
-        return runAgent(group, prompt, chatJid, onOutput, true, threadId);
+        return runAgent(group, prompt, chatJid, onOutput, true, threadId, sessionOverride);
       }
 
       logger.error(
