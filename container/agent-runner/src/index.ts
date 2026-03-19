@@ -408,7 +408,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__mcpvault__*'
+        'mcp__mcpvault__*',
+        'mcp__content-registry__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -427,6 +428,14 @@ async function runQuery(
         mcpvault: {
           command: 'node',
           args: ['/app/node_modules/@bitbonsai/mcpvault/dist/server.js', '/workspace/vault'],
+        },
+        'content-registry': {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'content-registry-mcp.js')],
+          env: {
+            CONTENT_REGISTRY_PG_URL: `postgresql://shoggoth:${process.env.NANOCLAW_PG_PASSWORD || ''}@host.docker.internal:5432/shoggoth`,
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+          },
         },
       },
       hooks: {

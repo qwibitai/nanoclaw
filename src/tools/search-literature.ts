@@ -30,7 +30,7 @@ export async function searchSemanticScholar(
     const res = await fetch(`${S2_BASE}/paper/search?${params}`);
     if (!res.ok) return [];
 
-    const data = await res.json();
+    const data = (await res.json()) as { data?: Record<string, unknown>[] };
     return (data.data || []).map((p: Record<string, unknown>) => ({
       source: 'semantic_scholar' as const,
       sourceId: p.paperId as string,
@@ -50,9 +50,7 @@ export async function searchSemanticScholar(
  * OpenAlex stores abstracts as inverted indices.
  * { "We": [0], "study": [1], "platforms": [2] } → "We study platforms"
  */
-function invertedIndexToText(
-  index: Record<string, number[]> | null,
-): string {
+function invertedIndexToText(index: Record<string, number[]> | null): string {
   if (!index) return '';
   const words: [string, number][] = [];
   for (const [word, positions] of Object.entries(index)) {
@@ -78,7 +76,7 @@ export async function searchOpenAlex(
     const res = await fetch(`${OA_BASE}/works?${params}`);
     if (!res.ok) return [];
 
-    const data = await res.json();
+    const data = (await res.json()) as { results?: Record<string, unknown>[] };
     return (data.results || []).map((w: Record<string, unknown>) => {
       const authorships =
         (w.authorships as { author: { display_name: string } }[]) || [];

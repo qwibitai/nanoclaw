@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -236,6 +237,15 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass secrets needed by content registry MCP server inside containers
+  const contentRegistryEnv = readEnvFile(['OPENAI_API_KEY', 'POSTGRES_PASSWORD']);
+  if (contentRegistryEnv.OPENAI_API_KEY) {
+    args.push('-e', `OPENAI_API_KEY=${contentRegistryEnv.OPENAI_API_KEY}`);
+  }
+  if (contentRegistryEnv.POSTGRES_PASSWORD) {
+    args.push('-e', `NANOCLAW_PG_PASSWORD=${contentRegistryEnv.POSTGRES_PASSWORD}`);
   }
 
   // Runtime-specific args for host gateway resolution
