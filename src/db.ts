@@ -78,6 +78,20 @@ function createSchema(database: Database.Database): void {
       chat_jid TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS watched_prs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      status TEXT DEFAULT 'active',
+      last_checked_at TEXT,
+      last_comment_id INTEGER,
+      created_at TEXT NOT NULL,
+      UNIQUE(repo, pr_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_watched_prs_status ON watched_prs(status);
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -131,6 +145,15 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Migrate existing groups from old default ["general"] to new default ["general","coding"]
+  try {
+    database.exec(
+      `UPDATE registered_groups SET skills = '["general","coding"]' WHERE skills = '["general"]'`,
+    );
+  } catch {
+    /* already migrated or table doesn't exist yet */
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -585,6 +608,97 @@ export function getAllActiveThreads(): Map<string, string> {
   return result;
 }
 
+// --- Watched PR accessors ---
+
+export interface WatchedPr {
+  id: number;
+  repo: string;
+  pr_number: number;
+  group_folder: string;
+  chat_jid: string;
+  source: string;
+  status: string;
+  last_checked_at: string | null;
+  last_comment_id: number | null;
+  created_at: string;
+}
+
+export function addWatchedPr(pr: {
+  repo: string;
+  pr_number: number;
+  group_folder: string;
+  chat_jid: string;
+  source: string;
+}): void {
+  db.prepare(
+    `INSERT INTO watched_prs (repo, pr_number, group_folder, chat_jid, source, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(repo, pr_number) DO UPDATE SET
+       group_folder = excluded.group_folder,
+       chat_jid = excluded.chat_jid,
+       source = excluded.source,
+       status = 'active'`,
+  ).run(
+    pr.repo,
+    pr.pr_number,
+    pr.group_folder,
+    pr.chat_jid,
+    pr.source,
+    new Date().toISOString(),
+  );
+}
+
+export function getWatchedPr(
+  repo: string,
+  prNumber: number,
+): WatchedPr | undefined {
+  return db
+    .prepare('SELECT * FROM watched_prs WHERE repo = ? AND pr_number = ?')
+    .get(repo, prNumber) as WatchedPr | undefined;
+}
+
+export function getActiveWatchedPrs(): WatchedPr[] {
+  return db
+    .prepare(
+      "SELECT * FROM watched_prs WHERE status = 'active' ORDER BY created_at",
+    )
+    .all() as WatchedPr[];
+}
+
+export function updateWatchedPr(
+  repo: string,
+  prNumber: number,
+  updates: Partial<
+    Pick<WatchedPr, 'status' | 'last_checked_at' | 'last_comment_id'>
+  >,
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.status !== undefined) {
+    fields.push('status = ?');
+    values.push(updates.status);
+  }
+  if (updates.last_checked_at !== undefined) {
+    fields.push('last_checked_at = ?');
+    values.push(updates.last_checked_at);
+  }
+  if (updates.last_comment_id !== undefined) {
+    fields.push('last_comment_id = ?');
+    values.push(updates.last_comment_id);
+  }
+  if (fields.length === 0) return;
+  values.push(repo, prNumber);
+  db.prepare(
+    `UPDATE watched_prs SET ${fields.join(', ')} WHERE repo = ? AND pr_number = ?`,
+  ).run(...values);
+}
+
+export function unwatchPr(repo: string, prNumber: number): void {
+  db.prepare(
+    "UPDATE watched_prs SET status = 'unwatched' WHERE repo = ? AND pr_number = ?",
+  ).run(repo, prNumber);
+}
+
 // --- Registered group accessors ---
 
 export function getRegisteredGroup(
@@ -621,9 +735,9 @@ export function getRegisteredGroup(
   } catch {
     logger.warn({ jid: row.jid }, 'Invalid container_config JSON, ignoring');
   }
-  let skills: string[] = ['general'];
+  let skills: string[] = ['general', 'coding'];
   try {
-    skills = row.skills ? JSON.parse(row.skills) : ['general'];
+    skills = row.skills ? JSON.parse(row.skills) : ['general', 'coding'];
   } catch {
     logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
   }
@@ -657,7 +771,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
-    group.skills ? JSON.stringify(group.skills) : '["general"]',
+    group.skills ? JSON.stringify(group.skills) : '["general","coding"]',
   );
 }
 
@@ -690,9 +804,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     } catch {
       logger.warn({ jid: row.jid }, 'Invalid container_config JSON, ignoring');
     }
-    let skills: string[] = ['general'];
+    let skills: string[] = ['general', 'coding'];
     try {
-      skills = row.skills ? JSON.parse(row.skills) : ['general'];
+      skills = row.skills ? JSON.parse(row.skills) : ['general', 'coding'];
     } catch {
       logger.warn({ jid: row.jid }, 'Invalid skills JSON, using default');
     }

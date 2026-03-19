@@ -11,7 +11,14 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  addWatchedPr,
+  createTask,
+  deleteTask,
+  getTaskById,
+  unwatchPr,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -314,6 +321,74 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC files directory');
+      }
+
+      // Process PR watch requests from this group's IPC directory
+      const prsDir = path.join(ipcBaseDir, sourceGroup, 'prs');
+      try {
+        if (fs.existsSync(prsDir)) {
+          const prFiles = fs
+            .readdirSync(prsDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of prFiles) {
+            const filePath = path.join(prsDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+              if (data.type === 'watch_pr' && data.repo && data.pr_number) {
+                // Resolve chat_jid from sourceGroup
+                const groups = deps.registeredGroups();
+                const groupEntry = Object.entries(groups).find(
+                  ([, g]) => g.folder === sourceGroup,
+                );
+                if (groupEntry) {
+                  const [chatJid] = groupEntry;
+                  addWatchedPr({
+                    repo: data.repo,
+                    pr_number: data.pr_number,
+                    group_folder: sourceGroup,
+                    chat_jid: chatJid,
+                    source: data.source || 'manual',
+                  });
+                  logger.info(
+                    { repo: data.repo, pr: data.pr_number, sourceGroup },
+                    'PR watch added via IPC',
+                  );
+                } else {
+                  logger.warn(
+                    { sourceGroup },
+                    'Cannot watch PR: group not registered',
+                  );
+                }
+              } else if (
+                data.type === 'unwatch_pr' &&
+                data.repo &&
+                data.pr_number
+              ) {
+                unwatchPr(data.repo, data.pr_number);
+                logger.info(
+                  { repo: data.repo, pr: data.pr_number, sourceGroup },
+                  'PR unwatched via IPC',
+                );
+              }
+
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC PR watch',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC prs directory');
       }
     }
 

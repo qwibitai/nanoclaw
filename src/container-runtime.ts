@@ -37,9 +37,10 @@ function detectProxyBindHost(): string {
     const ipv4 = docker0.find((a) => a.family === 'IPv4');
     if (ipv4) return ipv4.address;
   }
-  // Fall back to loopback — never bind to all interfaces (exposes API keys to LAN).
-  // Set CREDENTIAL_PROXY_HOST env var if containers need a custom bind address.
-  return '127.0.0.1';
+  // docker0 not found (e.g., process lacks network namespace visibility).
+  // On Linux, containers need to reach the proxy via host gateway, so bind
+  // to all interfaces. macOS/WSL already returned loopback above.
+  return '0.0.0.0';
 }
 
 /** CLI args needed for the container to resolve the host gateway. */

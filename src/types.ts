@@ -40,7 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
-  skills?: string[]; // Category tags for skill pre-loading. Default: ["general"]
+  skills?: string[]; // Category tags for skill pre-loading. Default: ["general", "coding"]
 }
 
 export interface NewMessage {
@@ -87,6 +87,8 @@ export interface FileAttachment {
 
 export interface Channel {
   name: string;
+  /** Channel-specific formatting rules, injected into prompts at runtime. */
+  formattingInstructions?: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
   isConnected(): boolean;

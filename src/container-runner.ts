@@ -231,7 +231,7 @@ function buildVolumeMounts(
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   // Container runs as node (uid 1000) and needs write access to IPC subdirs.
   // Use 0o770 (not 0o777) so other local users cannot inject/read IPC files.
-  for (const sub of ['messages', 'tasks', 'input', 'files']) {
+  for (const sub of ['messages', 'tasks', 'input', 'files', 'prs']) {
     const dir = path.join(groupIpcDir, sub);
     fs.mkdirSync(dir, { recursive: true });
     try {
@@ -329,6 +329,12 @@ function buildContainerArgs(
   if (ghSecrets.GIT_AUTHOR_EMAIL) {
     args.push('-e', `GIT_AUTHOR_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
     args.push('-e', `GIT_COMMITTER_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
+  }
+
+  // Inject Gemini API key if configured (for image generation skills)
+  const geminiSecrets = readEnvFile(['GEMINI_API_KEY']);
+  if (geminiSecrets.GEMINI_API_KEY) {
+    args.push('-e', `GEMINI_API_KEY=${geminiSecrets.GEMINI_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution

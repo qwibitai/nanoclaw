@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -58,6 +59,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startPrWatcher } from './pr-watcher.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -181,7 +183,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(missedMessages, TIMEZONE, channel);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -418,10 +420,11 @@ async function startMessageLoop(): Promise<void> {
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
+          // For non-main groups, only act on trigger messages — unless
+          // there's an active container already handling this group, in
+          // which case follow-up messages should be forwarded via IPC
+          // without requiring a fresh trigger.
+          if (needsTrigger && !queue.isActive(chatJid)) {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
@@ -441,7 +444,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formatted = formatMessages(messagesToSend, TIMEZONE, channel);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -458,7 +461,8 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container or IPC rejected — enqueue for processing
+            logger.info({ chatJid }, 'sendMessage returned false, enqueuing for new container');
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -493,7 +497,48 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function acquirePidLock(): void {
+  const pidFile = path.join(DATA_DIR, 'nanoclaw.pid');
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // Check if an existing process is still running
+  if (fs.existsSync(pidFile)) {
+    const oldPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+    if (oldPid && oldPid !== process.pid) {
+      try {
+        process.kill(oldPid, 0); // Check if process exists
+        // Old process is still alive — kill it
+        logger.warn(
+          { oldPid },
+          'Killing previous NanoClaw process to prevent double responses',
+        );
+        try {
+          process.kill(oldPid, 'SIGTERM');
+        } catch {
+          // Already gone
+        }
+      } catch {
+        // Process doesn't exist, stale pidfile
+      }
+    }
+  }
+
+  fs.writeFileSync(pidFile, String(process.pid));
+
+  // Clean up pidfile on exit
+  const removePid = () => {
+    try {
+      const current = fs.readFileSync(pidFile, 'utf-8').trim();
+      if (current === String(process.pid)) fs.unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePid);
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -644,6 +689,23 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+  });
+  startPrWatcher({
+    registeredGroups: () => registeredGroups,
+    getSessions: () => sessions,
+    queue,
+    onProcess: (groupJid, proc, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot send PR message');
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+    botGitHubUser: process.env.GIT_AUTHOR_NAME || undefined,
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {

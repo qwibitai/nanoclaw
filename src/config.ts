@@ -9,7 +9,7 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
 
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Jarvis';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -41,6 +41,11 @@ function parseIntEnv(envVar: string | undefined, fallback: number): number {
   const parsed = parseInt(envVar || String(fallback), 10);
   return Number.isNaN(parsed) ? fallback : parsed;
 }
+
+export const PR_POLL_INTERVAL = parseIntEnv(
+  process.env.PR_POLL_INTERVAL,
+  300000,
+); // 5 minutes default
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
