@@ -43,6 +43,9 @@ export function startCredentialProxy(
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
+  // Preserve path prefix from ANTHROPIC_BASE_URL (e.g. /api/claudecode)
+  const upstreamPathPrefix =
+    upstreamUrl.pathname === '/' ? '' : upstreamUrl.pathname.replace(/\/$/, '');
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -83,7 +86,7 @@ export function startCredentialProxy(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: upstreamPathPrefix + req.url,
             method: req.method,
             headers,
           } as RequestOptions,
