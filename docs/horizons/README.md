@@ -31,25 +31,26 @@ For the full framework design, see [`docs/horizons-framework-spec.md`](../horizo
 |---|---------|---------|-----------|-----|
 | 6 | **Resilience** | L1 (failure detection) | L2 state preservation | [resilience.md](resilience.md) |
 | 7 | **Cost Governance** | L1 (tracking) | L2 per-case budgets | [cost-governance.md](cost-governance.md) |
+| 8 | **Worktree-First Infrastructure** | L0→L1 (ad-hoc fixes) | L2 shared `git-paths.ts` resolver | [worktree-first-infrastructure.md](worktree-first-infrastructure.md) |
 
 ### Trust (who can do what, who sees what)
 
 | # | Horizon | Current | Next Step | Doc |
 |---|---------|---------|-----------|-----|
-| 8 | **Security** | L1-2 (least privilege + credential proxy) | L3 input sanitization | [security.md](security.md) |
-| 9 | **Human-Agent Interface** | L0 (raw output) | L1 plain-language summaries | [human-agent-interface.md](human-agent-interface.md) |
+| 9 | **Security** | L1-2 (least privilege + credential proxy) | L3 input sanitization | [security.md](security.md) |
+| 10 | **Human-Agent Interface** | L0 (raw output) | L1 plain-language summaries | [human-agent-interface.md](human-agent-interface.md) |
 
 ### Platform (how the system grows)
 
 | # | Horizon | Current | Next Step | Doc |
 |---|---------|---------|-----------|-----|
-| 10 | **Extensibility** | L1-2 (documented extension points) | L3 validated integration | [extensibility.md](extensibility.md) |
+| 11 | **Extensibility** | L1-2 (documented extension points) | L3 validated integration | [extensibility.md](extensibility.md) |
 
 ## Dormant Horizons
 
 | # | Horizon | Activation Signal | Doc |
 |---|---------|-------------------|-----|
-| 11 | **Scalability** | 3+ active verticals | [scalability.md](scalability.md) |
+| 12 | **Scalability** | 3+ active verticals | [scalability.md](scalability.md) |
 
 ## Meta
 
@@ -87,5 +88,6 @@ Observability → feeds → Incident-Driven Kaizen → feeds → Autonomous Kaiz
                     Extensibility                    State Integrity
 
 Human-Agent Interface → gates → Autonomous Kaizen L7 (auto-merge needs trust)
+Worktree-First Infra  → prerequisite → Autonomous Kaizen L6+ (agents always in worktrees)
 Horizon Completeness  → discovers → new horizons across all categories
 ```
