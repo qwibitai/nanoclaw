@@ -76,6 +76,32 @@ export async function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
+        if (
+          authMode === 'minimax-oauth' &&
+          req.url &&
+          req.url.startsWith('/v1/models')
+        ) {
+          const m = JSON.stringify({
+            data: [{ id: 'MiniMax-M2.5', type: 'model' }],
+          });
+          res.writeHead(200, {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(m),
+          });
+          res.end(m);
+          return;
+        }
+        let finalBody = body;
+        if (authMode === 'minimax-oauth' && body.length > 0) {
+          try {
+            const p = JSON.parse(body.toString());
+            p.model = 'MiniMax-M2.5';
+            delete p.betas;
+            finalBody = Buffer.from(JSON.stringify(p));
+            headers['content-length'] = finalBody.length;
+          } catch {}
+        }
+        if (authMode === 'minimax-oauth') delete headers['anthropic-beta'];
         if (authMode === 'api-key') {
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
@@ -110,7 +136,10 @@ export async function startCredentialProxy(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path:
+              authMode === 'minimax-oauth'
+                ? upstreamUrl.pathname.replace(/\/$/, '') + (req.url || '/')
+                : req.url,
             method: req.method,
             headers,
           } as RequestOptions,
@@ -126,7 +155,7 @@ export async function startCredentialProxy(
             res.end('Bad Gateway');
           }
         });
-        upstream.write(body);
+        upstream.write(finalBody ?? body);
         upstream.end();
       });
     });
