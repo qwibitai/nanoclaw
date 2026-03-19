@@ -5,6 +5,10 @@ description: Intelligently select the next kaizen issue to work on. Filters out 
 
 # Pick Work — Intelligent Issue Selection
 
+**Role:** The selector. Chooses WHICH issue to work on next from the kaizen backlog. Avoids collisions with other agents, balances momentum against diversity. Feeds into `/accept-case` — never skips straight to implementation.
+
+**Philosophy:** See the [Zen of Kaizen](../../kaizen/zen.md) — *"Compound interest is the greatest force in the universe. Small improvements compound."*
+
 Select the highest-value next issue from the kaizen backlog, avoiding collisions with other agents and balancing epic momentum against topic diversity.
 
 **When to use:**

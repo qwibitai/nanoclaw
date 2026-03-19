@@ -5,9 +5,31 @@ description: Recursive process improvement — core workflow for continuous impr
 
 # Recursive Kaizen — Core Workflow
 
+**Role:** The reflection engine. Fires after work is done and produces actionable improvements. Classifies the right enforcement level and files issues. Also the meta-layer: reflects on whether the kaizen system itself is working.
+
+**Philosophy:** See the [Zen of Kaizen](../../kaizen/zen.md) — run `/zen` to print it.
+
+## The Dev Work Skill Chain
+
+Each skill has a distinct responsibility. They complement, not overlap.
+
+| Skill | Role | Owns | Feeds into |
+|-------|------|------|------------|
+| `/pick-work` | **Selector** — chooses WHICH issue | Issue selection, collision avoidance | `/accept-case` |
+| `/accept-case` | **Scope gate** — decides WHAT to build | Scope decisions, evidence gathering, admin approval | `/implement-spec` |
+| `/write-prd` | **Cartographer** — maps the problem space | Problem taxonomy, requirements | `/accept-case` |
+| `/implement-spec` | **Execution engine** — turns scope into code | Freshness checks, code, tests, PRs | `/kaizen` |
+| `/plan-work` | **Sequencer** — breaks large work into PRs | Dependency graph, sub-issues | `/implement-spec` |
+| `/kaizen` | **Reflection engine** — learns from the work | Level classification, improvement filing, meta-reflection | `/pick-work` (loop) |
+
+**Key boundaries:**
+- `/accept-case` decides scope. `/implement-spec` must not change scope unilaterally — if reality changed, escalate back.
+- `/write-prd` maps the problem space with taxonomies. The taxonomy is the durable artifact — solution details rot.
+- `/kaizen` reflects on both the work AND the kaizen system itself. The system must improve itself.
+
 Kaizen is not optional. It is a CORE part of every piece of work. Every case completion, every fix-PR, every incident triggers a kaizen reflection that produces concrete, actionable output.
 
-**Recursive kaizen** means improving how we improve. When a process improvement doesn't work, escalate the enforcement mechanism — don't just write another instruction.
+**Recursive kaizen** means improving how we improve. When a process improvement doesn't work, escalate the enforcement mechanism — don't just write another instruction. *"It's kaizens all the way down."*
 
 ## The Kaizen Cycle
 
@@ -153,6 +175,20 @@ Improving how we improve:
 - **Level 3 kaizen:** Improving how we improve (the kaizen system itself, reflection triggers, escalation criteria)
 
 When the kaizen system itself fails (e.g., reflections happen but don't produce action, or improvements are identified but never implemented), that's a signal to apply kaizen to kaizen — recursive improvement.
+
+**Kaizen horizon taxonomy:** See [horizon.md](../../kaizen/horizon.md) for the L0–L8 taxonomy of autonomous kaizen. Current state: L3–L4, with L5 just beginning.
+
+### Meta-reflection — MANDATORY in every kaizen reflection
+
+Every kaizen reflection must include a meta-reflection on the kaizen system itself. This is what makes the recursion real, not just aspirational.
+
+**Questions to ask:**
+- **Are the skills asking the right questions?** Did `/accept-case` surface the right tradeoffs? Did `/implement-spec` check for the right things? Did any skill prompt lead you astray or waste time?
+- **Are the skills asking questions in the right way?** Was a prompt too prescriptive (caused underengineering by encouraging scope reduction)? Too vague (didn't guide useful thinking)?
+- **Are the skills asking about the right things?** Did you encounter friction that no skill addresses? Is there a gap in the workflow where a skill should exist but doesn't?
+- **Did the escalation framework fit?** Was the level classification obvious, or did you struggle with it? Does a new category of fix need a new level?
+
+If the answer to any of these is "no" or "I'm not sure," **file a kaizen issue about the skill or process itself.** The kaizen system is just code and prompts — it should improve as aggressively as the codebase does.
 
 ## Current Enforcement Inventory
 

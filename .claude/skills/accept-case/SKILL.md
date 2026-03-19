@@ -5,6 +5,10 @@ description: Evaluate a kaizen case before implementation — gather incidents, 
 
 # Accept Case — Kaizen Case Evaluation
 
+**Role:** The scope gate. Decides WHAT to build and at what level. Gathers evidence, evaluates scope, gets admin approval. Scope decisions live here — `/implement-spec` executes the scope this skill sets, and must not change it unilaterally.
+
+**Philosophy:** See the [Zen of Kaizen](../../kaizen/zen.md) — especially *"Specs are hypotheses. Incidents are data."* and *"No promises without mechanisms."*
+
 Before diving into implementation of a kaizen issue, run this skill to make sure we're solving the right problem, at the right scope, with the right evidence.
 
 Too many kaizen issues go from "abstract problem" to "big spec" to "never implemented." This skill forces concrete thinking: what actually happened, what's the smallest fix that proves value, what does the admin think, and what did we learn for next time.
@@ -105,6 +109,34 @@ Before looking at the spec's proposed solution, ask: what's the smallest change 
 
 Often the best low-hanging fruit isn't in the spec at all. It emerges from looking at the incidents with fresh eyes.
 
+### Scope Reduction Discipline — MANDATORY gate
+
+When your evaluation proposes doing less than the full solution — "start with L1, escalate later", "implement the simple version first", "defer the hook to a follow-up" — you are making a promise about future work. **Promises without mechanisms are just scope cuts.**
+
+You may only recommend reduced scope if you also provide **at least one** of:
+
+1. **A mechanistic signal** (non-LLM) that will fire when the deferred work is needed. Examples: a hook that counts `vi.mock` calls and warns above a threshold, a CI check that flags files over N lines, a script that measures duplication. Even noisy signals with false positives are acceptable — they create awareness. The signal doesn't need to be perfect; it needs to exist.
+
+2. **A connection to an existing epic** where progress on that epic naturally surfaces the need. Example: "as we work through the ipc.ts extraction epic (#63), each extraction step will reveal whether the remaining coupling is tolerable." The epic must be open and actively tracked — a stale epic is not a mechanism.
+
+3. **A filed follow-up issue** with concrete trigger criteria. Not "consider L2 later" but a kaizen issue that states: "Implement L2 mock-count warning hook. Trigger: when 3+ test files in a quarter have >5 mocks." The issue must be specific enough that a future agent can evaluate whether the trigger condition has been met.
+
+**If none of these three exist, you must not reduce scope.** Either solve the full problem in the current case, or include building the signal infrastructure as part of the current scope.
+
+**Why this matters:** "Do less now, more later" without a mechanism is just "do less." The "later" never arrives because there's no signal that triggers it. The reduced scope becomes the final scope, and the problem persists silently. This has happened repeatedly in kaizen evaluations — agents propose L1 with "escalate to L2 if needed" but provide no way to detect when L1 has failed.
+
+**This gate applies to:**
+- Phase 3 recommendations (low-hanging fruit instead of full solution)
+- Phase 5 questions to the admin ("X now, Y later?")
+- Any recommendation that defers work to a future case
+
+**Example — wrong:**
+> "Start with an L1 prompt addition. If agents still ignore it after 3-5 PRs, escalate to L2."
+> *(Who counts the PRs? How do you detect "ignoring"? No mechanism = no escalation.)*
+
+**Example — right:**
+> "Start with L1 prompt + L2-warn hook that counts mocks and emits warnings. The warnings create the signal — if we see repeated warnings over the next few cases, that's the trigger to upgrade to L2-block. Filed as kaizen #N with trigger criteria."
+
 ### Phase 4: Critique the spec (if one exists)
 
 Read the spec with the incidents in hand. Evaluate:
@@ -145,7 +177,7 @@ Present your findings clearly so the admin can make a decision without reading t
 **Structure your questions as:**
 - "I found N incidents over M weeks. The pattern is X. Does this match your experience?"
 - "The spec proposes A, but the incidents suggest B would be more impactful. Which direction?"
-- "The simplest fix is X (30 min). The full solution is Y (2 days). Do you want X now and Y later, or Y directly?"
+- "The simplest fix is X (30 min). The full solution is Y (2 days). Do you want X now and Y later, or Y directly?" *(If recommending "X now, Y later" — you must have passed the Scope Reduction Discipline gate: what signal will tell us when Y is needed?)*
 - "This problem overlaps with kaizen #N. Should we merge them or keep separate?"
 - "The spec's open question #K is actually the pivotal decision. My lean is Z because [reason]. Agree?"
 
@@ -183,6 +215,7 @@ The mechanism for storing and surfacing this doesn't exist yet. That's a separat
 - **Analysis paralysis.** If Phase 3 finds an obvious 15-minute fix, just do it. Don't block on completing all 6 phases.
 - **Asking the admin obvious questions.** Respect their time. Only escalate decisions that genuinely need human judgment.
 - **Recording trivial lessons.** "We should test our code" is not a lesson. "Specs over 100 lines for problems with known solutions lead to spec-rot — implement instead" is.
+- **"Do X now, Y later" without a mechanism.** Reducing scope is fine — but only if you provide a signal (mechanistic tool, epic connection, or filed follow-up) that will trigger "later." Without a mechanism, "later" never arrives. See the Scope Reduction Discipline gate.
 
 ## Integration with other skills
 

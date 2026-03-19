@@ -5,12 +5,33 @@ description: Plan a large body of work through iterative discovery, producing a 
 
 # Plan Large Work — Iterative Discovery to Spec
 
+**Role:** The cartographer. Maps the problem space before anyone starts building. Produces the taxonomy and problem structure that outlasts any specific solution. *"Map the territory before you move through it."*
+
 This skill guides you through planning a large initiative — from fuzzy idea to a structured spec document that a future implementor can pick up and execute. The output is a docs-only PR with a GitHub issue as the tracking anchor.
 
 **When to use:** The work is too large to start coding immediately. You need to think through the problem space, make architectural decisions, identify risks, and leave a trail of reasoning for whoever implements it (including your future self).
 
+## First: Feature or Horizon?
+
+Before planning, determine what kind of work this is:
+
+**Feature** — Has phases and a definition of done. "Add case routing," "implement container build caching," "add Telegram channel." Even if it has 5 phases, it ends. Most work is this.
+
+**Horizon** — An infinite game. A dimension of quality you'll endlessly want to improve. "Testing," "security," "observability," "autonomous operations." A horizon gets a taxonomy (what does good look like at each level?), a "you are here" marker, and clarity on the next few steps — but no definition of done, because there isn't one.
+
+**Feature within a horizon** — A concrete piece of work that advances a horizon. "Add mount-security tests" is a feature within the testing horizon. The feature has a definition of done; the horizon doesn't.
+
+This distinction matters because:
+- A **feature spec** focuses on requirements, implementation phases, and completion criteria
+- A **horizon spec** focuses on the taxonomy (levels/dimensions of what good looks like), current state assessment, and near-term next steps — but deliberately leaves distant levels rough
+- A **feature-within-horizon spec** references the horizon taxonomy to show where the feature sits and how it advances the current level
+
+**You won't accumulate many horizons.** A horizon is a fundamental quality dimension — testing, security, observability, developer ergonomics, autonomous operations. If you're creating dozens, you're tracking features, not horizons.
+
 **What you produce:**
-1. A spec document in `docs/` (the single source of truth)
+1. A spec document:
+   - **Feature or feature-within-horizon:** `docs/{name}-spec.md` (the single source of truth)
+   - **Horizon:** The taxonomy lives with the domain it covers (e.g., `.claude/kaizen/horizon.md` for the kaizen horizon), with a symlink from `docs/horizons/{name}.md`. Check `docs/horizons/` for existing horizons before creating a new one.
 2. A GitHub issue (the tracking anchor for all future implementation)
 3. A docs-only PR (reviewable, versionable)
 

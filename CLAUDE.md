@@ -190,6 +190,35 @@ Work is done
 - **All dev work MUST be in a case.** If `/implement-spec` activates, create a case with worktree before writing any code.
 - **Kaizen issue lifecycle:** When working on a kaizen issue, the `status:active`/`status:done` labels are auto-synced by `case-backend-github.ts`. Collision detection in `ipc-cases.ts` blocks duplicate case creation for the same issue.
 
+## The Zen of Kaizen
+
+The philosophy behind everything in this section. Run `/zen` to see the full commentary (`.claude/kaizen/zen.md`).
+
+```
+Compound interest is the greatest force in the universe.
+Small improvements compound. Large rewrites don't ship.
+Tsuyoku naritai — I want to become stronger. Not perfect today. Stronger tomorrow.
+It's kaizens all the way down. Improve the work. Improve how you work. Improve how you improve.
+No promises without mechanisms. "Later" without a signal is "never."
+Reflection without action is decoration. An insight not filed is an insight lost.
+Instructions are necessary but never sufficient.
+Enforcement is love. The hook that blocks you at 2 AM saves the human at 9 AM.
+An enforcement point is worth a thousand instructions. Put policy where intent meets action.
+The right level matters more than the right fix.
+Map the territory before you move through it.
+A good taxonomy of the problem outlasts any solution.
+Specs are hypotheses. Incidents are data. When they conflict, trust the data.
+Every failure is a gift — if you file the issue.
+The fix isn't done until the outcome is verified. "It should work" is not a test.
+Humans should never wait on agent mistakes.
+Isolation prevents contamination. Your worktree, your state, your problem.
+Avoiding overengineering is not a license to underengineer.
+Build what the problem needs. Not more, not less.
+The most dangerous requirement is the one nobody re-examined.
+When in doubt, escalate the level, not the volume.
+The goal is not to be done. The goal is to be better at not being done.
+```
+
 ## Dev Agent Policies (Kaizen)
 
 These policies were learned from past mistakes. Follow them strictly.
