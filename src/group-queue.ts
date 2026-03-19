@@ -59,6 +59,11 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  isActive(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.active === true && !state.isTaskContainer;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
@@ -159,8 +164,13 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
+    if (!state.active || !state.groupFolder || state.isTaskContainer) {
+      logger.info(
+        { groupJid, active: state.active, groupFolder: state.groupFolder || null, isTaskContainer: state.isTaskContainer },
+        'sendMessage rejected: container not ready for IPC',
+      );
       return false;
+    }
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');

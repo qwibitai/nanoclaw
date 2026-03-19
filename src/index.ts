@@ -420,10 +420,11 @@ async function startMessageLoop(): Promise<void> {
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
+          // For non-main groups, only act on trigger messages — unless
+          // there's an active container already handling this group, in
+          // which case follow-up messages should be forwarded via IPC
+          // without requiring a fresh trigger.
+          if (needsTrigger && !queue.isActive(chatJid)) {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
@@ -460,7 +461,8 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container or IPC rejected — enqueue for processing
+            logger.info({ chatJid }, 'sendMessage returned false, enqueuing for new container');
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -506,7 +508,10 @@ function acquirePidLock(): void {
       try {
         process.kill(oldPid, 0); // Check if process exists
         // Old process is still alive — kill it
-        logger.warn({ oldPid }, 'Killing previous NanoClaw process to prevent double responses');
+        logger.warn(
+          { oldPid },
+          'Killing previous NanoClaw process to prevent double responses',
+        );
         try {
           process.kill(oldPid, 'SIGTERM');
         } catch {
@@ -525,7 +530,9 @@ function acquirePidLock(): void {
     try {
       const current = fs.readFileSync(pidFile, 'utf-8').trim();
       if (current === String(process.pid)) fs.unlinkSync(pidFile);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
   process.on('exit', removePid);
 }
