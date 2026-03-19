@@ -875,6 +875,15 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    setThreadContext: (jid: string, threadId: string) => {
+      const channel = findChannel(channels, jid);
+      if (channel && 'setCurrentThreadContext' in channel) {
+        const ctx = getThreadContextByThreadId(threadId);
+        if (ctx) {
+          (channel as any).setCurrentThreadContext(jid, threadId, ctx);
+        }
+      }
+    },
   });
   queue.setProcessMessagesFn(async (groupJid: string, threadId?: string) => {
     return processGroupMessages(groupJid, threadId);
