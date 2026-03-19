@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 
-import { handleCaseCreate } from './cli-kaizen.js';
+import { handleCaseCreate, resolveMainStoreDir } from './cli-kaizen.js';
 import type { CaseCreateDeps } from './cli-kaizen.js';
 
 const exec = promisify(execFile);
@@ -295,5 +295,140 @@ describe('handleCaseCreate', () => {
     expect(deps.getActiveByIssue).not.toHaveBeenCalled();
 
     logSpy.mockRestore();
+  });
+
+  // INVARIANT: When --worktree-path and --branch-name are provided,
+  // handleCaseCreate adopts the existing worktree instead of creating a new one.
+  // SUT: handleCaseCreate with --worktree-path and --branch-name flags
+  // VERIFICATION: createWorkspace is NOT called; case record uses provided paths.
+
+  test('adopts existing worktree when --worktree-path and --branch-name provided', async () => {
+    const deps = makeDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(
+      [
+        '--description',
+        'Fix auth',
+        '--type',
+        'dev',
+        '--worktree-path',
+        '/home/user/projects/nanoclaw/.claude/worktrees/260319-fix-auth',
+        '--branch-name',
+        'case/260319-fix-auth',
+      ],
+      deps,
+    );
+
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+
+    expect(deps.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktree_path:
+          '/home/user/projects/nanoclaw/.claude/worktrees/260319-fix-auth',
+        branch_name: 'case/260319-fix-auth',
+        workspace_path:
+          '/home/user/projects/nanoclaw/.claude/worktrees/260319-fix-auth',
+      }),
+    );
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.worktree_path).toBe(
+      '/home/user/projects/nanoclaw/.claude/worktrees/260319-fix-auth',
+    );
+    expect(output.branch_name).toBe('case/260319-fix-auth');
+
+    logSpy.mockRestore();
+  });
+
+  test('requires both --worktree-path and --branch-name together', async () => {
+    const deps = makeDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    await expect(
+      handleCaseCreate(
+        [
+          '--description',
+          'Test',
+          '--type',
+          'dev',
+          '--worktree-path',
+          '/tmp/worktree',
+        ],
+        deps,
+      ),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '--worktree-path and --branch-name must be used together',
+      ),
+    );
+    expect(deps.insert).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test('requires both --branch-name and --worktree-path together (reverse)', async () => {
+    const deps = makeDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    await expect(
+      handleCaseCreate(
+        [
+          '--description',
+          'Test',
+          '--type',
+          'dev',
+          '--branch-name',
+          'case/test',
+        ],
+        deps,
+      ),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '--worktree-path and --branch-name must be used together',
+      ),
+    );
+    expect(deps.insert).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: resolveMainStoreDir returns the main checkout's store dir,
+// not the worktree's, regardless of where git-common-dir points.
+// SUT: resolveMainStoreDir function
+// VERIFICATION: Given a .git common dir path, returns <main-checkout>/store.
+
+describe('resolveMainStoreDir', () => {
+  test('resolves store dir from git common dir path', () => {
+    const result = resolveMainStoreDir('/home/user/projects/nanoclaw/.git');
+    expect(result).toBe('/home/user/projects/nanoclaw/store');
+  });
+
+  test('handles instance suffix via NANOCLAW_INSTANCE env var', () => {
+    const original = process.env.NANOCLAW_INSTANCE;
+    process.env.NANOCLAW_INSTANCE = 'staging';
+    try {
+      const result = resolveMainStoreDir('/home/user/projects/nanoclaw/.git');
+      expect(result).toBe('/home/user/projects/nanoclaw/store-staging');
+    } finally {
+      if (original === undefined) {
+        delete process.env.NANOCLAW_INSTANCE;
+      } else {
+        process.env.NANOCLAW_INSTANCE = original;
+      }
+    }
   });
 });

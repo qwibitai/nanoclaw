@@ -7,8 +7,10 @@
  *   node dist/cli-kaizen.js list [--state open|closed|all] [--labels L1,L2] [--limit N]
  *   node dist/cli-kaizen.js view <number>
  *   node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."]
+ *     [--worktree-path PATH --branch-name BRANCH]  (adopt existing worktree)
  */
 
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -28,14 +30,31 @@ import {
   insertCase,
 } from './cases.js';
 import type { Case, CaseType } from './cases.js';
-import { STORE_DIR } from './config.js';
 
 const { owner, repo } = DEV_CASE_ISSUE_REPO;
 
+/**
+ * Resolve the store directory for the MAIN checkout, not the current worktree.
+ * Uses `git rev-parse --git-common-dir` to find the shared .git dir,
+ * then resolves store/ relative to its parent (the main checkout root).
+ */
+export function resolveMainStoreDir(gitCommonDir?: string): string {
+  const instanceId = process.env.NANOCLAW_INSTANCE || '';
+  const instanceSuffix = instanceId ? `-${instanceId}` : '';
+  const commonDir =
+    gitCommonDir ||
+    execSync('git rev-parse --path-format=absolute --git-common-dir', {
+      encoding: 'utf-8',
+    }).trim();
+  const mainRoot = path.dirname(commonDir);
+  return path.join(mainRoot, `store${instanceSuffix}`);
+}
+
 /** Initialize the cases DB for CLI use (not running inside the main service). */
 export function initCasesDb(): void {
-  fs.mkdirSync(STORE_DIR, { recursive: true });
-  const dbPath = path.join(STORE_DIR, 'messages.db');
+  const storeDir = resolveMainStoreDir();
+  fs.mkdirSync(storeDir, { recursive: true });
+  const dbPath = path.join(storeDir, 'messages.db');
   const database = new Database(dbPath);
   createCasesSchema(database);
 }
@@ -66,11 +85,24 @@ export async function handleCaseCreate(
   const typeRaw = getFlag(args, '--type');
   const nameOverride = getFlag(args, '--name');
   const githubIssueRaw = getFlag(args, '--github-issue');
+  const worktreePathRaw = getFlag(args, '--worktree-path');
+  const branchNameRaw = getFlag(args, '--branch-name');
   const allowDuplicate = args.includes('--allow-duplicate');
 
   if (!description) {
     console.error(
       'Error: --description is required\n\nUsage:\n  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."]',
+    );
+    process.exit(1);
+  }
+
+  // Validate: --worktree-path and --branch-name must be used together
+  if (
+    (worktreePathRaw && !branchNameRaw) ||
+    (!worktreePathRaw && branchNameRaw)
+  ) {
+    console.error(
+      'Error: --worktree-path and --branch-name must be used together',
     );
     process.exit(1);
   }
@@ -101,7 +133,14 @@ export async function handleCaseCreate(
   const name = nameOverride || deps.generateName(description);
   const now = new Date().toISOString();
 
-  const workspace = deps.createWorkspace(name, caseType, id);
+  // Adopt existing worktree or create a new one
+  const workspace = worktreePathRaw
+    ? {
+        workspacePath: worktreePathRaw,
+        worktreePath: worktreePathRaw,
+        branchName: branchNameRaw!,
+      }
+    : deps.createWorkspace(name, caseType, id);
 
   const newCase: Case = {
     id,
