@@ -97,6 +97,8 @@ jobs:
           echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
           echo "succeeded=$SUCCEEDED" >> "$GITHUB_OUTPUT"
 
+      # NOTE: Some repos/forks may have Issues disabled. Use try/catch so a
+      # failed issue creation doesn't mark the entire workflow as failed.
       - name: Open issue for failed merges
         if: steps.merge.outputs.failed != ''
         uses: actions/github-script@v7
@@ -122,13 +124,18 @@ jobs:
               `Triggered by push to main: ${context.sha}`
             ].join('\n');
 
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Merge-forward failed for ${failed.length} skill branch(es) after ${sha}`,
-              body,
-              labels: ['skill-maintenance']
-            });
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Merge-forward failed for ${failed.length} skill branch(es) after ${sha}`,
+                body,
+                labels: ['skill-maintenance']
+              });
+            } catch (e) {
+              core.warning(`Could not create issue (Issues may be disabled on this repo): ${e.message}`);
+              core.warning(`Merge-forward failed for: ${failed.join(', ')} after ${sha}. Resolve manually.`);
+            }
 
       - name: Notify channel forks
         if: always()
