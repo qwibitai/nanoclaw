@@ -18,6 +18,7 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { transcribeAudio } from '../speech.js';
@@ -322,6 +323,13 @@ export class WhatsAppChannel implements Channel {
                           ? 'Document'
                           : 'Audio';
                   attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+
+                  // For PDFs, add pdf-reader usage hint
+                  if (normalized.documentMessage?.mimetype === 'application/pdf') {
+                    const sizeKB = Math.round(buffer.length / 1024);
+                    attachmentRef = `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
+                  }
+
                   logger.info(
                     { chatJid, filename, mediaType },
                     'Media attachment saved',
