@@ -117,9 +117,9 @@ jobs:
           # Format A: ```test-exceptions\nsrc/file.ts: reason\n```
           # Format B: ### test-exceptions\n```\nsrc/file.ts — reason\n```
           # Extract file paths (src/...) from either format, tolerating any separator
-          BLOCK_A=$(echo "$PR_BODY" | sed -n '/^```test-exceptions/,/^```/p' | grep -v '^```')
+          BLOCK_A=$(echo "$PR_BODY" | sed -n '/^```test-exceptions/,/^```/p' | grep -v '^```' || true)
           BLOCK_B=$(echo "$PR_BODY" | awk '/^###.*test-exceptions/{f=1;next} f&&/^`{3}/&&!i{i=1;next} f&&i&&/^`{3}/{exit} f&&i{print}')
-          EXCEPTIONS=$(printf '%s\n%s' "$BLOCK_A" "$BLOCK_B" | grep -oE 'src/[^ :—|]+' | xargs)
+          EXCEPTIONS=$(printf '%s\n%s' "$BLOCK_A" "$BLOCK_B" | grep -oE 'src/[^ :—|]+' | xargs || true)
 
           # Get changed test files
           CHANGED_TESTS=$(git diff --name-only "$BASE"..."$HEAD" -- \
