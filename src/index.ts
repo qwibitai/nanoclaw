@@ -731,7 +731,11 @@ async function main(): Promise<void> {
     sendChannelMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return (channel.sendChannelMessage ?? channel.sendMessage).call(channel, jid, text);
+      return (channel.sendChannelMessage ?? channel.sendMessage).call(
+        channel,
+        jid,
+        text,
+      );
     },
     sendFile: (jid, files, caption) => {
       const channel = findChannel(channels, jid);

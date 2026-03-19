@@ -40,6 +40,15 @@
       "path": "/skills-catalog/local/materials-simulation-skills/skills/core-numerical/convergence-study"
     },
     {
+      "name": "deploy",
+      "source": "local",
+      "description": "Deploy web apps to Vercel or Netlify. Use when asked to \"deploy\", \"go live\", \"publish my app\", \"host this\", \"put this on the internet\", or \"deploy to Vercel/Netlify\".",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/deploy"
+    },
+    {
       "name": "differentiation-schemes",
       "source": "local",
       "description": "Select and apply numerical differentiation schemes for PDE/ODE discretization. Use when choosing finite difference/volume/spectral schemes, building stencils, handling boundaries, estimating truncation error, or analyzing dispersion and dissipation.",
@@ -98,7 +107,7 @@
     {
       "name": "image-gen",
       "source": "local",
-      "description": "Generate images from text prompts using Google Gemini Imagen. Use when asked to create, draw, generate, illustrate, or visualize an image. Requires GEMINI_API_KEY environment variable.",
+      "description": "Generate images from text prompts using Google Gemini AI. Use when asked to create, draw, generate, illustrate, or visualize an image. Requires GEMINI_API_KEY environment variable.",
       "categories": [
         "general",
         "creative"
@@ -331,6 +340,15 @@
         "coding"
       ],
       "path": "/skills-catalog/plugins/superpowers/verification-before-completion"
+    },
+    {
+      "name": "visual-explainer",
+      "source": "local",
+      "description": "Generate beautiful, self-contained HTML pages that visually explain systems, code changes, plans, and data. Use when the user asks for a diagram, architecture overview, diff review, plan review, project recap, comparison table, or any visual explanation of technical concepts. Also use proactively when you are about to render a complex ASCII table (4+ rows or 3+ columns) — present it as a styled HTML page instead.",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/visual-explainer"
     },
     {
       "name": "writing-plans",

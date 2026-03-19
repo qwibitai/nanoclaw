@@ -313,40 +313,39 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
-  // Inject GitHub credentials if configured (for gh CLI and git operations)
-  const ghSecrets = readEnvFile([
+  // Read all optional secrets in a single .env parse
+  const secrets = readEnvFile([
     'GH_TOKEN',
     'GIT_AUTHOR_NAME',
     'GIT_AUTHOR_EMAIL',
+    'GEMINI_API_KEY',
+    'VERCEL_TOKEN',
   ]);
-  if (ghSecrets.GH_TOKEN) {
-    args.push('-e', `GH_TOKEN=${ghSecrets.GH_TOKEN}`);
-    args.push('-e', `GITHUB_TOKEN=${ghSecrets.GH_TOKEN}`);
+
+  // Inject GitHub credentials if configured (for gh CLI and git operations)
+  if (secrets.GH_TOKEN) {
+    args.push('-e', `GH_TOKEN=${secrets.GH_TOKEN}`);
+    args.push('-e', `GITHUB_TOKEN=${secrets.GH_TOKEN}`);
   }
-  if (ghSecrets.GIT_AUTHOR_NAME) {
-    args.push('-e', `GIT_AUTHOR_NAME=${ghSecrets.GIT_AUTHOR_NAME}`);
-    args.push('-e', `GIT_COMMITTER_NAME=${ghSecrets.GIT_AUTHOR_NAME}`);
+  if (secrets.GIT_AUTHOR_NAME) {
+    args.push('-e', `GIT_AUTHOR_NAME=${secrets.GIT_AUTHOR_NAME}`);
+    args.push('-e', `GIT_COMMITTER_NAME=${secrets.GIT_AUTHOR_NAME}`);
   }
-  if (ghSecrets.GIT_AUTHOR_EMAIL) {
-    args.push('-e', `GIT_AUTHOR_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
-    args.push('-e', `GIT_COMMITTER_EMAIL=${ghSecrets.GIT_AUTHOR_EMAIL}`);
+  if (secrets.GIT_AUTHOR_EMAIL) {
+    args.push('-e', `GIT_AUTHOR_EMAIL=${secrets.GIT_AUTHOR_EMAIL}`);
+    args.push('-e', `GIT_COMMITTER_EMAIL=${secrets.GIT_AUTHOR_EMAIL}`);
   }
 
-  // Inject Gemini API key if configured (for image generation skills)
-  const geminiSecrets = readEnvFile(['GEMINI_API_KEY']);
-  if (geminiSecrets.GEMINI_API_KEY) {
-    args.push('-e', `GEMINI_API_KEY=${geminiSecrets.GEMINI_API_KEY}`);
+  if (secrets.GEMINI_API_KEY) {
+    args.push('-e', `GEMINI_API_KEY=${secrets.GEMINI_API_KEY}`);
+  }
+  if (secrets.VERCEL_TOKEN) {
+    args.push('-e', `VERCEL_TOKEN=${secrets.VERCEL_TOKEN}`);
   }
 
   // Tag scheduled task containers so in-container send_message routes to main channel
   if (isScheduledTask) {
     args.push('-e', 'NANOCLAW_SCHEDULED_TASK=1');
-  }
-
-  // Inject Vercel token if configured (for deployment operations)
-  const vercelSecrets = readEnvFile(['VERCEL_TOKEN']);
-  if (vercelSecrets.VERCEL_TOKEN) {
-    args.push('-e', `VERCEL_TOKEN=${vercelSecrets.VERCEL_TOKEN}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -389,7 +388,11 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName, input.isScheduledTask);
+  const containerArgs = buildContainerArgs(
+    mounts,
+    containerName,
+    input.isScheduledTask,
+  );
 
   logger.debug(
     {
