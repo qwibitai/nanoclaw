@@ -58,10 +58,11 @@ Check the response below. Return ONLY raw JSON, no markdown fences.
 {"score": 0-100, "violations": [{"rule": "layman_first", "severity": "critical", "description": "quote the specific jargon that lacks a preceding analogy"}]}
 
 Scoring:
-- 85+ = pass. Every technical concept has a preceding analogy.
+- 85+ = pass. Every technical concept has a preceding analogy. Full answer provided.
 - 70-84 = borderline. Some analogies present but gaps remain.
 - < 70 = fail. Multiple technical terms without plain-language lead-ins. MUST be rewritten.
 - "layman_first" is CRITICAL if ANY technical term (function names, protocol names, data formats, code concepts) appears without a preceding plain-language explanation in the same response.
+- "dismissive" is CRITICAL if the response deflects instead of answering. Examples: "scroll up", "already covered this", "as I said before", "see above", "already answered", telling the CEO to find the answer themselves, giving a non-answer to a direct question. Every question gets a FULL answer regardless of whether it was asked before. The CEO asks, Atlas answers. No exceptions.
 - "decision_confirmation" is CRITICAL if decisions are presented as final without noting CEO approval needed.
 - "assumptions" is WARNING if business assumptions aren't stated explicitly.
 - Short responses (<100 chars) or code-only output: score 90+.
@@ -178,6 +179,12 @@ export function buildCorrectionPrompt(violations: QualityViolation[]): string {
     } else if (v.rule === 'assumptions') {
       rules.push(
         `ASSUMPTIONS: ${v.description}. State assumptions explicitly as "I'm assuming X — correct me if wrong."`
+      );
+    } else if (v.rule === 'dismissive') {
+      rules.push(
+        `DISMISSIVE: ${v.description}. Answer the question FULLY right now. Do not reference previous answers, ` +
+        `do not tell the user to scroll up, do not say "already covered." Provide the complete answer as if ` +
+        `this is the first time it was asked.`
       );
     }
   }

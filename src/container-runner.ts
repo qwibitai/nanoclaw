@@ -191,8 +191,30 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  // Always sync fresh source from the container image source.
+  // Previous bug: only copied on first create (!fs.existsSync), so existing
+  // groups kept running stale code forever after source updates.
+  // Fix: compare a version marker and resync when source changes.
+  if (fs.existsSync(agentRunnerSrc)) {
+    const versionFile = path.join(groupAgentRunnerDir, '.source-hash');
+    const sourceFiles = fs.readdirSync(agentRunnerSrc, { recursive: true }) as string[];
+    const sourceHash = sourceFiles
+      .filter((f) => f.toString().endsWith('.ts'))
+      .map((f) => {
+        const stat = fs.statSync(path.join(agentRunnerSrc, f.toString()));
+        return `${f}:${stat.size}:${stat.mtimeMs}`;
+      })
+      .join('|');
+    const cachedHash = fs.existsSync(versionFile)
+      ? fs.readFileSync(versionFile, 'utf-8').trim()
+      : '';
+
+    if (sourceHash !== cachedHash) {
+      // Source changed — resync entire directory
+      fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+      fs.writeFileSync(path.join(groupAgentRunnerDir, '.source-hash'), sourceHash);
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
