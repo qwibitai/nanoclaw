@@ -64,14 +64,36 @@ human_size() {
   numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "${1}B"
 }
 
-# Lock file checks — mirrors cases.ts but with a CRITICAL difference:
-# For cleanup, ANY lock file blocks removal, even stale ones.
-# Stale heartbeat means "no recent IPC activity", NOT "no agent session".
-# Claude sessions can be suspended for hours and resumed.
+# Lock file checks — mirrors cases.ts with PID liveness awareness.
+# A lock with a LIVE PID always blocks removal.
+# A lock with a DEAD PID is stale — safe to clean up.
+# Claude sessions can be suspended for hours and resumed, so heartbeat
+# staleness alone is NOT enough — we must check if the PID is still alive.
 STALE_THRESHOLD_SECONDS=1800  # 30 minutes, same as cases.ts
 
 has_lock_file() {
   [ -f "$1/.worktree-lock.json" ]
+}
+
+# Read the PID from a lock file. Returns empty string if no PID or no file.
+get_lock_pid() {
+  local lock_file="$1/.worktree-lock.json"
+  [ -f "$lock_file" ] || return
+  node -e "
+    try {
+      const lock = JSON.parse(require('fs').readFileSync('$lock_file', 'utf8'));
+      console.log(lock.pid || '');
+    } catch { console.log(''); }
+  " 2>/dev/null
+}
+
+# Check if the PID in a lock file is still running.
+# Returns 0 (true) if PID is alive, 1 (false) if dead or no PID recorded.
+is_lock_pid_alive() {
+  local pid
+  pid=$(get_lock_pid "$1")
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
 }
 
 is_lock_active() {
@@ -106,6 +128,21 @@ get_lock_age() {
   " 2>/dev/null
 }
 
+# Classify a lock: "active" (live PID + fresh heartbeat), "orphaned" (dead PID),
+# "stale" (live PID but old heartbeat — suspended session), or "none".
+classify_lock() {
+  has_lock_file "$1" || { echo "none"; return; }
+  if is_lock_pid_alive "$1"; then
+    if is_lock_active "$1"; then
+      echo "active"
+    else
+      echo "stale"  # PID alive but heartbeat old — suspended session, DO NOT remove
+    fi
+  else
+    echo "orphaned"  # PID dead — safe to clean up
+  fi
+}
+
 # Precompute merged branches (once)
 MERGED_BRANCHES=""
 get_merged_branches() {
@@ -120,21 +157,34 @@ is_branch_merged() {
 }
 
 # Distinguish "truly merged" (diverged then merged back) from "at-main" (never diverged)
-# Returns: "merged", "at-main", or "unmerged"
+# Returns: "merged", "squash-merged", "at-main", or "unmerged"
 branch_merge_status() {
   local branch="$1"
-  if ! is_branch_merged "$branch"; then
-    echo "unmerged"
+
+  # Fast path: git branch --merged recognizes regular merges
+  if is_branch_merged "$branch"; then
+    local ahead
+    ahead=$(git -C "$PROJECT_ROOT" rev-list --count "main..$branch" 2>/dev/null || echo "0")
+    if [ "$ahead" -eq 0 ]; then
+      echo "at-main"
+    else
+      echo "merged"
+    fi
     return
   fi
-  # Branch is in --merged list. Check if it actually diverged from main.
-  local ahead
-  ahead=$(git -C "$PROJECT_ROOT" rev-list --count "main..$branch" 2>/dev/null || echo "0")
-  if [ "$ahead" -eq 0 ]; then
-    echo "at-main"
-  else
-    echo "merged"
+
+  # Squash-merge detection: branch is not in --merged but its changes may
+  # already be in main via squash-merge (different SHA, same content).
+  # Use two-dot diff (direct tree comparison) — if main already contains all
+  # the branch's changes via squash-merge, the trees will be identical.
+  local diff_stat
+  diff_stat=$(git -C "$PROJECT_ROOT" diff --stat "main..$branch" 2>/dev/null || echo "has-diff")
+  if [ -z "$diff_stat" ]; then
+    echo "squash-merged"
+    return
   fi
+
+  echo "unmerged"
 }
 
 # Analyze worktrees
@@ -168,26 +218,25 @@ analyze_worktrees() {
     local branch_short
     branch_short=$(echo "$branch" | sed 's|^case/||;s|^worktree-||;s|^wt/||;s|^feat/||;s|^fix/||;s|^docs/||' | cut -c1-18)
 
-    # Lock status
-    local lock_str
-    if is_lock_active "$wt"; then
-      lock_str="${RED}ACTIVE${NC}"
-      active_locks=$((active_locks + 1))
-    elif has_lock_file "$wt"; then
-      lock_str="${YELLOW}stale($(get_lock_age "$wt"))${NC}"
-      stale_locks=$((stale_locks + 1))
-    else
-      lock_str="${DIM}none${NC}"
-    fi
+    # Lock status (with PID liveness)
+    local lock_str lock_class
+    lock_class=$(classify_lock "$wt")
+    case "$lock_class" in
+      active)   lock_str="${RED}ACTIVE${NC}"; active_locks=$((active_locks + 1)) ;;
+      stale)    lock_str="${YELLOW}stale($(get_lock_age "$wt"))${NC}"; stale_locks=$((stale_locks + 1)) ;;
+      orphaned) lock_str="${YELLOW}orphan($(get_lock_age "$wt"))${NC}"; stale_locks=$((stale_locks + 1)) ;;
+      *)        lock_str="${DIM}none${NC}" ;;
+    esac
 
     # Git state
     local state_parts=""
     local merge_status
     merge_status=$(branch_merge_status "$branch")
     case "$merge_status" in
-      merged)  state_parts="${GREEN}merged${NC}"; merged=$((merged + 1)) ;;
-      at-main) state_parts="${DIM}at-main${NC}" ;;
-      *)       state_parts="unmerged" ;;
+      merged)        state_parts="${GREEN}merged${NC}"; merged=$((merged + 1)) ;;
+      squash-merged) state_parts="${GREEN}squash-merged${NC}"; merged=$((merged + 1)) ;;
+      at-main)       state_parts="${DIM}at-main${NC}" ;;
+      *)             state_parts="unmerged" ;;
     esac
 
     local dirty_files
@@ -222,7 +271,7 @@ analyze_worktrees() {
   echo ""
   echo -e "  ${BOLD}Total:${NC} $count worktrees"
   $FAST || echo -e "  ${BOLD}Disk:${NC} $(human_size $total_size)"
-  echo -e "  Locks: ${RED}$active_locks active${NC}, ${YELLOW}$stale_locks stale${NC}  |  Merged: ${GREEN}$merged${NC}  Dirty: ${YELLOW}$dirty_count${NC}"
+  echo -e "  Locks: ${RED}$active_locks active${NC}, ${YELLOW}$stale_locks stale/orphaned${NC}  |  Merged: ${GREEN}$merged${NC}  Dirty: ${YELLOW}$dirty_count${NC}"
 }
 
 # Analyze branches
@@ -385,7 +434,7 @@ do_cleanup() {
 
   # Phase 1: Worktrees
   echo -e "  ${BOLD}Phase 1: Stale worktrees${NC}"
-  echo -e "  ${DIM}Must be: branch merged + no dirty files + no unpushed + NO lock file${NC}"
+  echo -e "  ${DIM}Removes: merged/squash-merged/at-main + clean + unlocked (or orphaned lock)${NC}"
   echo ""
 
   for wt in "$WORKTREES_DIR"/*/; do
@@ -394,19 +443,39 @@ do_cleanup() {
     name=$(basename "$wt")
     branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
 
-    # HARD SAFETY GATE: any lock file blocks removal
-    if has_lock_file "$wt"; then
-      local age
-      age=$(get_lock_age "$wt")
-      echo -e "    ${YELLOW}SKIP${NC} $name — lock file present (heartbeat: $age)"
-      skipped=$((skipped + 1))
-      continue
-    fi
+    # Lock safety gate — PID-aware
+    local lock_class
+    lock_class=$(classify_lock "$wt")
+    case "$lock_class" in
+      active|stale)
+        # Active PID or suspended session — never touch
+        local age
+        age=$(get_lock_age "$wt")
+        echo -e "    ${YELLOW}SKIP${NC} $name — lock ($lock_class, heartbeat: $age)"
+        skipped=$((skipped + 1))
+        continue
+        ;;
+      orphaned)
+        # Dead PID — remove the stale lock file so we can proceed
+        local age
+        age=$(get_lock_age "$wt")
+        echo -e "    ${DIM}Removing orphaned lock${NC} $name (PID dead, heartbeat: $age)"
+        if ! $DRY_RUN; then
+          rm -f "$wt/.worktree-lock.json"
+        fi
+        ;;
+      # "none" — no lock, proceed normally
+    esac
 
-    # Must be truly merged (not just sitting at main)
+    # Branch must be merged, squash-merged, or at-main (stillborn)
     local merge_status
     merge_status=$(branch_merge_status "$branch")
-    [ "$merge_status" = "merged" ] || continue
+    case "$merge_status" in
+      merged|squash-merged|at-main) ;;  # eligible for cleanup
+      *)
+        continue  # unmerged — skip silently
+        ;;
+    esac
 
     # Must be clean
     local dirty
@@ -418,20 +487,22 @@ do_cleanup() {
       continue
     fi
 
-    # Must have no unpushed commits
-    local unpushed
-    unpushed=$(git -C "$wt" log --oneline '@{u}..HEAD' 2>/dev/null | head -1)
-    if [ -n "$unpushed" ]; then
-      echo -e "    ${YELLOW}SKIP${NC} $name — unpushed commits"
-      skipped=$((skipped + 1))
-      continue
+    # Must have no unpushed commits (skip for at-main — they have 0 commits)
+    if [ "$merge_status" != "at-main" ]; then
+      local unpushed
+      unpushed=$(git -C "$wt" log --oneline '@{u}..HEAD' 2>/dev/null | head -1)
+      if [ -n "$unpushed" ]; then
+        echo -e "    ${YELLOW}SKIP${NC} $name — unpushed commits"
+        skipped=$((skipped + 1))
+        continue
+      fi
     fi
 
     if $DRY_RUN; then
-      echo -e "    ${GREEN}$label${NC}: $name (branch: $branch)"
+      echo -e "    ${GREEN}$label${NC}: $name (branch: $branch, $merge_status)"
     else
       if git -C "$PROJECT_ROOT" worktree remove "$wt" --force 2>/dev/null; then
-        echo -e "    ${GREEN}REMOVED${NC} $name"
+        echo -e "    ${GREEN}REMOVED${NC} $name ($merge_status)"
       else
         echo -e "    ${RED}FAILED${NC} $name"
       fi
@@ -439,7 +510,7 @@ do_cleanup() {
     removed_wt=$((removed_wt + 1))
   done
 
-  # Phase 2: Merged branches with no worktree
+  # Phase 2: Merged/squash-merged branches with no worktree
   echo ""
   echo -e "  ${BOLD}Phase 2: Merged branches (no worktree)${NC}"
   echo ""
@@ -452,16 +523,33 @@ do_cleanup() {
     # Skip if any worktree uses this branch
     git -C "$PROJECT_ROOT" worktree list 2>/dev/null | grep -qF "[$branch]" && continue
 
-    if $DRY_RUN; then
-      echo -e "    ${GREEN}$label${NC}: $branch"
-    else
-      if git -C "$PROJECT_ROOT" branch -d "$branch" 2>/dev/null; then
-        echo -e "    ${GREEN}REMOVED${NC} $branch"
-      fi
-      # silently skip branches that -d refuses (not fully merged)
-    fi
-    removed_br=$((removed_br + 1))
-  done < <(git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null)
+    local ms
+    ms=$(branch_merge_status "$branch")
+    case "$ms" in
+      merged|at-main)
+        # Regular merged branch — safe delete with -d
+        if $DRY_RUN; then
+          echo -e "    ${GREEN}$label${NC}: $branch ($ms)"
+        else
+          if git -C "$PROJECT_ROOT" branch -d "$branch" 2>/dev/null; then
+            echo -e "    ${GREEN}REMOVED${NC} $branch ($ms)"
+          fi
+        fi
+        removed_br=$((removed_br + 1))
+        ;;
+      squash-merged)
+        # Squash-merged: -d won't work (git doesn't see it as merged), use -D
+        if $DRY_RUN; then
+          echo -e "    ${GREEN}$label${NC}: $branch ($ms)"
+        else
+          if git -C "$PROJECT_ROOT" branch -D "$branch" 2>/dev/null; then
+            echo -e "    ${GREEN}REMOVED${NC} $branch ($ms)"
+          fi
+        fi
+        removed_br=$((removed_br + 1))
+        ;;
+    esac
+  done < <(git -C "$PROJECT_ROOT" branch 2>/dev/null)
 
   # Phase 3: Docker
   echo ""
