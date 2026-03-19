@@ -116,10 +116,14 @@ jobs:
 
       - name: Check test coverage for changed source files
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
+
+          # Re-fetch PR body from API (kaizen #119: picks up body edits without re-push)
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
 
           # Get changed source files (exclude tests, test utilities, config, docs, hooks, container agent-runner)
           CHANGED_SRC=$(git diff --name-only "$BASE"..."$HEAD" -- \
@@ -131,13 +135,13 @@ jobs:
             exit 0
           fi
 
-          # Parse test-exceptions from PR body
-          # Format A: ```test-exceptions\nsrc/file.ts: reason\n```
-          # Format B: ### test-exceptions\n```\nsrc/file.ts — reason\n```
-          # Extract file paths (src/...) from either format, tolerating any separator
+          # Parse test-exceptions from PR body (kaizen #156: match any path, not just src/)
+          # Format A: ```test-exceptions\npath/to/file.ts: reason\n```
+          # Format B: ### test-exceptions\n```\npath/to/file.ts — reason\n```
+          # Extract file paths from either format, tolerating any separator
           BLOCK_A=$(echo "$PR_BODY" | sed -n '/^```test-exceptions/,/^```/p' | grep -v '^```' || true)
           BLOCK_B=$(echo "$PR_BODY" | awk '/^###.*test-exceptions/{f=1;next} f&&/^`{3}/&&!i{i=1;next} f&&i&&/^`{3}/{exit} f&&i{print}')
-          EXCEPTIONS=$(printf '%s\n%s' "$BLOCK_A" "$BLOCK_B" | grep -oE 'src/[^ :—|]+' | xargs || true)
+          EXCEPTIONS=$(printf '%s\n%s' "$BLOCK_A" "$BLOCK_B" | grep -oE '[a-zA-Z0-9_./-]+\.(ts|js|tsx|jsx)' | xargs || true)
 
           # Get changed test files
           CHANGED_TESTS=$(git diff --name-only "$BASE"..."$HEAD" -- \
@@ -198,13 +202,28 @@ jobs:
           echo ""
           echo '  ```test-exceptions'
           echo '  src/file.ts: reason why no tests needed'
+          echo '  scripts/helper.ts: covered by existing tests'
           echo '  ```'
           exit 1
 
       - name: Check PR body has verification section
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          # Skip verification check for docs-only PRs (kaizen #107)
+          CHANGED=$(git diff --name-only "$BASE"..."$HEAD")
+          if ! echo "$CHANGED" | grep -qvE '^(docs/|.*\.md$|\.claude/|CLAUDE\.md$)'; then
+            echo "Docs-only PR — skipping verification section check."
+            exit 0
+          fi
+
+          # Re-fetch PR body from API (kaizen #119: picks up body edits without re-push)
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
+
           if echo "$PR_BODY" | grep -qiE '(##\s*Verification|##\s*Test\s+plan|Success\s+criteria)'; then
             echo "Verification section found in PR body."
             exit 0
