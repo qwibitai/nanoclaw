@@ -224,13 +224,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
         await channel.sendMessage(chatJid, text);
+        const botTimestamp = new Date().toISOString();
+        storeChatMetadata(chatJid, botTimestamp);
         storeMessage({
           id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           chat_jid: chatJid,
           sender: ASSISTANT_NAME,
           sender_name: ASSISTANT_NAME,
           content: text,
-          timestamp: new Date().toISOString(),
+          timestamp: botTimestamp,
           is_from_me: true,
           is_bot_message: true,
         });

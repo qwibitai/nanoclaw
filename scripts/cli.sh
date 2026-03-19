@@ -55,20 +55,23 @@ while IFS= read -r -p "You: " line; do
     VALUES ('$MSG_ID', '$JID', 'cli:user', 'User', '$ESCAPED', '$TIMESTAMP', 0, 0);
   "
 
-  # Poll for bot response
+  # Poll for bot response — look for any bot message sent AFTER our user message
   TIMEOUT=120
   WAITED=0
   while true; do
-    RESPONSE=$(sqlite3 "$DB" \
-      "SELECT content FROM messages
+    ROW=$(sqlite3 -separator '|' "$DB" \
+      "SELECT timestamp, content FROM messages
        WHERE chat_jid='$JID' AND is_bot_message=1
-       AND timestamp > '$CURSOR'
+       AND timestamp > '$TIMESTAMP'
        ORDER BY timestamp ASC LIMIT 1")
-    if [ -n "$RESPONSE" ]; then
+    if [ -n "$ROW" ]; then
+      BOT_TS="${ROW%%|*}"
+      BOT_CONTENT="${ROW#*|}"
       echo ""
-      echo "Andy: $RESPONSE"
+      echo "Andy: $BOT_CONTENT"
       echo ""
-      CURSOR=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+      # Advance cursor past this response so we don't re-read it
+      CURSOR="$BOT_TS"
       break
     fi
     sleep 1
@@ -77,7 +80,6 @@ while IFS= read -r -p "You: " line; do
       echo ""
       echo "(timed out waiting for response after ${TIMEOUT}s)"
       echo ""
-      CURSOR=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
       break
     fi
   done
