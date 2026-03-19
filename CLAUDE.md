@@ -161,12 +161,17 @@ There are two case types: **work** (customer tasks) and **dev** (tooling improve
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 | `/kaizen` | Recursive process improvement — escalation framework (Level 1→2→3) |
 | `/pick-work` | Intelligently select next kaizen issue — filters claimed, balances epic momentum vs diversity |
+| `/gap-analysis` | Strategic analysis of kaizen backlog — finds tooling/testing gaps, horizon concentration, unnamed dimensions |
 
 ### Dev work skill chain — MUST follow this workflow
 
 When the conversation involves **selecting, evaluating, or starting dev work**, activate the right skills in sequence. Do NOT jump straight to writing code.
 
 ```
+User asks "where are the gaps", "analyze gaps", "what should we invest in"
+  → /gap-analysis  (strategic: tooling/testing gaps, horizon concentration, unnamed dimensions)
+    → produces: low-hanging fruit, feature PRD candidates, meta/horizon PRD candidates
+
 User asks "what's next", "pick work", "pick a kaizen", "what should we work on"
   → /pick-work  (filter claimed issues, score by momentum/diversity, present options)
 
@@ -185,6 +190,7 @@ Work is done
 ```
 
 **Key triggers to recognize:**
+- **Strategic gap analysis:** "gap analysis", "analyze gaps", "where are problems concentrated", "tooling gaps", "testing gaps" → `/gap-analysis`
 - **Selecting work from backlog:** "pick a kaizen", "what's next", "what should we work on", "find work", "choose issue" → `/pick-work`
 - **Evaluating specific work:** "look at issue #N", "check PR #N", "find low hanging fruit", "evaluate this" → `/accept-case`
 - **Greenlighting work:** "lets do it", "go ahead", "build it", "start on this", "ship it", "make it happen" → `/implement-spec`
