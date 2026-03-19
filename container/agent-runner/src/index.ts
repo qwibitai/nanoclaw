@@ -198,6 +198,37 @@ function generateFallbackName(): string {
   return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
 }
 
+/**
+ * Patterns that agents must NEVER run — commands that would destabilize
+ * the host or create infinite restart loops.
+ */
+const BLOCKED_BASH_PATTERNS: RegExp[] = [
+  /systemctl\s+(?:--user\s+)?(?:restart|stop|disable|mask)\s+nanoclaw/,
+  /systemctl\s+(?:--user\s+)?(?:restart|stop|disable|mask)\s+agency-hq/,
+  /kill\s+.*nanoclaw/,
+  /pkill\s+.*nanoclaw/,
+  /rm\s+-rf?\s+\/home\/jkeyser\/nanoclaw/,
+];
+
+function createBashGuardHook(): HookCallback {
+  return async (input) => {
+    const preToolUse = input as { tool_name: string; tool_input: unknown };
+    if (preToolUse.tool_name !== 'Bash') return { continue: true };
+
+    const command = (preToolUse.tool_input as { command?: string })?.command || '';
+    for (const pattern of BLOCKED_BASH_PATTERNS) {
+      if (pattern.test(command)) {
+        log(`BLOCKED dangerous command: ${command.slice(0, 200)}`);
+        return {
+          decision: 'block' as const,
+          reason: 'This command would destabilize the host. Agents must not restart, stop, or destroy their own host service.',
+        };
+      }
+    }
+    return { continue: true };
+  };
+}
+
 interface ParsedMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -429,6 +460,7 @@ async function runQuery(
         },
       },
       hooks: {
+        PreToolUse: [{ hooks: [createBashGuardHook()] }],
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
     }

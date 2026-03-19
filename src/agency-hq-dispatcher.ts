@@ -4,7 +4,7 @@ import {
   STALL_DETECTOR_INTERVAL,
   STALL_THRESHOLD_MS,
 } from './config.js';
-import { createTask } from './db.js';
+import { completeStaleTasksByPrefix, createTask } from './db.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { SchedulerDependencies, runScheduledTask } from './task-scheduler.js';
 
@@ -225,6 +225,13 @@ async function dispatchTask(
   const prompt = buildPrompt(task, sprintGoal);
   const now = new Date().toISOString();
   const localTaskId = `ahq-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // Clean up any stale active tasks from previous dispatch attempts
+  // (e.g., from a crash/restart that left orphaned entries)
+  const staleCount = completeStaleTasksByPrefix(`ahq-${task.id}-`);
+  if (staleCount > 0) {
+    log.info({ taskId: task.id, staleCount }, 'Cleaned up stale dispatch entries');
+  }
 
   try {
     createTask({

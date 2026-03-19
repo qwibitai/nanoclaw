@@ -45,26 +45,35 @@ function runMigrations(database: Database.Database): void {
 
   // Read migration files in numeric order
   if (!fs.existsSync(migrationsDir)) {
-    logger.warn({ dir: migrationsDir }, 'Migrations directory not found, skipping');
+    logger.warn(
+      { dir: migrationsDir },
+      'Migrations directory not found, skipping',
+    );
     return;
   }
-  const files = fs.readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
     .sort();
 
   if (files.length === 0) return;
 
   // Check which migrations have already been applied
   const appliedVersions = new Set(
-    (database.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: string }>)
-      .map(r => r.version),
+    (
+      database.prepare('SELECT version FROM schema_migrations').all() as Array<{
+        version: string;
+      }>
+    ).map((r) => r.version),
   );
 
   // Detect existing database: has user tables but no migration records yet
   if (appliedVersions.size === 0) {
-    const existingTables = database.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_migrations')",
-    ).all() as Array<{ name: string }>;
+    const existingTables = database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_migrations')",
+      )
+      .all() as Array<{ name: string }>;
 
     if (existingTables.length > 0) {
       // Seed all migration versions as already applied
@@ -95,16 +104,20 @@ function runMigrations(database: Database.Database): void {
     try {
       database.exec('BEGIN');
       database.exec(sql);
-      database.prepare(
-        'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
-      ).run(version, now);
+      database
+        .prepare(
+          'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
+        )
+        .run(version, now);
       database.exec('COMMIT');
       logger.info({ version }, 'Applied migration');
     } catch (err) {
-      try { database.exec('ROLLBACK'); } catch { /* already rolled back */ }
-      throw new Error(
-        `Migration ${version} failed: ${(err as Error).message}`,
-      );
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* already rolled back */
+      }
+      throw new Error(`Migration ${version} failed: ${(err as Error).message}`);
     }
   }
 }
@@ -333,10 +346,10 @@ export function getMessagesSince(
 
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
-): void {
-  db.prepare(
+): boolean {
+  const result = db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+    INSERT OR IGNORE INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
@@ -351,6 +364,7 @@ export function createTask(
     task.status,
     task.created_at,
   );
+  return result.changes > 0;
 }
 
 export function getTaskById(id: string): ScheduledTask | undefined {
@@ -418,6 +432,21 @@ export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+}
+
+/**
+ * Mark all active scheduled_tasks whose ID starts with the given prefix
+ * as completed. Prevents stale duplicates from piling up when a task
+ * is re-dispatched after a crash/restart.
+ */
+export function completeStaleTasksByPrefix(idPrefix: string): number {
+  const result = db
+    .prepare(
+      `UPDATE scheduled_tasks SET status = 'completed', next_run = NULL
+       WHERE id LIKE ? AND status = 'active'`,
+    )
+    .run(`${idPrefix}%`);
+  return result.changes;
 }
 
 export function getDueTasks(): ScheduledTask[] {
