@@ -286,16 +286,76 @@ Stream 9 (Documentation) ─[depends]─ALL STREAMS
 | 8. Testing | **High** | All test files |
 | 9. Documentation | **Low** | `docs/`, `README.md`, `AGENTS.md` |
 
-## Key Decisions Needed
+## Key Decisions
 
-1. **Auth strategy:** Proxy pattern (secure) vs direct token injection (simpler)?  
-   → Recommendation: Keep proxy pattern for security parity
+| # | Decision | Options | Recommendation | **Decision** |
+|---|----------|---------|----------------|-------------|
+| 1 | **Auth strategy** | Proxy pattern (secure) vs direct token injection (simpler) | Keep proxy pattern | ✅ **Keep proxy pattern** — security parity with current design |
+| 2 | **Default model** | claude-opus-4.6, claude-sonnet-4.5, gpt-5, configurable | Configurable via env var | ✅ **Configurable via `MODEL` env var, default `claude-opus-4.6`** |
+| 3 | **Agent teams replacement** | Use customAgents, full multi-session IPC, drop entirely | Use customAgents | ✅ **Use `customAgents` for delegation, drop inter-agent messaging for now** |
+| 4 | **Copilot CLI in container** | Global install vs bundle with agent runner | Global install in Dockerfile | ✅ **Global install in Dockerfile** — matches current `claude-code` pattern |
 
-2. **Model selection:** Default to `claude-sonnet-4.5` (closest parity) or `gpt-5` (native)?  
-   → Recommendation: Make configurable via env var, default to `claude-opus-4.6`
+### Decision 3 — Deep Dive: Agent Teams Migration Strategy
 
-3. **Agent teams replacement:** Custom multi-session orchestration or drop the feature?  
-   → Recommendation: Implement basic version with custom IPC, flag as reduced capability
+#### What we're doing now
+Map Claude SDK's `Task`/`TaskOutput`/`TaskStop` tools to Copilot SDK's native `customAgents` pattern:
 
-4. **Copilot CLI in container:** Install globally or bundle with agent runner?  
-   → Recommendation: Global install in Dockerfile (matches current claude-code pattern)
+```typescript
+const session = await client.createSession({
+  customAgents: [
+    {
+      name: "researcher",
+      description: "Explores codebases and answers questions",
+      tools: ["grep", "glob", "view"],
+      prompt: "You are a research assistant...",
+    },
+    {
+      name: "editor", 
+      description: "Makes targeted code changes",
+      tools: ["view", "edit", "bash"],
+      prompt: "You are a code editor...",
+      infer: false, // Only invoked explicitly
+    },
+  ],
+});
+
+// Sub-agent lifecycle visible via events:
+session.on("subagent.started", (e) => console.log(`▶ ${e.data.agentDisplayName}`));
+session.on("subagent.completed", (e) => console.log(`✅ ${e.data.agentDisplayName}`));
+```
+
+#### What we're dropping (for now)
+- `TeamCreate` — create named agent teams with multiple members
+- `SendMessage` — direct message between team members
+- `TeamDelete` — tear down agent teams
+
+#### Future enhancement: Full multi-agent orchestration
+When inter-agent messaging is needed, here's the architecture to implement:
+
+**Pattern: Multi-session coordinator with shared IPC**
+
+```
+CopilotClient (single instance)
+├── Session "leader" (main agent)
+│   ├── Has custom tool: spawn_worker(name, prompt)
+│   ├── Has custom tool: get_worker_result(name)
+│   └── Has custom tool: send_to_worker(name, message)
+│
+├── Session "worker-research" (spawned by leader)
+│   ├── Restricted tool set
+│   └── Writes results to /workspace/ipc/teams/{team-id}/results/
+│
+└── Session "worker-editor" (spawned by leader)
+    ├── Restricted tool set
+    └── Writes results to /workspace/ipc/teams/{team-id}/results/
+```
+
+**Implementation notes for future agents:**
+1. The leader session uses `defineTool()` to create `spawn_worker`, `get_worker_result`, and `send_to_worker` tools
+2. Each worker is a separate `CopilotSession` with its own `customAgents` config and restricted tools
+3. Communication happens via the existing file-based IPC pattern (JSON files in shared directories)
+4. The leader polls for worker results, similar to how the host polls for container IPC
+5. Workers share the same `CopilotClient` instance (supported — client manages a `Map<string, CopilotSession>`)
+6. Key challenge: workers run inside the same container, so isolation is logical (tool restrictions) not physical (container boundaries)
+7. Session IDs should follow a naming convention: `{group}-{team-id}-{role}` for debuggability
+8. Consider using `session.send({ mode: "enqueue" })` for sequential task chaining within a single worker
