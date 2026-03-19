@@ -13,6 +13,9 @@
  * - Graduation as visual progress bars with locked state
  */
 
+// Force Eastern time for all date operations — Atlas standard timezone
+process.env.TZ = 'America/New_York';
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -336,6 +339,38 @@ function progressBar(pct, color) {
   return `<div class="progress-track"><div class="progress-fill" style="width:${clamped}%;background:${color}"></div></div>`;
 }
 
+/** Strip @Atlas @atlas_gpg_bot and other trigger prefixes from displayed messages */
+function cleanContent(content) {
+  if (!content) return '';
+  return content
+    .replace(/@Atlas\s*/gi, '')
+    .replace(/@atlas_gpg_bot\s*/gi, '')
+    .replace(/@atlas_\w+_bot\s*/gi, '')
+    .trim();
+}
+
+/** Format timestamp with date context: "Today 5:42 PM" or "Yesterday 3:15 PM" or "Mar 17 2:00 PM" */
+function formatTimeWithDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const opts = { timeZone: 'America/New_York' };
+    const msgDate = d.toLocaleDateString('en-US', { ...opts, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const nowDate = now.toLocaleDateString('en-US', { ...opts, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yestDate = yesterday.toLocaleDateString('en-US', { ...opts, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+    const time = d.toLocaleTimeString('en-US', { ...opts, hour: 'numeric', minute: '2-digit', hour12: true });
+
+    if (msgDate === nowDate) return time;
+    if (msgDate === yestDate) return `Yesterday ${time}`;
+    return d.toLocaleDateString('en-US', { ...opts, month: 'short', day: 'numeric' }) + ' ' + time;
+  } catch { return ''; }
+}
+
 function renderConversations(messages, groups) {
   if (!messages.length) {
     return `<div class="empty">No conversations in the last 24 hours</div>`;
@@ -345,83 +380,78 @@ function renderConversations(messages, groups) {
   const jidMap = {};
   for (const g of groups) jidMap[g.jid] = g.name;
 
-  // Group messages by chat_jid, most recent group first
-  const grouped = {};
-  const groupOrder = [];
-  for (const msg of messages) {
-    if (!grouped[msg.chat_jid]) {
-      grouped[msg.chat_jid] = [];
-      groupOrder.push(msg.chat_jid);
-    }
-    grouped[msg.chat_jid].push(msg);
-  }
-
-  // Build conversation pairs: user message -> Atlas response
+  // Show messages in reverse chronological order (most recent first)
+  // Group consecutive messages from the same chat for readability
+  const NOW = Date.now();
+  const FIVE_MINUTES = 5 * 60 * 1000;
   let html = '';
   let pairCount = 0;
   const MAX_PAIRS = 12;
+  let lastJid = null;
 
-  for (const jid of groupOrder) {
+  for (const msg of messages) {
     if (pairCount >= MAX_PAIRS) break;
 
-    const msgs = [...grouped[jid]].reverse(); // chronological
-    const groupName = jidMap[jid] || jid.split('@')[0] || 'Unknown';
+    const isUser = msg.is_from_me === 0 && msg.is_bot_message === 0;
+    const isAtlas = msg.is_from_me === 1 || msg.is_bot_message === 1;
 
-    let groupHtml = '';
-    let groupPairs = 0;
+    // Skip bot messages in the main loop — they'll be shown as responses
+    if (isAtlas) continue;
+    if (!isUser) continue;
 
-    for (let i = 0; i < msgs.length; i++) {
-      if (pairCount >= MAX_PAIRS) break;
-
-      const msg = msgs[i];
-      const isUser = msg.is_from_me === 0 && msg.is_bot_message === 0;
-      if (!isUser) continue;
-
-      // Find Atlas response (next is_from_me=1 message)
-      let response = null;
-      for (let j = i + 1; j < msgs.length; j++) {
-        if (msgs[j].is_from_me === 1 && msgs[j].chat_jid === msg.chat_jid) {
-          response = msgs[j];
-          break;
-        }
+    // Find Atlas response (look for the next bot message after this one chronologically)
+    let response = null;
+    for (const r of messages) {
+      if ((r.is_from_me === 1 || r.is_bot_message === 1) &&
+          r.chat_jid === msg.chat_jid &&
+          r.timestamp > msg.timestamp) {
+        // Check that this response is close in time (within 10 min)
+        const gap = new Date(r.timestamp).getTime() - new Date(msg.timestamp).getTime();
+        if (gap < 600_000) { response = r; }
+        break;
       }
-
-      const time = formatTime(msg.timestamp);
-      const sender = msg.sender_name || 'User';
-      const question = truncate(msg.content, 120);
-
-      // Determine status icon from response content
-      let icon = '\u2705'; // default: success checkmark
-      let responseText = '';
-      if (response?.content) {
-        responseText = truncate(response.content, 150);
-        const lower = response.content.toLowerCase();
-        if (lower.includes('escalat')) icon = '\u26A0\uFE0F';
-        else if (lower.includes('draft') || lower.includes('saved to workspace') || lower.includes('saved to shared')) icon = '\uD83D\uDCC4';
-        else if (lower.includes('error') || lower.includes('failed')) icon = '\u274C';
-      } else {
-        icon = '\u23F3'; // hourglass: no response yet
-        responseText = 'Processing\u2026';
-      }
-
-      groupHtml += `<div class="conv-pair">`;
-      groupHtml += `<div class="conv-time">${esc(time)}</div>`;
-      groupHtml += `<div class="conv-body">`;
-      groupHtml += `<div class="conv-question"><span class="conv-sender">${esc(sender)}:</span> ${esc(question)}</div>`;
-      groupHtml += `<div class="conv-response">\u2192 Atlas: ${esc(responseText)} ${icon}</div>`;
-      groupHtml += `</div>`;
-      groupHtml += `</div>`;
-
-      groupPairs++;
-      pairCount++;
     }
 
-    if (groupPairs > 0) {
-      html += `<div class="conv-group">`;
+    const groupName = jidMap[msg.chat_jid] || msg.chat_jid.split('@')[0] || 'Unknown';
+    const time = formatTimeWithDate(msg.timestamp);
+    const sender = msg.sender_name || 'User';
+    const question = truncate(cleanContent(msg.content), 120);
+    const msgAge = NOW - new Date(msg.timestamp).getTime();
+
+    // Build response line
+    let icon, responseText, responseClass;
+    if (response?.content) {
+      responseText = truncate(cleanContent(response.content), 150);
+      const lower = response.content.toLowerCase();
+      if (lower.includes('escalat')) { icon = '\u26A0\uFE0F'; responseClass = ''; }
+      else if (lower.includes('draft') || lower.includes('saved to workspace')) { icon = '\uD83D\uDCC4'; responseClass = ''; }
+      else if (lower.includes('error') || lower.includes('failed') || lower.includes('denied')) { icon = '\u274C'; responseClass = ''; }
+      else { icon = '\u2705'; responseClass = ''; }
+    } else if (msgAge < FIVE_MINUTES) {
+      icon = '\u23F3';
+      responseText = 'Processing\u2026';
+      responseClass = '';
+    } else {
+      icon = '\u2014';
+      responseText = 'No response';
+      responseClass = ' style="opacity:0.4"';
+    }
+
+    // Add group label if switching groups
+    if (msg.chat_jid !== lastJid) {
+      if (lastJid !== null) html += `<div style="height:8px"></div>`;
       html += `<div class="conv-group-label">${esc(groupName)}</div>`;
-      html += groupHtml;
-      html += `</div>`;
+      lastJid = msg.chat_jid;
     }
+
+    html += `<div class="conv-pair">`;
+    html += `<div class="conv-time">${esc(time)}</div>`;
+    html += `<div class="conv-body">`;
+    html += `<div class="conv-question"><span class="conv-sender">${esc(sender)}:</span> ${esc(question)}</div>`;
+    html += `<div class="conv-response"${responseClass}>\u2192 Atlas: ${esc(responseText)} ${icon}</div>`;
+    html += `</div>`;
+    html += `</div>`;
+    pairCount++;
   }
 
   return html || `<div class="empty">No conversations in the last 24 hours</div>`;
@@ -567,10 +597,19 @@ function renderHostTasks(hostData) {
   ].sort((a, b) => (b.completed_at || b.created_at || '').localeCompare(a.completed_at || a.created_at || ''));
 
   for (const t of all.slice(0, 8)) {
-    const desc = truncate(t.prompt || t.description || t.task_id || 'Unknown task', 100);
+    // Build a human-readable description from available fields
+    let desc = t.prompt || t.description || '';
+    if (!desc && t.result_summary) {
+      // Extract first meaningful line from result_summary (Atlas's output)
+      const firstLine = t.result_summary.split('\n').find(l => l.trim().length > 10) || '';
+      desc = firstLine.trim();
+    }
+    if (!desc || desc.length < 5) desc = 'Task ' + (t.task_id || 'unknown').slice(0, 8);
+    desc = truncate(cleanContent(desc), 100);
+
     const status = t._status || t.status || 'unknown';
     const icon = status === 'success' ? '\u2705' : status === 'running' ? '\u23F3' : '\u274C';
-    const time = relativeTime(t.completed_at || t.created_at);
+    const time = formatTimeWithDate(t.completed_at || t.created_at);
     const entity = (t.entity || '').toUpperCase();
 
     html += `<div class="host-row">`;
@@ -593,7 +632,7 @@ function renderScheduledTasks(tasks) {
   for (const t of tasks) {
     const name = t.id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const schedule = scheduleHuman(t.schedule_type, t.schedule_value);
-    const nextRun = t.next_run ? relativeTime(t.next_run) : 'never';
+    const nextRun = t.next_run ? `${relativeTime(t.next_run)} (${formatTime(t.next_run)})` : 'never';
     const lastRun = t.last_run ? relativeTime(t.last_run) : 'never';
 
     html += `<div class="sched-row">`;
