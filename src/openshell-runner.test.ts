@@ -16,7 +16,10 @@ vi.mock('./config.js', () => ({
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
-  RUNTIME_ENGINE: 'docker',
+  RUNTIME_ENGINE: 'openshell',
+  OPENSHELL_POLICY: 'default',
+  OPENSHELL_PROVIDERS: 'local',
+  OPENSHELL_AUTO_PROVIDERS: false,
 }));
 
 // Mock logger
@@ -84,6 +87,7 @@ vi.mock('child_process', async () => {
         return new EventEmitter();
       },
     ),
+    execSync: vi.fn(),
   };
 });
 
@@ -112,7 +116,7 @@ function emitOutputMarker(
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
-describe('container-runner timeout behavior', () => {
+describe('container-runner timeout behavior (openshell)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
@@ -177,7 +181,7 @@ describe('container-runner timeout behavior', () => {
 
     const result = await resultPromise;
     expect(result.status).toBe('error');
-    expect(result.error).toContain('timed out');
+    expect(result.error).toContain('timeout');
     expect(onOutput).not.toHaveBeenCalled();
   });
 

@@ -6,13 +6,31 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'RUNTIME_ENGINE',
+  'OPENSHELL_POLICY',
+  'OPENSHELL_PROVIDERS',
+  'OPENSHELL_AUTO_PROVIDERS',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+
+export const RUNTIME_ENGINE = (process.env.RUNTIME_ENGINE ||
+  envConfig.RUNTIME_ENGINE ||
+  'docker') as 'docker' | 'openshell';
+export const OPENSHELL_POLICY =
+  process.env.OPENSHELL_POLICY || envConfig.OPENSHELL_POLICY || undefined;
+export const OPENSHELL_PROVIDERS =
+  process.env.OPENSHELL_PROVIDERS || envConfig.OPENSHELL_PROVIDERS || undefined;
+export const OPENSHELL_AUTO_PROVIDERS =
+  (process.env.OPENSHELL_AUTO_PROVIDERS ||
+    envConfig.OPENSHELL_AUTO_PROVIDERS) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

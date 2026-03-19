@@ -89,7 +89,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
+- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), NVIDIA [OpenShell](docs/openshell.md) (secure policy-driven sandbox), Apple Container (macOS), or Docker (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
@@ -173,7 +173,10 @@ Key files:
 
 **Why Docker?**
 
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
+Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. NanoClaw also supports alternative runtimes:
+
+- **Apple Container**: A lighter-weight native runtime on macOS (switch via `/convert-to-apple-container`).
+- **NVIDIA OpenShell**: Secure, policy-driven sandboxes. See [OpenShell documentation](docs/openshell.md) or use `/setup-openshell`.
 
 **Can I run this on Linux?**
 
