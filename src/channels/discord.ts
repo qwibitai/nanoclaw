@@ -29,6 +29,7 @@ import { BUILD_SYSTEM_PROMPT } from '../agents/build-prompt.js';
 import { researchCommand } from '../commands/research.js';
 import { buildCommand } from '../commands/build.js';
 import { statusCommand } from '../commands/status.js';
+import { reportCommand } from '../commands/report.js';
 
 const { DISCORD_TOKEN, DISCORD_CONTROL_CHANNEL_ID: CONTROL_CHANNEL_ID } =
   readEnvFile(['DISCORD_TOKEN', 'DISCORD_CONTROL_CHANNEL_ID']);
@@ -64,6 +65,7 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   commands.set(researchCommand.data.name, researchCommand);
   commands.set(buildCommand.data.name, buildCommand);
   commands.set(statusCommand.data.name, statusCommand);
+  commands.set(reportCommand.data.name, reportCommand);
 
   /**
    * Check if a channel/thread is the control channel
@@ -152,6 +154,12 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
         logger.info({ user: client.user?.tag }, 'Discord bot connected');
         connected = true;
 
+        // Repopulate discordJids from existing registered groups so that
+        // scheduled tasks can route outbound messages after a restart.
+        for (const jid of Object.keys(opts.registeredGroups())) {
+          discordJids.add(jid);
+        }
+
         // Set bot status
         client.user?.setPresence({
           activities: [
@@ -187,6 +195,15 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
                 interaction,
                 opts.registeredGroups(),
                 activeContainers,
+              );
+            } else if (interaction.commandName === 'report') {
+              await command.execute(
+                interaction,
+                (jid: string, group: any) => {
+                  discordJids.add(jid);
+                  opts.onRegisterGroup(jid, group);
+                },
+                opts.registeredGroups,
               );
             } else {
               // Research and build commands.
@@ -371,6 +388,7 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
       researchCommand.data.toJSON(),
       buildCommand.data.toJSON(),
       statusCommand.data.toJSON(),
+      reportCommand.data.toJSON(),
     ];
 
     try {
