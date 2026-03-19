@@ -33,13 +33,34 @@ function makeTestAdapter(): CaseSyncAdapter {
   };
 }
 
-// Wire up the mutation hook → sync chain exactly like index.ts does
+// Benign fields that do NOT trigger a sync call — mirrors index.ts logic exactly
+const BENIGN_FIELDS = [
+  'last_message',
+  'last_activity_at',
+  'total_cost_usd',
+  'time_spent_ms',
+  'github_issue',
+  'github_issue_url',
+];
+
+// Wire up the mutation hook → sync chain exactly like index.ts does (lines 1086-1113)
 function wireHooks(syncService: CaseSyncService): void {
   registerCaseMutationHook((event, c, changes) => {
     if (event === 'inserted') {
       syncService.onCaseMutated({ type: 'created', case: c }).catch(() => {});
     } else if (changes?.status === 'done') {
       syncService.onCaseMutated({ type: 'done', case: c }).catch(() => {});
+    } else if (changes?.status) {
+      syncService
+        .onCaseMutated({ type: 'status_changed', case: c, changes })
+        .catch(() => {});
+    } else if (
+      changes &&
+      Object.keys(changes).some((k) => !BENIGN_FIELDS.includes(k))
+    ) {
+      syncService
+        .onCaseMutated({ type: 'updated', case: c, changes })
+        .catch(() => {});
     }
   });
 }
@@ -370,5 +391,133 @@ describe('integration: sync + escalation hooks coexist without interference', ()
     await vi.waitFor(() => {
       expect(mockAdapterCreate).toHaveBeenCalledOnce();
     });
+  });
+});
+
+// INVARIANT: When sync calls updateCase with github_issue/github_issue_url (benign fields),
+//   the re-fired mutation hook does NOT trigger another sync call.
+// SUT: insertCase → sync hook → adapter.createCase → updateCase({github_issue}) → hook filter
+// VERIFICATION: createGitHubIssue-equivalent called exactly once (no recursive loop).
+describe('integration: sync loop prevention — benign field filter', () => {
+  test('sync-originated github_issue update does not trigger recursive sync', async () => {
+    const adapter = makeTestAdapter();
+    const syncService = new CaseSyncService(adapter);
+    wireHooks(syncService);
+
+    // Adapter simulates real GitHubCaseSyncAdapter: creates CRM issue,
+    // then calls updateCase to store the link back
+    mockAdapterCreate.mockImplementation(async (caseObj: Case) => {
+      updateCase(caseObj.id, {
+        github_issue: 77,
+        github_issue_url: 'https://github.com/example/repo/issues/77',
+      });
+      return { success: true, issueNumber: 77 };
+    });
+
+    const c = makeCase({ id: 'case-loop-test', github_issue: null });
+    insertCase(c);
+
+    await vi.waitFor(() => {
+      expect(mockAdapterCreate).toHaveBeenCalledOnce();
+    });
+
+    // The key invariant: adapter.createCase was called exactly once.
+    // If the benign field filter wasn't working, the updateCase({github_issue})
+    // would re-trigger the sync hook, causing a second adapter call.
+    expect(mockAdapterCreate).toHaveBeenCalledTimes(1);
+    expect(mockAdapterUpdate).not.toHaveBeenCalled();
+  });
+
+  test('benign field updates (last_message, costs, time) do not trigger sync', async () => {
+    const adapter = makeTestAdapter();
+    const syncService = new CaseSyncService(adapter);
+    wireHooks(syncService);
+
+    mockAdapterCreate.mockResolvedValue({ success: true });
+
+    const c = makeCase({ id: 'case-benign-test' });
+    insertCase(c);
+
+    await vi.waitFor(() => {
+      expect(mockAdapterCreate).toHaveBeenCalledOnce();
+    });
+
+    // Clear mocks to isolate the update calls
+    vi.clearAllMocks();
+
+    // Update with benign-only fields — none should trigger sync
+    updateCase('case-benign-test', { last_message: 'hello' });
+    updateCase('case-benign-test', {
+      last_activity_at: new Date().toISOString(),
+    });
+    updateCase('case-benign-test', { total_cost_usd: 1.5 });
+    updateCase('case-benign-test', { time_spent_ms: 30000 });
+
+    // Give async hooks a tick to fire (they shouldn't)
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockAdapterCreate).not.toHaveBeenCalled();
+    expect(mockAdapterUpdate).not.toHaveBeenCalled();
+    expect(mockAdapterClose).not.toHaveBeenCalled();
+  });
+
+  test('non-benign field update triggers sync', async () => {
+    const adapter = makeTestAdapter();
+    const syncService = new CaseSyncService(adapter);
+    wireHooks(syncService);
+
+    mockAdapterCreate.mockResolvedValue({ success: true });
+    mockAdapterUpdate.mockResolvedValue({ success: true });
+
+    const c = makeCase({ id: 'case-nonbenign-test' });
+    insertCase(c);
+
+    await vi.waitFor(() => {
+      expect(mockAdapterCreate).toHaveBeenCalledOnce();
+    });
+
+    vi.clearAllMocks();
+
+    // Update description — a non-benign field — should trigger sync
+    updateCase('case-nonbenign-test', { description: 'updated description' });
+
+    await vi.waitFor(() => {
+      expect(mockAdapterUpdate).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+// INVARIANT: All registered mutation hooks fire in registration order,
+//   regardless of individual hook behavior.
+// SUT: registerCaseMutationHook(hook1), registerCaseMutationHook(hook2) → insertCase
+// VERIFICATION: hook1 called before hook2, both called.
+describe('integration: hooks fire in registration order', () => {
+  test('hooks fire in the order they were registered', () => {
+    const callOrder: string[] = [];
+
+    registerCaseMutationHook(() => callOrder.push('first'));
+    registerCaseMutationHook(() => callOrder.push('second'));
+    registerCaseMutationHook(() => callOrder.push('third'));
+
+    const c = makeCase({ id: 'case-order-test' });
+    insertCase(c);
+
+    expect(callOrder).toEqual(['first', 'second', 'third']);
+  });
+
+  test('registration order preserved even when earlier hooks throw', () => {
+    const callOrder: string[] = [];
+
+    registerCaseMutationHook(() => callOrder.push('first'));
+    registerCaseMutationHook(() => {
+      callOrder.push('second-throws');
+      throw new Error('boom');
+    });
+    registerCaseMutationHook(() => callOrder.push('third'));
+
+    const c = makeCase({ id: 'case-order-throw-test' });
+    insertCase(c);
+
+    expect(callOrder).toEqual(['first', 'second-throws', 'third']);
   });
 });
