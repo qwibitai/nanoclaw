@@ -20,17 +20,31 @@ import { join } from 'path';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-/** Read the live OAuth token from Claude CLI credentials file, with fallback. */
-function getLiveOAuthToken(fallback: string | undefined): string | undefined {
+/** Returns true if the JWT token has not yet expired (with 60s grace). */
+function isTokenValid(token: string): boolean {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+    );
+    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60;
+  } catch {
+    return true; // not a JWT or can't decode — assume valid
+  }
+}
+
+/** Read the live OAuth token. Prefers explicit .env value if valid; falls back to Claude CLI credentials file. */
+function getLiveOAuthToken(envToken: string | undefined): string | undefined {
+  if (envToken && isTokenValid(envToken)) return envToken;
   try {
     const credsPath = join(homedir(), '.claude', '.credentials.json');
     const creds = JSON.parse(readFileSync(credsPath, 'utf8'));
     const token = creds?.claudeAiOauth?.accessToken as string | undefined;
-    if (token) return token;
+    if (token && isTokenValid(token)) return token;
   } catch {
-    // credentials file missing or unreadable — use fallback
+    // credentials file missing or unreadable
   }
-  return fallback;
+  // Both expired or absent — return env token as last resort (will get a 401)
+  return envToken;
 }
 
 export type AuthMode = 'api-key' | 'oauth';
