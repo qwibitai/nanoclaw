@@ -323,10 +323,12 @@ Notify only: "✅ Updated [what]. Active on next conversation, no restart needed
 After merging a PR (via `gh pr merge`), always sync local main immediately:
 
 ```bash
-cd /home/aviadr1/projects/nanoclaw && git fetch origin main && git merge --ff-only origin/main
+git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge --ff-only origin/main
 ```
 
 This ensures hooks, settings, and CLAUDE.md changes take effect in the current session. Skipping this causes hooks registered in merged PRs to remain inactive.
+
+**NEVER `cd` to the main checkout.** The main checkout is the production instance — other agents may be using it, and dirtying it can cause cross-agent contamination. Always use `git -C` for the sync and stay in your worktree. If you need follow-up work after merge, create a new branch from within your worktree.
 
 ### Critical rules
 
@@ -442,8 +444,10 @@ gh run view <run-id> --repo Garsson-io/nanoclaw --json jobs --jq '.jobs[] | sele
 gh pr view <url> --repo Garsson-io/nanoclaw --json state --jq .state
 # Expected: "MERGED"
 
-# Step 4: Sync main
+# Step 4: Sync main (stay in your worktree — use git -C, NEVER cd to main checkout)
 git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge --ff-only origin/main
+# If follow-up work is needed, stay in this worktree:
+#   git fetch origin main && git merge origin/main && git checkout -b fix/whatever
 ```
 
 **If CI fails**: fix the issue, commit, push. Auto-merge stays queued — CI re-runs automatically. Go back to step 2.
