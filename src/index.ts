@@ -869,9 +869,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         logger.warn({ chatJid, err }, 'Failed to remove queue reaction'),
       );
   }
+  // Add 💭 on the trigger message for new threads so the user knows it's being worked on.
+  // Removed on first agent output. Only for top-level messages that will become threads.
+  const thinkingReactionMsg =
+    isThreadEnabled && effectiveThreadId && !threadId
+      ? effectiveThreadId
+      : undefined;
+  if (thinkingReactionMsg) {
+    channel
+      .addReaction?.(chatJid, thinkingReactionMsg, '💭')
+      ?.catch((err: unknown) =>
+        logger.debug({ chatJid, err }, 'Failed to add thinking reaction'),
+      );
+  }
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let thinkingReactionCleared = false;
   let agentResponseText = '';
 
   // For Discord top-level messages (new threads), pre-generate a Haiku title
@@ -960,6 +974,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             is_bot_message: true,
           });
           await channel.setTyping?.(chatJid, false);
+          // Remove 💭 on first output — the thread now exists as feedback
+          if (!outputSentToUser && thinkingReactionMsg) {
+            thinkingReactionCleared = true;
+            channel
+              .removeReaction?.(chatJid, thinkingReactionMsg, '💭')
+              ?.catch((err: unknown) =>
+                logger.debug({ chatJid, err }, 'Failed to remove thinking reaction'),
+              );
+          }
           outputSentToUser = true;
         }
       }
@@ -1028,6 +1051,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Failed to send no-output fallback message',
       );
     }
+  }
+  // Clean up 💭 if it wasn't already removed (error/no-output paths)
+  if (thinkingReactionMsg && !thinkingReactionCleared) {
+    channel
+      .removeReaction?.(chatJid, thinkingReactionMsg, '💭')
+      ?.catch(() => {});
   }
   // Clear IPC output tracking for this container run
   ipcOutputSentJids.delete(chatJid);

@@ -1065,6 +1065,50 @@ export class DiscordChannel implements Channel {
     this.typingIntervals.set(jid, setInterval(sendTyping, 8000));
   }
 
+  async addReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.client) return;
+    try {
+      const msg = await this.fetchDiscordMessage(jid, messageId);
+      if (msg) await msg.react(emoji);
+    } catch (err) {
+      logger.debug({ jid, messageId, emoji, err }, 'Failed to add Discord reaction');
+    }
+  }
+
+  async removeReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.client) return;
+    try {
+      const msg = await this.fetchDiscordMessage(jid, messageId);
+      if (!msg) return;
+      const botReaction = msg.reactions.cache.find(
+        (r) => r.emoji.name === emoji && r.me,
+      );
+      if (botReaction) await botReaction.users.remove();
+    } catch (err) {
+      logger.debug({ jid, messageId, emoji, err }, 'Failed to remove Discord reaction');
+    }
+  }
+
+  private async fetchDiscordMessage(
+    jid: string,
+    messageId: string,
+  ): Promise<Message | null> {
+    const channelId = jid.replace(/^dc:/, '');
+    const channel = await this.client!.channels.fetch(channelId);
+    if (channel && 'messages' in channel) {
+      return (channel as TextChannel).messages.fetch(messageId);
+    }
+    return null;
+  }
+
   /**
    * Resolve a parent JID to its active thread JID for IPC routing.
    * When a container sends IPC messages using its NANOCLAW_CHAT_JID (parent),
