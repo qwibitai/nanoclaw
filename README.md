@@ -29,7 +29,12 @@ curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
 curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 ```
 
-> The one-liner installers above target macOS (Apple Silicon) and Windows (x86). On Linux, skip the installer and follow the [Linux / DigitalOcean setup](#linux--digitalocean) below.
+**Linux (x86_64 / ARM64)**
+```bash
+curl -fsSL https://raw.githubusercontent.com/heyjawrsh/shpshft/main/install-linux.sh | bash
+```
+
+> The macOS and Windows installers use Docker Sandboxes. The Linux installer uses an equivalent Docker-based session container with iptables network isolation. All three drop you into a Claude Code session — type `/setup` to finish.
 
 <p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
 
@@ -170,6 +175,10 @@ sudo apt-get install -y build-essential
 ```
 
 ### Setup
+
+The quickest path is the one-liner installer at the top of this README — it handles Docker CE, pulls the session container, clones nanoclaw, and launches Claude Code in one command.
+
+Alternatively, if you prefer to set up manually:
 
 ```bash
 gh repo fork qwibitai/nanoclaw --clone
