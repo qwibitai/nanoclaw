@@ -27,6 +27,8 @@ interface GroupState {
   retryCount: number;
 }
 
+const STATUS_FILE = path.join(DATA_DIR, 'status.json');
+
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
@@ -34,6 +36,21 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+
+  private writeStatus(): void {
+    try {
+      fs.writeFileSync(
+        STATUS_FILE,
+        JSON.stringify({
+          activeContainers: this.activeCount,
+          pid: process.pid,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -166,7 +183,12 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer) {
       logger.info(
-        { groupJid, active: state.active, groupFolder: state.groupFolder || null, isTaskContainer: state.isTaskContainer },
+        {
+          groupJid,
+          active: state.active,
+          groupFolder: state.groupFolder || null,
+          isTaskContainer: state.isTaskContainer,
+        },
         'sendMessage rejected: container not ready for IPC',
       );
       return false;
@@ -217,6 +239,7 @@ export class GroupQueue {
     state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
+    this.writeStatus();
 
     logger.debug(
       { groupJid, reason, activeCount: this.activeCount },
@@ -241,6 +264,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.writeStatus();
       this.drainGroup(groupJid);
     }
   }
@@ -252,6 +276,7 @@ export class GroupQueue {
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
     this.activeCount++;
+    this.writeStatus();
 
     logger.debug(
       { groupJid, taskId: task.id, activeCount: this.activeCount },
@@ -270,6 +295,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.writeStatus();
       this.drainGroup(groupJid);
     }
   }
