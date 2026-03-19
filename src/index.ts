@@ -19,6 +19,7 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
+  writeChatsSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -64,6 +65,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { StatusTracker } from './status-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -78,6 +80,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker!: StatusTracker;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -189,6 +192,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  // Track message lifecycle status (idempotent — recovery path enters here directly)
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
+  for (const msg of missedMessages) {
+    statusTracker.markReceived(msg.id, chatJid, !!msg.is_from_me);
+  }
+  for (const msg of userMessages) {
+    statusTracker.markThinking(msg.id);
+  }
+
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -217,13 +231,30 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // For non-main groups: add ⏳ reaction to the last user message to indicate processing
+  const lastUserMsg = userMessages[userMessages.length - 1];
+  if (!isMainGroup && lastUserMsg && channel.sendReaction) {
+    channel
+      .sendReaction(chatJid, '⏳', lastUserMsg.id)
+      .catch((err) =>
+        logger.warn({ chatJid, err }, 'Failed to send ⏳ processing reaction'),
+      );
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        for (const msg of userMessages) {
+          statusTracker.markWorking(msg.id);
+        }
+      }
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -244,6 +275,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      statusTracker.markAllDone(chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -255,7 +287,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  // Remove ⏳ reaction now that processing is complete
+  if (!isMainGroup && lastUserMsg && channel.sendReaction) {
+    channel
+      .sendReaction(chatJid, '', lastUserMsg.id)
+      .catch((err) =>
+        logger.warn(
+          { chatJid, err },
+          'Failed to remove ⏳ processing reaction',
+        ),
+      );
+  }
+
   if (output === 'error' || hadError) {
+    statusTracker.markAllFailed(chatJid, 'Task crashed \u2014 retrying.');
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -311,6 +356,7 @@ async function runAgent(
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
+  writeChatsSnapshot(group.folder, isMain);
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -425,6 +471,13 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
+          // Mark new user messages as received (status emoji)
+          for (const msg of groupMessages) {
+            if (!msg.is_from_me && !msg.is_bot_message) {
+              statusTracker.markReceived(msg.id, chatJid, false);
+            }
+          }
+
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
@@ -500,6 +553,22 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Initialize status tracker (channels don't need to be connected yet)
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, emoji, messageKey.id);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -507,6 +576,7 @@ async function main(): Promise<void> {
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    await statusTracker.shutdown();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -656,6 +726,18 @@ async function main(): Promise<void> {
         throw new Error(`No image-capable channel for JID: ${jid}`);
       return channel.sendImage(jid, imageUrl, caption);
     },
+    sendReaction: (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendReaction)
+        throw new Error(`No reaction-capable channel for JID: ${jid}`);
+      return channel.sendReaction(jid, emoji, messageId);
+    },
+    sendDocument: (jid, filePath, caption, fileName, mimeType) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendDocument)
+        throw new Error(`No document-capable channel for JID: ${jid}`);
+      return channel.sendDocument(jid, filePath, caption, fileName, mimeType);
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
@@ -684,6 +766,11 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Recover status tracker AFTER channels connect so recovery reactions can be sent
+  await statusTracker.recover();
+  // Heartbeat: detect stale tracked messages where container has died
+  setInterval(() => statusTracker.heartbeatCheck(), 5000);
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
