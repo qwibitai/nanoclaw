@@ -314,22 +314,22 @@ export class WhatsAppChannel implements Channel {
                     : `${Date.now()}${ext}`;
                   fs.writeFileSync(path.join(attachDir, filename), buffer);
 
+                  const label =
+                    mediaType === 'image'
+                      ? 'Image'
+                      : mediaType === 'video'
+                        ? 'Video'
+                        : mediaType === 'document'
+                          ? 'Document'
+                          : 'Audio';
+                  attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+
+                  // For PDFs, add pdf-reader usage hint
                   if (
-                    mediaType === 'document' &&
                     normalized.documentMessage?.mimetype === 'application/pdf'
                   ) {
                     const sizeKB = Math.round(buffer.length / 1024);
                     attachmentRef = `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
-                  } else {
-                    const label =
-                      mediaType === 'image'
-                        ? 'Image'
-                        : mediaType === 'video'
-                          ? 'Video'
-                          : mediaType === 'document'
-                            ? 'Document'
-                            : 'Audio';
-                    attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
                   }
                   logger.info(
                     { chatJid, filename, mediaType },
