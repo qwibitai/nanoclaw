@@ -6,8 +6,11 @@
 #
 # Companion to enforce-pr-review.sh (which handles Bash commands with
 # an allowlist for review commands like gh pr diff). This hook is simpler:
-# during an active review, these tools are always blocked because the agent
+# during an active review, these tools are generally blocked because the agent
 # should be reviewing, not editing or spawning subagents.
+#
+# Exceptions:
+#   - Agent(kaizen-bg, background=true): parallel kaizen reflection (kaizen #151)
 #
 # Read-only tools (Read, Glob, Grep) are NOT blocked because they're useful
 # for reviewing code during the review process.

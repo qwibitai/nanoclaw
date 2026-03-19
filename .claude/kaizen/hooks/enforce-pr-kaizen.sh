@@ -11,8 +11,9 @@
 #   gh issue create (filing kaizen issues)
 #   gh issue list/search (finding existing issues — kaizen #150)
 #   gh issue comment (adding incidents to existing issues)
+#   gh issue list/search/view (searching for duplicates — kaizen #150)
 #   echo "KAIZEN_IMPEDIMENTS: ..." (structured impediment declaration)
-#   echo "KAIZEN_NO_ACTION: ..." (legacy — still accepted for compatibility)
+#   echo "KAIZEN_NO_ACTION [category]: ..." (restricted categories — kaizen #140)
 #   gh pr view, gh pr diff, gh pr edit, gh pr comment, gh pr checks (PR-related)
 #   gh api (read-only API calls — CI monitoring, PR status)
 #   gh run view, gh run list, gh run watch (CI monitoring)
@@ -53,6 +54,10 @@ is_kaizen_command() {
   fi
   # gh issue comment — adding incidents to existing issues
   if echo "$cmd" | grep -qE '^\s*gh\s+issue\s+comment'; then
+    return 0
+  fi
+  # gh issue list/search/view — searching for duplicates during reflection (kaizen #150)
+  if echo "$cmd" | grep -qE '^\s*gh\s+issue\s+(list|search|view)'; then
     return 0
   fi
   # KAIZEN_NO_ACTION declaration — format: KAIZEN_NO_ACTION [category]: reason (kaizen #159)
@@ -114,7 +119,7 @@ For trivial changes only: echo 'KAIZEN_NO_ACTION [category]: reason'
   Categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 
 Allowed commands during reflection:
-  gh issue create/comment, gh pr diff/view/comment/edit
+  gh issue create/comment/list/search/view, gh pr diff/view/comment/edit
   gh api, gh run view/list/watch
   git diff, git log, git show, git status, git branch" \
   '{
