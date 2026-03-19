@@ -198,30 +198,30 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(
+  // Mount pre-compiled agent-runner dist/ so containers skip runtime tsc.
+  // The host compiles once via `npm run build` (which includes agent-runner).
+  // This eliminates ~25s of TypeScript compilation on every container boot.
+  const agentRunnerDist = path.join(
     projectRoot,
     'container',
     'agent-runner',
-    'src',
+    'dist',
   );
   const groupAgentRunnerDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
-    'agent-runner-src',
+    'agent-runner-dist',
   );
-  // Always sync from repo source so new MCP tools (e.g. create_case) are
-  // available immediately after deploy.  Previous logic only copied on first
-  // run, which left agents with stale tooling after PRs merged.
-  if (fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  // Always sync from host dist so new MCP tools are available immediately
+  // after deploy (npm run build). Previous pattern mounted src/ and
+  // recompiled on every boot — see kaizen #123.
+  if (fs.existsSync(agentRunnerDist)) {
+    fs.cpSync(agentRunnerDist, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
-    containerPath: '/app/src',
+    containerPath: '/app/dist',
     readonly: false,
   });
 

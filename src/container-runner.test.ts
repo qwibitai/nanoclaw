@@ -177,7 +177,7 @@ describe('global CLAUDE.md mount', () => {
   });
 });
 
-describe('agent-runner source sync', () => {
+describe('agent-runner dist sync', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
@@ -187,7 +187,7 @@ describe('agent-runner source sync', () => {
     vi.useRealTimers();
   });
 
-  it('always syncs agent-runner source even when session dir exists', async () => {
+  it('always syncs agent-runner dist even when session dir exists', async () => {
     const fs = await import('fs');
     const cpSyncSpy = vi.spyOn(fs.default, 'cpSync');
 
@@ -211,12 +211,12 @@ describe('agent-runner source sync', () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
 
-    // Verify cpSync was called with agent-runner source path
+    // Verify cpSync was called with agent-runner dist path
     const agentRunnerCalls = cpSyncSpy.mock.calls.filter(
       (call) =>
         typeof call[0] === 'string' &&
         call[0].includes('agent-runner') &&
-        call[0].includes('src'),
+        call[0].includes('dist'),
     );
     expect(agentRunnerCalls.length).toBeGreaterThanOrEqual(1);
     // Verify it uses recursive: true

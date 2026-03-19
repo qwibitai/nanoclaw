@@ -3,7 +3,7 @@
  *
  * INVARIANT: A message sent to the container via stdin produces a valid
  * response via stdout output markers. The full pipeline — entrypoint,
- * TypeScript compilation, SDK initialization, API call, result emission —
+ * pre-compiled dist, SDK initialization, API call, result emission —
  * works end-to-end.
  *
  * SUT: Full agent pipeline with stub Anthropic API

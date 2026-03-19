@@ -99,7 +99,7 @@ export function startAgent(
   const groupDir = path.join(tmpDir, 'group');
   const claudeDir = path.join(tmpDir, 'claude');
   const globalDir = path.join(tmpDir, 'global');
-  const agentRunnerSrcDir = path.join(tmpDir, 'agent-runner-src');
+  const agentRunnerDistDir = path.join(tmpDir, 'agent-runner-dist');
 
   for (const dir of [
     messagesDir,
@@ -108,21 +108,29 @@ export function startAgent(
     groupDir,
     claudeDir,
     globalDir,
-    agentRunnerSrcDir,
+    agentRunnerDistDir,
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Copy agent-runner source for container compilation
-  const srcDir = path.join(PROJECT_ROOT, 'container/agent-runner/src');
-  if (fs.existsSync(srcDir)) {
-    fs.cpSync(srcDir, agentRunnerSrcDir, { recursive: true });
+  // Mount pre-compiled agent-runner dist/ if available (no runtime tsc — kaizen #123).
+  // If dist/ doesn't exist (e.g., CI hasn't built yet), skip the mount and use the
+  // image's built-in dist/ from the Dockerfile.
+  const distDir = path.join(PROJECT_ROOT, 'container/agent-runner/dist');
+  const hasHostDist =
+    fs.existsSync(distDir) && fs.readdirSync(distDir).length > 0;
+  if (hasHostDist) {
+    fs.cpSync(distDir, agentRunnerDistDir, { recursive: true });
   }
 
   const hostGateway =
     os.platform() === 'linux'
       ? ['--add-host=host.docker.internal:host-gateway']
       : [];
+
+  const distMount = hasHostDist
+    ? ['-v', `${agentRunnerDistDir}:/app/dist`]
+    : [];
 
   const proc = spawn(
     'docker',
@@ -153,8 +161,7 @@ export function startAgent(
       `${claudeDir}:/home/node/.claude`,
       '-v',
       `${globalDir}:/workspace/global:ro`,
-      '-v',
-      `${agentRunnerSrcDir}:/app/src`,
+      ...distMount,
       CONTAINER_IMAGE,
     ],
     { stdio: ['pipe', 'pipe', 'pipe'] },

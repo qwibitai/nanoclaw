@@ -1,22 +1,21 @@
 /**
  * Tier 1 E2E: Container build, boot, and MCP tool registration.
  *
- * INVARIANT: The container image builds, boots, compiles TypeScript,
- * and registers all expected MCP tools.
+ * INVARIANT: The container image builds, boots, and registers all expected
+ * MCP tools using pre-compiled dist/.
  *
- * SUT: container/build.sh → Dockerfile → entrypoint.sh → ipc-mcp-stdio.ts
+ * SUT: container/build.sh → Dockerfile → ipc-mcp-stdio.ts
  * VERIFICATION: Build image, spawn MCP server, verify tool list matches contract.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import {
-  buildContainer,
   startMcpServer,
   testContainerName,
   cleanupContainer,
-  collectOutput,
   getMcpTools,
 } from './helpers.js';
 
@@ -44,8 +43,13 @@ describe('Tier 1: Container build + boot', () => {
     containers.length = 0;
   });
 
-  it('container image builds successfully', () => {
-    expect(buildContainer()).toBe(true);
+  it('container image exists', () => {
+    // CI builds the image via docker/build-push-action before tests run.
+    // Verify the image exists rather than rebuilding (kaizen #123).
+    const result = execSync('docker image inspect nanoclaw-agent:latest', {
+      stdio: 'pipe',
+    });
+    expect(result).toBeTruthy();
   });
 
   it('MCP server boots and registers all expected tools', async () => {
@@ -69,16 +73,18 @@ describe('Tier 1: Container build + boot', () => {
     }
   });
 
-  it('container entrypoint compiles TypeScript without errors', async () => {
-    const containerName = testContainerName('e2e-compile');
+  it('pre-compiled dist/ exists in image and is loadable', async () => {
+    const containerName = testContainerName('e2e-dist-check');
     containers.push(containerName);
 
-    // Run the entrypoint with a minimal input — it will compile TS then try to run
-    // the agent (which will fail without API, but that's OK — we're checking compilation)
+    // Verify /app/dist/index.js exists and can be required (no runtime tsc needed)
     const proc = startMcpServer(containerName, {});
-    const { stderr } = await collectOutput(proc, 30_000);
-
-    // Check for TypeScript compilation errors
-    expect(stderr).not.toContain('error TS');
+    try {
+      const tools = await getMcpTools(proc);
+      // If we got tools, the pre-compiled dist loaded successfully
+      expect(tools.length).toBeGreaterThan(0);
+    } finally {
+      proc.kill('SIGTERM');
+    }
   });
 });

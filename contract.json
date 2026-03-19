@@ -50,7 +50,7 @@
       "update_task"
     ],
     "mountPaths": [
-      "/app/src",
+      "/app/dist",
       "/home/node/.claude",
       "/home/node/.gmail-mcp",
       "/workspace/case",

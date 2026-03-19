@@ -158,10 +158,14 @@ describe('contract manifest generator', () => {
       expect(pkgs.some((p: string) => p.startsWith('Pillow'))).toBe(true);
     });
 
-    it('extracts global npm packages', () => {
+    it('extracts global npm packages without version suffixes', () => {
       const pkgs = runtime.globalNpmPackages as string[];
       expect(pkgs).toContain('agent-browser');
       expect(pkgs).toContain('@anthropic-ai/claude-code');
+      // Pinned versions (e.g. agent-browser@0.21.2) should be stripped
+      for (const pkg of pkgs) {
+        expect(pkg).not.toMatch(/@\d+\.\d+/);
+      }
     });
   });
 });

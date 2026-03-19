@@ -183,7 +183,7 @@ function extractContainerRuntime(): {
   if (npmResult) {
     for (const pkg of npmResult[1].split(/\s+/)) {
       const clean = pkg.trim();
-      if (clean) globalNpmPackages.push(clean);
+      if (clean) globalNpmPackages.push(clean.replace(/@[\d.]+$/, ''));
     }
   }
 
