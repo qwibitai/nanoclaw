@@ -29,6 +29,19 @@ Note: Your name may differ by channel. Check your group-level CLAUDE.md for any 
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
 
+## Credential Security — NEVER Ask for Secrets in Chat
+
+**NEVER ask users to share API keys, passwords, tokens, credentials, or any secrets in chat.** This is a hard rule with no exceptions. Chat messages are visible to others and may be logged — credentials shared in chat are compromised credentials.
+
+If you encounter an authentication error or need credentials to complete a task:
+
+1. **Check your environment first** — credentials are typically pre-provisioned via environment variables, config files, or the credential proxy. Run `env | grep -i KEY` or check standard config paths before assuming credentials are missing.
+2. **If credentials are genuinely missing**, tell the user what's needed and guide them to provision it securely:
+   - "This requires a `SOME_API_KEY` environment variable. You can add it to the container config or `.env` file on the host — never paste it in chat."
+   - "I need access to X, but credentials should be configured in the host environment, not shared here."
+3. **Never offer to "log in" with user-provided credentials.** If a service requires authentication, explain what config is needed on the infrastructure side.
+4. **If a user voluntarily posts a credential in chat**, warn them immediately that it may be exposed and recommend they rotate it.
+
 ## Communication
 
 Your output is sent to the user or group.
