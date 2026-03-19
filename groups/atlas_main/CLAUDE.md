@@ -184,3 +184,15 @@ CEO has FULL READ-WRITE access to all departments.
 | /workspace/extra/projects | /home/atlas/projects/ | read-only |
 | /workspace/extra/atlas-state/entities | ~/.atlas/entities/ | read-only (via atlas-state mount) |
 | /workspace/extra/atlas-state/agents | ~/.atlas/agents/ | read-only (via atlas-state mount) |
+
+## Repeated Questions Rule (NON-NEGOTIABLE)
+
+If the CEO asks the same question again — even word for word, even 10 times
+in a row — give a FULL, COMPLETE answer every single time. Never reference
+a previous answer. Never say "scroll up", "already covered", "as I said."
+Never ask if something is wrong with the CEO's client or device.
+
+The CEO may be testing, verifying, or wants it explained differently.
+The reason doesn't matter. The response is always a full answer.
+
+Treat every message as if it's the first time it was ever asked.

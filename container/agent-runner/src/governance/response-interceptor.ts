@@ -57,7 +57,7 @@ Check the response below. Return ONLY raw JSON, no markdown fences.
 
 {"score": 0-100, "violations": [
   {"rule": "layman_first", "severity": "critical", "description": "quote the specific jargon that lacks a preceding analogy"},
-  {"rule": "dismissive", "severity": "critical", "description": "quote where the response deflects instead of answering"},
+  {"rule": "non_answer", "severity": "critical", "description": "quote the deflection, pointer, or meta-commentary instead of an answer"},
   {"rule": "decision_confirmation", "severity": "critical", "description": "what decision was presented as final without CEO approval"},
   {"rule": "assumptions", "severity": "warning", "description": "what business assumption was unstated"}
 ]}
@@ -67,7 +67,7 @@ Scoring:
 - 70-84 = borderline. Some analogies present but gaps remain.
 - < 70 = fail. Multiple technical terms without plain-language lead-ins. MUST be rewritten.
 - "layman_first" is CRITICAL if ANY technical term (function names, protocol names, data formats, code concepts) appears without a preceding plain-language explanation in the same response.
-- "dismissive" is CRITICAL if the response deflects instead of answering. Examples: "scroll up", "already covered this", "as I said before", "see above", "already answered", telling the CEO to find the answer themselves, giving a non-answer to a direct question. Every question gets a FULL answer regardless of whether it was asked before. The CEO asks, Atlas answers. No exceptions.
+- "non_answer" is CRITICAL if the response does ANY of these: references a previous answer instead of providing one ("scroll up", "already covered", "as I said", "see above", "answer is above"); suggests the user has a problem instead of answering ("is something wrong on your end?", "client glitch", "messages not loading?"); gives meta-commentary about the question instead of answering ("you've asked this X times", "same question again"); responds with attitude or sarcasm instead of substance; provides a summary or pointer instead of the full explanation asked for; answers a DIFFERENT question than what was asked; says anything other than a direct, complete, helpful answer to the exact question; references or defers to a previous response in ANY way instead of answering fully right now. The test: if the CEO read ONLY this response, would they have the full answer without needing to scroll, search, or ask again? If no = CRITICAL violation. REPEATED QUESTIONS: If the same question appears multiple times, EVERY response must be complete. Never reference previous answers. Never suggest device issues. Treat every message as the first time it was ever asked.
 - "decision_confirmation" is CRITICAL if decisions are presented as final without noting CEO approval needed.
 - "assumptions" is WARNING if business assumptions aren't stated explicitly.
 - Short responses (<100 chars) or code-only output: score 90+.
@@ -197,11 +197,11 @@ export function buildCorrectionPrompt(violations: QualityViolation[]): string {
       rules.push(
         `ASSUMPTIONS: ${v.description}. State assumptions explicitly as "I'm assuming X — correct me if wrong."`
       );
-    } else if (v.rule === 'dismissive') {
+    } else if (v.rule === 'non_answer') {
       rules.push(
-        `DISMISSIVE: ${v.description}. Answer the question FULLY right now. Do not reference previous answers, ` +
-        `do not tell the user to scroll up, do not say "already covered." Provide the complete answer as if ` +
-        `this is the first time it was asked.`
+        `NON-ANSWER: ${v.description}. Answer the question FULLY right now. Do not reference previous answers, ` +
+        `do not tell the user to scroll up, do not say "already covered," do not suggest the user has a device problem. ` +
+        `Provide the complete answer as if this is the first time it was ever asked.`
       );
     }
   }
