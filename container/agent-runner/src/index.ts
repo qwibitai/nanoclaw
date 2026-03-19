@@ -334,6 +334,7 @@ async function runQuery(
   sessionId: string | undefined,
   mcpServerPath: string,
   unraidclawMcpServerPath: string,
+  tailscaleMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -409,7 +410,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__unraidclaw__*'
+        'mcp__unraidclaw__*',
+        'mcp__tailscale__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -432,6 +434,16 @@ async function runQuery(
             UNRAIDCLAW_SERVERS: sdkEnv.UNRAIDCLAW_SERVERS ?? '',
             UNRAIDCLAW_URL: sdkEnv.UNRAIDCLAW_URL ?? '',
             UNRAIDCLAW_API_KEY: sdkEnv.UNRAIDCLAW_API_KEY ?? '',
+          },
+        },
+        tailscale: {
+          command: 'node',
+          args: [tailscaleMcpServerPath],
+          env: {
+            TAILSCALE_API_KEY: sdkEnv.TAILSCALE_API_KEY ?? '',
+            TAILSCALE_CLIENT_ID: sdkEnv.TAILSCALE_CLIENT_ID ?? '',
+            TAILSCALE_CLIENT_SECRET: sdkEnv.TAILSCALE_CLIENT_SECRET ?? '',
+            TAILSCALE_TAILNET: sdkEnv.TAILSCALE_TAILNET ?? '-',
           },
         },
       },
@@ -499,6 +511,7 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
   const unraidclawMcpServerPath = path.join(__dirname, 'unraidclaw-mcp-stdio.js');
+  const tailscaleMcpServerPath = path.join(__dirname, 'tailscale-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -523,7 +536,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, unraidclawMcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, unraidclawMcpServerPath, tailscaleMcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
