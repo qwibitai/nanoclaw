@@ -281,6 +281,7 @@ function evaluateM2CleanRun(
   } catch (err) {
     logger.warn({ taskId, err }, 'M2 evaluation failed (non-blocking)');
   }
+}
 
 let schedulerRunning = false;
 
