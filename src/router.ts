@@ -13,15 +13,24 @@ export function escapeXml(s: string): string {
 export function formatMessages(
   messages: NewMessage[],
   timezone: string,
+  maxMessages: number = 10,
 ): string {
-  const lines = messages.map((m) => {
+  // Issue #989: Cap conversation history to reduce input tokens (60-80% reduction)
+  const recentMessages = messages.slice(-maxMessages);
+
+  const lines = recentMessages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  // Add indicator if messages were truncated
+  const truncatedNotice = messages.length > maxMessages
+    ? `<!-- Showing ${maxMessages} most recent messages of ${messages.length} total -->\n`
+    : '';
+
+  return `${header}${truncatedNotice}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

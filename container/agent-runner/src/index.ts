@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -57,6 +57,81 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// Issue #989: Simple tools that should early-exit on success
+const SIMPLE_TOOLS = new Set([
+  'schedule_task',
+  'send_message',
+  'pause_task',
+  'resume_task',
+  'cancel_task',
+]);
+
+const CANNED_RESPONSES: Record<string, string> = {
+  schedule_task: 'Task scheduled successfully.',
+  send_message: 'Message sent.',
+  pause_task: 'Task paused.',
+  resume_task: 'Task resumed.',
+  cancel_task: 'Task cancelled.',
+};
+
+// Issue #989: Progress tracking during query
+interface ProgressState {
+  startedAt: number;
+  lastUpdateAt: number;
+  updateInterval: number;
+  stage: string;
+}
+
+const PROGRESS_MESSAGES: Record<string, string> = {
+  init: 'Working on your request...',
+  processing: 'Still processing...',
+  tool_use: 'Using tools to complete your request...',
+  complete: 'Almost done...',
+};
+
+function sendProgressUpdate(
+  stage: string,
+  progress: ProgressState,
+  chatJid: string,
+  groupFolder: string,
+  assistantName?: string,
+): void {
+  const now = Date.now();
+  if (now - progress.lastUpdateAt < progress.updateInterval) {
+    return;
+  }
+
+  const elapsed = Math.round((now - progress.startedAt) / 1000);
+  const message = PROGRESS_MESSAGES[stage];
+  const ipcDir = '/workspace/ipc/messages';
+
+  try {
+    fs.mkdirSync(ipcDir, { recursive: true });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const filepath = path.join(ipcDir, filename);
+
+    const data = {
+      type: 'message',
+      chatJid,
+      text: `${message} (${elapsed}s elapsed)`,
+      sender: assistantName || 'Assistant',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+      isProgress: true,
+    };
+
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tempPath, filepath);
+
+    progress.lastUpdateAt = now;
+    progress.stage = stage;
+    log(`Progress update sent: ${message}`);
+  } catch (err) {
+    log(`Failed to send progress update: ${err}`);
+  }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -328,6 +403,8 @@ function waitForIpcMessage(): Promise<string | null> {
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
+ * 
+ * Issue #989: Added early-exit for simple tools and progress markers.
  */
 async function runQuery(
   prompt: string,
@@ -365,6 +442,16 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+
+  // Issue #989: Early-exit and progress tracking state
+  let shouldEarlyExit = false;
+  const progress: ProgressState = {
+    startedAt: Date.now(),
+    lastUpdateAt: Date.now(),
+    updateInterval: 15000, // 15 seconds between updates
+    stage: 'init',
+  };
+  let firstMessage = true;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -433,6 +520,43 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
+    // Issue #989: Send progress updates
+    if (!firstMessage) {
+      if (message.type === 'system' && message.subtype === 'item') {
+        sendProgressUpdate('tool_use', progress, containerInput.chatJid, containerInput.groupFolder, containerInput.assistantName);
+      } else if (message.type === 'result') {
+        sendProgressUpdate('complete', progress, containerInput.chatJid, containerInput.groupFolder, containerInput.assistantName);
+      } else if (messageCount % 5 === 0) {
+        sendProgressUpdate('processing', progress, containerInput.chatJid, containerInput.groupFolder, containerInput.assistantName);
+      }
+    }
+    firstMessage = false;
+
+    // Issue #989: Early-exit detection for simple tool successes
+    if (message.type === 'system' && message.subtype === 'item_result') {
+      const result = message as {
+        item: { id: string; name: string };
+        result?: { content?: Array<{ type?: string }> }
+      };
+      const toolName = result.item?.name;
+
+      if (toolName && SIMPLE_TOOLS.has(toolName)) {
+        const hasError = result.result?.content?.some((c: { type?: string }) => c.type === 'error');
+        if (!hasError) {
+          log(`Early-exit triggered: ${toolName} succeeded`);
+          shouldEarlyExit = true;
+          const cannedResponse = CANNED_RESPONSES[toolName] || 'Done.';
+          writeOutput({
+            status: 'success',
+            result: cannedResponse,
+            newSessionId,
+          });
+          stream.end();
+          break;
+        }
+      }
+    }
+
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
@@ -461,6 +585,13 @@ async function runQuery(
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
+
+  // Issue #989: Early-exit return
+  if (shouldEarlyExit) {
+    log('Early-exit active, skipping further processing');
+    return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  }
+
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
