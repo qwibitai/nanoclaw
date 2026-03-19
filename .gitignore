@@ -11,12 +11,15 @@ logs/
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*
+
 !groups/main/
 !groups/global/
 !groups/whatsapp_assistant/
+
 groups/main/*
 groups/global/*
 groups/whatsapp_assistant/*
+
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 !groups/whatsapp_assistant/CLAUDE.md
