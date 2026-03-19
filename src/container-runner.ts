@@ -163,6 +163,15 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared CSRankings cache (public data, safe to share across groups)
+  const csrankingsCacheDir = path.join(DATA_DIR, 'csrankings-cache');
+  fs.mkdirSync(csrankingsCacheDir, { recursive: true });
+  mounts.push({
+    hostPath: csrankingsCacheDir,
+    containerPath: '/home/node/.cache/csrankings',
+    readonly: false,
+  });
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
