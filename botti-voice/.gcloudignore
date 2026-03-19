@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.env
+.env.save
+*.pyc
+botti_voice.py
+start.sh
+store/

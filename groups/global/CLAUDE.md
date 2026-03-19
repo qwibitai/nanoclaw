@@ -47,6 +47,36 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Google Workspace
+
+You have the `gws` CLI (Google Workspace CLI) available via Bash. Use it to access Gmail, Calendar, Drive, Sheets, and Docs for `yacine@bestoftours.co.uk`.
+
+### Gmail
+- `gws gmail +triage` — unread inbox summary (sender, subject, date)
+- `gws gmail +read --message-id <ID>` — read a specific email
+- `gws gmail +send --to <email> --subject "..." --body "..."` — send an email
+- `gws gmail +reply --message-id <ID> --body "..."` — reply to an email
+- `gws gmail +forward --message-id <ID> --to <email>` — forward an email
+- `gws gmail users messages list --params '{"userId":"me","q":"search query","maxResults":5}'` — search emails
+
+### Calendar
+- `gws calendar events list --params '{"calendarId":"primary","timeMin":"2026-03-19T00:00:00Z","timeMax":"2026-03-20T00:00:00Z","singleEvents":true,"orderBy":"startTime"}'` — list events
+- `gws calendar events insert --params '{"calendarId":"primary"}' --json '{"summary":"Meeting","start":{"dateTime":"2026-03-20T14:00:00+01:00"},"end":{"dateTime":"2026-03-20T15:00:00+01:00"}}'` — create event
+
+### Drive
+- `gws drive files list --params '{"q":"name contains '\''budget'\''","pageSize":10,"fields":"files(id,name,mimeType,webViewLink)"}'` — search files
+
+### Sheets
+- `gws sheets +read --spreadsheet-id <ID>` — read spreadsheet data
+- `gws sheets +append --spreadsheet-id <ID> --range "Sheet1" --json '[["col1","col2"]]'` — append rows
+
+### Docs
+- `gws docs documents get --params '{"documentId":"<ID>"}'` — read a document
+- `gws docs +write --document-id <ID> --text "content to append"` — write to a document
+- `gws docs documents create --json '{"title":"My Document"}'` — create a new document
+
+Always use Bash to run these commands. Parse JSON output to extract relevant information before presenting it to the user.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:

@@ -408,7 +408,7 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__gmail__*',
+        'mcp__firestore__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -424,9 +424,12 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        firestore: {
+          command: 'node',
+          args: [mcpServerPath.replace('ipc-mcp-stdio.js', 'firestore-mcp-stdio.js')],
+          env: {
+            GOOGLE_APPLICATION_CREDENTIALS: '/home/node/.firebase/service-account.json',
+          },
         },
       },
       hooks: {

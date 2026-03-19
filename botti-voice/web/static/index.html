@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Botti Voice</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙</text></svg>">
+</head>
+<body>
+    <div id="app">
+        <h1>Botti Voice</h1>
+        <div id="status">Disconnected</div>
+        <div class="pulse-ring" id="pulseRing"></div>
+        <div class="controls">
+            <button id="connectBtn">Connect</button>
+            <button id="muteBtn" disabled>Mute</button>
+        </div>
+        <div id="transcript"></div>
+        <div id="textInput">
+            <input type="text" id="textMsg" placeholder="Message texte..." disabled>
+            <button id="sendBtn" disabled>Envoyer</button>
+        </div>
+        <a id="logout" href="/auth/logout">Logout</a>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

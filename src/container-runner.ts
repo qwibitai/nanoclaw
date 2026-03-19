@@ -175,6 +175,26 @@ function buildVolumeMounts(
     });
   }
 
+  // Firebase service account for Firestore MCP inside the container
+  const firebaseDir = path.join(homeDir, '.firebase-mcp');
+  if (fs.existsSync(firebaseDir)) {
+    mounts.push({
+      hostPath: firebaseDir,
+      containerPath: '/home/node/.firebase',
+      readonly: true,
+    });
+  }
+
+  // Google Workspace CLI credentials (for gws MCP inside the container)
+  const gwsDir = path.join(homeDir, '.config', 'gws');
+  if (fs.existsSync(gwsDir)) {
+    mounts.push({
+      hostPath: gwsDir,
+      containerPath: '/home/node/.config/gws',
+      readonly: false, // GWS may need to refresh OAuth tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -249,6 +269,9 @@ function buildContainerArgs(
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
+
+  // Google Workspace CLI: use plain credentials file (no OS keyring in container)
+  args.push('-e', 'GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file');
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());

@@ -1,0 +1,158 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0a0a0a;
+    color: #e5e5e5;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    text-align: center;
+    padding: 2rem;
+    max-width: 400px;
+    width: 100%;
+}
+
+h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+#status {
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 2rem;
+    min-height: 1.4em;
+}
+
+#status.connected { color: #22c55e; }
+#status.connecting { color: #eab308; }
+#status.error { color: #ef4444; }
+
+.controls {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+}
+
+button {
+    font-size: 1rem;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s, transform 0.1s;
+}
+
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+#connectBtn {
+    background: #2563eb;
+    color: #fff;
+}
+#connectBtn:hover:not(:disabled) { background: #1d4ed8; }
+#connectBtn.active {
+    background: #dc2626;
+}
+#connectBtn.active:hover { background: #b91c1c; }
+
+#muteBtn {
+    background: #333;
+    color: #fff;
+}
+#muteBtn:hover:not(:disabled) { background: #444; }
+#muteBtn.muted {
+    background: #dc2626;
+}
+
+/* Pulse animation when connected */
+.pulse-ring {
+    display: inline-block;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: #1a1a1a;
+    margin-bottom: 2rem;
+    position: relative;
+}
+
+.pulse-ring.active {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.pulse-ring.speaking {
+    animation: pulse-speak 0.6s ease-in-out infinite;
+    background: #1e3a5f;
+}
+
+.pulse-ring::after {
+    content: '';
+    position: absolute;
+    inset: 30%;
+    border-radius: 50%;
+    background: #333;
+}
+
+.pulse-ring.active::after { background: #2563eb; }
+.pulse-ring.speaking::after { background: #3b82f6; }
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.3); }
+    50% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); }
+}
+
+@keyframes pulse-speak {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+    50% { box-shadow: 0 0 0 30px rgba(59, 130, 246, 0); }
+}
+
+#transcript {
+    font-size: 0.85rem;
+    color: #666;
+    max-height: 150px;
+    overflow-y: auto;
+    text-align: left;
+    padding: 0.5rem;
+    border-radius: 8px;
+    background: #111;
+}
+
+#transcript:empty { display: none; }
+
+#textInput {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+#textInput input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #111;
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+#textInput button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+}
+
+a#logout {
+    display: inline-block;
+    margin-top: 2rem;
+    font-size: 0.8rem;
+    color: #555;
+    text-decoration: none;
+}
+a#logout:hover { color: #888; }
