@@ -2,59 +2,45 @@
  * Stdio MCP Server for NanoClaw
  * Standalone process that agent teams subagents can inherit.
  * Reads context from environment variables, writes IPC files for the host.
+ *
+ * This is a thin wiring layer — business logic lives in ipc-handlers.ts,
+ * IPC utilities in ipc-utils.ts. Extracted for testability (kaizen #167).
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
-import { validateScheduleValue } from './validation.js';
-
-const IPC_DIR = '/workspace/ipc';
-const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+import type { McpConfig } from './ipc-handlers.js';
+import {
+  handleSendMessage,
+  handleSendImage,
+  handleSendDocument,
+  handleScheduleTask,
+  handleListTasks,
+  handlePauseTask,
+  handleResumeTask,
+  handleCancelTask,
+  handleUpdateTask,
+  handleRegisterGroup,
+  handleListCases,
+  handleCreateCase,
+  handleCaseMarkDone,
+  handleCaseMarkBlocked,
+  handleAddCaseComment,
+  handleAttachCaseArtifact,
+  handleCaseMarkActive,
+  handleCaseSuggestDev,
+  handleCreateGithubIssue,
+  handleRouteDecision,
+} from './ipc-handlers.js';
 
 // Context from environment variables (set by the agent runner)
-const chatJid = process.env.NANOCLAW_CHAT_JID!;
-const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAW_IS_MAIN === '1';
-
-/** Poll for a result file written by the host. Returns parsed JSON or null on timeout. */
-async function pollForResult(
-  dir: string,
-  requestId: string,
-  maxAttempts = 30,
-): Promise<Record<string, unknown> | null> {
-  const resultFile = path.join(dir, `${requestId}.json`);
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    try {
-      if (fs.existsSync(resultFile)) {
-        const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
-        fs.unlinkSync(resultFile);
-        return result;
-      }
-    } catch {
-      // File might not exist yet, keep polling
-    }
-  }
-  return null;
-}
-
-function writeIpcFile(dir: string, data: object): string {
-  fs.mkdirSync(dir, { recursive: true });
-
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  const filepath = path.join(dir, filename);
-
-  // Atomic write: temp file then rename
-  const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tempPath, filepath);
-
-  return filename;
-}
+const config: McpConfig = {
+  chatJid: process.env.NANOCLAW_CHAT_JID!,
+  groupFolder: process.env.NANOCLAW_GROUP_FOLDER!,
+  isMain: process.env.NANOCLAW_IS_MAIN === '1',
+  ipcDir: '/workspace/ipc',
+};
 
 const server = new McpServer({
   name: 'nanoclaw',
@@ -73,20 +59,7 @@ server.tool(
         'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
       ),
   },
-  async (args) => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
-
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
-  },
+  async (args: any) => handleSendMessage(args, config),
 );
 
 server.tool(
@@ -108,35 +81,7 @@ The file must be accessible from the container. Common locations:
       .optional()
       .describe('Optional caption/description to accompany the image'),
   },
-  async (args) => {
-    // Verify the file exists before sending IPC
-    if (!fs.existsSync(args.image_path)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Image file not found: ${args.image_path}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const data: Record<string, string | undefined> = {
-      type: 'image',
-      chatJid,
-      imagePath: args.image_path,
-      caption: args.caption || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
-
-    return {
-      content: [{ type: 'text' as const, text: 'Image sent.' }],
-    };
-  },
+  async (args: any) => handleSendImage(args, config),
 );
 
 server.tool(
@@ -164,35 +109,7 @@ The file must be accessible from the container. Common locations:
       .optional()
       .describe('Optional caption/description to accompany the document'),
   },
-  async (args) => {
-    if (!fs.existsSync(args.document_path)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Document file not found: ${args.document_path}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const data: Record<string, string | undefined> = {
-      type: 'document',
-      chatJid,
-      documentPath: args.document_path,
-      filename: args.filename || undefined,
-      caption: args.caption || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
-
-    return {
-      content: [{ type: 'text' as const, text: 'Document sent.' }],
-    };
-  },
+  async (args: any) => handleSendDocument(args, config),
 );
 
 server.tool(
@@ -247,190 +164,35 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         '(Main group only) JID of the group to schedule the task for. Defaults to the current group.',
       ),
   },
-  async (args) => {
-    // Validate schedule_value before writing IPC
-    const validation = validateScheduleValue(
-      args.schedule_type,
-      args.schedule_value,
-    );
-    if (!validation.valid) {
-      return {
-        content: [{ type: 'text' as const, text: validation.error! }],
-        isError: true,
-      };
-    }
-
-    // Non-main groups can only schedule for themselves
-    const targetJid =
-      isMain && args.target_group_jid ? args.target_group_jid : chatJid;
-
-    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const data = {
-      type: 'schedule_task',
-      taskId,
-      prompt: args.prompt,
-      schedule_type: args.schedule_type,
-      schedule_value: args.schedule_value,
-      context_mode: args.context_mode || 'group',
-      targetJid,
-      createdBy: groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleScheduleTask(args, config),
 );
 
 server.tool(
   'list_tasks',
   "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
   {},
-  async () => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-
-    try {
-      if (!fs.existsSync(tasksFile)) {
-        return {
-          content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
-          ],
-        };
-      }
-
-      const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-
-      const tasks = isMain
-        ? allTasks
-        : allTasks.filter(
-            (t: { groupFolder: string }) => t.groupFolder === groupFolder,
-          );
-
-      if (tasks.length === 0) {
-        return {
-          content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
-          ],
-        };
-      }
-
-      const formatted = tasks
-        .map(
-          (t: {
-            id: string;
-            prompt: string;
-            schedule_type: string;
-            schedule_value: string;
-            status: string;
-            next_run: string;
-          }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
-        )
-        .join('\n');
-
-      return {
-        content: [
-          { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
-        ],
-      };
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-      };
-    }
-  },
+  async () => handleListTasks(config),
 );
 
 server.tool(
   'pause_task',
   'Pause a scheduled task. It will not run until resumed.',
   { task_id: z.string().describe('The task ID to pause') },
-  async (args) => {
-    const data = {
-      type: 'pause_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} pause requested.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handlePauseTask(args, config),
 );
 
 server.tool(
   'resume_task',
   'Resume a paused task.',
   { task_id: z.string().describe('The task ID to resume') },
-  async (args) => {
-    const data = {
-      type: 'resume_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} resume requested.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleResumeTask(args, config),
 );
 
 server.tool(
   'cancel_task',
   'Cancel and delete a scheduled task.',
   { task_id: z.string().describe('The task ID to cancel') },
-  async (args) => {
-    const data = {
-      type: 'cancel_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} cancellation requested.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCancelTask(args, config),
 );
 
 server.tool(
@@ -448,54 +210,7 @@ server.tool(
       .optional()
       .describe('New schedule value (see schedule_task for format)'),
   },
-  async (args) => {
-    // Validate schedule_value if provided
-    if (args.schedule_value && args.schedule_type) {
-      const validation = validateScheduleValue(
-        args.schedule_type,
-        args.schedule_value,
-      );
-      if (!validation.valid) {
-        return {
-          content: [{ type: 'text' as const, text: validation.error! }],
-          isError: true,
-        };
-      }
-    } else if (args.schedule_value && !args.schedule_type) {
-      // When no schedule_type given, try cron validation as default
-      const validation = validateScheduleValue('cron', args.schedule_value);
-      if (!validation.valid) {
-        return {
-          content: [{ type: 'text' as const, text: validation.error! }],
-          isError: true,
-        };
-      }
-    }
-
-    const data: Record<string, string | undefined> = {
-      type: 'update_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain: String(isMain),
-      timestamp: new Date().toISOString(),
-    };
-    if (args.prompt !== undefined) data.prompt = args.prompt;
-    if (args.schedule_type !== undefined)
-      data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined)
-      data.schedule_value = args.schedule_value;
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} update requested.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleUpdateTask(args, config),
 );
 
 server.tool(
@@ -517,105 +232,17 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
-  async (args) => {
-    if (!isMain) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'Only the main group can register new groups.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const data = {
-      type: 'register_group',
-      jid: args.jid,
-      name: args.name,
-      folder: args.folder,
-      trigger: args.trigger,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Group "${args.name}" registered. It will start receiving messages immediately.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleRegisterGroup(args, config),
 );
 
-// ---------------------------------------------------------------------------
 // Case lifecycle tools
-// ---------------------------------------------------------------------------
 
 server.tool(
   'list_cases',
   `List all active cases (work items). Shows case name, type, status, description, last activity, and cost.
 From main group: shows all cases. From other groups: shows only that group's cases.`,
   {},
-  async () => {
-    const casesFile = path.join(IPC_DIR, 'active_cases.json');
-
-    try {
-      if (!fs.existsSync(casesFile)) {
-        return {
-          content: [{ type: 'text' as const, text: 'No active cases.' }],
-        };
-      }
-
-      const cases = JSON.parse(fs.readFileSync(casesFile, 'utf-8'));
-      if (cases.length === 0) {
-        return {
-          content: [{ type: 'text' as const, text: 'No active cases.' }],
-        };
-      }
-
-      const formatted = cases
-        .map(
-          (c: {
-            name: string;
-            type: string;
-            status: string;
-            description: string;
-            last_message: string | null;
-            last_activity_at: string | null;
-            total_cost_usd: number;
-            time_spent_ms: number;
-            blocked_on: string | null;
-            initiator: string;
-          }) => {
-            const blocked = c.blocked_on ? ` [blocked: ${c.blocked_on}]` : '';
-            const cost =
-              c.total_cost_usd > 0 ? `$${c.total_cost_usd.toFixed(2)}` : '$0';
-            return `- [${c.name}] (${c.type}, ${c.status}${blocked}) — ${c.description.slice(0, 80)}\n  Last: "${(c.last_message || 'none').slice(0, 60)}" | Cost: ${cost} | By: ${c.initiator}`;
-          },
-        )
-        .join('\n');
-
-      return {
-        content: [
-          { type: 'text' as const, text: `Active cases:\n${formatted}` },
-        ],
-      };
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Error reading cases: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-      };
-    }
-  },
+  async () => handleListCases(config),
 );
 
 server.tool(
@@ -702,85 +329,7 @@ Case types:
         'Existing worktree path to link this case to. Must be provided together with branch_name. When both are provided and the path exists on disk, the case reuses it.',
       ),
   },
-  async (args) => {
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const data: Record<string, unknown> = {
-      type: 'case_create',
-      shortName: args.short_name,
-      description: args.description,
-      context: args.context,
-      caseType: args.case_type || 'work',
-      chatJid,
-      initiator: 'agent',
-      groupFolder,
-      requestId,
-      timestamp: new Date().toISOString(),
-      ...(args.github_issue ? { githubIssue: args.github_issue } : {}),
-      ...(args.gap_type ? { gapType: args.gap_type } : {}),
-      ...(args.signals ? { signals: args.signals } : {}),
-    };
-    if (args.customer_name) data.customer_name = args.customer_name;
-    if (args.customer_phone) data.customer_phone = args.customer_phone;
-    if (args.customer_email) data.customer_email = args.customer_email;
-    if (args.customer_org) data.customer_org = args.customer_org;
-    if (args.branch_name) data.branchName = args.branch_name;
-    if (args.worktree_path) data.worktreePath = args.worktree_path;
-
-    writeIpcFile(TASKS_DIR, data);
-
-    // Poll for result (host processes IPC files every ~1s, dev cases also create a GitHub issue)
-    const result = await pollForResult(
-      path.join(IPC_DIR, 'case_results'),
-      requestId,
-    );
-    if (result) {
-      if (result.needs_approval) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Dev case suggested (pending approval):\n  ID: ${result.id}\n  Name: ${result.name}\n  Status: SUGGESTED — awaiting approval from main group\n\nThe case needs approval before it becomes active. The main group has been notified. Do NOT start working on this case until it is approved.`,
-            },
-          ],
-        };
-      }
-      const parts = [
-        `Case created:\n  ID: ${result.id}\n  Name: ${result.name}\n  Workspace: ${result.workspace_path}${result.issue_url ? `\n  GitHub: ${result.issue_url}` : ''}`,
-      ];
-      if (result.priority) {
-        parts.push(
-          `  Priority: ${result.priority}${result.gap_type ? ` (gap: ${result.gap_type})` : ''}`,
-        );
-      }
-      if (result.meanwhile) {
-        parts.push(
-          `\nMeanwhile message for the customer: "${result.meanwhile}"`,
-        );
-      }
-      parts.push(
-        '\nThe case is now ACTIVE. Future messages about this topic will be routed to it.',
-      );
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: parts.join('\n'),
-          },
-        ],
-      };
-    }
-
-    // Timeout — the IPC was written, case will be created but we can't confirm
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Case creation requested for: "${args.description}". It should appear shortly in the active cases list.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCreateCase(args, config),
 );
 
 server.tool(
@@ -831,63 +380,7 @@ The case will move to DONE status and await user review before being pruned.`,
         'Why no kaizen items were identified (e.g., "straightforward config change with no friction"). Required when no_kaizen_needed is true.',
       ),
   },
-  async (args) => {
-    // L3 enforcement (kaizen #57): require either kaizen reflections or explicit opt-out
-    const hasKaizen = args.kaizen && args.kaizen.length > 0;
-    const hasOptOut =
-      args.no_kaizen_needed === true &&
-      args.no_kaizen_reason &&
-      args.no_kaizen_reason.trim().length > 0;
-
-    if (!hasKaizen && !hasOptOut) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'Rejected: You must provide either a non-empty kaizen array with reflections, or set no_kaizen_needed=true with a no_kaizen_reason explaining why no improvements were identified. Empty reflections are not allowed — every case teaches something.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const data = {
-      type: 'case_mark_done',
-      caseId: args.case_id,
-      conclusion: args.conclusion,
-      noKaizenNeeded: args.no_kaizen_needed || false,
-      noKaizenReason: args.no_kaizen_reason || '',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    // Submit each kaizen reflection as a suggested dev case
-    if (hasKaizen) {
-      for (const k of args.kaizen!) {
-        const suggestData = {
-          type: 'case_suggest_dev',
-          sourceCaseId: args.case_id,
-          description: `[${k.severity}] ${k.issue} → ${k.suggestion}`,
-          groupFolder,
-          chatJid,
-          timestamp: new Date().toISOString(),
-        };
-        writeIpcFile(TASKS_DIR, suggestData);
-      }
-    }
-
-    const kaizenCount = args.kaizen?.length || 0;
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Case ${args.case_id} marked as done. Awaiting review.${kaizenCount > 0 ? ` ${kaizenCount} kaizen suggestion(s) submitted.` : hasOptOut ? ' No kaizen needed: ' + args.no_kaizen_reason : ''}`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCaseMarkDone(args, config),
 );
 
 server.tool(
@@ -902,25 +395,7 @@ This pauses time tracking and signals the user that input is needed.`,
         'What is blocking progress (e.g., "user input needed", "waiting for deploy")',
       ),
   },
-  async (args) => {
-    const data = {
-      type: 'case_mark_blocked',
-      caseId: args.case_id,
-      blocked_on: args.blocked_on,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Case ${args.case_id} marked as blocked on: ${args.blocked_on}`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCaseMarkBlocked(args, config),
 );
 
 server.tool(
@@ -943,26 +418,7 @@ Use this when:
         'Who is making this comment (e.g., customer name, "agent", admin name). Defaults to "agent".',
       ),
   },
-  async (args) => {
-    const data = {
-      type: 'case_add_comment',
-      caseId: args.case_id,
-      text: args.text,
-      author: args.author || 'agent',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Comment added to case ${args.case_id}.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleAddCaseComment(args, config),
 );
 
 server.tool(
@@ -983,35 +439,7 @@ The artifact is recorded as a structured comment on the case and synced to the c
       .optional()
       .describe('Brief description of what this artifact is'),
   },
-  async (args) => {
-    const label =
-      args.artifact_type === 'file'
-        ? '📎'
-        : args.artifact_type === 'link'
-          ? '🔗'
-          : '📝';
-    const desc = args.description ? ` — ${args.description}` : '';
-    const text = `${label} **Artifact (${args.artifact_type}):** ${args.value}${desc}`;
-
-    const data = {
-      type: 'case_add_comment',
-      caseId: args.case_id,
-      text,
-      author: 'agent',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Artifact attached to case ${args.case_id}: ${args.artifact_type} — ${args.value}`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleAttachCaseArtifact(args, config),
 );
 
 server.tool(
@@ -1020,21 +448,7 @@ server.tool(
   {
     case_id: z.string().describe('The case ID to resume'),
   },
-  async (args) => {
-    const data = {
-      type: 'case_mark_active',
-      caseId: args.case_id,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-    return {
-      content: [
-        { type: 'text' as const, text: `Case ${args.case_id} resumed.` },
-      ],
-    };
-  },
+  async (args: any) => handleCaseMarkActive(args, config),
 );
 
 server.tool(
@@ -1054,26 +468,7 @@ The suggestion stays in SUGGESTED status until the user approves it → BACKLOG.
       .string()
       .describe('What tooling/workflow improvement would help (one paragraph)'),
   },
-  async (args) => {
-    const data = {
-      type: 'case_suggest_dev',
-      sourceCaseId: args.source_case_id,
-      description: args.description,
-      groupFolder,
-      chatJid,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Dev case suggested from ${args.source_case_id}. User will be notified for approval.`,
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCaseSuggestDev(args, config),
 );
 
 // GitHub issue creation — proxied through host (no token in containers)
@@ -1112,63 +507,11 @@ Allowed labels: work-agent, needs-dev, kaizen, bug, enhancement.`,
       .default(['work-agent', 'needs-dev'])
       .describe('Labels to apply (filtered to allowed set)'),
   },
-  async (args) => {
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const data = {
-      type: 'create_github_issue',
-      owner: args.owner || 'Garsson-io',
-      repo: args.repo || 'kaizen',
-      title: args.title,
-      body: args.body,
-      labels: args.labels || ['work-agent', 'needs-dev'],
-      requestId,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    const result = await pollForResult(
-      path.join(IPC_DIR, 'issue_results'),
-      requestId,
-    );
-    if (result) {
-      if (result.success) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Issue created: ${result.issueUrl}\nNumber: #${result.issueNumber}`,
-            },
-          ],
-        };
-      } else {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Failed to create issue: ${result.error}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'Issue creation requested but timed out waiting for confirmation. The host may still process it.',
-        },
-      ],
-    };
-  },
+  async (args: any) => handleCreateGithubIssue(args, config),
 );
 
 // Router-specific tool — only registered when running as the message router
-if (groupFolder === '__router__') {
-  const ROUTER_RESULTS_DIR = path.join(IPC_DIR, 'results');
+if (config.groupFolder === '__router__') {
   server.tool(
     'route_decision',
     `Submit your routing decision for the current message. You MUST call this tool exactly once per routing request.
@@ -1201,34 +544,7 @@ Decisions:
         .optional()
         .describe('Answer text (required for direct_answer)'),
     },
-    async (args) => {
-      fs.mkdirSync(ROUTER_RESULTS_DIR, { recursive: true });
-
-      const result = {
-        requestId: args.request_id,
-        decision: args.decision,
-        caseId: args.case_id,
-        caseName: args.case_name,
-        confidence: args.confidence,
-        reason: args.reason,
-        directAnswer: args.direct_answer,
-        timestamp: new Date().toISOString(),
-      };
-
-      const filepath = path.join(ROUTER_RESULTS_DIR, `${args.request_id}.json`);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(result, null, 2));
-      fs.renameSync(tempPath, filepath);
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Routing decision submitted: ${args.decision}${args.case_name ? ` → ${args.case_name}` : ''}`,
-          },
-        ],
-      };
-    },
+    async (args: any) => handleRouteDecision(args, config),
   );
 }
 

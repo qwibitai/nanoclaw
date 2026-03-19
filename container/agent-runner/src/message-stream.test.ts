@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MessageStream } from './index.js';
+import { MessageStream } from './message-stream.js';
 
 describe('MessageStream', () => {
   /**
@@ -45,7 +45,7 @@ describe('MessageStream', () => {
     })();
 
     // Push after a tick to test async waiting
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     stream.push('delayed');
     stream.end();
 

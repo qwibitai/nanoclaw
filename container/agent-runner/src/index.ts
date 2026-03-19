@@ -16,73 +16,27 @@
 
 import fs from 'fs';
 import path from 'path';
-import {
-  query,
-  HookCallback,
-  PreCompactHookInput,
-} from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import {
   ContainerInput,
-  ContainerOutput,
   UsageData,
   SDKUserMessage,
-  sanitizeFilename,
-  generateFallbackName,
-  parseTranscript,
-  formatTranscriptMarkdown,
   loadGlobalPolicy,
   discoverExtraDirs,
   buildSystemPrompt,
   buildMcpConfig,
   buildInitialPrompt,
-  getSessionSummary,
   drainIpcInput,
   shouldClose,
   ALLOWED_TOOLS,
 } from './lib.js';
+import { writeOutput, createPreCompactHook } from './output.js';
+import { MessageStream } from './message-stream.js';
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
- */
-export class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -96,68 +50,8 @@ async function readStdin(): Promise<string> {
   });
 }
 
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-function writeOutput(output: ContainerOutput): void {
-  console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
-  console.log(OUTPUT_END_MARKER);
-}
-
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
-}
-
-/**
- * Archive the full transcript to conversations/ before compaction.
- */
-function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preCompact = input as PreCompactHookInput;
-    const transcriptPath = preCompact.transcript_path;
-    const sessionId = preCompact.session_id;
-
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
-      return {};
-    }
-
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf-8');
-      const messages = parseTranscript(content);
-
-      if (messages.length === 0) {
-        log('No messages to archive');
-        return {};
-      }
-
-      const summary = getSessionSummary(sessionId, transcriptPath);
-      const name = summary ? sanitizeFilename(summary) : generateFallbackName();
-
-      const conversationsDir = '/workspace/group/conversations';
-      fs.mkdirSync(conversationsDir, { recursive: true });
-
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `${date}-${name}.md`;
-      const filePath = path.join(conversationsDir, filename);
-
-      const markdown = formatTranscriptMarkdown(
-        messages,
-        summary,
-        assistantName,
-      );
-      fs.writeFileSync(filePath, markdown);
-
-      log(`Archived conversation to ${filePath}`);
-    } catch (err) {
-      log(
-        `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    return {};
-  };
 }
 
 /**
@@ -257,7 +151,14 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
+          {
+            hooks: [
+              createPreCompactHook(
+                '/workspace/group/conversations',
+                containerInput.assistantName,
+              ),
+            ],
+          },
         ],
       },
     },
