@@ -29,7 +29,11 @@ import {
   logInvocation,
   logGovernanceEvent,
   recordRateLimit,
+  checkResponseQuality,
+  buildCorrectionPrompt,
+  logInterceptionResult,
   type GovernanceContainerInput,
+  type QualityCheckResult,
 } from './governance/index.js';
 
 interface ContainerInput {
@@ -355,6 +359,7 @@ async function runQuery(
   governedTools: string[],
   auditInterceptor: ReturnType<typeof createAuditInterceptor>,
   resumeAt?: string,
+  isCeoSession: boolean = false,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -384,6 +389,12 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+
+  // Response quality interception state
+  // Think of these like the copy editor's clipboard — tracking whether
+  // a rewrite was requested and what the original score was
+  let interceptRetried = false;
+  let interceptOriginalResult: QualityCheckResult | null = null;
 
   // Explicitly load system prompt files and inject into SDK.
   // Order: self-knowledge FIRST (who Atlas is), then global governance, then group persona.
@@ -513,6 +524,51 @@ async function runQuery(
         }
       }
 
+      // --- Response Quality Interception ---
+      // Think of this like a copy editor: check the response before it
+      // reaches the CEO. If quality fails, push a correction prompt back
+      // into the conversation for one rewrite attempt.
+      if (isCeoSession && textResult && !interceptRetried) {
+        const qualityResult = await checkResponseQuality(textResult);
+        log(`Quality check: score=${qualityResult.score} pass=${qualityResult.pass} violations=${qualityResult.violations.length}`);
+
+        if (!qualityResult.pass) {
+          const criticals = qualityResult.violations.filter(v => v.severity === 'critical');
+          if (criticals.length > 0) {
+            // Send the response back for a rewrite — one attempt only
+            interceptRetried = true;
+            interceptOriginalResult = qualityResult;
+            const correction = buildCorrectionPrompt(qualityResult.violations);
+            log(`Quality FAILED (${criticals.map(v => v.rule).join(', ')}). Injecting correction prompt for retry.`);
+            stream.push(correction);
+            continue; // Skip writeOutput — wait for the corrected response
+          }
+        }
+
+        // Log interception (passed first time or non-critical violations only)
+        logInterceptionResult(
+          containerInput.groupFolder,
+          qualityResult,
+          false,
+          null,
+          textResult.length,
+        );
+      } else if (isCeoSession && textResult && interceptRetried && interceptOriginalResult) {
+        // This is the retry response — check it but send regardless
+        const retryResult = await checkResponseQuality(textResult);
+        log(`Retry quality check: score=${retryResult.score} pass=${retryResult.pass}`);
+        logInterceptionResult(
+          containerInput.groupFolder,
+          interceptOriginalResult,
+          true,
+          retryResult,
+          textResult.length,
+        );
+        // Reset for next result in this query
+        interceptRetried = false;
+        interceptOriginalResult = null;
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -608,7 +664,8 @@ async function main(): Promise<void> {
 
       let queryResult: { newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean };
       try {
-        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, governedTools, auditInterceptor, resumeAt);
+        const isCeoSession = !containerInput.isScheduledTask;
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, governedTools, auditInterceptor, resumeAt, isCeoSession);
       } catch (queryErr) {
         const errMsg = queryErr instanceof Error ? queryErr.message : String(queryErr);
         // Self-heal: if session not found, clear session and retry fresh
