@@ -25,7 +25,10 @@ import { transcribeAudio } from '../speech.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import {
   getLastGroupSync,
+  getLatestMessage,
   setLastGroupSync,
+  storeAttachment,
+  storeReaction,
   updateChatName,
   getMessageContent,
   deleteMessages,
@@ -38,6 +41,7 @@ import {
   OnInboundMessage,
   OnChatMetadata,
   RegisteredGroup,
+  SendDocumentResult,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
@@ -314,6 +318,23 @@ export class WhatsAppChannel implements Channel {
                     : `${Date.now()}${ext}`;
                   fs.writeFileSync(path.join(attachDir, filename), buffer);
 
+                  storeAttachment({
+                    message_id: msg.key.id || '',
+                    chat_jid: chatJid,
+                    direction: 'inbound',
+                    category: 'received',
+                    file_path: path.join(groupDir, 'attachments', filename),
+                    file_name: origName ?? filename,
+                    mime_type:
+                      normalized.imageMessage?.mimetype ||
+                      normalized.videoMessage?.mimetype ||
+                      normalized.documentMessage?.mimetype ||
+                      normalized.audioMessage?.mimetype ||
+                      undefined,
+                    file_size: buffer.length,
+                    created_at: new Date().toISOString(),
+                  });
+
                   const label =
                     mediaType === 'image'
                       ? 'Image'
@@ -369,6 +390,17 @@ export class WhatsAppChannel implements Channel {
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content.trim()) continue;
+
+            // Voice messages are stored after transcription, which can take several
+            // seconds. During that time, other messages may arrive and advance the
+            // DB cursor past the voice message's WA send timestamp, causing it to be
+            // permanently missed. Use the current time so the stored timestamp is
+            // always >= any messages processed concurrently during transcription.
+            const effectiveTimestamp = voiceTranscript
+              ? new Date(
+                  Math.max(Number(msg.messageTimestamp) * 1000, Date.now()),
+                ).toISOString()
+              : timestamp;
 
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
@@ -465,18 +497,30 @@ export class WhatsAppChannel implements Channel {
         if (!group) continue;
         const sender =
           reaction.key?.participant || reaction.key?.remoteJid || '';
+        const emoji = reaction.text || null;
+        const timestamp = reaction.senderTimestampMs
+          ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+          : new Date().toISOString();
+        // Write to messages.db (host-side, for IPC/StatusTracker)
+        storeReaction({
+          message_id: key.id,
+          message_chat_jid: chatJid,
+          reactor_jid: sender,
+          reactor_name: sender.split('@')[0],
+          emoji: emoji ?? '',
+          timestamp,
+        });
+        // Write to search.db (container-side, for qsearch)
         exportReaction(group.folder, {
           message_id: key.id,
           sender,
           sender_name: sender.split('@')[0],
-          emoji: reaction.text || null,
-          timestamp: reaction.senderTimestampMs
-            ? new Date(Number(reaction.senderTimestampMs)).toISOString()
-            : new Date().toISOString(),
+          emoji,
+          timestamp,
         });
         logger.info(
-          { chatJid, messageId: key.id, emoji: reaction.text, sender },
-          reaction.text ? 'Reaction saved' : 'Reaction removed',
+          { chatJid, messageId: key.id, emoji, sender },
+          emoji ? 'Reaction saved' : 'Reaction removed',
         );
       }
     });
@@ -544,6 +588,60 @@ export class WhatsAppChannel implements Channel {
       image: buffer,
       caption: caption ?? '',
     });
+  }
+
+  async sendReaction(
+    chatJid: string,
+    emoji: string,
+    messageId?: string,
+  ): Promise<void> {
+    if (!this.connected) throw new Error('Not connected to WhatsApp');
+    let msgId = messageId;
+    let fromMe = false;
+    if (!msgId) {
+      const latest = getLatestMessage(chatJid);
+      if (!latest) throw new Error(`No messages found for chat ${chatJid}`);
+      msgId = latest.id;
+      fromMe = latest.fromMe;
+    }
+    const messageKey = { id: msgId, remoteJid: chatJid, fromMe };
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: { text: emoji, key: messageKey },
+      });
+      logger.info(
+        {
+          chatJid,
+          messageId: msgId.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed',
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async sendDocument(
+    jid: string,
+    filePath: string,
+    caption?: string,
+    fileName?: string,
+    mimeType?: string,
+  ): Promise<SendDocumentResult> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const buffer = fs.readFileSync(filePath);
+    const result = await this.sock.sendMessage(jid, {
+      document: buffer,
+      mimetype: mimeType ?? 'application/octet-stream',
+      fileName: fileName ?? path.basename(filePath),
+      caption: caption ?? '',
+    });
+    const messageId = result?.key?.id;
+    if (!messageId)
+      throw new Error('Baileys did not return a message ID for sent document');
+    return { messageId };
   }
 
   isConnected(): boolean {
