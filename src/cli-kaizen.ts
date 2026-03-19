@@ -4,9 +4,9 @@
  * Used by skills (markdown prompts) and hooks that need to call the domain model from bash.
  *
  * Usage:
- *   node dist/cli-kaizen.js list [--state open|closed|all] [--labels L1,L2] [--limit N]
- *   node dist/cli-kaizen.js view <number>
- *   node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."]
+ *   npx tsx src/cli-kaizen.ts list [--state open|closed|all] [--labels L1,L2] [--limit N]
+ *   npx tsx src/cli-kaizen.ts view <number>
+ *   npx tsx src/cli-kaizen.ts case-create --description "..." --type dev [--github-issue N] [--name "..."]
  *     [--worktree-path PATH --branch-name BRANCH]  (adopt existing worktree)
  */
 
@@ -94,7 +94,7 @@ export async function handleCaseCreate(
 
   if (!description) {
     console.error(
-      'Error: --description is required\n\nUsage:\n  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."]',
+      'Error: --description is required\n\nUsage:\n  npx tsx src/cli-kaizen.ts case-create --description "..." --type dev [--github-issue N] [--name "..."]',
     );
     process.exit(1);
   }
@@ -280,7 +280,7 @@ export function handleCaseByBranch(
   const branchName = args[0];
   if (!branchName) {
     console.error(
-      'Usage: node dist/cli-kaizen.js case-by-branch <branch-name>',
+      'Usage: npx tsx src/cli-kaizen.ts case-by-branch <branch-name>',
     );
     process.exit(1);
   }
@@ -305,7 +305,7 @@ export function handleCaseUpdateStatus(
 
   if (!name || !newStatus) {
     console.error(
-      'Usage: node dist/cli-kaizen.js case-update-status <name> <status>',
+      'Usage: npx tsx src/cli-kaizen.ts case-update-status <name> <status>',
     );
     process.exit(1);
   }
@@ -349,18 +349,18 @@ async function main(): Promise<void> {
   if (!command || command === '--help' || command === '-h') {
     console.error('Usage:');
     console.error(
-      '  node dist/cli-kaizen.js list [--state open|closed|all] [--labels L1,L2] [--limit N]',
+      '  npx tsx src/cli-kaizen.ts list [--state open|closed|all] [--labels L1,L2] [--limit N]',
     );
-    console.error('  node dist/cli-kaizen.js view <number>');
+    console.error('  npx tsx src/cli-kaizen.ts view <number>');
     console.error(
-      '  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P]',
+      '  npx tsx src/cli-kaizen.ts case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P]',
     );
     console.error(
-      '  node dist/cli-kaizen.js case-list [--status S1,S2] [--type dev|work]',
+      '  npx tsx src/cli-kaizen.ts case-list [--status S1,S2] [--type dev|work]',
     );
-    console.error('  node dist/cli-kaizen.js case-by-branch <branch-name>');
+    console.error('  npx tsx src/cli-kaizen.ts case-by-branch <branch-name>');
     console.error(
-      '  node dist/cli-kaizen.js case-update-status <name> <status>',
+      '  npx tsx src/cli-kaizen.ts case-update-status <name> <status>',
     );
     process.exit(1);
   }
@@ -401,7 +401,7 @@ async function main(): Promise<void> {
   } else if (command === 'view') {
     const issueNumber = parseInt(args[0], 10);
     if (!issueNumber || isNaN(issueNumber)) {
-      console.error('Usage: node dist/cli-kaizen.js view <number>');
+      console.error('Usage: npx tsx src/cli-kaizen.ts view <number>');
       process.exit(1);
     }
 

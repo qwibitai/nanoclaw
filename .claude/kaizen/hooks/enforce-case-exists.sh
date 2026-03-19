@@ -98,7 +98,10 @@ jq -n \
   --arg file "$FILE_PATH" \
   --arg reason "No case record found for branch '$BRANCH'. All dev work must have a case before writing code.
 
-Create a case first:
+Create a case first (works without npm run build):
+  npx tsx src/cli-kaizen.ts case-create --description \"your description\" --type dev --github-issue N
+
+Or if dist/ is available:
   node dist/cli-kaizen.js case-create --description \"your description\" --type dev --github-issue N
 
 Or via /implement-spec (which calls the CLI for you).

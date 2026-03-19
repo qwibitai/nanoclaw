@@ -64,16 +64,30 @@ find_project_root() {
   echo "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 
+# Resolve cli-kaizen: tsx from source (no build needed) or dist/ fallback.
+_resolve_image_lib_cli() {
+  local project_root
+  project_root=$(find_project_root)
+  local resolve_lib="$project_root/scripts/lib/resolve-cli-kaizen.sh"
+  if [ -f "$resolve_lib" ]; then
+    source "$resolve_lib"
+    resolve_cli_kaizen "$project_root" && return 0
+  fi
+  # Fallback: compiled dist/
+  local cli="$project_root/dist/cli-kaizen.js"
+  if [ -f "$cli" ]; then
+    echo "node $cli"
+    return 0
+  fi
+  return 1
+}
+
 # Query active case branches via domain model CLI (not raw SQL).
 # Returns one branch name per line.
 active_case_branches() {
-  local project_root
-  project_root=$(find_project_root)
-  local cli="$project_root/dist/cli-kaizen.js"
-  if [ ! -f "$cli" ]; then
-    return 0
-  fi
-  node "$cli" case-list --status suggested,backlog,active,blocked 2>/dev/null | \
+  local cli_kaizen
+  cli_kaizen=$(_resolve_image_lib_cli) || return 0
+  $cli_kaizen case-list --status suggested,backlog,active,blocked 2>/dev/null | \
     node -e "
       const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       cases.filter(c => c.branch_name).forEach(c => console.log(c.branch_name));
@@ -82,14 +96,9 @@ active_case_branches() {
 
 # Get count of active cases (for soft cap calculation).
 active_case_count() {
-  local project_root
-  project_root=$(find_project_root)
-  local cli="$project_root/dist/cli-kaizen.js"
-  if [ ! -f "$cli" ]; then
-    echo "0"
-    return 0
-  fi
-  node "$cli" case-list --status suggested,backlog,active,blocked 2>/dev/null | \
+  local cli_kaizen
+  cli_kaizen=$(_resolve_image_lib_cli) || { echo "0"; return 0; }
+  $cli_kaizen case-list --status suggested,backlog,active,blocked 2>/dev/null | \
     node -e "
       const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       console.log(cases.length);

@@ -87,6 +87,7 @@ BASH_HARNESS_TESTS=(
   "$SCRIPT_DIR/test-hook-interaction-matrix.sh"
   "$SCRIPT_DIR/test-integration-pr-lifecycle.sh"
   "$SCRIPT_DIR/test-claude-wt.sh"
+  "$SCRIPT_DIR/../../../../scripts/tests/test-resolve-cli-kaizen.sh"
 )
 
 # Python harness test (preferred — cleaner, faster, better assertions)

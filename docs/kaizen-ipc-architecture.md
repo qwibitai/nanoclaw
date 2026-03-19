@@ -64,8 +64,8 @@ cli-kaizen.ts  ──>  github-api.ts  ──>  GitHub REST API
 | Container agent | Create/manage cases | Case MCP tools → IPC → `ipc-cases.ts` |
 | Container agent | Suggest improvement | `case_suggest_dev` MCP tool → IPC |
 | Container agent | Create GitHub issue | `create_github_issue` MCP tool → IPC |
-| Host-side skill | Query kaizen backlog | `node dist/cli-kaizen.js list\|view` |
-| Host-side skill | Read specific issue | `node dist/cli-kaizen.js view <N>` |
+| Host-side skill | Query kaizen backlog | `npx tsx src/cli-kaizen.ts list\|view` |
+| Host-side skill | Read specific issue | `npx tsx src/cli-kaizen.ts view <N>` |
 | Backend adapter | Sync case → GitHub | `case-backend-github.ts` → `github-api.ts` (automatic) |
 
 **Rule: All case operations go through MCP tools (containers) or cli-kaizen (host skills). Never raw `gh` CLI.**

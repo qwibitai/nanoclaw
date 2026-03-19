@@ -51,6 +51,10 @@ for arg in "$@"; do
   esac
 done
 
+# Resolve cli-kaizen: tsx from source (no build needed) or dist/ fallback
+source "$SCRIPT_DIR/lib/resolve-cli-kaizen.sh" 2>/dev/null || true
+CLI_KAIZEN=$(resolve_cli_kaizen "$PROJECT_ROOT" 2>/dev/null) || CLI_KAIZEN="node $PROJECT_ROOT/dist/cli-kaizen.js"
+
 # Helpers
 query_db() {
   node -e "
@@ -257,7 +261,7 @@ analyze_worktrees() {
     # Case info (via domain model CLI, not raw SQL)
     local case_str="${DIM}none${NC}"
     local case_json
-    case_json=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-by-branch "$branch" 2>/dev/null)
+    case_json=$($CLI_KAIZEN case-by-branch "$branch" 2>/dev/null)
     if [ -n "$case_json" ] && [ "$case_json" != "null" ]; then
       local case_row
       case_row=$(echo "$case_json" | node -e "const c=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(c.status + (c.github_issue ? ' #'+c.github_issue : ''))" 2>/dev/null)
@@ -307,7 +311,7 @@ analyze_cases() {
 
   # Counts by status (via domain model CLI)
   local all_cases
-  all_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list 2>/dev/null)
+  all_cases=$($CLI_KAIZEN case-list 2>/dev/null)
   if [ -n "$all_cases" ] && [ "$all_cases" != "[]" ]; then
     echo "$all_cases" | node -e "
       const cases = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
@@ -324,7 +328,7 @@ analyze_cases() {
   echo ""
   echo -e "  ${BOLD}Stale active cases${NC} (active/blocked but branch merged or worktree gone):"
   local active_cases
-  active_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list --status active,blocked 2>/dev/null)
+  active_cases=$($CLI_KAIZEN case-list --status active,blocked 2>/dev/null)
   if [ -n "$active_cases" ] && [ "$active_cases" != "[]" ]; then
     echo "$active_cases" | node -e "
       const fs = require('fs');
@@ -590,7 +594,7 @@ do_cleanup() {
 
     # Use domain model CLI for both reads and writes (triggers GitHub sync, reflection hooks)
     local active_cases
-    active_cases=$(node "$PROJECT_ROOT/dist/cli-kaizen.js" case-list --status active,blocked 2>/dev/null)
+    active_cases=$($CLI_KAIZEN case-list --status active,blocked 2>/dev/null)
     if [ -n "$active_cases" ] && [ "$active_cases" != "[]" ]; then
       local stale_names
       stale_names=$(echo "$active_cases" | node -e "
@@ -612,7 +616,7 @@ do_cleanup() {
           if $DRY_RUN; then
             echo "    would mark done: $case_name"
           else
-            node "$PROJECT_ROOT/dist/cli-kaizen.js" case-update-status "$case_name" done 2>/dev/null
+            $CLI_KAIZEN case-update-status "$case_name" done 2>/dev/null
             echo "    marked done: $case_name"
           fi
         done

@@ -38,7 +38,7 @@ gh issue list --repo Garsson-io/kaizen --state open --label "status:backlog" --j
 **Active cases (cross-reference):**
 ```bash
 # Check active cases in the database for github_issue linkage (via domain model CLI)
-node dist/cli-kaizen.js case-list --status active,backlog,blocked
+npx tsx src/cli-kaizen.ts case-list --status active,backlog,blocked
 ```
 
 **Open PRs (may indicate partial work):**

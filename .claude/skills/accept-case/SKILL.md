@@ -37,7 +37,7 @@ This is a conversation, not a checklist. The phases overlap. Use judgment about 
 
 2. **Active cases in database:** Is there a case linked to this issue?
    ```bash
-   node dist/cli-kaizen.js case-list --status active,backlog,blocked
+   npx tsx src/cli-kaizen.ts case-list --status active,backlog,blocked
    # Then filter by github_issue == {N} in the JSON output
    ```
 

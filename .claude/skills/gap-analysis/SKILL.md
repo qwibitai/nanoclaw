@@ -33,7 +33,7 @@ gh issue list --repo Garsson-io/kaizen --state open --limit 100 --json number,ti
 gh issue list --repo Garsson-io/kaizen --state closed --limit 20 --json number,title,labels,closedAt,body
 
 # Active cases and their linked issues (via domain model CLI, not raw SQL)
-node dist/cli-kaizen.js case-list --status suggested,backlog,active,blocked
+npx tsx src/cli-kaizen.ts case-list --status suggested,backlog,active,blocked
 ```
 
 Also read:

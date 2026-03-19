@@ -117,7 +117,7 @@ There are two case types: **work** (customer tasks) and **dev** (tooling improve
 - Dev agents also encounter friction → file improvement requests → also become **dev cases**
 - When any case is marked done, the agent reflects on impediments → `case_suggest_dev` → new dev case suggested
 
-**All case operations go through the case MCP tools** (`case_create`, `case_mark_done`, `case_suggest_dev`, etc.) for container agents, or via `node dist/cli-kaizen.js case-create` for host-side CLI agents. Never use raw SQL or `gh` CLI for case operations. The backend adapter (`case-backend-github.ts`) handles GitHub sync transparently.
+**All case operations go through the case MCP tools** (`case_create`, `case_mark_done`, `case_suggest_dev`, etc.) for container agents, or via `npx tsx src/cli-kaizen.ts case-create` (or `node dist/cli-kaizen.js case-create` if built) for host-side CLI agents. Never use raw SQL or `gh` CLI for case operations. The backend adapter (`case-backend-github.ts`) handles GitHub sync transparently.
 
 **Separate CRM backends:** customer cases → per-customer CRM repo, dev/kaizen cases → `Garsson-io/kaizen`. The domain model (`cases.ts`) and backend adapter abstract this — agents don't know or care which repo backs their case.
 
@@ -313,7 +313,7 @@ The point of review is to catch gaps. A gap identified but not closed is not a r
 
 ## Kaizen Backlog
 
-Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `node dist/cli-kaizen.js list|view` and create cases via `node dist/cli-kaizen.js case-create`. Include: what, why, when, how, reproduction steps, and verification criteria.
+Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `npx tsx src/cli-kaizen.ts list|view` and create cases via `npx tsx src/cli-kaizen.ts case-create`. Include: what, why, when, how, reproduction steps, and verification criteria.
 
 ## Post-Merge: Deploy & Maintenance Policy
 
@@ -382,10 +382,14 @@ This ensures hooks, settings, and CLAUDE.md changes take effect in the current s
 SQLite database at `store/messages.db` (path defined by `STORE_DIR` in `src/config.ts`). Uses `better-sqlite3` (NOT the `sqlite3` CLI, which is not installed). **For cases, always use the CLI instead of raw SQL:**
 
 ```bash
+# Prefer tsx (works in fresh worktrees without build):
+npx tsx src/cli-kaizen.ts case-list                              # all cases
+npx tsx src/cli-kaizen.ts case-list --status active,blocked       # filter by status
+npx tsx src/cli-kaizen.ts case-by-branch <branch-name>            # find case for a branch
+npx tsx src/cli-kaizen.ts case-update-status <name> <status>      # update case status
+
+# Alternative (requires npm run build):
 node dist/cli-kaizen.js case-list                              # all cases
-node dist/cli-kaizen.js case-list --status active,blocked       # filter by status
-node dist/cli-kaizen.js case-by-branch <branch-name>            # find case for a branch
-node dist/cli-kaizen.js case-update-status <name> <status>      # update case status
 ```
 
 For other tables, query via `better-sqlite3`:

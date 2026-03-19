@@ -40,7 +40,7 @@ git branch --merged main | grep -v '^\*\|main$'
 ### 5. Active Cases with Kaizen Issue Links
 Query active/backlog cases linked to GitHub issues via the domain model CLI:
 ```bash
-node dist/cli-kaizen.js case-list --status suggested,backlog,active,blocked
+npx tsx src/cli-kaizen.ts case-list --status suggested,backlog,active,blocked
 ```
 
 ## Output Format

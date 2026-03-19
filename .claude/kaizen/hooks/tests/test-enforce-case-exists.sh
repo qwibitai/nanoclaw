@@ -4,6 +4,21 @@ source "$(dirname "$0")/test-helpers.sh"
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/enforce-case-exists.sh"
 
+# Source resolver for querying cases (works without dist/ — kaizen #197)
+RESOLVE_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/resolve-cli-kaizen.sh"
+if [ -f "$RESOLVE_LIB" ]; then
+  source "$RESOLVE_LIB"
+fi
+
+# Helper: resolve cli-kaizen for case queries
+_test_cli_kaizen() {
+  local main_root="$1"
+  if type resolve_cli_kaizen &>/dev/null; then
+    resolve_cli_kaizen "$main_root" 2>/dev/null && return 0
+  fi
+  echo "node $main_root/dist/cli-kaizen.js"
+}
+
 echo "Testing enforce-case-exists.sh"
 echo ""
 
@@ -48,7 +63,7 @@ else
   DB_PATH="$MAIN_ROOT/store/messages.db"
 
   if [ -f "$DB_PATH" ]; then
-    CASE_COUNT=$(node "$MAIN_ROOT/dist/cli-kaizen.js" case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
+    CASE_COUNT=$($(_test_cli_kaizen "$MAIN_ROOT") case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
 
     if [ "$CASE_COUNT" -gt 0 ] 2>/dev/null; then
       # Case exists — source edits should be allowed
@@ -89,7 +104,7 @@ if [ "$GIT_DIR" != "$GIT_COMMON" ]; then
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
   if [ -f "$DB_PATH" ]; then
-    CASE_COUNT=$(node "$MAIN_ROOT/dist/cli-kaizen.js" case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
+    CASE_COUNT=$($(_test_cli_kaizen "$MAIN_ROOT") case-by-branch "$BRANCH" 2>/dev/null | node -e "const r=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(r ? 1 : 0)" 2>/dev/null)
 
     if [ "$CASE_COUNT" -eq 0 ] 2>/dev/null; then
       for path in "src/index.ts" "container/Dockerfile" "package.json" "docs/README.md" "tsconfig.json"; do

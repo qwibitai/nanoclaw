@@ -24,14 +24,14 @@ Before touching any source code, verify a case exists. The `enforce-case-exists.
 **Checklist:**
 1. **Case exists in DB** for the current branch:
    ```bash
-   node dist/cli-kaizen.js case-by-branch "$(git rev-parse --abbrev-ref HEAD)"
+   npx tsx src/cli-kaizen.ts case-by-branch "$(git rev-parse --abbrev-ref HEAD)"
    ```
 2. **Case has `github_issue` linked** (when working on a kaizen issue)
 3. **Case status is `ACTIVE`**
 
 If any check fails, create the case via the CLI before proceeding:
 ```bash
-node dist/cli-kaizen.js case-create --description "your description" --type dev --github-issue N
+npx tsx src/cli-kaizen.ts case-create --description "your description" --type dev --github-issue N
 ```
 For kaizen issues, always pass `--github-issue` to link the case to the existing issue. Container agents should use `case_create` MCP tool instead.
 
