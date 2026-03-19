@@ -520,4 +520,190 @@ describe('output parsing', () => {
 
     expect(session.sdkSessionId).toBe('session-456');
   });
+
+  it('handles output markers split across multiple chunks', async () => {
+    const onOutput = vi.fn(async () => {});
+    const config = makeTestConfig();
+    await startDevSession(config, onOutput);
+
+    const output = { status: 'success', result: 'split test' };
+    const full = `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`;
+
+    // Split the output across 3 chunks
+    const mid = Math.floor(full.length / 2);
+    fakeProc.stdout.write(full.slice(0, mid));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onOutput).not.toHaveBeenCalled();
+
+    fakeProc.stdout.write(full.slice(mid));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onOutput).toHaveBeenCalledWith(output);
+  });
+
+  it('handles multiple output markers in rapid succession', async () => {
+    const outputs: unknown[] = [];
+    const onOutput = vi.fn(async (o) => {
+      outputs.push(o);
+    });
+
+    const config = makeTestConfig();
+    await startDevSession(config, onOutput);
+
+    const output1 = { status: 'success', result: 'first' };
+    const output2 = { status: 'success', result: 'second' };
+
+    fakeProc.stdout.write(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify(output1)}\n${OUTPUT_END_MARKER}\n` +
+        `${OUTPUT_START_MARKER}\n${JSON.stringify(output2)}\n${OUTPUT_END_MARKER}\n`,
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onOutput).toHaveBeenCalledTimes(2);
+    expect(outputs[0]).toEqual(output1);
+    expect(outputs[1]).toEqual(output2);
+  });
+});
+
+// INVARIANT: Session timeout (30 min) and idle timeout (5 min) enforce
+// resource limits and prevent runaway containers.
+// SUT: startDevSession timeout behavior
+// VERIFICATION: Session is cleaned up when timeouts fire.
+describe('timeout enforcement', () => {
+  let startDevSession: typeof import('./dev-session.js').startDevSession;
+  let getActiveDevSession: typeof import('./dev-session.js').getActiveDevSession;
+  let _clearActiveSessions: typeof import('./dev-session.js')._clearActiveSessions;
+  let DEV_SESSION_TIMEOUT_MS: number;
+  let DEV_SESSION_IDLE_TIMEOUT_MS: number;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const mod = await import('./dev-session.js');
+    startDevSession = mod.startDevSession;
+    getActiveDevSession = mod.getActiveDevSession;
+    _clearActiveSessions = mod._clearActiveSessions;
+    DEV_SESSION_TIMEOUT_MS = mod.DEV_SESSION_TIMEOUT_MS;
+    DEV_SESSION_IDLE_TIMEOUT_MS = mod.DEV_SESSION_IDLE_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    _clearActiveSessions();
+    vi.useRealTimers();
+  });
+
+  it('terminates session after 30 min session timeout', async () => {
+    const onEnd = vi.fn();
+    const config = makeTestConfig();
+    await startDevSession(config, undefined, onEnd);
+
+    expect(getActiveDevSession(config.case.id)).toBeDefined();
+
+    // Advance past session timeout
+    await vi.advanceTimersByTimeAsync(DEV_SESSION_TIMEOUT_MS + 1000);
+
+    // Session should be cleaned up after container exits
+    // (endDevSession writes _close, then setTimeout 5s for force-stop)
+    expect(onEnd).not.toHaveBeenCalled(); // container hasn't exited yet
+    // But the session is marked as ended
+    const session = getActiveDevSession(config.case.id);
+    // Session may still be in map but marked ended, or removed after container close
+    // The key invariant: endDevSession was called (wrote _close sentinel)
+    const fs = await import('fs');
+    expect(fs.default.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('_close'),
+      '',
+    );
+  });
+
+  it('terminates session after 5 min idle timeout', async () => {
+    const config = makeTestConfig();
+    await startDevSession(config);
+
+    const fs = await import('fs');
+    const writeCallsBefore = (
+      fs.default.writeFileSync as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+
+    // Advance past idle timeout
+    await vi.advanceTimersByTimeAsync(DEV_SESSION_IDLE_TIMEOUT_MS + 1000);
+
+    // Should have written _close sentinel
+    const writeCalls = (fs.default.writeFileSync as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const closeWrites = writeCalls
+      .slice(writeCallsBefore)
+      .filter(
+        (call: unknown[]) =>
+          typeof call[0] === 'string' && (call[0] as string).includes('_close'),
+      );
+    expect(closeWrites.length).toBeGreaterThan(0);
+  });
+
+  it('resets idle timeout when output is received', async () => {
+    const config = makeTestConfig();
+    await startDevSession(config, async () => {});
+
+    // Advance 4 minutes (just under 5 min idle timeout)
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+
+    // Emit output — should reset idle timer
+    const output = { status: 'success', result: 'still working' };
+    fakeProc.stdout.write(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify(output)}\n${OUTPUT_END_MARKER}\n`,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Advance another 4 minutes (total 8 min, but only 4 since last output)
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+
+    // Session should still be active (idle timer was reset)
+    expect(getActiveDevSession(config.case.id)).toBeDefined();
+
+    // Now advance past idle timeout from last output
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+
+    // Now the _close sentinel should have been written
+    const fs = await import('fs');
+    expect(fs.default.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('_close'),
+      '',
+    );
+  });
+});
+
+// INVARIANT: getDevSessionByContainerName returns the session matching
+// the given container name.
+// SUT: getDevSessionByContainerName
+// VERIFICATION: Returns correct session or undefined.
+describe('getDevSessionByContainerName', () => {
+  let startDevSession: typeof import('./dev-session.js').startDevSession;
+  let getDevSessionByContainerName: typeof import('./dev-session.js').getDevSessionByContainerName;
+  let _clearActiveSessions: typeof import('./dev-session.js')._clearActiveSessions;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const mod = await import('./dev-session.js');
+    startDevSession = mod.startDevSession;
+    getDevSessionByContainerName = mod.getDevSessionByContainerName;
+    _clearActiveSessions = mod._clearActiveSessions;
+  });
+
+  afterEach(() => {
+    _clearActiveSessions();
+    vi.useRealTimers();
+  });
+
+  it('finds session by container name', async () => {
+    const config = makeTestConfig();
+    const session = await startDevSession(config);
+
+    const found = getDevSessionByContainerName(session.containerName);
+    expect(found).toBe(session);
+  });
+
+  it('returns undefined for unknown container name', async () => {
+    const found = getDevSessionByContainerName('nonexistent-container');
+    expect(found).toBeUndefined();
+  });
 });

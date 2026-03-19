@@ -32,6 +32,7 @@ import {
   tryRouteToDevSession,
   notifyFromDevSession,
   notifySessionStarted,
+  notifySessionCompleted,
 } from './dev-session-router.js';
 
 const mockSession = {
@@ -223,6 +224,39 @@ describe('notifySessionStarted', () => {
     expect(deps.sendMessage).toHaveBeenCalledWith(
       'tg:123',
       expect.stringContaining('custom-work'),
+    );
+  });
+});
+
+// INVARIANT: Session completed notification includes the reason.
+// SUT: notifySessionCompleted
+// VERIFICATION: Notification text contains the reason string.
+describe('notifySessionCompleted', () => {
+  it('sends completion notification with reason', async () => {
+    mockGetActiveDevSession.mockReturnValue(mockSession);
+    mockGetDevBotClaim.mockReturnValue(mockClaim);
+
+    const deps = { sendMessage: vi.fn() };
+
+    await notifySessionCompleted('case-1', 'completed', deps);
+
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'tg:123',
+      expect.stringContaining('completed'),
+    );
+  });
+
+  it('sends timeout notification', async () => {
+    mockGetActiveDevSession.mockReturnValue(mockSession);
+    mockGetDevBotClaim.mockReturnValue(mockClaim);
+
+    const deps = { sendMessage: vi.fn() };
+
+    await notifySessionCompleted('case-1', 'timeout', deps);
+
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'tg:123',
+      expect.stringContaining('timeout'),
     );
   });
 });

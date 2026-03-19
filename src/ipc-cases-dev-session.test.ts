@@ -295,3 +295,128 @@ describe('dev_session_stop IPC', () => {
     );
   });
 });
+
+// INVARIANT: case_mark_done deactivates dev sessions for dev cases.
+// SUT: processCaseIpc with type=case_mark_done for a dev case
+// VERIFICATION: deactivateDevSession is called with 'case-done' reason.
+describe('case_mark_done → dev session deactivation', () => {
+  it('deactivates dev session when dev case is marked done', async () => {
+    const c = makeCase({
+      id: 'case-dev-done-1',
+      type: 'dev',
+      group_folder: 'main',
+      status: 'active',
+    });
+    insertCase(c);
+
+    await processCaseIpc(
+      {
+        type: 'case_mark_done',
+        caseId: 'case-dev-done-1',
+        conclusion: 'PR merged',
+      },
+      'main',
+      true,
+      mockDeps,
+    );
+
+    expect(mockDeactivateDevSession).toHaveBeenCalledWith(
+      'case-dev-done-1',
+      'case-done',
+      mockDeps,
+    );
+  });
+
+  it('does NOT deactivate for work cases', async () => {
+    const c = makeCase({
+      id: 'case-work-done-1',
+      type: 'work',
+      group_folder: 'main',
+      status: 'active',
+    });
+    insertCase(c);
+
+    await processCaseIpc(
+      { type: 'case_mark_done', caseId: 'case-work-done-1' },
+      'main',
+      true,
+      mockDeps,
+    );
+
+    expect(mockDeactivateDevSession).not.toHaveBeenCalled();
+  });
+
+  it('updates case status to done even if deactivation fails', async () => {
+    mockDeactivateDevSession.mockRejectedValue(new Error('cleanup failed'));
+
+    const c = makeCase({
+      id: 'case-dev-done-2',
+      type: 'dev',
+      group_folder: 'main',
+      status: 'active',
+    });
+    insertCase(c);
+
+    await processCaseIpc(
+      { type: 'case_mark_done', caseId: 'case-dev-done-2' },
+      'main',
+      true,
+      mockDeps,
+    );
+
+    // Case should still be marked done despite deactivation error
+    const updated = getCaseById('case-dev-done-2');
+    expect(updated?.status).toBe('done');
+  });
+});
+
+// INVARIANT: case_mark_blocked deactivates dev sessions for dev cases.
+// SUT: processCaseIpc with type=case_mark_blocked for a dev case
+// VERIFICATION: deactivateDevSession is called with blocked reason.
+describe('case_mark_blocked → dev session deactivation', () => {
+  it('deactivates dev session when dev case is blocked', async () => {
+    const c = makeCase({
+      id: 'case-dev-blocked-1',
+      type: 'dev',
+      group_folder: 'main',
+      status: 'active',
+    });
+    insertCase(c);
+
+    await processCaseIpc(
+      {
+        type: 'case_mark_blocked',
+        caseId: 'case-dev-blocked-1',
+        blocked_on: 'tests failing',
+      },
+      'main',
+      true,
+      mockDeps,
+    );
+
+    expect(mockDeactivateDevSession).toHaveBeenCalledWith(
+      'case-dev-blocked-1',
+      'blocked: tests failing',
+      mockDeps,
+    );
+  });
+
+  it('does NOT deactivate for work cases', async () => {
+    const c = makeCase({
+      id: 'case-work-blocked-1',
+      type: 'work',
+      group_folder: 'main',
+      status: 'active',
+    });
+    insertCase(c);
+
+    await processCaseIpc(
+      { type: 'case_mark_blocked', caseId: 'case-work-blocked-1' },
+      'main',
+      true,
+      mockDeps,
+    );
+
+    expect(mockDeactivateDevSession).not.toHaveBeenCalled();
+  });
+});
