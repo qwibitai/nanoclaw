@@ -63,6 +63,34 @@ server.tool(
 );
 
 server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z.string().describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
+    message_id: z
+      .string()
+      .optional()
+      .describe('The message ID to react to. If omitted, reacts to the latest message in the chat.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Reaction ${args.emoji} sent.` }],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
@@ -315,6 +343,105 @@ server.tool(
     };
     writeIpcFile(MESSAGES_DIR, data);
     return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
+  },
+);
+
+server.tool(
+  'send_file',
+  `Send a file to the user. Write the file to /workspace/group/generated/{filename} first, then call this tool.
+
+The file must be in /workspace/group/generated/ (the default) or another folder explicitly allowed for this group.
+
+Examples:
+  send_file("report.pdf") → sends /workspace/group/generated/report.pdf
+  send_file("data.csv", { caption: "Here's your export", mime_type: "text/csv" })`,
+  {
+    file_path: z.string().describe('Filename only (e.g. "report.pdf") — no subdirectories'),
+    caption: z.string().optional().describe('Optional caption shown with the file'),
+    file_name: z.string().optional().describe('Display name in chat. Defaults to the filename.'),
+    mime_type: z.string().optional().describe('MIME type e.g. "application/pdf", "text/csv", "text/markdown". Helps the receiver open the file correctly.'),
+    source_folder: z.string().optional().describe('Subfolder within /workspace/group/ to send from. Defaults to "generated". Other values require explicit group permission.'),
+  },
+  async (args) => {
+    const basename = path.basename(args.file_path);
+    // Security: reject if basename differs from input (catches traversal like "../foo")
+    if (basename !== args.file_path) {
+      return {
+        content: [{ type: 'text' as const, text: `Invalid file path. Use a filename only (e.g. "report.pdf"), not a path. Got: "${args.file_path}"` }],
+        isError: true,
+      };
+    }
+    const sourceFolder = args.source_folder ?? 'generated';
+    const fullPath = path.join('/workspace/group', sourceFolder, basename);
+    if (!fs.existsSync(fullPath)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${fullPath}. Write the file there first before calling send_file.` }],
+        isError: true,
+      };
+    }
+    const stat = fs.statSync(fullPath);
+    const data = {
+      type: 'file',
+      chatJid,
+      relativeFilePath: basename,
+      sourceFolder,
+      caption: args.caption || undefined,
+      fileName: args.file_name || undefined,
+      mimeType: args.mime_type || undefined,
+      fileSize: stat.size,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return {
+      content: [{ type: 'text' as const, text: `File "${basename}" (${stat.size} bytes) queued for delivery.` }],
+    };
+  },
+);
+
+server.tool(
+  'list_chats',
+  'Search known chats/groups by name to find their JID. Use this before register_group to look up the JID. Main group only.',
+  {
+    query: z.string().optional().describe('Filter chats by name (case-insensitive). Omit to list all.'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can list chats.' }],
+        isError: true,
+      };
+    }
+
+    const chatsFile = path.join(IPC_DIR, 'chats_snapshot.json');
+    try {
+      if (!fs.existsSync(chatsFile)) {
+        return { content: [{ type: 'text' as const, text: 'No chats snapshot available yet.' }] };
+      }
+
+      const { chats } = JSON.parse(fs.readFileSync(chatsFile, 'utf-8')) as {
+        chats: { jid: string; name: string; channel: string; is_group: number }[];
+      };
+
+      const filtered = args.query
+        ? chats.filter((c) => c.name?.toLowerCase().includes(args.query!.toLowerCase()))
+        : chats;
+
+      if (filtered.length === 0) {
+        return { content: [{ type: 'text' as const, text: `No chats found matching "${args.query}".` }] };
+      }
+
+      const lines = filtered
+        .slice(0, 50)
+        .map((c) => `- ${c.name} | ${c.jid} | ${c.channel ?? 'whatsapp'}`)
+        .join('\n');
+
+      return { content: [{ type: 'text' as const, text: `Chats:\n${lines}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading chats: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
   },
 );
 
