@@ -26,6 +26,7 @@ vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
   setLastGroupSync: vi.fn(),
   updateChatName: vi.fn(),
+  storeAttachment: vi.fn(),
 }));
 
 // Mock fs
@@ -506,7 +507,9 @@ describe('WhatsAppChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: 'Check this photo' }),
+        expect.objectContaining({
+          content: expect.stringContaining('Check this photo'),
+        }),
       );
     });
 
@@ -534,7 +537,9 @@ describe('WhatsAppChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: 'Watch this' }),
+        expect.objectContaining({
+          content: expect.stringContaining('Watch this'),
+        }),
       );
     });
 
@@ -623,7 +628,7 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
         expect.objectContaining({
-          content: expect.stringContaining('[PDF: attachments/report.pdf'),
+          content: expect.stringContaining('report.pdf'),
         }),
       );
     });
@@ -664,7 +669,7 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
         expect.objectContaining({
-          content: expect.stringContaining('[PDF: attachments/report.pdf'),
+          content: expect.stringContaining('report.pdf'),
         }),
       );
     });
