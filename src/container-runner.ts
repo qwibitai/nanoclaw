@@ -247,14 +247,20 @@ function buildContainerArgs(
       const parsed = new URL(simpleMemUrl);
       const token = parsed.searchParams.get('token') || '';
       // Rewrite to Streamable HTTP endpoint: http://host:port/mcp
-      const hostname = parsed.hostname === 'localhost' ? CONTAINER_HOST_GATEWAY : parsed.hostname;
+      const hostname =
+        parsed.hostname === 'localhost'
+          ? CONTAINER_HOST_GATEWAY
+          : parsed.hostname;
       const baseUrl = `${parsed.protocol}//${hostname}:${parsed.port}/mcp`;
       args.push('-e', `SIMPLEMEM_URL=${baseUrl}`);
       if (token) {
         args.push('-e', `SIMPLEMEM_TOKEN=${token}`);
       }
     } catch {
-      logger.warn({ simpleMemUrl }, 'Invalid SIMPLEMEM_URL, skipping SimpleMem');
+      logger.warn(
+        { simpleMemUrl },
+        'Invalid SIMPLEMEM_URL, skipping SimpleMem',
+      );
     }
   }
 
