@@ -103,12 +103,13 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
       'anthropic-version': '2023-06-01',
     };
 
-    // The credential proxy swaps these placeholders for real credentials
-    if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-      headers['Authorization'] = `Bearer ${process.env.CLAUDE_CODE_OAUTH_TOKEN}`;
-    } else {
-      headers['x-api-key'] = apiKey;
-    }
+    // The credential proxy handles auth — container never sees real tokens.
+    // Send a placeholder header that the proxy will replace.
+    // DO NOT set x-api-key to empty string — that can cause auth errors.
+    // The proxy strips and replaces auth headers on all upstream requests.
+    headers['x-api-key'] = 'proxy-injected';
+
+    const log = (msg: string) => console.error(`[response-interceptor] ${msg}`);
 
     const req = transport.request(
       {
@@ -124,6 +125,12 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
           try {
+            if (res.statusCode !== 200) {
+              log(`Haiku API returned ${res.statusCode}: ${data.slice(0, 200)}`);
+              // API error — let response through but log it
+              resolve({ pass: true, violations: [], score: -1 });
+              return;
+            }
             const parsed = JSON.parse(data);
             let text = parsed.content?.[0]?.text || '{}';
             // Strip markdown fences if present
@@ -131,32 +138,37 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
               text = text.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim();
             }
             const result = JSON.parse(text);
-            const score = typeof result.score === 'number' ? result.score : 90;
+            const score = typeof result.score === 'number' ? result.score : 50;
             const violations: QualityViolation[] = Array.isArray(result.violations)
               ? result.violations.filter((v: QualityViolation) => v.rule && v.severity)
               : [];
 
+            log(`Haiku evaluated: score=${score} violations=${violations.length}`);
             resolve({
               pass: score >= 85,
               violations,
               score,
             });
-          } catch {
-            // If Haiku response is unparseable, let the response through
-            resolve({ pass: true, violations: [], score: 90 });
+          } catch (err) {
+            log(`Haiku response parse error: ${err instanceof Error ? err.message : String(err)}`);
+            log(`Raw response: ${data.slice(0, 300)}`);
+            // Parse error — let response through but with distinguishable score
+            resolve({ pass: true, violations: [], score: -2 });
           }
         });
       },
     );
 
-    req.on('error', () => {
-      // Network error — don't block the response
-      resolve({ pass: true, violations: [], score: 90 });
+    req.on('error', (err) => {
+      log(`Haiku network error: ${err.message}`);
+      // Network error — let response through but log
+      resolve({ pass: true, violations: [], score: -3 });
     });
 
     req.on('timeout', () => {
+      log('Haiku request timed out (15s)');
       req.destroy();
-      resolve({ pass: true, violations: [], score: 90 });
+      resolve({ pass: true, violations: [], score: -4 });
     });
 
     req.write(body);
