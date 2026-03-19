@@ -342,7 +342,7 @@ def process_task(task_path: Path) -> None:
 
         write_result(task_id, entity, status, exit_code, result_summary,
                      new_commits, pushed, str(full_output_path),
-                     duration_ms, callback_group)
+                     duration_ms, callback_group, prompt)
 
         # Audit log
         log_audit(entity, {
@@ -394,6 +394,7 @@ def write_result(
     full_output_path: str = "",
     duration_ms: int = 0,
     callback_group: str = "",
+    prompt: str = "",
 ) -> None:
     """Write task result to completed/ directory."""
     COMPLETED_DIR.mkdir(parents=True, exist_ok=True)
@@ -403,6 +404,7 @@ def write_result(
         "entity": entity,
         "status": status,
         "exit_code": exit_code,
+        "prompt": prompt[:500] if prompt else "",
         "result_summary": result_summary,
         "full_output_path": full_output_path,
         "commits": commits,

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 /**
- * Atlas Mission Control — CEO glance dashboard
+ * Atlas Mission Control v2 — CEO glance dashboard
  *
  * Server-rendered HTML, dark theme, auto-refreshes every 10s.
  * Reads from NanoClaw SQLite + Atlas state files.
  * No React, no build tooling — single file.
  *
- * Usage: node mission-control/server.cjs
- * Accessible at http://<host>:8080
+ * Redesigned for a CEO who glances at it for 10 seconds:
+ * - Shows WHAT was asked and WHAT Atlas did, not UUIDs
+ * - Conversation pairs with status icons
+ * - Escalations prominently visible
+ * - Graduation as visual progress bars with locked state
  */
 
 const http = require('http');
@@ -20,7 +23,7 @@ const PORT = process.env.MC_PORT || 8080;
 const ATLAS_DIR = path.join(require('os').homedir(), '.atlas');
 const NANOCLAW_DB = path.join(__dirname, '..', 'store', 'messages.db');
 
-// ─── Basic Auth ──────────────────────────────────────────────────────────────
+// --- Basic Auth ---------------------------------------------------------------
 
 function loadEnvAuth() {
   const envPath = path.join(__dirname, '..', '.env');
@@ -35,7 +38,7 @@ function loadEnvAuth() {
         if (key.trim() === 'MISSION_CONTROL_USER') user = val;
         if (key.trim() === 'MISSION_CONTROL_PASS') pass = val;
       }
-    } catch { /* no .env — auth disabled */ }
+    } catch { /* no .env -- auth disabled */ }
   }
   return { user, pass };
 }
@@ -60,7 +63,7 @@ function checkAuth(req, res) {
   return false;
 }
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
+// --- Utility ------------------------------------------------------------------
 
 function esc(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -97,6 +100,15 @@ function relativeTime(iso) {
   return past ? `${days}d ago` : `in ${days}d`;
 }
 
+function formatTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York'
+    });
+  } catch { return ''; }
+}
+
 function truncate(str, len = 200) {
   if (!str) return '';
   return str.length > len ? str.slice(0, len) + '\u2026' : str;
@@ -106,7 +118,7 @@ function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
-// ─── Data Readers ────────────────────────────────────────────────────────────
+// --- Data Readers -------------------------------------------------------------
 
 function getActiveContainers() {
   try {
@@ -121,25 +133,24 @@ function getActiveContainers() {
 }
 
 function getMode() {
-  const mode = readJson(path.join(ATLAS_DIR, 'state', 'mode.json'));
-  return mode?.mode || mode?.status || 'unknown';
+  const modeFile = readJson(path.join(ATLAS_DIR, 'state', 'mode.json'));
+  if (!modeFile) return 'active';
+  return modeFile.mode || modeFile.status || 'unknown';
 }
 
 function getGraduationStatus() {
-  const grad = readJson(path.join(ATLAS_DIR, 'autonomy', 'graduation-status.json'));
-  if (!grad || !grad.milestones) {
-    return {
-      milestones: {
-        M0: { name: 'Build complete', status: 'complete' },
-        M1: { name: 'Tier 1 cron activated', status: 'locked' },
-        M2: { name: 'Tier 1 LLM reasoning', status: 'locked' },
-        M3: { name: 'Tier 2 fully autonomous', status: 'locked' },
-        M4: { name: 'Tier 3 auto-drafting', status: 'locked' },
-        M5: { name: 'Full v10 autonomy', status: 'locked' },
-      }
-    };
+  // Check multiple locations for graduation data
+  const paths = [
+    path.join(ATLAS_DIR, 'autonomy', 'graduation-status.json'),
+    path.join(__dirname, '..', 'data', 'graduation-status.json'),
+  ];
+
+  for (const p of paths) {
+    const grad = readJson(p);
+    if (grad?.milestones) return grad;
   }
-  return grad;
+
+  return null;
 }
 
 function getQuotaToday() {
@@ -199,17 +210,18 @@ function getScheduledTasks(db) {
   } catch { return []; }
 }
 
-function getRecentMessages(db, limit = 50) {
-  const today = todayISO();
+function getRecentMessages(db, limit = 100) {
+  // Last 24 hours, not just today -- CEO may check in the morning
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   try {
     return db.prepare(`
       SELECT m.id, m.chat_jid, m.sender, m.sender_name, m.content,
              m.timestamp, m.is_from_me, m.is_bot_message
       FROM messages m
-      WHERE m.timestamp >= ?
+      WHERE m.timestamp >= ? AND m.content IS NOT NULL AND m.content != ''
       ORDER BY m.timestamp DESC
       LIMIT ?
-    `).all(today, limit);
+    `).all(cutoff, limit);
   } catch { return []; }
 }
 
@@ -224,8 +236,7 @@ function getHostTasks() {
       const files = fs.readdirSync(completedDir).filter(f => f.endsWith('.json'));
       for (const f of files.sort().reverse().slice(0, 10)) {
         try {
-          const data = JSON.parse(fs.readFileSync(path.join(completedDir, f), 'utf-8'));
-          completed.push(data);
+          completed.push(JSON.parse(fs.readFileSync(path.join(completedDir, f), 'utf-8')));
         } catch { /* skip corrupt */ }
       }
     }
@@ -236,8 +247,7 @@ function getHostTasks() {
       const files = fs.readdirSync(pendingDir).filter(f => f.endsWith('.json'));
       for (const f of files) {
         try {
-          const data = JSON.parse(fs.readFileSync(path.join(pendingDir, f), 'utf-8'));
-          pending.push(data);
+          pending.push(JSON.parse(fs.readFileSync(path.join(pendingDir, f), 'utf-8')));
         } catch { /* skip corrupt */ }
       }
     }
@@ -255,22 +265,27 @@ function getSharedWorkspaceActivity() {
     const deptDir = path.join(ATLAS_DIR, 'shared', dept);
     if (!fs.existsSync(deptDir)) continue;
 
-    const activity = { dept, files: [], escalations: 0, totalToday: 0 };
+    const activity = { dept, files: [], escalations: [], totalToday: 0 };
 
     try {
       const subdirs = fs.readdirSync(deptDir, { withFileTypes: true });
       for (const entry of subdirs) {
         const subPath = path.join(deptDir, entry.name);
         if (entry.isDirectory()) {
-          // Check for escalations
           if (entry.name === 'escalations') {
             try {
-              const escFiles = fs.readdirSync(subPath);
-              activity.escalations = escFiles.length;
+              const escFiles = fs.readdirSync(subPath).filter(f => f.endsWith('.md'));
+              for (const ef of escFiles) {
+                try {
+                  const content = fs.readFileSync(path.join(subPath, ef), 'utf-8');
+                  const title = content.split('\n').find(l => l.startsWith('# '))?.slice(2).trim()
+                    || ef.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}[-_]?/, '');
+                  activity.escalations.push({ file: ef, title });
+                } catch { activity.escalations.push({ file: ef, title: ef }); }
+              }
             } catch { /* skip */ }
             continue;
           }
-          // Check files modified today in subdirectory
           try {
             const files = fs.readdirSync(subPath);
             for (const file of files) {
@@ -279,7 +294,6 @@ function getSharedWorkspaceActivity() {
                 if (stat.mtime.toISOString().startsWith(today)) {
                   activity.totalToday++;
                   if (activity.files.length < 5) {
-                    // Strip date prefix for readability (e.g., 2026-03-18-filename.md -> filename.md)
                     const displayName = file.replace(/^\d{4}-\d{2}-\d{2}[-_]?/, '');
                     activity.files.push({ name: displayName || file, dir: entry.name });
                   }
@@ -287,22 +301,11 @@ function getSharedWorkspaceActivity() {
               } catch { /* skip */ }
             }
           } catch { /* skip */ }
-        } else if (entry.isFile()) {
-          try {
-            const stat = fs.statSync(subPath);
-            if (stat.mtime.toISOString().startsWith(today)) {
-              activity.totalToday++;
-              if (activity.files.length < 5) {
-                const displayName = entry.name.replace(/^\d{4}-\d{2}-\d{2}[-_]?/, '');
-                activity.files.push({ name: displayName || entry.name, dir: dept });
-              }
-            }
-          } catch { /* skip */ }
         }
       }
     } catch { /* skip entire dept */ }
 
-    if (activity.totalToday > 0 || activity.escalations > 0) {
+    if (activity.totalToday > 0 || activity.escalations.length > 0) {
       results.push(activity);
     }
   }
@@ -310,133 +313,156 @@ function getSharedWorkspaceActivity() {
   return results;
 }
 
-// ─── Department & Task Name Mapping ──────────────────────────────────────────
-
-const FOLDER_DEPARTMENT_MAP = {
-  'atlas_main': 'CEO Control',
-  'atlas_gpg': 'GPG Entity',
-  'atlas_crownscape': 'Crownscape Entity',
-  'telegram_atlas-marketing': 'Marketing Dept',
-};
-
-function folderToDepartment(folder) {
-  if (FOLDER_DEPARTMENT_MAP[folder]) return FOLDER_DEPARTMENT_MAP[folder];
-  // Derive from folder name: telegram_atlas-ops -> Atlas Ops
-  const clean = folder.replace(/^telegram_/, '').replace(/^atlas[_-]/, '').replace(/[-_]/g, ' ');
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
-}
-
-const TASK_FRIENDLY_NAMES = {
-  'atlas-orchestrator-daily': 'Morning Briefing (6AM)',
-  'atlas-marketing-weekly': 'Marketing Weekly Report',
-  'atlas-ops-daily': 'Operations Daily Check',
-};
-
-function taskFriendlyName(taskId) {
-  return TASK_FRIENDLY_NAMES[taskId] || taskId;
-}
-
-function scheduleHuman(type, value) {
-  if (type === 'cron') {
-    // Basic cron parsing for common patterns
-    const parts = value.split(' ');
-    if (parts.length >= 5) {
-      const [min, hour] = parts;
-      if (hour !== '*' && min !== '*') {
-        const h = parseInt(hour);
-        const m = parseInt(min);
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-        return `Daily at ${h12}:${String(m).padStart(2, '0')} ${ampm}`;
-      }
-    }
-    return `Cron: ${value}`;
-  }
-  if (type === 'interval') return `Every ${value}`;
-  return `${type}: ${value}`;
-}
-
-// ─── HTML Rendering ──────────────────────────────────────────────────────────
+// --- Rendering ----------------------------------------------------------------
 
 function badge(text, color) {
-  return `<span style="display:inline-block;background:${color};color:#fff;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;letter-spacing:0.3px">${esc(text)}</span>`;
+  return `<span class="badge" style="background:${color}">${esc(text)}</span>`;
 }
 
 function statusBadge(status) {
   const colors = {
-    active: '#22c55e', complete: '#22c55e', success: '#22c55e', NORMAL: '#22c55e',
-    pending: '#3b82f6', in_progress: '#3b82f6', 'in-progress': '#3b82f6',
+    active: '#22c55e', operational: '#22c55e', complete: '#22c55e', success: '#22c55e', NORMAL: '#22c55e',
+    pending: '#3b82f6', in_progress: '#3b82f6',
     paused: '#f59e0b', THROTTLED: '#f59e0b', warning: '#f59e0b',
     error: '#ef4444', failed: '#ef4444', PAUSED: '#ef4444',
-    locked: '#6b7280', completed: '#6b7280', unknown: '#6b7280',
+    locked: '#475569', completed: '#6b7280', unknown: '#6b7280',
   };
   const color = colors[status] || '#6b7280';
   return badge(String(status).toUpperCase(), color);
 }
 
-function progressBar(pct, color, height = 12) {
+function progressBar(pct, color) {
   const clamped = Math.max(0, Math.min(100, pct));
-  return `<div style="height:${height}px;background:#334155;border-radius:${height / 2}px;overflow:hidden;flex:1">
-    <div style="height:100%;width:${clamped}%;background:${color};border-radius:${height / 2}px;transition:width 0.3s"></div>
-  </div>`;
+  return `<div class="progress-track"><div class="progress-fill" style="width:${clamped}%;background:${color}"></div></div>`;
 }
 
 function renderConversations(messages, groups) {
   if (!messages.length) {
-    return `<div style="color:#6b7280;padding:16px;text-align:center">No activity today</div>`;
+    return `<div class="empty">No conversations in the last 24 hours</div>`;
   }
 
   // Build JID -> group name map
   const jidMap = {};
-  for (const g of groups) {
-    jidMap[g.jid] = g.name;
-  }
+  for (const g of groups) jidMap[g.jid] = g.name;
 
-  // Group messages by chat_jid, keeping order
+  // Group messages by chat_jid, most recent group first
   const grouped = {};
-  const order = [];
+  const groupOrder = [];
   for (const msg of messages) {
     if (!grouped[msg.chat_jid]) {
       grouped[msg.chat_jid] = [];
-      order.push(msg.chat_jid);
+      groupOrder.push(msg.chat_jid);
     }
     grouped[msg.chat_jid].push(msg);
   }
 
-  // Build conversation pairs within each group
-  const groupColors = ['#1e293b', '#172033'];
+  // Build conversation pairs: user message -> Atlas response
   let html = '';
+  let pairCount = 0;
+  const MAX_PAIRS = 12;
 
-  for (let gi = 0; gi < order.length; gi++) {
-    const jid = order[gi];
-    const msgs = grouped[jid];
+  for (const jid of groupOrder) {
+    if (pairCount >= MAX_PAIRS) break;
+
+    const msgs = [...grouped[jid]].reverse(); // chronological
     const groupName = jidMap[jid] || jid.split('@')[0] || 'Unknown';
-    const bgColor = groupColors[gi % 2];
 
-    html += `<div style="background:${bgColor};border-radius:8px;padding:12px 16px;margin-bottom:8px">`;
-    html += `<div style="font-weight:700;color:#e2e8f0;margin-bottom:8px;font-size:14px">${esc(groupName)}</div>`;
+    let groupHtml = '';
+    let groupPairs = 0;
 
-    // Show messages in chronological order (reverse since they come DESC)
-    const chronological = [...msgs].reverse();
+    for (let i = 0; i < msgs.length; i++) {
+      if (pairCount >= MAX_PAIRS) break;
 
-    for (const msg of chronological) {
+      const msg = msgs[i];
       const isUser = msg.is_from_me === 0 && msg.is_bot_message === 0;
-      const isAtlas = msg.is_from_me === 1;
+      if (!isUser) continue;
 
-      if (!isUser && !isAtlas) continue; // skip system messages
+      // Find Atlas response (next is_from_me=1 message)
+      let response = null;
+      for (let j = i + 1; j < msgs.length; j++) {
+        if (msgs[j].is_from_me === 1 && msgs[j].chat_jid === msg.chat_jid) {
+          response = msgs[j];
+          break;
+        }
+      }
 
-      const senderLabel = isUser ? (msg.sender_name || 'User') : 'Atlas';
-      const senderColor = isUser ? '#3b82f6' : '#22c55e';
-      const content = truncate(msg.content || '', 200);
-      const time = relativeTime(msg.timestamp);
+      const time = formatTime(msg.timestamp);
+      const sender = msg.sender_name || 'User';
+      const question = truncate(msg.content, 120);
 
-      html += `<div style="margin-bottom:6px;display:flex;gap:8px;align-items:flex-start">`;
-      html += `<span style="color:${senderColor};font-weight:600;font-size:12px;min-width:60px;flex-shrink:0">${esc(senderLabel)}</span>`;
-      html += `<span style="color:#cbd5e1;font-size:13px;flex:1">${esc(content)}</span>`;
-      html += `<span style="color:#64748b;font-size:11px;flex-shrink:0;white-space:nowrap">${esc(time)}</span>`;
-      html += `</div>`;
+      // Determine status icon from response content
+      let icon = '\u2705'; // default: success checkmark
+      let responseText = '';
+      if (response?.content) {
+        responseText = truncate(response.content, 150);
+        const lower = response.content.toLowerCase();
+        if (lower.includes('escalat')) icon = '\u26A0\uFE0F';
+        else if (lower.includes('draft') || lower.includes('saved to workspace') || lower.includes('saved to shared')) icon = '\uD83D\uDCC4';
+        else if (lower.includes('error') || lower.includes('failed')) icon = '\u274C';
+      } else {
+        icon = '\u23F3'; // hourglass: no response yet
+        responseText = 'Processing\u2026';
+      }
+
+      groupHtml += `<div class="conv-pair">`;
+      groupHtml += `<div class="conv-time">${esc(time)}</div>`;
+      groupHtml += `<div class="conv-body">`;
+      groupHtml += `<div class="conv-question"><span class="conv-sender">${esc(sender)}:</span> ${esc(question)}</div>`;
+      groupHtml += `<div class="conv-response">\u2192 Atlas: ${esc(responseText)} ${icon}</div>`;
+      groupHtml += `</div>`;
+      groupHtml += `</div>`;
+
+      groupPairs++;
+      pairCount++;
     }
 
+    if (groupPairs > 0) {
+      html += `<div class="conv-group">`;
+      html += `<div class="conv-group-label">${esc(groupName)}</div>`;
+      html += groupHtml;
+      html += `</div>`;
+    }
+  }
+
+  return html || `<div class="empty">No conversations in the last 24 hours</div>`;
+}
+
+function renderSharedWorkspace(workspaceData) {
+  if (!workspaceData.length) {
+    return `<div class="empty">No workspace activity today</div>`;
+  }
+
+  let html = '';
+  // Escalations first -- most important
+  const allEscalations = workspaceData.flatMap(d =>
+    d.escalations.map(e => ({ ...e, dept: d.dept }))
+  );
+
+  if (allEscalations.length > 0) {
+    html += `<div class="escalation-banner">`;
+    html += `<strong>${allEscalations.length} escalation${allEscalations.length !== 1 ? 's' : ''} pending</strong>`;
+    for (const esc_item of allEscalations) {
+      const deptLabel = esc_item.dept.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      html += `<div class="escalation-item">${deptLabel}: ${esc(esc_item.title)}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  for (const dept of workspaceData) {
+    const deptLabel = dept.dept.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const fileCount = dept.totalToday;
+    const escCount = dept.escalations.length;
+
+    html += `<div class="ws-dept">`;
+    html += `<span class="ws-dept-name">${esc(deptLabel)}:</span> `;
+    html += `<span class="ws-dept-count">${fileCount} new item${fileCount !== 1 ? 's' : ''}</span>`;
+    if (dept.files.length > 0) {
+      const labels = dept.files.map(f => f.dir + '/' + f.name).join(', ');
+      html += ` <span class="ws-dept-detail">(${esc(truncate(labels, 80))})</span>`;
+    }
+    if (escCount > 0) {
+      html += ` ${badge(escCount + ' ESCALATION' + (escCount !== 1 ? 'S' : ''), '#ef4444')}`;
+    }
     html += `</div>`;
   }
 
@@ -444,51 +470,84 @@ function renderConversations(messages, groups) {
 }
 
 function renderGraduationProgress(graduation) {
+  if (!graduation) {
+    return `<div class="empty">No graduation data available</div>`;
+  }
+
   const milestones = graduation.milestones || {};
+  const milestoneOrder = ['M0', 'M1', 'M2', 'M3', 'M4', 'M5'];
   let html = '';
 
-  for (const [key, m] of Object.entries(milestones)) {
+  // Find the first incomplete milestone to know which are "locked"
+  let firstIncomplete = null;
+  for (const key of milestoneOrder) {
+    if (milestones[key]?.status !== 'complete') {
+      firstIncomplete = key;
+      break;
+    }
+  }
+
+  for (const key of milestoneOrder) {
+    const m = milestones[key] || {};
     let pct = 0;
-    let color = '#6b7280';
+    let color = '#475569';
     let detail = '';
+    let isLocked = false;
 
     if (m.status === 'complete') {
       pct = 100;
       color = '#22c55e';
-      detail = m.met_at ? `Completed ${relativeTime(m.met_at)}` : 'Complete';
-    } else if (m.status === 'pending' || m.status === 'in_progress') {
+      detail = 'Complete';
+    } else if (key === firstIncomplete) {
+      // This is the active milestone
       color = '#3b82f6';
       const prog = m.progress || {};
-      // Figure out progress percentage from available fields
-      if (prog.required_sessions) {
-        pct = Math.round((prog.instrumented_sessions / prog.required_sessions) * 100);
-        const entitiesNeeded = prog.required_entities || 2;
-        const entitiesHave = prog.entities_seen?.length || 0;
-        detail = `Sessions: ${prog.instrumented_sessions}/${prog.required_sessions}, Entities: ${entitiesHave}/${entitiesNeeded}`;
-      } else if (prog.required !== undefined) {
-        const current = prog.consecutive_clean_runs ?? prog.total_cycles ?? 0;
-        pct = Math.round((current / prog.required) * 100);
-        detail = `${current}/${prog.required}`;
-      } else if (prog.required_actions) {
-        pct = Math.round((prog.total_actions / prog.required_actions) * 100);
-        detail = `Actions: ${prog.total_actions}/${prog.required_actions}, Override: ${Math.round(prog.override_rate * 100)}%`;
-      } else if (prog.required_drafts) {
-        pct = Math.round((prog.total_drafts / prog.required_drafts) * 100);
-        detail = `Drafts: ${prog.total_drafts}/${prog.required_drafts}, Approval: ${Math.round(prog.approve_rate * 100)}%`;
+
+      if (key === 'M1') {
+        const sessions = prog.instrumented_sessions || 0;
+        const reqSessions = prog.required_sessions || 3;
+        const entities = prog.entities_seen?.length || 0;
+        const reqEntities = prog.required_entities || 2;
+        pct = Math.round(((sessions / reqSessions) * 0.5 + (entities / reqEntities) * 0.5) * 100);
+        detail = `${sessions}/${reqSessions} sessions, ${entities}/${reqEntities} entities`;
+        if (entities < reqEntities) {
+          const missing = ['gpg', 'crownscape', 'atlas'].filter(e => !(prog.entities_seen || []).includes(e));
+          detail += ` (need ${missing.join(', ')})`;
+        }
+      } else if (key === 'M2') {
+        const runs = prog.consecutive_clean_runs || 0;
+        const req = prog.required || 5;
+        pct = Math.round((runs / req) * 100);
+        detail = `${runs}/${req} consecutive clean runs`;
+      } else if (key === 'M3') {
+        const actions = prog.total_actions || 0;
+        const req = prog.required_actions || 10;
+        pct = Math.round((actions / req) * 100);
+        const rate = prog.override_rate || 0;
+        detail = `${actions}/${req} actions, ${Math.round(rate * 100)}% override`;
+      } else if (key === 'M4') {
+        const drafts = prog.total_drafts || 0;
+        const req = prog.required_drafts || 10;
+        pct = Math.round((drafts / req) * 100);
+        const rate = prog.approve_rate || 0;
+        detail = `${drafts}/${req} drafts, ${Math.round(rate * 100)}% approved`;
+      } else if (key === 'M5') {
+        const cycles = prog.total_cycles || 0;
+        const req = prog.required || 20;
+        pct = Math.round((cycles / req) * 100);
+        detail = `${cycles}/${req} cycles`;
       }
     } else {
-      // locked
-      pct = 0;
-      color = '#6b7280';
-      detail = 'Locked';
+      // Locked: milestone before this one isn't complete
+      isLocked = true;
+      detail = `Locked \u2014 needs ${milestoneOrder[milestoneOrder.indexOf(key) - 1]}`;
     }
 
-    html += `<div style="margin-bottom:12px">`;
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">`;
-    html += `<span style="font-weight:600;font-size:13px;color:#e2e8f0">${esc(key)}: ${esc(m.name || '')}</span>`;
-    html += `<span style="font-size:12px;color:#94a3b8">${esc(detail)}</span>`;
-    html += `</div>`;
-    html += progressBar(pct, color, 10);
+    const opacity = isLocked ? 'opacity:0.5' : '';
+    html += `<div class="grad-row" style="${opacity}">`;
+    html += `<div class="grad-label">${esc(key)}</div>`;
+    html += `<div class="grad-bar">${progressBar(pct, color)}</div>`;
+    html += `<div class="grad-detail">${esc(detail)}</div>`;
     html += `</div>`;
   }
 
@@ -497,70 +556,28 @@ function renderGraduationProgress(graduation) {
 
 function renderHostTasks(hostData) {
   const { completed, pending } = hostData;
-
   if (!completed.length && !pending.length) {
-    return `<div style="color:#6b7280;padding:16px;text-align:center">No host-executor tasks</div>`;
-  }
-
-  let html = '<table><thead><tr><th>Task</th><th>Entity</th><th>Status</th><th>When</th></tr></thead><tbody>';
-
-  for (const t of pending) {
-    const desc = truncate(t.prompt || t.description || t.task_id || 'Unknown task', 80);
-    html += `<tr>`;
-    html += `<td style="font-size:13px">${esc(desc)}</td>`;
-    html += `<td>${esc(t.entity || '\u2014')}</td>`;
-    html += `<td>${statusBadge('in_progress')}</td>`;
-    html += `<td>${relativeTime(t.created_at)}</td>`;
-    html += `</tr>`;
-  }
-
-  for (const t of completed) {
-    const desc = truncate(t.prompt || t.description || t.task_id || 'Unknown task', 80);
-    const status = t.status || (t.error ? 'failed' : 'success');
-    html += `<tr>`;
-    html += `<td style="font-size:13px">${esc(desc)}</td>`;
-    html += `<td>${esc(t.entity || '\u2014')}</td>`;
-    html += `<td>${statusBadge(status)}</td>`;
-    html += `<td>${relativeTime(t.completed_at)}</td>`;
-    html += `</tr>`;
-  }
-
-  html += '</tbody></table>';
-  return html;
-}
-
-function renderSharedWorkspace(workspaceData) {
-  if (!workspaceData.length) {
-    return `<div style="color:#6b7280;padding:16px;text-align:center">No workspace activity today</div>`;
+    return `<div class="empty">No host-executor tasks</div>`;
   }
 
   let html = '';
+  const all = [
+    ...pending.map(t => ({ ...t, _status: 'running' })),
+    ...completed,
+  ].sort((a, b) => (b.completed_at || b.created_at || '').localeCompare(a.completed_at || a.created_at || ''));
 
-  for (const dept of workspaceData) {
-    const deptLabel = dept.dept.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  for (const t of all.slice(0, 8)) {
+    const desc = truncate(t.prompt || t.description || t.task_id || 'Unknown task', 100);
+    const status = t._status || t.status || 'unknown';
+    const icon = status === 'success' ? '\u2705' : status === 'running' ? '\u23F3' : '\u274C';
+    const time = relativeTime(t.completed_at || t.created_at);
+    const entity = (t.entity || '').toUpperCase();
 
-    html += `<div style="margin-bottom:12px;padding:10px 14px;background:#0f172a;border-radius:6px">`;
-    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">`;
-    html += `<span style="font-weight:700;font-size:14px;color:#e2e8f0">${esc(deptLabel)}</span>`;
-    html += `<span style="color:#94a3b8;font-size:12px">${dept.totalToday} file${dept.totalToday !== 1 ? 's' : ''} today</span>`;
-    if (dept.escalations > 0) {
-      html += badge(`${dept.escalations} ESCALATION${dept.escalations !== 1 ? 'S' : ''}`, '#ef4444');
-    }
-    html += `</div>`;
-
-    if (dept.files.length > 0) {
-      html += `<div style="padding-left:8px">`;
-      for (const file of dept.files) {
-        html += `<div style="font-size:12px;color:#94a3b8;margin-bottom:2px">`;
-        html += `<span style="color:#64748b">${esc(file.dir)}/</span>${esc(file.name)}`;
-        html += `</div>`;
-      }
-      if (dept.totalToday > dept.files.length) {
-        html += `<div style="font-size:11px;color:#64748b">+${dept.totalToday - dept.files.length} more</div>`;
-      }
-      html += `</div>`;
-    }
-
+    html += `<div class="host-row">`;
+    html += `<span class="host-time">${esc(time)}</span>`;
+    html += `<span class="host-entity">${esc(entity)}</span>`;
+    html += `<span class="host-desc">${esc(desc)}</span>`;
+    html += `<span class="host-status">${icon} ${esc(status)}</span>`;
     html += `</div>`;
   }
 
@@ -569,55 +586,76 @@ function renderSharedWorkspace(workspaceData) {
 
 function renderScheduledTasks(tasks) {
   if (!tasks.length) {
-    return `<div style="color:#6b7280;padding:16px;text-align:center">No scheduled tasks</div>`;
+    return `<div class="empty">No scheduled tasks</div>`;
   }
 
-  let html = '<table><thead><tr><th>Task</th><th>Schedule</th><th>Status</th><th>Next Run</th><th>Last Run</th><th>Last Result</th></tr></thead><tbody>';
-
+  let html = '';
   for (const t of tasks) {
-    const name = taskFriendlyName(t.id);
+    const name = t.id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const schedule = scheduleHuman(t.schedule_type, t.schedule_value);
-    const lastResult = t.last_result ? truncate(t.last_result, 40) : '\u2014';
+    const nextRun = t.next_run ? relativeTime(t.next_run) : 'never';
+    const lastRun = t.last_run ? relativeTime(t.last_run) : 'never';
 
-    html += `<tr>`;
-    html += `<td style="font-weight:600;font-size:13px">${esc(name)}</td>`;
-    html += `<td style="font-size:12px;color:#94a3b8">${esc(schedule)}</td>`;
-    html += `<td>${statusBadge(t.status)}</td>`;
-    html += `<td style="font-size:12px">${relativeTime(t.next_run)}</td>`;
-    html += `<td style="font-size:12px">${relativeTime(t.last_run)}</td>`;
-    html += `<td style="font-size:12px;color:#94a3b8">${esc(lastResult)}</td>`;
-    html += `</tr>`;
+    html += `<div class="sched-row">`;
+    html += `<span class="sched-name">${esc(name)}</span>`;
+    html += `<span class="sched-schedule">${esc(schedule)}</span>`;
+    html += `<span class="sched-next">Next: ${esc(nextRun)}</span>`;
+    html += `<span class="sched-last">Last: ${esc(lastRun)}</span>`;
+    html += `</div>`;
   }
-
-  html += '</tbody></table>';
   return html;
+}
+
+function scheduleHuman(type, value) {
+  if (type === 'cron') {
+    const parts = (value || '').split(' ');
+    if (parts.length >= 5) {
+      const [min, hour] = parts;
+      if (hour !== '*' && min !== '*') {
+        const h = parseInt(hour);
+        const m = parseInt(min);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+        return `${h12}:${String(m).padStart(2, '0')} ${ampm} daily`;
+      }
+    }
+    return `cron: ${value}`;
+  }
+  if (type === 'interval') return `every ${value}`;
+  return `${type}: ${value}`;
 }
 
 function renderRegisteredGroups(groups) {
   if (!groups.length) {
-    return `<div style="color:#6b7280;padding:16px;text-align:center">No registered groups</div>`;
+    return `<div class="empty">No registered groups</div>`;
   }
 
-  let html = '<table><thead><tr><th>Group</th><th>Department</th><th>Trigger</th><th>JID</th></tr></thead><tbody>';
+  let html = '';
+  // Main group first, then alphabetical
+  const sorted = [...groups].sort((a, b) => {
+    if (a.is_main && !b.is_main) return -1;
+    if (!a.is_main && b.is_main) return 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
-  for (const g of groups) {
-    const dept = folderToDepartment(g.folder);
-    const triggerMode = g.requires_trigger === 0 ? 'Always' : 'On Mention';
-    const mainBadge = g.is_main ? ` ${badge('MAIN', '#3b82f6')}` : '';
+  for (const g of sorted) {
+    const mainIcon = g.is_main ? '\u2B50 ' : '   ';
+    const triggerMode = g.requires_trigger === 0 ? 'always active' : 'on mention';
+    const jidDisplay = g.jid.startsWith('tg:') ? g.jid : truncate(g.jid, 30);
+    const typeLabel = g.is_main ? 'CEO control' : (g.folder?.startsWith('dispatch:') ? 'dispatch only' : triggerMode);
 
-    html += `<tr>`;
-    html += `<td style="font-weight:600">${esc(g.name)}${mainBadge}</td>`;
-    html += `<td style="font-size:12px;color:#94a3b8">${esc(dept)}</td>`;
-    html += `<td>${badge(triggerMode, triggerMode === 'Always' ? '#22c55e' : '#6b7280')}</td>`;
-    html += `<td style="font-size:11px;color:#64748b;font-family:monospace">${esc(g.jid)}</td>`;
-    html += `</tr>`;
+    html += `<div class="group-row">`;
+    html += `<span class="group-icon">${mainIcon}</span>`;
+    html += `<span class="group-name">${esc(g.name)}</span>`;
+    html += `<span class="group-folder">${esc(g.folder || '')}</span>`;
+    html += `<span class="group-type">${esc(typeLabel)}</span>`;
+    html += `<span class="group-jid">${esc(jidDisplay)}</span>`;
+    html += `</div>`;
   }
-
-  html += '</tbody></table>';
   return html;
 }
 
-// ─── Page Assembly ───────────────────────────────────────────────────────────
+// --- Page Assembly ------------------------------------------------------------
 
 function renderPage(data) {
   const {
@@ -631,8 +669,9 @@ function renderPage(data) {
     hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
 
-  // Quota bar color
   const quotaColor = quota.level === 'NORMAL' ? '#22c55e' : quota.level === 'THROTTLED' ? '#f59e0b' : '#ef4444';
+  const modeColor = (mode === 'active' || mode === 'operational') ? '#22c55e' : '#ef4444';
+  const totalEscalations = workspaceActivity.reduce((n, d) => n + d.escalations.length, 0);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -642,120 +681,99 @@ function renderPage(data) {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Atlas Mission Control</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * { margin:0; padding:0; box-sizing:border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 24px;
-      line-height: 1.5;
+      background: #0a0f1a; color: #e2e8f0; padding: 20px 24px; line-height: 1.5;
     }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .header h1 {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-    }
-    .header .time {
-      color: #94a3b8;
-      font-size: 13px;
-    }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+    .header h1 { font-size:20px; font-weight:700; letter-spacing:-0.5px; color:#f1f5f9; }
+    .header .time { color:#64748b; font-size:12px; }
 
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    @media (max-width: 900px) {
-      .stats-row { grid-template-columns: repeat(3, 1fr); }
-    }
-    @media (max-width: 600px) {
-      .stats-row { grid-template-columns: repeat(2, 1fr); }
-    }
+    .stats-row { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:16px; }
+    @media(max-width:900px) { .stats-row { grid-template-columns:repeat(3,1fr); } }
+
     .stat-card {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 14px 16px;
+      background:#111827; border:1px solid #1e293b; border-radius:8px; padding:12px 14px;
     }
-    .stat-card .label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #64748b;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
-    .stat-card .value {
-      font-size: 26px;
-      font-weight: 700;
-    }
-    .stat-card .sub {
-      font-size: 11px;
-      color: #94a3b8;
-      margin-top: 4px;
-    }
+    .stat-card .label { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#4b5563; font-weight:600; margin-bottom:4px; }
+    .stat-card .value { font-size:22px; font-weight:700; }
+    .stat-card .sub { font-size:10px; color:#6b7280; margin-top:3px; }
 
     .section {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 16px;
+      background:#111827; border:1px solid #1e293b; border-radius:8px;
+      padding:14px 18px; margin-bottom:12px;
     }
     .section h2 {
-      font-size: 14px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #94a3b8;
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #334155;
+      font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;
+      color:#6b7280; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #1e293b;
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    th {
-      text-align: left;
-      padding: 8px 10px;
-      color: #64748b;
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      border-bottom: 1px solid #334155;
-    }
-    td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #1e293b;
-      color: #cbd5e1;
-    }
-    tr:hover td {
-      background: rgba(51, 65, 85, 0.5);
-    }
+    .badge { display:inline-block; color:#fff; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; letter-spacing:0.3px; }
+    .empty { color:#4b5563; padding:12px; text-align:center; font-size:13px; }
 
-    .quota-bar {
-      height: 8px;
-      background: #334155;
-      border-radius: 4px;
-      margin-top: 6px;
-      overflow: hidden;
-    }
-    .quota-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.3s;
-    }
+    .progress-track { height:10px; background:#1e293b; border-radius:5px; overflow:hidden; flex:1; }
+    .progress-fill { height:100%; border-radius:5px; transition:width 0.3s; }
+
+    .quota-bar { height:6px; background:#1e293b; border-radius:3px; margin-top:5px; overflow:hidden; }
+    .quota-fill { height:100%; border-radius:3px; }
+
+    /* Conversations */
+    .conv-group { margin-bottom:10px; }
+    .conv-group-label { font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:6px; }
+    .conv-pair { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid #0d1321; }
+    .conv-pair:last-child { border-bottom:none; }
+    .conv-time { color:#4b5563; font-size:11px; min-width:65px; flex-shrink:0; padding-top:1px; }
+    .conv-body { flex:1; min-width:0; }
+    .conv-question { font-size:13px; color:#cbd5e1; }
+    .conv-sender { font-weight:600; color:#3b82f6; }
+    .conv-response { font-size:12px; color:#6b7280; margin-top:2px; padding-left:16px; }
+
+    /* Escalation banner */
+    .escalation-banner { background:#1c0a0a; border:1px solid #7f1d1d; border-radius:6px; padding:10px 14px; margin-bottom:10px; }
+    .escalation-banner strong { color:#fca5a5; font-size:13px; }
+    .escalation-item { color:#f87171; font-size:12px; margin-top:4px; padding-left:12px; }
+
+    /* Workspace */
+    .ws-dept { padding:4px 0; font-size:13px; }
+    .ws-dept-name { font-weight:600; color:#e2e8f0; }
+    .ws-dept-count { color:#94a3b8; }
+    .ws-dept-detail { color:#4b5563; font-size:11px; }
+
+    /* Graduation */
+    .grad-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+    .grad-label { font-weight:700; font-size:13px; color:#e2e8f0; min-width:28px; }
+    .grad-bar { flex:1; }
+    .grad-detail { font-size:11px; color:#6b7280; min-width:200px; text-align:right; }
+
+    /* Host tasks */
+    .host-row { display:flex; gap:10px; padding:5px 0; border-bottom:1px solid #0d1321; font-size:13px; align-items:center; }
+    .host-row:last-child { border-bottom:none; }
+    .host-time { color:#4b5563; font-size:11px; min-width:55px; }
+    .host-entity { font-weight:700; font-size:10px; color:#3b82f6; min-width:40px; text-transform:uppercase; }
+    .host-desc { flex:1; color:#cbd5e1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .host-status { color:#6b7280; font-size:12px; min-width:80px; text-align:right; }
+
+    /* Scheduled tasks */
+    .sched-row { display:flex; gap:12px; padding:5px 0; border-bottom:1px solid #0d1321; font-size:13px; align-items:center; }
+    .sched-row:last-child { border-bottom:none; }
+    .sched-name { font-weight:600; color:#e2e8f0; flex:1; }
+    .sched-schedule { color:#6b7280; font-size:12px; min-width:120px; }
+    .sched-next { color:#94a3b8; font-size:12px; min-width:100px; }
+    .sched-last { color:#4b5563; font-size:12px; min-width:100px; }
+
+    /* Groups */
+    .group-row { display:flex; gap:8px; padding:4px 0; border-bottom:1px solid #0d1321; font-size:13px; align-items:center; }
+    .group-row:last-child { border-bottom:none; }
+    .group-icon { font-size:14px; min-width:20px; }
+    .group-name { font-weight:600; color:#e2e8f0; min-width:140px; }
+    .group-folder { color:#4b5563; font-size:11px; font-family:monospace; min-width:160px; }
+    .group-type { color:#6b7280; font-size:11px; min-width:100px; }
+    .group-jid { color:#374151; font-size:10px; font-family:monospace; }
+
+    /* Two column layout for bottom sections */
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    @media(max-width:900px) { .two-col { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -764,78 +782,69 @@ function renderPage(data) {
     <div class="time">${esc(now)} ET</div>
   </div>
 
-  <!-- ═══ TOP STATS ROW ═══ -->
   <div class="stats-row">
     <div class="stat-card">
       <div class="label">Mode</div>
-      <div class="value">${statusBadge(mode)}</div>
+      <div class="value" style="color:${modeColor}">${esc(mode.toUpperCase())}</div>
     </div>
     <div class="stat-card">
-      <div class="label">Active Containers</div>
+      <div class="label">Containers</div>
       <div class="value">${containers.length}</div>
-      <div class="sub">${containers.map(c => esc(c.name)).join(', ') || 'none'}</div>
+      <div class="sub">${containers.map(c => esc(c.name)).join(', ') || 'none running'}</div>
     </div>
     <div class="stat-card">
-      <div class="label">Today's Sessions</div>
+      <div class="label">Tasks Today</div>
       <div class="value">${quota.total}</div>
-      <div class="sub">${quota.autonomous} autonomous + ${quota.ceo} CEO</div>
+      <div class="sub">${quota.autonomous} auto + ${quota.ceo} CEO</div>
     </div>
     <div class="stat-card">
       <div class="label">Quota</div>
       <div class="value" style="color:${quotaColor}">${quota.pct}%</div>
-      <div class="quota-bar">
-        <div class="quota-fill" style="width:${quota.pct}%;background:${quotaColor}"></div>
-      </div>
-      <div class="sub">${statusBadge(quota.level)} ${quota.weighted} / 200 weighted</div>
+      <div class="quota-bar"><div class="quota-fill" style="width:${quota.pct}%;background:${quotaColor}"></div></div>
+      <div class="sub">${quota.weighted}/200 weighted \u2022 ${quota.level}</div>
     </div>
     <div class="stat-card">
-      <div class="label">Pending Approvals</div>
+      <div class="label">Approvals</div>
       <div class="value" style="color:${approvals.length > 0 ? '#f59e0b' : '#e2e8f0'}">${approvals.length}</div>
-      <div class="sub">${approvals.length > 0 ? 'action needed' : 'clear'}</div>
+      <div class="sub">${totalEscalations > 0 ? totalEscalations + ' escalation' + (totalEscalations !== 1 ? 's' : '') : 'clear'}</div>
     </div>
   </div>
 
-  <!-- ═══ TODAY'S ACTIVITY ═══ -->
   <div class="section">
     <h2>Today's Activity</h2>
     ${renderConversations(messages, groups)}
   </div>
 
-  <!-- ═══ SHARED WORKSPACE ACTIVITY ═══ -->
   <div class="section">
     <h2>Shared Workspace Activity</h2>
     ${renderSharedWorkspace(workspaceActivity)}
   </div>
 
-  <!-- ═══ GRADUATION PROGRESS ═══ -->
   <div class="section">
     <h2>Graduation Progress</h2>
     ${renderGraduationProgress(graduation)}
   </div>
 
-  <!-- ═══ HOST-EXECUTOR RESULTS ═══ -->
-  <div class="section">
-    <h2>Host-Executor Results</h2>
-    ${renderHostTasks(hostTasks)}
+  <div class="two-col">
+    <div class="section">
+      <h2>Host-Executor Results</h2>
+      ${renderHostTasks(hostTasks)}
+    </div>
+    <div class="section">
+      <h2>Scheduled Tasks</h2>
+      ${renderScheduledTasks(scheduledTasks)}
+    </div>
   </div>
 
-  <!-- ═══ SCHEDULED TASKS ═══ -->
-  <div class="section">
-    <h2>Scheduled Tasks</h2>
-    ${renderScheduledTasks(scheduledTasks)}
-  </div>
-
-  <!-- ═══ REGISTERED GROUPS ═══ -->
   <div class="section">
     <h2>Registered Groups</h2>
     ${renderRegisteredGroups(groups)}
   </div>
-
 </body>
 </html>`;
 }
 
-// ─── Server ──────────────────────────────────────────────────────────────────
+// --- Server -------------------------------------------------------------------
 
 const server = http.createServer((req, res) => {
   if (!checkAuth(req, res)) return;
@@ -863,7 +872,7 @@ const server = http.createServer((req, res) => {
       containers: getActiveContainers(),
       quota: getQuotaToday(),
       graduation: getGraduationStatus(),
-      messages: getRecentMessages(db, 50),
+      messages: getRecentMessages(db, 100),
       groups,
       scheduledTasks: getScheduledTasks(db),
       hostTasks: getHostTasks(),
@@ -883,8 +892,8 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Atlas Mission Control running at http://0.0.0.0:${PORT}`);
-  console.log(`  Auth: ${AUTH_ENABLED ? 'enabled' : 'DISABLED - set MISSION_CONTROL_USER and MISSION_CONTROL_PASS in .env'}`);
+  console.log(`Atlas Mission Control v2 at http://0.0.0.0:${PORT}`);
+  console.log(`  Auth: ${AUTH_ENABLED ? 'enabled' : 'DISABLED'}`);
   console.log(`  Database: ${NANOCLAW_DB}`);
   console.log(`  Atlas dir: ${ATLAS_DIR}`);
 });
