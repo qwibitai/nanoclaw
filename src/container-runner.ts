@@ -387,7 +387,10 @@ function buildContainerArgs(
     args.push('-e', `TAILSCALE_CLIENT_ID=${process.env.TAILSCALE_CLIENT_ID}`);
   }
   if (process.env.TAILSCALE_CLIENT_SECRET) {
-    args.push('-e', `TAILSCALE_CLIENT_SECRET=${process.env.TAILSCALE_CLIENT_SECRET}`);
+    args.push(
+      '-e',
+      `TAILSCALE_CLIENT_SECRET=${process.env.TAILSCALE_CLIENT_SECRET}`,
+    );
   }
   if (process.env.TAILSCALE_TAILNET) {
     args.push('-e', `TAILSCALE_TAILNET=${process.env.TAILSCALE_TAILNET}`);
