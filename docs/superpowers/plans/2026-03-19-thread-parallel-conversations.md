@@ -905,33 +905,33 @@ this.opts.onMessage(chatJid, {
 });
 ```
 
-- [ ] **Step 5: Update sendMessage for multi-thread**
+- [ ] **Step 6: Update sendMessage for multi-thread**
 
 Rewrite `sendMessage(jid, text)` to accept an optional thread context:
 
 The method needs to know which thread to send to. Since `sendMessage` is called from `index.ts` streaming callback with just `(jid, text)`, we need a way to track the "current active send target" per ongoing operation.
 
-Approach: Add `sendToThread(jid: string, threadId: string, text: string)` method. For new triggers where thread doesn't exist yet, use `pendingTrigger` to create the thread on first send, then update the context with the new thread ID.
-
-Keep `sendMessage(jid, text)` for backward compatibility — it checks `pendingTrigger` first (new @mention → create thread), then falls back to channel.
-
-The mapping: each call to `processGroupMessages` in `index.ts` is now associated with a thread context. Before the streaming callback fires, `index.ts` sets the thread context on the Discord channel so `sendMessage` knows where to route.
-
-Add method:
+Approach: Add `setCurrentThreadContext` to set the active thread context before streaming begins. The key should be `{jid}:{threadId}` (not just `jid`) to avoid races when multiple threads for the same channel are sending concurrently:
 
 ```typescript
-  setCurrentThreadContext(jid: string, context: ThreadContext | null): void {
+  // Map of `{jid}:{threadId}` → ThreadContext for concurrent send routing
+  private currentSendTarget = new Map<string, ThreadContext>();
+
+  setCurrentThreadContext(jid: string, threadId: string, context: ThreadContext | null): void {
+    const key = `${jid}:${threadId}`;
     if (context) {
-      this.currentSendTarget.set(jid, context);
+      this.currentSendTarget.set(key, context);
     } else {
-      this.currentSendTarget.delete(jid);
+      this.currentSendTarget.delete(key);
     }
   }
 ```
 
-Then `sendMessage` checks `currentSendTarget` to find the right thread.
+Keep `sendMessage(jid, text)` for backward compatibility — it checks `pendingTrigger` first (new @mention → create thread), then checks `currentSendTarget` entries for this `jid`, then falls back to channel.
 
-- [ ] **Step 6: Update sendChannelMessage to return message ID**
+For new triggers where the thread doesn't exist yet, `sendMessage` creates the Discord thread on the pending trigger message, then updates the thread context with the new `thread_id` via `updateThreadContext`.
+
+- [ ] **Step 7: Update sendChannelMessage to return message ID**
 
 ```typescript
   async sendChannelMessage(jid: string, text: string): Promise<string | undefined> {
@@ -964,12 +964,12 @@ Then `sendMessage` checks `currentSendTarget` to find the right thread.
   }
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [ ] **Step 8: Run tests to verify they pass**
 
 Run: `npx vitest run src/channels/discord.test.ts --reporter=verbose 2>&1 | tail -30`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/channels/discord.ts src/channels/discord.test.ts src/types.ts
