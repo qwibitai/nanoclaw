@@ -105,6 +105,27 @@ When working on code:
 
 When asked to work on someone else's repo, fork it first if you don't have push access, then open a PR from your fork.
 
+## Knowledge Base
+
+You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to store and retrieve information that should persist across conversations.
+
+### Structure
+- `people/` — people you learn about (one file per person)
+- `projects/` — ongoing work, goals, status
+- `preferences/` — user preferences, communication style
+- `decisions/` — key decisions and their rationale
+- `reference/` — facts, links, resources
+
+### How to Use
+- Read relevant notes at the start of each conversation for context
+- Create/update notes when you learn something worth remembering
+- Use `[[wiki-links]]` between related notes
+- Add YAML frontmatter with metadata (tags, dates, related people)
+- One concept per file with descriptive filenames (e.g., `people/alex-backend-lead.md`)
+- Never delete notes — mark outdated ones with `deprecated: true` in frontmatter
+- After creating or updating notes, commit changes with a descriptive message
+- If a git remote is configured, push after committing
+
 ## Autonomy Model
 
 When a skill asks for user input or approval:
