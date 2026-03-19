@@ -124,10 +124,7 @@ export function startCredentialProxy(
             upstream.end();
           })
           .catch((err) => {
-            logger.error(
-              { err },
-              'Credential proxy failed to refresh secrets',
-            );
+            logger.error({ err }, 'Credential proxy failed to refresh secrets');
             // Fall back to .env-based credentials
             const secrets = readEnvFile([...CREDENTIAL_KEYS]);
             forwardRequest(req, res, body, secrets);

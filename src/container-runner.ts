@@ -22,10 +22,7 @@ import {
   generateCorrelationId,
   logger,
 } from './logger.js';
-import {
-  hasSession,
-  stopSession,
-} from './container-runtime.js';
+import { hasSession, stopSession } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -185,7 +182,10 @@ export function buildVolumeMounts(
   if (group.containerConfig?.mcpCredentialMounts) {
     for (const mcpMount of group.containerConfig.mcpCredentialMounts) {
       const expandedPath = mcpMount.hostPath.startsWith('~/')
-        ? path.join(process.env.HOME || os.homedir(), mcpMount.hostPath.slice(2))
+        ? path.join(
+            process.env.HOME || os.homedir(),
+            mcpMount.hostPath.slice(2),
+          )
         : path.resolve(mcpMount.hostPath);
 
       if (!fs.existsSync(expandedPath)) {
@@ -222,9 +222,7 @@ export function buildVolumeMounts(
  * Build environment variables for the tmux session.
  * These replace the Docker -e flags and path-mapping volume mounts.
  */
-function buildSessionEnv(
-  mounts: VolumeMount[],
-): Record<string, string> {
+function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
   const env: Record<string, string> = {};
 
   env.TZ = TIMEZONE;
@@ -437,14 +435,18 @@ export async function runContainerAgent(
           if (onOutput) {
             parseBuffer += chunk;
             let startIdx: number;
-            while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
+            while (
+              (startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
+            ) {
               const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
               if (endIdx === -1) break;
 
               const jsonStr = parseBuffer
                 .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
                 .trim();
-              parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
+              parseBuffer = parseBuffer.slice(
+                endIdx + OUTPUT_END_MARKER.length,
+              );
 
               try {
                 const parsed: ContainerOutput = JSON.parse(jsonStr);
@@ -554,7 +556,10 @@ export async function runContainerAgent(
       ];
 
       // Determine exit status from whether we got output or not
-      const isError = !hadStreamingOutput && stdout.indexOf(OUTPUT_START_MARKER) === -1 && stderr.length > 0;
+      const isError =
+        !hadStreamingOutput &&
+        stdout.indexOf(OUTPUT_START_MARKER) === -1 &&
+        stderr.length > 0;
 
       if (isVerbose || isError) {
         logLines.push(

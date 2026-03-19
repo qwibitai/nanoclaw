@@ -78,13 +78,21 @@ export function recordSuccess(channelName: string): void {
 
   if (prev === CircuitState.HALF_OPEN) {
     logger.info(
-      { channel: channelName, transition: 'HALF_OPEN→CLOSED', event: 'circuit_breaker' },
+      {
+        channel: channelName,
+        transition: 'HALF_OPEN→CLOSED',
+        event: 'circuit_breaker',
+      },
       'Circuit breaker recovered — probe succeeded',
     );
   } else if (prev === CircuitState.OPEN) {
     // Shouldn't normally happen, but log it
     logger.info(
-      { channel: channelName, transition: 'OPEN→CLOSED', event: 'circuit_breaker' },
+      {
+        channel: channelName,
+        transition: 'OPEN→CLOSED',
+        event: 'circuit_breaker',
+      },
       'Circuit breaker reset',
     );
   }
@@ -102,7 +110,12 @@ export function recordFailure(channelName: string, error?: unknown): void {
     // Probe failed — back to OPEN
     health.state = CircuitState.OPEN;
     logger.warn(
-      { channel: channelName, transition: 'HALF_OPEN→OPEN', event: 'circuit_breaker', err: error },
+      {
+        channel: channelName,
+        transition: 'HALF_OPEN→OPEN',
+        event: 'circuit_breaker',
+        err: error,
+      },
       'Circuit breaker probe failed — re-opening circuit',
     );
   } else if (
@@ -141,7 +154,12 @@ export function shouldSkipChannel(channelName: string): boolean {
     if (elapsed >= health.config.cooldownMs) {
       health.state = CircuitState.HALF_OPEN;
       logger.info(
-        { channel: channelName, transition: 'OPEN→HALF_OPEN', event: 'circuit_breaker', cooldownMs: health.config.cooldownMs },
+        {
+          channel: channelName,
+          transition: 'OPEN→HALF_OPEN',
+          event: 'circuit_breaker',
+          cooldownMs: health.config.cooldownMs,
+        },
         'Circuit breaker cooldown elapsed — probing',
       );
       return false; // allow probe attempt
@@ -178,7 +196,12 @@ export async function connectWithBackoff(
     if (attempt > 0) {
       const delay = backoffDelay(health);
       logger.info(
-        { channel: channelName, attempt: attempt + 1, delayMs: delay, event: 'circuit_breaker' },
+        {
+          channel: channelName,
+          attempt: attempt + 1,
+          delayMs: delay,
+          event: 'circuit_breaker',
+        },
         `Retrying channel connect after ${delay}ms`,
       );
       await sleep(delay);

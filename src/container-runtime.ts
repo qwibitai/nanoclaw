@@ -14,8 +14,7 @@ import { logger } from './logger.js';
  * With tmux, agents run directly on the host, so the proxy is always reachable
  * on 127.0.0.1.
  */
-export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || '127.0.0.1';
+export const PROXY_BIND_HOST = process.env.CREDENTIAL_PROXY_HOST || '127.0.0.1';
 
 /** Returns the shell command to kill a tmux session by name. */
 export function stopSession(name: string): string {

@@ -50,9 +50,7 @@ export async function initSecrets(): Promise<void> {
   const ttl = 5 * 60 * 1000; // 5 minutes
 
   if (!token) {
-    logger.warn(
-      'SOLO_VAULT_TOKEN not set — using .env file as secret source',
-    );
+    logger.warn('SOLO_VAULT_TOKEN not set — using .env file as secret source');
     return;
   }
 
@@ -67,9 +65,7 @@ export async function initSecrets(): Promise<void> {
  * Fetch a single secret from the Solo Vault REST API.
  * Uses GET /v1/secrets/:project/:env/:key
  */
-function fetchVaultSecret(
-  key: string,
-): Promise<string | undefined> {
+function fetchVaultSecret(key: string): Promise<string | undefined> {
   if (!vaultConfig) return Promise.resolve(undefined);
 
   const { url: baseUrl, token, project, environment } = vaultConfig;
@@ -115,9 +111,7 @@ function fetchVaultSecret(
             const data = JSON.parse(body);
             // Support { value: "..." } or { secret: { value: "..." } }
             const value =
-              typeof data.value === 'string'
-                ? data.value
-                : data.secret?.value;
+              typeof data.value === 'string' ? data.value : data.secret?.value;
             if (typeof value !== 'string') {
               reject(
                 new Error(
@@ -128,7 +122,9 @@ function fetchVaultSecret(
             }
             resolve(value);
           } catch {
-            reject(new Error(`Solo Vault returned invalid JSON for key "${key}"`));
+            reject(
+              new Error(`Solo Vault returned invalid JSON for key "${key}"`),
+            );
           }
         });
       },

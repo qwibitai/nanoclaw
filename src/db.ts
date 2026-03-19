@@ -347,23 +347,25 @@ export function getMessagesSince(
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): boolean {
-  const result = db.prepare(
-    `
+  const result = db
+    .prepare(
+      `
     INSERT OR IGNORE INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
-  ).run(
-    task.id,
-    task.group_folder,
-    task.chat_jid,
-    task.prompt,
-    task.schedule_type,
-    task.schedule_value,
-    task.context_mode || 'isolated',
-    task.next_run,
-    task.status,
-    task.created_at,
-  );
+    )
+    .run(
+      task.id,
+      task.group_folder,
+      task.chat_jid,
+      task.prompt,
+      task.schedule_type,
+      task.schedule_value,
+      task.context_mode || 'isolated',
+      task.next_run,
+      task.status,
+      task.created_at,
+    );
   return result.changes > 0;
 }
 

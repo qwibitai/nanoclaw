@@ -95,11 +95,19 @@ export function stopHostExecWatcher(): void {
 
 function executeCommand(req: HostExecRequest): void {
   const resultPath = path.join(HOST_EXEC_DIR, `${req.id}.result.json`);
-  const log = logger.child({ op: 'host-exec', id: req.id, command: req.command });
+  const log = logger.child({
+    op: 'host-exec',
+    id: req.id,
+    command: req.command,
+  });
 
   if (!ALLOWED_COMMANDS.has(req.command)) {
     log.warn('Command not on allowlist, rejecting');
-    writeResult(resultPath, { stdout: '', stderr: 'command not allowed', exit_code: 403 });
+    writeResult(resultPath, {
+      stdout: '',
+      stderr: 'command not allowed',
+      exit_code: 403,
+    });
     return;
   }
 

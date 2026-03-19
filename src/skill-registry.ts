@@ -34,9 +34,7 @@ const registry = new Map<string, SkillEntry>();
  * Parse YAML front-matter from a SKILL.md file.
  * Expects a block delimited by --- lines at the top of the file.
  */
-function parseFrontMatter(
-  content: string,
-): Record<string, string> | null {
+function parseFrontMatter(content: string): Record<string, string> | null {
   const lines = content.split('\n');
   if (lines[0]?.trim() !== '---') return null;
 
@@ -64,7 +62,10 @@ function scanSkillFile(skillDir: string, dirName: string): SkillEntry | null {
     const content = fs.readFileSync(skillFile, 'utf-8');
     const meta = parseFrontMatter(content);
     if (!meta?.name) {
-      logger.warn({ file: skillFile }, 'Skill file missing name in front-matter');
+      logger.warn(
+        { file: skillFile },
+        'Skill file missing name in front-matter',
+      );
       return null;
     }
 
@@ -87,7 +88,10 @@ function scanSkillFile(skillDir: string, dirName: string): SkillEntry | null {
  */
 export function scanSkills(skillsDir: string): number {
   if (!fs.existsSync(skillsDir)) {
-    logger.debug({ skillsDir }, 'Skills directory does not exist, skipping scan');
+    logger.debug(
+      { skillsDir },
+      'Skills directory does not exist, skipping scan',
+    );
     return 0;
   }
 
@@ -143,20 +147,27 @@ export function watchSkills(skillsDir: string): void {
   if (!fs.existsSync(skillsDir)) return;
 
   try {
-    watcher = fs.watch(skillsDir, { recursive: true }, (eventType, filename) => {
-      // Re-scan on any change (additions, modifications, deletions)
-      logger.debug(
-        { eventType, filename },
-        'Skills directory changed, rescanning',
-      );
-      scanSkills(skillsDir);
-    });
+    watcher = fs.watch(
+      skillsDir,
+      { recursive: true },
+      (eventType, filename) => {
+        // Re-scan on any change (additions, modifications, deletions)
+        logger.debug(
+          { eventType, filename },
+          'Skills directory changed, rescanning',
+        );
+        scanSkills(skillsDir);
+      },
+    );
 
     watcher.on('error', (err) => {
       logger.warn({ err }, 'Skills directory watcher error');
     });
   } catch (err) {
-    logger.warn({ err }, 'Failed to watch skills directory, falling back to scan-only');
+    logger.warn(
+      { err },
+      'Failed to watch skills directory, falling back to scan-only',
+    );
   }
 }
 
@@ -171,7 +182,10 @@ export function stopWatcher(): void {
 
 let httpServer: Server | null = null;
 
-export function startSkillServer(port: number, host = '127.0.0.1'): Promise<Server> {
+export function startSkillServer(
+  port: number,
+  host = '127.0.0.1',
+): Promise<Server> {
   return new Promise((resolve, reject) => {
     httpServer = createServer((req, res) => {
       if (req.method === 'GET' && req.url === '/skills') {

@@ -230,7 +230,10 @@ async function dispatchTask(
   // (e.g., from a crash/restart that left orphaned entries)
   const staleCount = completeStaleTasksByPrefix(`ahq-${task.id}-`);
   if (staleCount > 0) {
-    log.info({ taskId: task.id, staleCount }, 'Cleaned up stale dispatch entries');
+    log.info(
+      { taskId: task.id, staleCount },
+      'Cleaned up stale dispatch entries',
+    );
   }
 
   try {

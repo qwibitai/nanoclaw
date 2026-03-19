@@ -5,8 +5,14 @@ import { CronExpressionParser } from 'cron-parser';
 import type pino from 'pino';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { AvailableGroup, writeTasksSnapshot } from './container-runner.js';
+import {
+  createTask,
+  deleteTask,
+  getAllTasks,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -87,10 +93,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
-                  log.info(
-                    { chatJid: data.chatJid },
-                    'IPC message sent',
-                  );
+                  log.info({ chatJid: data.chatJid }, 'IPC message sent');
                 } else {
                   log.warn(
                     { chatJid: data.chatJid },
@@ -100,10 +103,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
               fs.unlinkSync(filePath);
             } catch (err) {
-              log.error(
-                { err },
-                'Error processing IPC message',
-              );
+              log.error({ err }, 'Error processing IPC message');
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
@@ -139,10 +139,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               await processTaskIpc(data, sourceGroup, isMain, deps, log);
               fs.unlinkSync(filePath);
             } catch (err) {
-              log.error(
-                { err },
-                'Error processing IPC task',
-              );
+              log.error({ err }, 'Error processing IPC task');
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
               fs.renameSync(
@@ -272,7 +269,7 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
-        createTask({
+        const inserted = createTask({
           id: taskId,
           group_folder: targetFolder,
           chat_jid: targetJid,
@@ -284,6 +281,40 @@ export async function processTaskIpc(
           status: 'active',
           created_at: new Date().toISOString(),
         });
+
+        if (!inserted) {
+          _log.warn(
+            { taskId, sourceGroup },
+            'Duplicate task IPC ignored — task with this ID already exists',
+          );
+          break;
+        }
+
+        // Update the tasks snapshot immediately so list_tasks reflects the new
+        // task without waiting for the next scheduled run to update it.
+        try {
+          const isMainTarget = targetGroupEntry.isMain === true;
+          const allTasks = getAllTasks();
+          writeTasksSnapshot(
+            targetFolder,
+            isMainTarget,
+            allTasks.map((t) => ({
+              id: t.id,
+              groupFolder: t.group_folder,
+              prompt: t.prompt,
+              schedule_type: t.schedule_type,
+              schedule_value: t.schedule_value,
+              status: t.status,
+              next_run: t.next_run,
+            })),
+          );
+        } catch (snapshotErr) {
+          _log.warn(
+            { snapshotErr },
+            'Failed to update tasks snapshot after IPC task creation',
+          );
+        }
+
         _log.info(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
@@ -412,10 +443,7 @@ export async function processTaskIpc(
     case 'refresh_groups':
       // Only main group can request a refresh
       if (isMain) {
-        _log.info(
-          { sourceGroup },
-          'Group metadata refresh requested via IPC',
-        );
+        _log.info({ sourceGroup }, 'Group metadata refresh requested via IPC');
         await deps.syncGroups(true);
         // Write updated snapshot immediately
         const availableGroups = deps.getAvailableGroups();

@@ -1,7 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, TIMEZONE } from './config.js';
+import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -9,6 +9,7 @@ import {
 } from './container-runner.js';
 import {
   getAllTasks,
+  getDueTasks,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
@@ -240,12 +241,34 @@ export async function runScheduledTask(
 }
 
 /**
- * @deprecated The SQLite polling loop has been replaced by the cron-service
- * RabbitMQ subscription (see cron-subscriber.ts). This function is retained
- * as a no-op fallback so existing call sites don't break during migration.
+ * SQLite polling loop for locally-scheduled tasks.
+ *
+ * The cron-service (RabbitMQ) only fires for jobs it manages in its own
+ * Postgres DB. Tasks created via IPC / mcp__nanoclaw__schedule_task are
+ * stored in SQLite but never registered with the cron-service, so they
+ * would never execute without this loop.
+ *
+ * This runs alongside the cron-subscriber: each mechanism handles the tasks
+ * it owns. The GroupQueue deduplicates by taskId, so there is no risk of
+ * double-execution even if both mechanisms see the same task.
  */
-export function startSchedulerLoop(_deps: SchedulerDependencies): void {
-  logger.info(
-    'SQLite polling loop disabled — schedule management delegated to cron-service',
-  );
+export function startSchedulerLoop(deps: SchedulerDependencies): void {
+  logger.info('SQLite polling loop started for locally-scheduled tasks');
+
+  const poll = () => {
+    try {
+      const dueTasks = getDueTasks();
+      for (const task of dueTasks) {
+        logger.info({ taskId: task.id }, 'Polling loop: enqueueing due task');
+        deps.queue.enqueueTask(task.chat_jid, task.id, async () => {
+          await runScheduledTask(task, deps);
+        });
+      }
+    } catch (err) {
+      logger.error({ err }, 'Error in SQLite scheduler polling loop');
+    }
+    setTimeout(poll, SCHEDULER_POLL_INTERVAL);
+  };
+
+  setTimeout(poll, SCHEDULER_POLL_INTERVAL);
 }

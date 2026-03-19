@@ -32,7 +32,10 @@ describe('circuit-breaker', () => {
     });
 
     it('accepts config overrides', () => {
-      const health = getChannelHealth('test-ch', { maxAttempts: 3, baseDelay: 500 });
+      const health = getChannelHealth('test-ch', {
+        maxAttempts: 3,
+        baseDelay: 500,
+      });
       expect(health.config.maxAttempts).toBe(3);
       expect(health.config.baseDelay).toBe(500);
       expect(health.config.multiplier).toBe(2); // default preserved
@@ -47,7 +50,11 @@ describe('circuit-breaker', () => {
 
   describe('backoffDelay', () => {
     it('calculates exponential delays', () => {
-      const health = getChannelHealth('test-ch', { baseDelay: 1000, multiplier: 2, maxDelay: 60_000 });
+      const health = getChannelHealth('test-ch', {
+        baseDelay: 1000,
+        multiplier: 2,
+        maxDelay: 60_000,
+      });
       health.consecutiveFailures = 0;
       expect(backoffDelay(health)).toBe(1000);
       health.consecutiveFailures = 1;
@@ -59,7 +66,11 @@ describe('circuit-breaker', () => {
     });
 
     it('caps at maxDelay', () => {
-      const health = getChannelHealth('test-ch', { baseDelay: 1000, multiplier: 2, maxDelay: 10_000 });
+      const health = getChannelHealth('test-ch', {
+        baseDelay: 1000,
+        multiplier: 2,
+        maxDelay: 10_000,
+      });
       health.consecutiveFailures = 10;
       expect(backoffDelay(health)).toBe(10_000);
     });
@@ -194,7 +205,10 @@ describe('circuit-breaker', () => {
     });
 
     it('allows single probe in HALF_OPEN and recovers on success', async () => {
-      const health = getChannelHealth('test-ch', { cooldownMs: 1, baseDelay: 1 });
+      const health = getChannelHealth('test-ch', {
+        cooldownMs: 1,
+        baseDelay: 1,
+      });
       health.state = CircuitState.OPEN;
       health.lastFailureAt = Date.now() - 100; // past cooldown
       health.consecutiveFailures = 5;
@@ -208,7 +222,10 @@ describe('circuit-breaker', () => {
     });
 
     it('re-opens circuit on failed HALF_OPEN probe', async () => {
-      const health = getChannelHealth('test-ch', { cooldownMs: 1, baseDelay: 1 });
+      const health = getChannelHealth('test-ch', {
+        cooldownMs: 1,
+        baseDelay: 1,
+      });
       health.state = CircuitState.OPEN;
       health.lastFailureAt = Date.now() - 100;
       health.consecutiveFailures = 5;

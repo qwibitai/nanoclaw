@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import {
-  generateCorrelationId,
-  createCorrelationLogger,
-} from './logger.js';
+import { generateCorrelationId, createCorrelationLogger } from './logger.js';
 
 describe('logger correlation utilities', () => {
   it('generateCorrelationId returns a 12-char hex string', () => {
@@ -12,7 +9,9 @@ describe('logger correlation utilities', () => {
   });
 
   it('generateCorrelationId returns unique values', () => {
-    const ids = new Set(Array.from({ length: 100 }, () => generateCorrelationId()));
+    const ids = new Set(
+      Array.from({ length: 100 }, () => generateCorrelationId()),
+    );
     expect(ids.size).toBe(100);
   });
 

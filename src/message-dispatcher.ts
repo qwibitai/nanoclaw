@@ -88,10 +88,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  log.info(
-    { messageCount: missedMessages.length },
-    'Processing messages',
-  );
+  log.info({ messageCount: missedMessages.length }, 'Processing messages');
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -247,10 +244,7 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
-      log.error(
-        { error: output.error },
-        'Container agent error',
-      );
+      log.error({ error: output.error }, 'Container agent error');
       return 'error';
     }
 

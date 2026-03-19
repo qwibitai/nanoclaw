@@ -628,7 +628,13 @@ describe('runMigrations', () => {
 
     // Verify schema_migrations table was populated with all migration versions
     // We check indirectly: the full schema should be available
-    storeChatMetadata('test@g.us', '2024-01-01T00:00:00.000Z', 'Test', 'whatsapp', true);
+    storeChatMetadata(
+      'test@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Test',
+      'whatsapp',
+      true,
+    );
     const chats = getAllChats();
     expect(chats).toHaveLength(1);
     expect(chats[0].channel).toBe('whatsapp');
@@ -739,9 +745,11 @@ describe('runMigrations', () => {
     `);
 
     // Check that the existing table detection works by looking at sqlite_master
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_migrations')",
-    ).all() as Array<{ name: string }>;
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_migrations')",
+      )
+      .all() as Array<{ name: string }>;
     expect(tables.length).toBeGreaterThan(0);
 
     db.close();

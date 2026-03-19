@@ -140,14 +140,21 @@ describe('tmux session runner', () => {
     let statCalls = 0;
     vi.mocked(fs.statSync).mockImplementation(() => {
       statCalls++;
-      return { size: statCalls > 1 ? outputData.length : 0, isDirectory: () => false } as fs.Stats;
+      return {
+        size: statCalls > 1 ? outputData.length : 0,
+        isDirectory: () => false,
+      } as fs.Stats;
     });
     vi.mocked(fs.openSync).mockReturnValue(99);
-    vi.mocked(fs.readSync).mockImplementation((_fd, buffer: ArrayBufferView) => {
-      const data = Buffer.from(outputData);
-      data.copy(Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength));
-      return data.length;
-    });
+    vi.mocked(fs.readSync).mockImplementation(
+      (_fd, buffer: ArrayBufferView) => {
+        const data = Buffer.from(outputData);
+        data.copy(
+          Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+        );
+        return data.length;
+      },
+    );
 
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
@@ -177,13 +184,12 @@ describe('tmux session runner', () => {
   it('timeout with no output resolves as error', async () => {
     // Session stays alive until timeout
     vi.mocked(hasSession).mockReturnValue(true);
-    vi.mocked(fs.statSync).mockReturnValue({ size: 0, isDirectory: () => false } as fs.Stats);
+    vi.mocked(fs.statSync).mockReturnValue({
+      size: 0,
+      isDirectory: () => false,
+    } as fs.Stats);
 
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-    );
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
     // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
     await vi.advanceTimersByTimeAsync(1830000);

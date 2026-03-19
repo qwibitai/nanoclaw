@@ -41,7 +41,10 @@ describe('env', () => {
     await initSecrets();
     expect(isVaultConfigured()).toBe(true);
     expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ project: 'nanoclaw', environment: 'production' }),
+      expect.objectContaining({
+        project: 'nanoclaw',
+        environment: 'production',
+      }),
       'Solo Vault configured for on-demand secret fetching',
     );
   });
@@ -77,9 +80,8 @@ describe('env', () => {
       process.env.SOLO_VAULT_TOKEN = 'test-token';
       process.env.SOLO_VAULT_URL = `http://127.0.0.1:${port}`;
 
-      const { initSecrets, refreshSecrets, readEnvFile } = await import(
-        './env.js'
-      );
+      const { initSecrets, refreshSecrets, readEnvFile } =
+        await import('./env.js');
       await initSecrets();
       await refreshSecrets(['ANTHROPIC_API_KEY', 'TELEGRAM_BOT_TOKEN']);
 
@@ -115,9 +117,8 @@ describe('env', () => {
       process.env.SOLO_VAULT_TOKEN = 'key';
       process.env.SOLO_VAULT_URL = `http://127.0.0.1:${port}`;
 
-      const { initSecrets, refreshSecrets, readEnvFile } = await import(
-        './env.js'
-      );
+      const { initSecrets, refreshSecrets, readEnvFile } =
+        await import('./env.js');
       await initSecrets();
 
       // First fetch
@@ -163,9 +164,8 @@ describe('env', () => {
       process.env.SOLO_VAULT_TOKEN = 'key';
       process.env.SOLO_VAULT_URL = `http://127.0.0.1:${port}`;
 
-      const { initSecrets, refreshSecrets, readEnvFile } = await import(
-        './env.js'
-      );
+      const { initSecrets, refreshSecrets, readEnvFile } =
+        await import('./env.js');
       await initSecrets();
       await refreshSecrets(['ANTHROPIC_API_KEY']);
 

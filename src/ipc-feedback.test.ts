@@ -95,9 +95,11 @@ describe('feedback IPC operation', () => {
   });
 
   it('POSTs valid bug feedback to the Feedback Registry', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: '123' }), { status: 201 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: '123' }), { status: 201 }),
+      );
 
     await processTaskIpc(
       {
@@ -126,9 +128,11 @@ describe('feedback IPC operation', () => {
   });
 
   it('POSTs valid feature feedback with email', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: '456' }), { status: 201 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: '456' }), { status: 201 }),
+      );
 
     await processTaskIpc(
       {
@@ -191,9 +195,9 @@ describe('feedback IPC operation', () => {
   });
 
   it('does not include email when not provided', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 201 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 201 }));
 
     await processTaskIpc(
       {
