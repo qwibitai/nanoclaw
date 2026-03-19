@@ -74,10 +74,20 @@ function createSchema(database: Database.Database): void {
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS active_threads (
-      chat_jid TEXT PRIMARY KEY,
-      thread_id TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS thread_contexts (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid          TEXT NOT NULL,
+      thread_id         TEXT,
+      session_id        TEXT,
+      origin_message_id TEXT,
+      source            TEXT NOT NULL,
+      task_id           INTEGER,
+      created_at        TEXT NOT NULL,
+      last_active_at    TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_thread_ctx_chat ON thread_contexts(chat_jid);
+    CREATE INDEX IF NOT EXISTS idx_thread_ctx_thread ON thread_contexts(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_thread_ctx_origin ON thread_contexts(origin_message_id);
     CREATE TABLE IF NOT EXISTS watched_prs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       repo TEXT NOT NULL,
@@ -176,6 +186,24 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Migrate active_threads → thread_contexts
+  try {
+    const hasActiveThreads = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='active_threads'"
+    ).get();
+    if (hasActiveThreads) {
+      const now = new Date().toISOString();
+      const rows = database.prepare('SELECT chat_jid, thread_id FROM active_threads').all() as Array<{ chat_jid: string; thread_id: string }>;
+      for (const row of rows) {
+        database.prepare(
+          `INSERT OR IGNORE INTO thread_contexts (chat_jid, thread_id, source, created_at, last_active_at)
+           VALUES (?, ?, 'mention', ?, ?)`
+        ).run(row.chat_jid, row.thread_id, now, now);
+      }
+      database.exec('DROP TABLE active_threads');
+    }
+  } catch { /* migration already done */ }
 }
 
 export function initDatabase(): void {
@@ -578,32 +606,158 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
-// --- Active thread accessors (Discord thread tracking) ---
+// --- Thread context interfaces ---
 
+export interface ThreadContext {
+  id: number;
+  chat_jid: string;
+  thread_id: string | null;
+  session_id: string | null;
+  origin_message_id: string | null;
+  source: 'mention' | 'reply' | 'scheduled_task';
+  task_id: number | null;
+  created_at: string;
+  last_active_at: string;
+}
+
+export interface CreateThreadContextInput {
+  chatJid: string;
+  threadId: string | null;
+  sessionId: string | null;
+  originMessageId: string | null;
+  source: 'mention' | 'reply' | 'scheduled_task';
+  taskId?: number;
+}
+
+// --- Thread context CRUD ---
+
+export function createThreadContext(input: CreateThreadContextInput): ThreadContext {
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    `INSERT INTO thread_contexts (chat_jid, thread_id, session_id, origin_message_id, source, task_id, created_at, last_active_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    input.chatJid,
+    input.threadId ?? null,
+    input.sessionId ?? null,
+    input.originMessageId ?? null,
+    input.source,
+    input.taskId ?? null,
+    now,
+    now,
+  );
+  return getThreadContextById(result.lastInsertRowid as number)!;
+}
+
+export function getThreadContextById(id: number): ThreadContext | undefined {
+  return db
+    .prepare('SELECT * FROM thread_contexts WHERE id = ?')
+    .get(id) as ThreadContext | undefined;
+}
+
+export function getThreadContextByThreadId(threadId: string): ThreadContext | undefined {
+  return db
+    .prepare('SELECT * FROM thread_contexts WHERE thread_id = ? ORDER BY last_active_at DESC, id DESC LIMIT 1')
+    .get(threadId) as ThreadContext | undefined;
+}
+
+export function getThreadContextByOriginMessage(originMessageId: string): ThreadContext | undefined {
+  return db
+    .prepare('SELECT * FROM thread_contexts WHERE origin_message_id = ? ORDER BY created_at DESC LIMIT 1')
+    .get(originMessageId) as ThreadContext | undefined;
+}
+
+export function updateThreadContext(
+  id: number,
+  updates: { threadId?: string; sessionId?: string; taskId?: number },
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.threadId !== undefined) {
+    fields.push('thread_id = ?');
+    values.push(updates.threadId);
+  }
+  if (updates.sessionId !== undefined) {
+    fields.push('session_id = ?');
+    values.push(updates.sessionId);
+  }
+  if (updates.taskId !== undefined) {
+    fields.push('task_id = ?');
+    values.push(updates.taskId);
+  }
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(
+    `UPDATE thread_contexts SET ${fields.join(', ')} WHERE id = ?`,
+  ).run(...values);
+}
+
+export function touchThreadContext(id: number): void {
+  db.prepare(
+    'UPDATE thread_contexts SET last_active_at = ? WHERE id = ?',
+  ).run(new Date().toISOString(), id);
+}
+
+export function getActiveThreadContexts(chatJid: string, expiryHours: number): ThreadContext[] {
+  const cutoff = new Date(Date.now() - expiryHours * 60 * 60 * 1000).toISOString();
+  return db
+    .prepare(
+      'SELECT * FROM thread_contexts WHERE chat_jid = ? AND last_active_at > ? ORDER BY last_active_at DESC, id DESC',
+    )
+    .all(chatJid, cutoff) as ThreadContext[];
+}
+
+// --- Active thread accessors (deprecated — now wrappers around thread_contexts) ---
+
+/** @deprecated Use createThreadContext / getThreadContextByThreadId instead. */
 export function getActiveThread(chatJid: string): string | undefined {
   const row = db
-    .prepare('SELECT thread_id FROM active_threads WHERE chat_jid = ?')
-    .get(chatJid) as { thread_id: string } | undefined;
-  return row?.thread_id;
+    .prepare(
+      'SELECT thread_id FROM thread_contexts WHERE chat_jid = ? ORDER BY last_active_at DESC, id DESC LIMIT 1',
+    )
+    .get(chatJid) as { thread_id: string | null } | undefined;
+  return row?.thread_id ?? undefined;
 }
 
+/** @deprecated Use createThreadContext instead. */
 export function setActiveThread(chatJid: string, threadId: string): void {
-  db.prepare(
-    'INSERT OR REPLACE INTO active_threads (chat_jid, thread_id) VALUES (?, ?)',
-  ).run(chatJid, threadId);
+  // Upsert: if a context already exists for this chatJid+threadId, touch it; otherwise create one.
+  const existing = db
+    .prepare(
+      'SELECT id FROM thread_contexts WHERE chat_jid = ? AND thread_id = ? ORDER BY last_active_at DESC, id DESC LIMIT 1',
+    )
+    .get(chatJid, threadId) as { id: number } | undefined;
+  if (existing) {
+    touchThreadContext(existing.id);
+  } else {
+    createThreadContext({
+      chatJid,
+      threadId,
+      sessionId: null,
+      originMessageId: null,
+      source: 'mention',
+    });
+  }
 }
 
+/** @deprecated Use deleteActiveThread only removes by chatJid now (no-op if not found). */
 export function deleteActiveThread(chatJid: string): void {
-  db.prepare('DELETE FROM active_threads WHERE chat_jid = ?').run(chatJid);
+  db.prepare('DELETE FROM thread_contexts WHERE chat_jid = ?').run(chatJid);
 }
 
+/** @deprecated Use getActiveThreadContexts instead. */
 export function getAllActiveThreads(): Map<string, string> {
   const rows = db
-    .prepare('SELECT chat_jid, thread_id FROM active_threads')
+    .prepare(
+      'SELECT chat_jid, thread_id FROM thread_contexts WHERE thread_id IS NOT NULL ORDER BY last_active_at DESC, id DESC',
+    )
     .all() as Array<{ chat_jid: string; thread_id: string }>;
+  // Return most-recent thread per chatJid
   const result = new Map<string, string>();
   for (const row of rows) {
-    result.set(row.chat_jid, row.thread_id);
+    if (!result.has(row.chat_jid)) {
+      result.set(row.chat_jid, row.thread_id);
+    }
   }
   return result;
 }
