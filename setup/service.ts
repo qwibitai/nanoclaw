@@ -15,10 +15,25 @@ import {
   getNodePath,
   getServiceManager,
   hasSystemd,
+  hasAgentsh,
+  getAgentshPath,
   isRoot,
   isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+/**
+ * Returns agentsh exec prefix args if agentsh is installed and host config exists.
+ * Returns null if agentsh should not be used.
+ */
+function getAgentshExecArgs(projectRoot: string): { path: string; configPath: string } | null {
+  if (!hasAgentsh()) return null;
+  const configPath = path.join(projectRoot, 'host', 'agentsh', 'config.yaml');
+  if (!fs.existsSync(configPath)) return null;
+  const agentshPath = getAgentshPath();
+  if (!agentshPath) return null;
+  return { path: agentshPath, configPath };
+}
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -73,6 +88,10 @@ function setupLaunchd(
   nodePath: string,
   homeDir: string,
 ): void {
+  const agentsh = getAgentshExecArgs(projectRoot);
+  if (agentsh) {
+    logger.info({ agentshPath: agentsh.path }, 'agentsh detected — wrapping launchd service');
+  }
   const plistPath = path.join(
     homeDir,
     'Library',
@@ -88,7 +107,12 @@ function setupLaunchd(
     <key>Label</key>
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
-    <array>
+    <array>${agentsh ? `
+        <string>${agentsh.path}</string>
+        <string>exec</string>
+        <string>--config</string>
+        <string>${agentsh.configPath}</string>
+        <string>--</string>` : ''}
         <string>${nodePath}</string>
         <string>${projectRoot}/dist/index.js</string>
     </array>
@@ -103,7 +127,9 @@ function setupLaunchd(
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
         <key>HOME</key>
-        <string>${homeDir}</string>
+        <string>${homeDir}</string>${agentsh ? `
+        <key>AGENTSH_CONFIG</key>
+        <string>${agentsh.configPath}</string>` : ''}
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -207,6 +233,10 @@ function setupSystemd(
   homeDir: string,
 ): void {
   const runningAsRoot = isRoot();
+  const agentsh = getAgentshExecArgs(projectRoot);
+  if (agentsh) {
+    logger.info({ agentshPath: agentsh.path }, 'agentsh detected — wrapping systemd service');
+  }
 
   // Root uses system-level service, non-root uses user-level
   let unitPath: string;
@@ -233,18 +263,22 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  const execStart = agentsh
+    ? `${agentsh.path} exec --config ${agentsh.configPath} -- ${nodePath} ${projectRoot}/dist/index.js`
+    : `${nodePath} ${projectRoot}/dist/index.js`;
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
+ExecStart=${execStart}
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin${agentsh ? `\nEnvironment=AGENTSH_CONFIG=${agentsh.configPath}` : ''}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -312,8 +346,17 @@ function setupNohupFallback(
 ): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
+  const agentsh = getAgentshExecArgs(projectRoot);
+  if (agentsh) {
+    logger.info({ agentshPath: agentsh.path }, 'agentsh detected — wrapping nohup command');
+  }
+
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
   const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+
+  const nohupCmd = agentsh
+    ? `nohup ${JSON.stringify(agentsh.path)} exec --config ${JSON.stringify(agentsh.configPath)} -- ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')}`
+    : `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')}`;
 
   const lines = [
     '#!/bin/bash',
@@ -323,6 +366,7 @@ function setupNohupFallback(
     'set -euo pipefail',
     '',
     `cd ${JSON.stringify(projectRoot)}`,
+    ...(agentsh ? [`export AGENTSH_CONFIG=${JSON.stringify(agentsh.configPath)}`] : []),
     '',
     '# Stop existing instance if running',
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
@@ -335,7 +379,7 @@ function setupNohupFallback(
     'fi',
     '',
     'echo "Starting NanoClaw..."',
-    `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
+    `${nohupCmd} \\`,
     `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
     `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
     '',
