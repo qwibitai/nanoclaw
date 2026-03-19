@@ -1,4 +1,4 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, spawnSync } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
@@ -236,7 +236,51 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // --- M2 graduation: evaluate clean run criteria ---
+  // Think of this like a scorecard — after each cron run, grade it against
+  // the 6 clean-run criteria and log the result for milestone tracking.
+  evaluateM2CleanRun(task.id, error ? 'error' : 'success', !!result, error);
 }
+
+
+/**
+ * Evaluate a completed task run against M2 clean run criteria.
+ * Non-blocking — failures here don't affect the task result.
+ */
+function evaluateM2CleanRun(
+  taskId: string,
+  status: string,
+  resultDelivered: boolean,
+  error: string | null,
+): void {
+  try {
+    const trackerPath = `${process.env.HOME || '/home/atlas'}/.atlas/lib/autonomy_tracker.py`;
+    const args = [
+      trackerPath,
+      'm2-evaluate',
+      '--task-id',
+      taskId,
+      '--run-status',
+      status,
+    ];
+    if (resultDelivered) args.push('--result-delivered');
+    if (error) {
+      args.push('--run-error', error.slice(0, 200));
+    }
+
+    const proc = spawnSync('python3', args, { timeout: 10000 });
+    if (proc.status !== 0) {
+      logger.warn(
+        { taskId, stderr: proc.stderr?.toString().slice(0, 200) },
+        'M2 evaluation returned non-zero',
+      );
+    } else {
+      logger.info({ taskId }, 'M2 clean run evaluation completed');
+    }
+  } catch (err) {
+    logger.warn({ taskId, err }, 'M2 evaluation failed (non-blocking)');
+  }
 
 let schedulerRunning = false;
 
