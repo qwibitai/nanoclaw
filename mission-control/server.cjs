@@ -343,9 +343,13 @@ function progressBar(pct, color) {
 function cleanContent(content) {
   if (!content) return '';
   return content
-    .replace(/@Atlas\s*/gi, '')
-    .replace(/@atlas_gpg_bot\s*/gi, '')
+    // Strip bot mentions first (longer match before shorter)
     .replace(/@atlas_\w+_bot\s*/gi, '')
+    .replace(/@atlas_gpg_bot\s*/gi, '')
+    .replace(/@Atlas\s*/gi, '')
+    // Clean up any leftover bare bot handle fragments
+    .replace(/\batlas_gpg_bot\b\s*/gi, '')
+    .replace(/\batlas_\w+_bot\b\s*/gi, '')
     .trim();
 }
 
