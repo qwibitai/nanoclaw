@@ -55,6 +55,7 @@ server.tool(
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
+      isScheduled: process.env.NANOCLAW_SCHEDULED_TASK === '1' ? 'true' : undefined,
     };
 
     writeIpcFile(MESSAGES_DIR, data);

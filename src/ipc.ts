@@ -25,6 +25,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendChannelMessage: (jid: string, text: string) => Promise<void>;
   sendFile: (
     jid: string,
     files: Array<{ path: string; name: string }>,
@@ -147,7 +148,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Scheduled task send_message calls always go to main channel, never a thread
+                  if (data.isScheduled === 'true') {
+                    await deps.sendChannelMessage(data.chatJid, data.text);
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',

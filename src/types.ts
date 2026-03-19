@@ -91,6 +91,9 @@ export interface Channel {
   formattingInstructions?: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
+  /** Always sends to the main channel, never a thread. Use for scheduled tasks and system announcements.
+   *  Falls back to sendMessage for channels that don't implement thread routing. */
+  sendChannelMessage?(jid: string, text: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

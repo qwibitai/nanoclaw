@@ -42,7 +42,6 @@ export class DiscordChannel implements Channel {
   private activeThread = new Map<string, string>();
   private activeThreadLoaded = false;
   // JIDs with an active user-triggered conversation (not persisted — clears on restart)
-  // Prevents scheduled task output from going to a stale thread
   private activeConversation = new Set<string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
@@ -114,6 +113,18 @@ export class DiscordChannel implements Channel {
           chatName = senderName;
         }
 
+        // Fetch replied-to message early — used for trigger detection and reply context
+        let repliedToMessage: Message | null = null;
+        if (message.reference?.messageId) {
+          try {
+            repliedToMessage = await message.channel.messages.fetch(
+              message.reference.messageId,
+            );
+          } catch {
+            // Replied-to message may have been deleted
+          }
+        }
+
         // Replies in a bot-created thread are implicitly directed at the bot
         const isInBotThread =
           isThread && this.getThread(chatJid) === message.channelId;
@@ -161,6 +172,18 @@ export class DiscordChannel implements Channel {
           this.activeConversation.add(chatJid);
         }
 
+        // Direct reply to a bot message outside a thread — treat as directed at the bot
+        if (
+          !isInBotThread &&
+          repliedToMessage &&
+          this.client?.user &&
+          repliedToMessage.author.id === this.client.user.id &&
+          !TRIGGER_PATTERN.test(content)
+        ) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+          this.activeConversation.add(chatJid);
+        }
+
         // Handle attachments — store placeholders so the agent knows something was sent
         if (message.attachments.size > 0) {
           const attachmentDescriptions = [...message.attachments.values()].map(
@@ -185,19 +208,12 @@ export class DiscordChannel implements Channel {
         }
 
         // Handle reply context — include who the user is replying to
-        if (message.reference?.messageId) {
-          try {
-            const repliedTo = await message.channel.messages.fetch(
-              message.reference.messageId,
-            );
-            const replyAuthor =
-              repliedTo.member?.displayName ||
-              repliedTo.author.displayName ||
-              repliedTo.author.username;
-            content = `[Reply to ${replyAuthor}] ${content}`;
-          } catch {
-            // Referenced message may have been deleted
-          }
+        if (repliedToMessage) {
+          const replyAuthor =
+            repliedToMessage.member?.displayName ||
+            repliedToMessage.author.displayName ||
+            repliedToMessage.author.username;
+          content = `[Reply to ${replyAuthor}] ${content}`;
         }
 
         // Store chat metadata for discovery
@@ -358,6 +374,29 @@ export class DiscordChannel implements Channel {
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
+    }
+  }
+
+  async sendChannelMessage(jid: string, text: string): Promise<void> {
+    if (!this.client) {
+      logger.warn('Discord client not initialized');
+      return;
+    }
+    try {
+      const channelId = jid.replace(/^dc:/, '');
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('send' in channel)) {
+        logger.warn({ jid }, 'Discord channel not found or not text-based');
+        return;
+      }
+      const textChannel = channel as TextChannel;
+      await this.sendChunked(textChannel, text);
+      logger.info(
+        { jid, length: text.length },
+        'Discord scheduled message sent to channel',
+      );
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Discord channel message');
     }
   }
 

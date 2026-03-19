@@ -289,6 +289,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  isScheduledTask?: boolean,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -337,6 +338,11 @@ function buildContainerArgs(
     args.push('-e', `GEMINI_API_KEY=${geminiSecrets.GEMINI_API_KEY}`);
   }
 
+  // Tag scheduled task containers so in-container send_message routes to main channel
+  if (isScheduledTask) {
+    args.push('-e', 'NANOCLAW_SCHEDULED_TASK=1');
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
@@ -377,7 +383,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, input.isScheduledTask);
 
   logger.debug(
     {
