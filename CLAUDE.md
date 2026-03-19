@@ -117,11 +117,11 @@ There are two case types: **work** (customer tasks) and **dev** (tooling improve
 - Dev agents also encounter friction → file improvement requests → also become **dev cases**
 - When any case is marked done, the agent reflects on impediments → `case_suggest_dev` → new dev case suggested
 
-**All case operations go through the case MCP tools** (`case_create`, `case_mark_done`, `case_suggest_dev`, etc.), never raw `gh` CLI. The backend adapter (`case-backend-github.ts`) handles GitHub sync transparently.
+**All case operations go through the case MCP tools** (`case_create`, `case_mark_done`, `case_suggest_dev`, etc.) for container agents, or via `node dist/cli-kaizen.js case-create` for host-side CLI agents. Never use raw SQL or `gh` CLI for case operations. The backend adapter (`case-backend-github.ts`) handles GitHub sync transparently.
 
 **Separate CRM backends:** customer cases → per-customer CRM repo, dev/kaizen cases → `Garsson-io/kaizen`. The domain model (`cases.ts`) and backend adapter abstract this — agents don't know or care which repo backs their case.
 
-**Dev workflow skills** (`/pick-work` → `/accept-case` → `/implement-spec` → `/kaizen`) manage the kaizen lifecycle. Host-side skills use `cli-kaizen.ts` for backlog queries.
+**Dev workflow skills** (`/pick-work` → `/accept-case` → `/implement-spec` → `/kaizen`) manage the kaizen lifecycle. Host-side skills use `cli-kaizen.ts` for backlog queries and case creation.
 
 **Architecture docs:** See [`docs/kaizen-ipc-architecture.md`](docs/kaizen-ipc-architecture.md) for the full architecture diagram and [`docs/kaizen-cases-unification-spec.md`](docs/kaizen-cases-unification-spec.md) for the unification spec.
 
@@ -302,7 +302,7 @@ The point of review is to catch gaps. A gap identified but not closed is not a r
 
 ## Kaizen Backlog
 
-Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `node dist/cli-kaizen.js list|view`. Include: what, why, when, how, reproduction steps, and verification criteria.
+Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `node dist/cli-kaizen.js list|view` and create cases via `node dist/cli-kaizen.js case-create`. Include: what, why, when, how, reproduction steps, and verification criteria.
 
 ## Post-Merge: Deploy & Maintenance Policy
 

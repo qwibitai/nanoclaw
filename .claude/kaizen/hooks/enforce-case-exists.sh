@@ -4,7 +4,7 @@
 # PreToolUse hook on Edit|Write: blocks source code edits in worktrees
 # that don't have a corresponding case record in the database.
 #
-# This catches agents that skip case creation (via case_create IPC)
+# This catches agents that skip case creation (via CLI or IPC)
 # before starting implementation work in a worktree.
 #
 # Only fires in worktrees (not main checkout — enforce-worktree-writes.sh
@@ -96,9 +96,12 @@ jq -n \
   --arg file "$FILE_PATH" \
   --arg reason "No case record found for branch '$BRANCH'. All dev work must have a case before writing code.
 
-Create a case first using case_create IPC (via /implement-spec or directly).
+Create a case first:
+  node dist/cli-kaizen.js case-create --description \"your description\" --type dev --github-issue N
+
+Or via /implement-spec (which calls the CLI for you).
+
 This ensures:
-  - status:active label is applied to the kaizen issue
   - /pick-work filters out this work (prevents duplicate effort)
   - Kaizen reflection fires on completion
 

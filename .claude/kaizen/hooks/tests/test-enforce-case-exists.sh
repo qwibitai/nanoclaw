@@ -74,7 +74,7 @@ else
 
       # Verify the deny message mentions the branch
       assert_contains "deny message mentions branch" "$BRANCH" "$OUTPUT"
-      assert_contains "deny message mentions case_create" "case_create" "$OUTPUT"
+      assert_contains "deny message mentions cli-kaizen.js case-create" "case-create" "$OUTPUT"
     fi
   else
     echo "  SKIP: no database at $DB_PATH"
