@@ -12,6 +12,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMedia?: (jid: string, filePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -454,6 +455,34 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'send_media': {
+      // Send an image/media file to a JID.
+      // Payload: { type: 'send_media', targetJid: '...', filePath: '/abs/path/to/file.png', caption?: '...' }
+      const mediaJid = data.targetJid ?? data.chatJid;
+      if (!mediaJid || !('filePath' in data)) {
+        logger.warn({ data }, 'send_media: missing targetJid or filePath');
+        break;
+      }
+      // Authorization: non-main groups can only send media to their own JID
+      const mediaTargetGroup = registeredGroups[mediaJid];
+      if (!isMain && (!mediaTargetGroup || mediaTargetGroup.folder !== sourceGroup)) {
+        logger.warn(
+          { mediaJid, sourceGroup },
+          'Unauthorized send_media attempt blocked',
+        );
+        break;
+      }
+      const fp = (data as any).filePath as string;
+      const caption = (data as any).caption as string | undefined;
+      if (!deps.sendMedia) {
+        logger.warn('send_media IPC received but channel does not support sendMedia');
+        break;
+      }
+      await deps.sendMedia(mediaJid, fp, caption);
+      logger.info({ mediaJid, fp }, 'Media sent via IPC');
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
