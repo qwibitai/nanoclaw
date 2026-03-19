@@ -298,6 +298,9 @@ async function main(): Promise<void> {
     if (dryRun) {
       // Strip internal fields before showing to user
       const { api_key, distinct_id, ...visible } = payload;
+      const props = visible.properties as Record<string, unknown>;
+      delete props.$process_person_profile;
+      delete props.$lib;
       console.log(JSON.stringify(visible, null, 2));
       return;
     }
