@@ -2,11 +2,19 @@ import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
+import { minimatch } from 'minimatch';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  updateTask,
+  storeAttachment,
+  updateAttachmentMessageId,
+} from './db.js';
+import { resolveGroupFolderPath, isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -17,6 +25,18 @@ export interface IpcDeps {
     imageUrl: string,
     caption?: string,
   ) => Promise<void>;
+  sendReaction?: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
+  sendDocument?: (
+    jid: string,
+    filePath: string,
+    caption?: string,
+    fileName?: string,
+    mimeType?: string,
+  ) => Promise<{ messageId: string }>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -121,6 +141,157 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC image attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  if (deps.sendReaction) {
+                    await deps.sendReaction(
+                      data.chatJid,
+                      data.emoji,
+                      data.messageId,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      'IPC reaction sent',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'file' &&
+                data.chatJid &&
+                data.relativeFilePath
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  if (deps.sendDocument) {
+                    const groupConfig = Object.values(registeredGroups).find(
+                      (g) => g.folder === sourceGroup,
+                    );
+                    const allowedFolders = groupConfig?.allowedSendPaths ?? [
+                      'generated',
+                    ];
+                    const requestedFolder =
+                      (data.sourceFolder as string | undefined) ?? 'generated';
+
+                    if (!allowedFolders.includes(requestedFolder)) {
+                      logger.warn(
+                        { sourceGroup, requestedFolder, allowedFolders },
+                        'IPC file blocked: folder not in allowedSendPaths',
+                      );
+                    } else {
+                      const basename = path.basename(
+                        data.relativeFilePath as string,
+                      );
+
+                      // Hard-coded blocklist for known system files
+                      const SYSTEM_FILES = new Set([
+                        'CLAUDE.md',
+                        'search.db',
+                        'groups.json',
+                        'messages.db',
+                      ]);
+
+                      // Per-group custom blocklist (glob patterns)
+                      const blockedPatterns =
+                        groupConfig?.blockedSendFilePatterns ?? [];
+                      const isBlocked =
+                        SYSTEM_FILES.has(basename) ||
+                        blockedPatterns.some((pattern) =>
+                          minimatch(basename, pattern),
+                        );
+
+                      if (isBlocked) {
+                        logger.warn(
+                          { sourceGroup, basename },
+                          'IPC file blocked: filename is protected',
+                        );
+                      } else {
+                        const hostPath = path.join(
+                          resolveGroupFolderPath(sourceGroup),
+                          requestedFolder,
+                          basename,
+                        );
+
+                        if (!fs.existsSync(hostPath)) {
+                          logger.warn(
+                            { hostPath },
+                            'IPC file not found on host',
+                          );
+                        } else {
+                          // Write provisional DB record before send (crash safety)
+                          const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                          const fileSize = fs.statSync(hostPath).size;
+                          storeAttachment({
+                            message_id: tempId,
+                            chat_jid: data.chatJid as string,
+                            direction: 'outbound',
+                            category: 'generated',
+                            file_path: hostPath,
+                            file_name:
+                              (data.fileName as string | undefined) ?? basename,
+                            mime_type: data.mimeType as string | undefined,
+                            file_size: fileSize,
+                            created_at: new Date().toISOString(),
+                          });
+                          try {
+                            const { messageId } = await deps.sendDocument(
+                              data.chatJid as string,
+                              hostPath,
+                              data.caption as string | undefined,
+                              (data.fileName as string | undefined) ?? basename,
+                              data.mimeType as string | undefined,
+                            );
+                            updateAttachmentMessageId(
+                              tempId,
+                              data.chatJid as string,
+                              messageId,
+                            );
+                            logger.info(
+                              {
+                                chatJid: data.chatJid,
+                                sourceGroup,
+                                hostPath,
+                                messageId,
+                              },
+                              'IPC file sent',
+                            );
+                          } catch (err) {
+                            logger.error(
+                              {
+                                err,
+                                hostPath,
+                                chatJid: data.chatJid,
+                                sourceGroup,
+                              },
+                              'Failed to send IPC file',
+                            );
+                            // tempId row kept for debugging
+                          }
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC file attempt blocked',
                   );
                 }
               }
