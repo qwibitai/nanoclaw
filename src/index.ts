@@ -1989,11 +1989,12 @@ async function main(): Promise<void> {
       // Pass null to explicitly skip thread creation — scheduled task output
       // is system-originated and should post to the channel directly.
       // suppressActions: scheduled output may list PRs the user didn't create.
-      if (text) await channel.sendMessage(jid, text, null, { suppressActions: true });
+      if (text)
+        await channel.sendMessage(jid, text, null, { suppressActions: true });
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text, sender?) => {
+    sendMessage: (jid, text, sender?, threadId?) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       text = stripInternalTags(text);
@@ -2007,10 +2008,22 @@ async function main(): Promise<void> {
       // across concurrent threads and would cause cross-contamination.
       ipcOutputSentJids.add(jid);
       if (resolvedJid !== jid) ipcOutputSentJids.add(resolvedJid);
+      // Use threadId as triggerMessageId to create the thread on first IPC
+      // message. Only when the resolved JID is still a parent (thread not
+      // yet created). Once the thread exists, resolveIpcJid returns the
+      // thread JID and triggerMsgId stays null (send directly to thread).
+      const isAlreadyThread = !!parseThreadJid(resolvedJid);
+      const triggerMsgId = !isAlreadyThread && threadId ? threadId : null;
       if (sender && channel.sendSwarmMessage) {
+        // Swarm messages can't create threads (no triggerMsgId param).
+        // If the thread doesn't exist yet, send via regular sendMessage
+        // first to create it, then the swarm path will find the redirect.
+        if (triggerMsgId) {
+          return channel.sendMessage(resolvedJid, `**[${sender}]** ${text}`, triggerMsgId);
+        }
         return channel.sendSwarmMessage(resolvedJid, text, sender);
       }
-      return channel.sendMessage(resolvedJid, text, null);
+      return channel.sendMessage(resolvedJid, text, triggerMsgId);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

@@ -55,7 +55,7 @@ const VALID_MEMORY_TYPES = [
 ] as const;
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string, sender?: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, sender?: string, threadId?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -128,7 +128,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text, data.sender);
+                  await deps.sendMessage(data.chatJid, data.text, data.sender, data.threadId);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup, sender: data.sender },
                     'IPC message sent',
@@ -1301,10 +1301,7 @@ function processQueryIpc(
     case 'scan_commits': {
       runCommitDigestForGroup(sourceGroup, registeredGroups)
         .then((result) => {
-          logger.info(
-            { sourceGroup, ...result },
-            'IPC scan_commits completed',
-          );
+          logger.info({ sourceGroup, ...result }, 'IPC scan_commits completed');
           writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
             status: 'ok',
             repos: result.repos,
