@@ -107,8 +107,9 @@ async function callHaiku(responseText: string): Promise<QualityCheckResult> {
     // if the incoming request already has one. Send a placeholder so the proxy
     // injects the real OAuth token. Without this, the request arrives at
     // api.anthropic.com with no auth → 401.
+    // DO NOT send x-api-key — the Anthropic API checks it first and rejects
+    // "proxy-placeholder" before looking at the valid Authorization header.
     headers['Authorization'] = 'Bearer proxy-placeholder';
-    headers['x-api-key'] = 'proxy-placeholder';
 
     const log = (msg: string) => console.error(`[response-interceptor] ${msg}`);
 
