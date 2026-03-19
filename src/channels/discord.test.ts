@@ -931,25 +931,24 @@ describe('DiscordChannel', () => {
       expect(textChannel.send).toHaveBeenCalledWith('TRANSFORMED');
     });
 
-    it('passes transformed text to buildPrButtons, not original', async () => {
-      vi.mocked(transformTablesInText).mockReturnValueOnce({
-        text: 'No PR links here',
-      });
-
+    it('does not show merge button without triggerMessageId even if text has PR URL', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      // Original text has a PR link but transformed does not — no buttons expected
+      // Send with null triggerMessageId (like scheduled tasks / IPC)
       await channel.sendMessage(
         'dc:1234567890123456',
-        'https://github.com/owner/repo/pull/1',
+        'Check out https://github.com/owner/repo/pull/1',
+        null,
       );
 
       const textChannel =
         await currentClient().channels.fetch('1234567890123456');
-      // Called with no components because transformed text has no PR link
-      expect(textChannel.send).toHaveBeenCalledWith('No PR links here');
+      // Called with plain text (no components) because triggerMessageId is absent
+      expect(textChannel.send).toHaveBeenCalledWith(
+        'Check out https://github.com/owner/repo/pull/1',
+      );
     });
   });
 });

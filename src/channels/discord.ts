@@ -465,7 +465,12 @@ export class DiscordChannel implements Channel {
       // Collapse --- horizontal rules (and surrounding blank lines) into a single blank line
       text = text.replace(/\n*^\s*---\s*$\n*/gm, '\n\n');
       ({ text } = transformTablesInText('discord', text));
-      const components = this.buildPrButtons(text);
+      // Only show merge button for agent responses (triggerMessageId is set),
+      // not for scheduled tasks or IPC send_message calls which may mention
+      // unrelated PRs (e.g., daily summaries listing team PRs).
+      const components = triggerMessageId
+        ? this.buildPrButtons(text)
+        : undefined;
       await this.sendChunked(textChannel, text, components);
       logger.info({ jid, length: text.length }, 'Discord message sent');
     } catch (err) {
