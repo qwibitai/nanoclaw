@@ -24,6 +24,25 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Mock DB — thread context functions used by the new multi-thread routing
+vi.mock('../db.js', () => ({
+  createThreadContext: vi.fn((input: any) => ({
+    id: 1,
+    chat_jid: input.chatJid,
+    thread_id: input.threadId ?? null,
+    session_id: input.sessionId ?? null,
+    origin_message_id: input.originMessageId ?? null,
+    source: input.source,
+    task_id: input.taskId ?? null,
+    created_at: new Date().toISOString(),
+    last_active_at: new Date().toISOString(),
+  })),
+  getThreadContextByThreadId: vi.fn().mockReturnValue(undefined),
+  getThreadContextByOriginMessage: vi.fn().mockReturnValue(undefined),
+  updateThreadContext: vi.fn(),
+  touchThreadContext: vi.fn(),
+}));
+
 // --- discord.js mock ---
 
 type Handler = (...args: any[]) => any;
@@ -164,6 +183,8 @@ function createMessage(overrides: {
     guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
+      isThread: () => false,
+      parentId: null,
       messages: {
         fetch: vi.fn().mockResolvedValue({
           author: { username: 'Bob', displayName: 'Bob' },

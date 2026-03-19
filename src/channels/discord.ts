@@ -8,10 +8,12 @@ import {
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import {
-  deleteActiveThread,
-  getAllActiveThreads,
-  getActiveThread,
-  setActiveThread,
+  createThreadContext,
+  getThreadContextByThreadId,
+  getThreadContextByOriginMessage,
+  updateThreadContext,
+  touchThreadContext,
+  ThreadContext,
 } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -36,41 +38,25 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
-  // Track the triggering @mention message per channel so responses go into a thread
-  private pendingTrigger = new Map<string, Message>();
-  // Track active thread per channel — persisted in DB, cached in memory
-  private activeThread = new Map<string, string>();
-  private activeThreadLoaded = false;
+  // Pending triggers: chatJid → { message, contextId } for creating Discord thread on first response
+  private pendingTrigger = new Map<string, { message: Message; contextId: number }>();
   // JIDs with an active user-triggered conversation (not persisted — clears on restart)
   private activeConversation = new Set<string>();
+  // Current send target: `{jid}:{threadId}` → ThreadContext (set by index.ts before streaming)
+  private currentSendTarget = new Map<string, ThreadContext>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
   }
 
-  private ensureThreadsLoaded(): void {
-    if (!this.activeThreadLoaded) {
-      this.activeThread = getAllActiveThreads();
-      this.activeThreadLoaded = true;
+  setCurrentThreadContext(jid: string, threadId: string, context: ThreadContext | null): void {
+    const key = `${jid}:${threadId}`;
+    if (context) {
+      this.currentSendTarget.set(key, context);
+    } else {
+      this.currentSendTarget.delete(key);
     }
-  }
-
-  private setThread(chatJid: string, threadId: string): void {
-    this.ensureThreadsLoaded();
-    this.activeThread.set(chatJid, threadId);
-    setActiveThread(chatJid, threadId);
-  }
-
-  private deleteThread(chatJid: string): void {
-    this.ensureThreadsLoaded();
-    this.activeThread.delete(chatJid);
-    deleteActiveThread(chatJid);
-  }
-
-  private getThread(chatJid: string): string | undefined {
-    this.ensureThreadsLoaded();
-    return this.activeThread.get(chatJid);
   }
 
   async connect(): Promise<void> {
@@ -126,8 +112,9 @@ export class DiscordChannel implements Channel {
         }
 
         // Replies in a bot-created thread are implicitly directed at the bot
+        // Check by looking up whether this Discord thread has a thread context
         const isInBotThread =
-          isThread && this.getThread(chatJid) === message.channelId;
+          isThread && !!getThreadContextByThreadId(message.channelId);
         if (isInBotThread && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
           this.activeConversation.add(chatJid);
@@ -137,15 +124,16 @@ export class DiscordChannel implements Channel {
         // Discord mentions look like <@botUserId> — these won't match
         // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
         // when the bot is @mentioned.
+        let isBotMentioned = false;
         if (!isInBotThread && this.client?.user) {
           const botId = this.client.user.id;
           // Check for role mentions that reference the bot's managed role
           const botRoleId = message.guild?.members?.me?.roles?.botRole?.id;
-          const isBotMentioned =
+          isBotMentioned =
             message.mentions.users.has(botId) ||
             content.includes(`<@${botId}>`) ||
             content.includes(`<@!${botId}>`) ||
-            (botRoleId && content.includes(`<@&${botRoleId}>`));
+            !!(botRoleId && content.includes(`<@&${botRoleId}>`));
 
           if (isBotMentioned) {
             // Strip the <@botId> or <@&roleId> mention to avoid visual clutter
@@ -160,10 +148,7 @@ export class DiscordChannel implements Channel {
             if (!TRIGGER_PATTERN.test(content)) {
               content = `@${ASSISTANT_NAME} ${content}`;
             }
-            // Store this message so the response is sent as a thread
-            this.pendingTrigger.set(chatJid, message);
             this.activeConversation.add(chatJid);
-            this.deleteThread(chatJid);
           }
         }
 
@@ -182,6 +167,37 @@ export class DiscordChannel implements Channel {
         ) {
           content = `@${ASSISTANT_NAME} ${content}`;
           this.activeConversation.add(chatJid);
+        }
+
+        // --- Thread context tracking ---
+        let threadContextId: number | undefined;
+
+        if (isBotMentioned) {
+          // New @mention → new thread context
+          const ctx = createThreadContext({
+            chatJid, threadId: null, sessionId: null,
+            originMessageId: msgId, source: 'mention',
+          });
+          this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
+          threadContextId = ctx.id;
+        } else if (isInBotThread) {
+          // Message in existing bot thread — look up by Discord thread channel ID
+          const ctx = getThreadContextByThreadId(message.channelId);
+          if (ctx) {
+            touchThreadContext(ctx.id);
+            threadContextId = ctx.id;
+          }
+        } else if (repliedToMessage && repliedToMessage.author.id === this.client?.user?.id) {
+          // Reply to bot message in channel
+          let ctx = getThreadContextByOriginMessage(repliedToMessage.id);
+          if (!ctx) {
+            ctx = createThreadContext({
+              chatJid, threadId: null, sessionId: null,
+              originMessageId: repliedToMessage.id, source: 'reply',
+            });
+          }
+          this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
+          threadContextId = ctx.id;
         }
 
         // Handle attachments — store placeholders so the agent knows something was sent
@@ -245,6 +261,7 @@ export class DiscordChannel implements Channel {
           content,
           timestamp,
           is_from_me: false,
+          thread_context_id: threadContextId,
         });
 
         logger.info(
@@ -319,37 +336,17 @@ export class DiscordChannel implements Channel {
       }
 
       const textChannel = channel as TextChannel;
-      const triggerMsg = this.pendingTrigger.get(jid);
-      const existingThreadId = this.getThread(jid);
 
-      if (existingThreadId && triggerMsg) {
-        // New @mention with existing thread — fall through to create new thread
-      } else if (existingThreadId && this.activeConversation.has(jid)) {
-        // Streaming continuation — send to the already-created thread
-        try {
-          const thread = await textChannel.threads.fetch(existingThreadId);
-          if (thread) {
-            await this.sendChunked(thread, text);
-            logger.info(
-              { jid, threadId: existingThreadId, length: text.length },
-              'Discord message sent to existing thread',
-            );
-            return;
-          }
-        } catch {
-          // Thread may have been deleted; fall through to create new one or send to channel
-          this.deleteThread(jid);
-        }
-      }
-
-      if (triggerMsg) {
-        // Create a new thread on the triggering @mention message
+      // Step 1: If there's a pending trigger → create a new thread
+      const triggerInfo = this.pendingTrigger.get(jid);
+      if (triggerInfo) {
         this.pendingTrigger.delete(jid);
         try {
-          const thread = await triggerMsg.startThread({
+          const thread = await triggerInfo.message.startThread({
             name: text.slice(0, 100).replace(/\n/g, ' ') || 'Response',
           });
-          this.setThread(jid, thread.id);
+          // Update the thread context with the actual Discord thread ID
+          updateThreadContext(triggerInfo.contextId, { threadId: thread.id });
           await this.sendChunked(thread, text);
           logger.info(
             { jid, threadId: thread.id, length: text.length },
@@ -361,10 +358,33 @@ export class DiscordChannel implements Channel {
             { jid, err },
             'Failed to create thread, falling back to channel',
           );
+          // Fall through to channel send
         }
       }
 
-      // No trigger context (scheduled task, IPC, etc.) — send to main channel
+      // Step 2: If there's a currentSendTarget for this jid → send to that thread
+      for (const [key, ctx] of this.currentSendTarget) {
+        if (key.startsWith(`${jid}:`)) {
+          if (ctx.thread_id) {
+            try {
+              const thread = await textChannel.threads.fetch(ctx.thread_id);
+              if (thread) {
+                await this.sendChunked(thread, text);
+                logger.info(
+                  { jid, threadId: ctx.thread_id, length: text.length },
+                  'Discord message sent to existing thread',
+                );
+                return;
+              }
+            } catch {
+              // Thread deleted, fall through
+            }
+          }
+          break;
+        }
+      }
+
+      // Step 3: No trigger context (scheduled task, IPC, etc.) — send to main channel
       await this.sendChunked(textChannel, text);
       // Clear conversation flag so future scheduled tasks go to main channel, not stale threads
       this.activeConversation.delete(jid);
@@ -434,15 +454,19 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
 
-      // Send to active thread if one exists, otherwise to channel
-      const threadId = this.getThread(jid);
+      // Send to active thread from currentSendTarget if one exists, otherwise to channel
       let target: { send: (options: object) => Promise<unknown> } = textChannel;
-      if (threadId) {
-        try {
-          const thread = await textChannel.threads.fetch(threadId);
-          if (thread) target = thread;
-        } catch {
-          // Thread deleted, fall through to channel
+      for (const [key, ctx] of this.currentSendTarget) {
+        if (key.startsWith(`${jid}:`)) {
+          if (ctx.thread_id) {
+            try {
+              const thread = await textChannel.threads.fetch(ctx.thread_id);
+              if (thread) target = thread;
+            } catch {
+              // Thread deleted, fall through to channel
+            }
+          }
+          break;
         }
       }
 
