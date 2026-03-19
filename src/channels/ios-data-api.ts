@@ -12,39 +12,41 @@ import { logger } from '../logger.js';
 import { getMessageHistory, getMessageHistoryAllIos } from '../db.js';
 
 const SIGMA_DATA = path.join(process.env.HOME || '/Users/fambot', 'sigma-data');
+const SIGMA_REPO = path.join(process.env.HOME || '/Users/fambot', 'Projects', 'Sigma');
 const SCHEDULES_DIR = path.join(SIGMA_DATA, 'family', 'schedules');
-const TASKS_FILE = path.join(SIGMA_DATA, 'family', 'sigma-app-tasks.md');
+const INITIATIVES_FILE = path.join(SIGMA_REPO, 'initiatives.md');
+const IDEAS_NITS_FILE = path.join(SIGMA_REPO, 'ideas-and-nits.md');
 
-// Module-level broadcast callback, set by watchTasksFile
-let broadcastTasksChange: ((content: string) => void) | null = null;
+// Module-level broadcast callbacks, set by watchFiles
+let broadcastInitiativesChange: ((content: string) => void) | null = null;
+let broadcastIdeasNitsChange: ((content: string) => void) | null = null;
 
 /**
- * Start watching the tasks file for changes. Calls `onChanged` with the
- * new file content whenever it's modified (debounced to 500ms).
- * Returns a cleanup function.
+ * Watch a file for changes. Calls `onChanged` with the new content (debounced 500ms).
  */
-export function watchTasksFile(onChanged: (content: string) => void): () => void {
-  // Store the callback so the PUT handler can also trigger broadcasts
-  broadcastTasksChange = onChanged;
-
+function watchFile(
+  filePath: string,
+  fileType: string,
+  onChanged: (content: string, fileType: string) => void,
+): () => void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let lastContent = '';
 
   try {
-    lastContent = fs.readFileSync(TASKS_FILE, 'utf-8');
+    lastContent = fs.readFileSync(filePath, 'utf-8');
   } catch {
     // file may not exist yet
   }
 
-  const watcher = fs.watch(TASKS_FILE, () => {
+  const watcher = fs.watch(filePath, () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       try {
-        const content = fs.readFileSync(TASKS_FILE, 'utf-8');
+        const content = fs.readFileSync(filePath, 'utf-8');
         if (content !== lastContent) {
           lastContent = content;
-          onChanged(content);
-          logger.info('Tasks file changed, broadcasting update');
+          onChanged(content, fileType);
+          logger.info({ fileType }, 'File changed, broadcasting update');
         }
       } catch {
         // ignore read errors during rapid writes
@@ -52,11 +54,30 @@ export function watchTasksFile(onChanged: (content: string) => void): () => void
     }, 500);
   });
 
-  logger.info({ path: TASKS_FILE }, 'Watching tasks file for changes');
+  logger.info({ path: filePath, fileType }, 'Watching file for changes');
 
   return () => {
     watcher.close();
     if (debounceTimer) clearTimeout(debounceTimer);
+  };
+}
+
+/**
+ * Start watching both initiatives and ideas-and-nits files.
+ * Returns a cleanup function.
+ */
+export function watchWorkFiles(
+  onChanged: (content: string, fileType: string) => void,
+): () => void {
+  broadcastInitiativesChange = (content) => onChanged(content, 'initiatives');
+  broadcastIdeasNitsChange = (content) => onChanged(content, 'ideas-and-nits');
+
+  const stopInit = watchFile(INITIATIVES_FILE, 'initiatives', onChanged);
+  const stopIN = watchFile(IDEAS_NITS_FILE, 'ideas-and-nits', onChanged);
+
+  return () => {
+    stopInit();
+    stopIN();
   };
 }
 
@@ -80,13 +101,24 @@ export function handleDataApi(
     return true;
   }
 
-  if (req.method === 'GET' && url === '/api/tasks') {
-    authGuard(req, res, token, () => handleGetTasks(res));
+  if (req.method === 'GET' && url === '/api/initiatives') {
+    authGuard(req, res, token, () => handleGetFile(res, INITIATIVES_FILE));
     return true;
   }
 
-  if (req.method === 'PUT' && url === '/api/tasks') {
-    authGuard(req, res, token, () => handlePutTasks(req, res));
+  if (req.method === 'GET' && url === '/api/ideas-and-nits') {
+    authGuard(req, res, token, () => handleGetFile(res, IDEAS_NITS_FILE));
+    return true;
+  }
+
+  if (req.method === 'PUT' && url === '/api/ideas-and-nits') {
+    authGuard(req, res, token, () => handlePutFile(req, res, IDEAS_NITS_FILE, 'ideas-and-nits'));
+    return true;
+  }
+
+  // Legacy route — still support old combined endpoint for backward compat
+  if (req.method === 'GET' && url === '/api/tasks') {
+    authGuard(req, res, token, () => handleGetFile(res, INITIATIVES_FILE));
     return true;
   }
 
@@ -277,41 +309,48 @@ function handleGetMessages(req: http.IncomingMessage, res: http.ServerResponse):
   }
 }
 
-// MARK: - Tasks
+// MARK: - File read/write
 
-function handleGetTasks(res: http.ServerResponse): void {
+function handleGetFile(res: http.ServerResponse, filePath: string): void {
   try {
-    const content = fs.readFileSync(TASKS_FILE, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf-8');
     res.writeHead(200, { 'Content-Type': 'text/markdown' });
     res.end(content);
   } catch (err) {
-    logger.error({ err }, 'Failed to read tasks');
+    logger.error({ err, filePath }, 'Failed to read file');
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Failed to read tasks file' }));
+    res.end(JSON.stringify({ error: 'Failed to read file' }));
   }
 }
 
-function handlePutTasks(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handlePutFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  filePath: string,
+  fileType: string,
+): void {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
   });
   req.on('end', () => {
     try {
-      fs.writeFileSync(TASKS_FILE, body, 'utf-8');
-      logger.info('Tasks file updated via API');
+      fs.writeFileSync(filePath, body, 'utf-8');
+      logger.info({ fileType }, 'File updated via API');
 
-      // Broadcast to other connected clients so they get the update in real-time
-      if (broadcastTasksChange) {
-        broadcastTasksChange(body);
+      // Broadcast to other connected clients
+      const broadcast =
+        fileType === 'initiatives' ? broadcastInitiativesChange : broadcastIdeasNitsChange;
+      if (broadcast) {
+        broadcast(body);
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'saved' }));
     } catch (err) {
-      logger.error({ err }, 'Failed to write tasks');
+      logger.error({ err, fileType }, 'Failed to write file');
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Failed to write tasks file' }));
+      res.end(JSON.stringify({ error: 'Failed to write file' }));
     }
   });
 }

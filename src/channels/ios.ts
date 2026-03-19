@@ -10,7 +10,7 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
-import { handleDataApi, watchTasksFile } from './ios-data-api.js';
+import { handleDataApi, watchWorkFiles } from './ios-data-api.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
 let WebSocketServer: any;
@@ -61,9 +61,9 @@ export class IosChannel implements Channel {
       this.handleWsConnection(ws, req);
     });
 
-    // Watch the tasks file and push changes to all connected clients
-    this.stopTasksWatcher = watchTasksFile((content) => {
-      this.broadcastToAll({ type: 'tasks_updated', content });
+    // Watch initiatives and ideas-and-nits files, push changes to all clients
+    this.stopTasksWatcher = watchWorkFiles((content, fileType) => {
+      this.broadcastToAll({ type: 'tasks_updated', content, fileType });
     });
 
     return new Promise<void>((resolve) => {
