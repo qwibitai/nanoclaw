@@ -1,0 +1,15 @@
+skill: add-telegram-voice-transcription
+version: 1.0.0
+description: "Add voice message transcription to Telegram using local Whisper service"
+core_version: 1.2.10
+adds: []
+modifies:
+  - src/channels/telegram.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - TRANSCRIPTION_URL
+conflicts: []
+depends:
+  - add-telegram
+test: "npx vitest run -c /dev/null .claude/skills/add-telegram-voice-transcription/tests/telegram-voice-transcription.test.ts"
