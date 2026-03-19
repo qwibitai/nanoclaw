@@ -325,7 +325,9 @@ export class WhatsAppChannel implements Channel {
                   attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
 
                   // For PDFs, add pdf-reader usage hint
-                  if (normalized.documentMessage?.mimetype === 'application/pdf') {
+                  if (
+                    normalized.documentMessage?.mimetype === 'application/pdf'
+                  ) {
                     const sizeKB = Math.round(buffer.length / 1024);
                     attachmentRef = `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
                   }

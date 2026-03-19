@@ -87,9 +87,7 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
-    downloadMediaMessage: vi
-      .fn()
-      .mockResolvedValue(Buffer.from('pdf-data')),
+    downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from('pdf-data')),
     fetchLatestWaWebVersion: vi
       .fn()
       .mockResolvedValue({ version: [2, 3000, 0] }),
