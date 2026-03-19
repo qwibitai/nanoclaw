@@ -62,82 +62,48 @@ if [ "$IS_CREATE" = true ]; then
     "$PR_URL" "needs_pr_kaizen" "$KAIZEN_BRANCH" > "$KAIZEN_STATE_FILE"
   chmod 600 "$KAIZEN_STATE_FILE" 2>/dev/null
 
-  cat <<'REFLECT'
+  cat <<REFLECT
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔄 KAIZEN REFLECTION — Post-PR Creation
+🔄 KAIZEN REFLECTION — Post-PR Creation (background)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Before moving on, reflect on the work that led to this PR:
+Launch a background kaizen-bg subagent to handle reflection while you continue working.
 
-1. **What broke / what was the trigger?**
-   - Was this a bug fix, new feature, or process improvement?
-   - What was the root cause?
+**Use the Agent tool** with these parameters:
+- subagent_type: "kaizen-bg"
+- run_in_background: true
+- prompt: Include this context:
+  - Event: PR created
+  - PR URL: $PR_URL
+  - Branch: $BRANCH
+  - Changed files: $CHANGED
+  - List any impediments/friction you encountered during this work
 
-2. **What level is this fix?**
-   - L1 (instructions only) → L2 (hooks/checks) → L3 (mechanistic)
-   - Is this the RIGHT level, or should it be escalated?
-   - Remember: MCP tools are Level 3 enforcement points. If the fix
-     is "better instructions", ask if it should be mechanistic instead.
+The kaizen-bg subagent will search for duplicate issues, file incidents, and
+create new kaizen issues as needed. It will report results back to you.
 
-3. **Has this type of failure happened before?**
-   - If yes → the previous level wasn't enough, escalate
-   - Check: https://github.com/Garsson-io/kaizen/issues
+**When the subagent completes**, use its results to clear the gate:
 
-4. **Process friction encountered?**
-   - What slowed you down? Missing docs? Unclear architecture?
-   - Would a hook, tool, or architectural change prevent this?
+\`\`\`bash
+echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+[
+  {"impediment": "description", "disposition": "filed", "ref": "#NNN"},
+  {"impediment": "description", "disposition": "incident", "ref": "#NNN"},
+  {"impediment": "description", "disposition": "fixed-in-pr"},
+  {"impediment": "description", "disposition": "waived", "reason": "why"}
+]
+IMPEDIMENTS
+\`\`\`
 
-5. **🔍 INCIDENTS ARE DATA — check before filing:**
-   Before filing a NEW kaizen issue, search existing open issues:
-     `gh issue list --repo Garsson-io/kaizen --state open --search "<keywords>"`
-   If a match exists, ADD AN INCIDENT COMMENT instead of filing a duplicate:
-     ## Incident #N (YYYY-MM-DD)
-     **PR/Context:** #NNN
-     **Impact:** [time wasted | blocked | wrong output | human notified]
-     **Details:** [what happened]
-   Incidents on existing issues are MORE VALUABLE than new issues —
-   they accumulate evidence that drives prioritization and level escalation.
+If the subagent found no impediments: \`echo 'KAIZEN_IMPEDIMENTS: []'\`
 
-6. **⚡ STRUCTURED IMPEDIMENTS — you are GATED until ALL are addressed:**
-   Reflection without action is decoration. For EVERY impediment you
-   identified above, you MUST choose a disposition. First, do any filing
-   or incident-commenting needed, then submit a single JSON declaration:
+⛔ You are GATED until you submit a valid KAIZEN_IMPEDIMENTS declaration.
+Allowed commands: gh issue/pr, gh api, gh run, git read-only, ls/cat.
 
-   ```bash
-   echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
-   [
-     {"impediment": "description", "disposition": "filed", "ref": "#NNN"},
-     {"impediment": "description", "disposition": "incident", "ref": "#NNN"},
-     {"impediment": "description", "disposition": "fixed-in-pr"},
-     {"impediment": "description", "disposition": "waived", "reason": "why"}
-   ]
-   IMPEDIMENTS
-   ```
-
-   Valid dispositions:
-   - **filed** — new kaizen issue created (requires "ref": "#NNN")
-   - **incident** — comment added to existing issue (requires "ref": "#NNN")
-   - **fixed-in-pr** — already fixed in this PR
-   - **waived** — not worth filing (requires "reason": "why")
-
-   If you genuinely found NO impediments (include a reason):
-     `echo 'KAIZEN_IMPEDIMENTS: [] straightforward fix, no process issues'`
-
-   For trivial changes (typo, formatting, docs-only), you may also use:
-     `echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'`
-   Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
-
-   ⛔ You will be BLOCKED from non-kaizen commands until you submit
-   a valid KAIZEN_IMPEDIMENTS declaration covering ALL impediments.
-
-Ensure the PR description includes the Kaizen section:
-  ## Kaizen
-  - **Root cause:** [what caused this]
-  - **Fix level:** L[1/2/3]
-  - **Repeat failure?** [yes/no]
-  - **Escalation needed?** [yes/no]
-  - **Impediments:** [structured list from reflection]
+For trivial changes (typo, formatting, docs-only), you may also use:
+  \`echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'\`
+Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REFLECT
 fi
@@ -159,80 +125,56 @@ if [ "$IS_MERGE" = true ]; then
     "$PR_URL" "needs_pr_kaizen" "$KAIZEN_BRANCH" > "$KAIZEN_STATE_FILE"
   chmod 600 "$KAIZEN_STATE_FILE" 2>/dev/null
 
-  cat <<'REFLECT'
+  cat <<REFLECT
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔄 KAIZEN REFLECTION — Post-Merge
+🔄 KAIZEN REFLECTION — Post-Merge (background)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-The PR has been merged. Reflect on the outcome:
+Launch a background kaizen-bg subagent to handle reflection while you continue
+with post-merge steps (deploy verification, main sync, case closure).
 
-1. **Was the fix at the right level?**
-   - L1 fixes often recur — should this be escalated to L2/L3?
-   - Did this fix address symptoms or root cause?
-   - MCP tools are Level 3 enforcement points — if this was L1,
-     could the MCP tool enforce it mechanistically?
+**Use the Agent tool** with these parameters:
+- subagent_type: "kaizen-bg"
+- run_in_background: true
+- prompt: Include this context:
+  - Event: PR merged
+  - PR URL: $PR_URL
+  - Branch: $BRANCH
+  - Changed files: $CHANGED
+  - List any impediments/friction you encountered during this work
+  - Ask it to also check if any open kaizen issues are now resolved by this merge
 
-2. **Are any kaizen issues now resolved?**
-   - Check: https://github.com/Garsson-io/kaizen/issues
-   - Close issues that this PR resolves
+The kaizen-bg subagent will search for duplicate issues, file incidents, and
+create new kaizen issues as needed. It will report results back to you.
 
-3. **Deployment verification:**
-   - Follow the Post-Merge deployment procedure in CLAUDE.md
-   - Run the verification steps defined in the PR
-   - Report results to leads
+**When the subagent completes**, use its results to clear the gate:
 
-4. **Knowledge capture:**
-   - Should any learnings go into CLAUDE.md or docs/?
-   - Is there a pattern here that other agents should know?
+\`\`\`bash
+echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+[
+  {"impediment": "description", "disposition": "filed", "ref": "#NNN"},
+  {"impediment": "description", "disposition": "incident", "ref": "#NNN"},
+  {"impediment": "description", "disposition": "fixed-in-pr"},
+  {"impediment": "description", "disposition": "waived", "reason": "why"}
+]
+IMPEDIMENTS
+\`\`\`
 
-5. **🔍 INCIDENTS ARE DATA — check before filing:**
-   Before filing a NEW kaizen issue, search existing open issues:
-     `gh issue list --repo Garsson-io/kaizen --state open --search "<keywords>"`
-   If a match exists, ADD AN INCIDENT COMMENT instead of filing a duplicate:
-     ## Incident #N (YYYY-MM-DD)
-     **PR/Context:** #NNN
-     **Impact:** [time wasted | blocked | wrong output | human notified]
-     **Details:** [what happened]
-   Incidents on existing issues are MORE VALUABLE than new issues —
-   they accumulate evidence that drives prioritization and level escalation.
+If the subagent found no impediments: \`echo 'KAIZEN_IMPEDIMENTS: []'\`
 
-6. **⚡ STRUCTURED IMPEDIMENTS — you are GATED until ALL are addressed:**
-   Reflection without action is decoration. For EVERY impediment you
-   identified above, you MUST choose a disposition. First, do any filing
-   or incident-commenting needed, then submit a single JSON declaration:
+⛔ You are GATED until you submit a valid KAIZEN_IMPEDIMENTS declaration.
+Allowed commands: gh issue/pr, gh api, gh run, git read-only, ls/cat.
 
-   ```bash
-   echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
-   [
-     {"impediment": "description", "disposition": "filed", "ref": "#NNN"},
-     {"impediment": "description", "disposition": "incident", "ref": "#NNN"},
-     {"impediment": "description", "disposition": "fixed-in-pr"},
-     {"impediment": "description", "disposition": "waived", "reason": "why"}
-   ]
-   IMPEDIMENTS
-   ```
+For trivial changes (typo, formatting, docs-only), you may also use:
+  \`echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'\`
+Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
 
-   Valid dispositions:
-   - **filed** — new kaizen issue created (requires "ref": "#NNN")
-   - **incident** — comment added to existing issue (requires "ref": "#NNN")
-   - **fixed-in-pr** — already fixed in this PR
-   - **waived** — not worth filing (requires "reason": "why")
-
-   If you genuinely found NO impediments (include a reason):
-     `echo 'KAIZEN_IMPEDIMENTS: [] straightforward fix, no process issues'`
-
-   For trivial changes (typo, formatting, docs-only), you may also use:
-     `echo 'KAIZEN_NO_ACTION [docs-only]: updated README formatting'`
-   Valid categories: docs-only, formatting, typo, config-only, test-only, trivial-refactor
-
-   ⛔ You will be BLOCKED from non-kaizen commands until you submit
-   a valid KAIZEN_IMPEDIMENTS declaration covering ALL impediments.
-
-7. **Cleanup:**
-   - Delete the merged branch (local + remote)
-   - Remove the worktree if applicable
-   - Update any related kaizen issues
+**Also complete post-merge steps** (these are NOT delegated to the subagent):
+- Follow Post-Merge deployment procedure in CLAUDE.md
+- Sync main: \`git -C /home/aviadr1/projects/nanoclaw fetch origin main && git -C /home/aviadr1/projects/nanoclaw merge --ff-only origin/main\`
+- Close resolved kaizen issues
+- Delete merged branch and worktree
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REFLECT
 

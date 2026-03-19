@@ -186,66 +186,48 @@ TASK:
 
 ### Needs Building
 
-| Component | What | Why it doesn't exist yet |
-|-----------|------|-------------------------|
-| Subagent launch trigger | Code/skill that launches the background kaizen subagent when a gate fires | New feature — the connection between gate firing and subagent launch |
-| Context capture | Gather impediments, PR URL, changed files into a structured prompt for the subagent | Currently the agent assembles this mentally; needs to be explicit |
-| Gate clearing bridge | Main agent runs the clearing command using subagent's results | Currently the agent does both reflection AND clearing |
-| Sub-subagent prevention | Mechanism to prevent the kaizen subagent from spawning agents | Need to evaluate L1 (prompt) vs L2 (tool restriction) |
+All Phase 1 components were shipped in the initial implementation. See "Implementation Record" below.
 
-## 8. Open Questions & Known Risks
+## 8. Resolved Questions
 
 ### Q1: Should the subagent clear the gate directly?
-
-**Options:**
-- **(A) Subagent reports, main agent clears** — Simple, no state file system changes. 5-second overhead on main agent.
-- **(B) Subagent writes a completion marker, hook checks for it** — Fully autonomous, but adds complexity to state-utils.sh. Requires a new state file type.
-- **(C) Modify pr-kaizen-clear.sh to fire on Agent PostToolUse** — The subagent's Bash calls would trigger the clearing hook in the subagent's context. But subagent hooks fire in the subagent, not the parent.
-
-**Lean:** Option A. It's the simplest, and the 5-second overhead is negligible.
+**Decision: Option A** — Subagent reports, main agent clears. The 5-second overhead is negligible and avoids state file system changes.
 
 ### Q2: How to prevent sub-subagent spawning reliably?
-
-**Options:**
-- **(A) Prompt-level instruction** (L1) — "Do NOT use the Agent tool." Relies on the subagent following instructions.
-- **(B) Custom agent type** — Define a `kaizen-reflector` agent type in settings that excludes Agent from its tool list. This is L3 — mechanistic.
-- **(C) Hook on Agent tool** — Add a PreToolUse hook for Agent that checks if the caller is already a subagent. Complex, may not be possible with current Claude Code architecture.
-
-**Lean:** Start with A (prompt), file a kaizen issue for B if agents violate it. This is exactly the L1→L2 escalation pattern.
+**Decision: Not needed.** Claude Code has a hard architectural limit: subagents cannot spawn other subagents. This is L3 enforcement built into the platform — no hooks or restrictions needed. The kaizen-bg agent definition also excludes the Agent tool from its `tools` allowlist (defense-in-depth, L3).
 
 ### Q3: Should this replace or supplement the current flow?
-
-The current synchronous reflection has value: the agent reflects while context is fresh. Background reflection might produce lower-quality insights because the subagent has less context than the main agent at reflection time.
-
-**Mitigation:** The main agent captures impediments explicitly before launching the subagent. The subagent doesn't need to "remember" — it receives the context as structured input.
+**Decision: Replace.** The hook output now instructs agents to launch kaizen-bg instead of doing inline reflection. The subagent receives full context (PR URL, branch, changed files, impediments) as structured input. The gate stays as a safety net.
 
 ### Q4: What about the post-merge Stop gate?
+**Deferred.** The post-merge Stop gate (`enforce-post-merge-stop.sh`) is separate from the PR kaizen gate. It blocks session end, not Bash. The kaizen-bg subagent handles the PR kaizen gate reflection. The Stop gate still requires the main agent to run `/kaizen` — this is less disruptive since it happens at session end, not mid-task.
 
-The Stop gate (`enforce-post-merge-stop.sh`) blocks session end, not Bash. Even with background kaizen, the agent can't stop until `/kaizen` is invoked. The subagent would need to invoke `/kaizen` skill to clear this gate — but skill invocation from a subagent may not fire the same PostToolUse hooks.
+## 9. Implementation Record
 
-**This needs investigation.** If subagent skill invocations don't trigger parent-session hooks, the post-merge gate can only be cleared by the main agent. This limits the feature to the PR kaizen gate only (which is the more disruptive one anyway).
+### Phase 1: Shipped — Hook-driven subagent launch (kaizen #131)
 
-## 9. Implementation Sequencing
+Skipped the "manual pattern" phase and went directly to modifying `kaizen-reflect.sh` — the manual pattern was obvious once the architecture was understood, and documenting it without shipping the hook change would have been pure L1.
 
-### Phase 1: Manual pattern (no code, L1)
+**What was built:**
 
-Teach agents the pattern via CLAUDE.md / skill docs:
-1. When kaizen gate fires, immediately capture impediments as a text block
-2. Launch `Agent` tool with `run_in_background: true` and the kaizen-reflector prompt
-3. Continue main work
-4. When notified of subagent completion, run the clearing command
+| Component | File | What it does |
+|-----------|------|-------------|
+| Agent definition | `.claude/agents/kaizen-bg.md` | Sonnet model, tools: Read/Grep/Glob/Bash/Skill, maxTurns: 30, kaizen skill preloaded. Prompt emphasizes thorough duplicate search and incident filing. |
+| Modified reflection hook | `.claude/kaizen/hooks/kaizen-reflect.sh` | Both PR-create and PR-merge prompts now instruct the main agent to launch kaizen-bg subagent with context. Gate-clearing format included in output. |
+| Tests | `.claude/kaizen/hooks/tests/test-kaizen-reflect.sh` | 19 tests: state file creation, subagent instruction presence, agent definition validation (tools, model, maxTurns). |
 
-This validates the pattern before building infrastructure. Signal to proceed: agents successfully use this pattern 3+ times.
+**What was NOT changed:**
+- `enforce-pr-kaizen.sh` — gate enforcement unchanged
+- `pr-kaizen-clear.sh` — clearing validation unchanged
+- `state-utils.sh` — state file system unchanged
+- Gate flow — same state files, same enforcement, same clearing commands
 
-### Phase 2: Skill wrapper (small code, L2)
+**Key discovery:** `gh pr checks` was already in the allowed commands list (kaizen #132 fix was already shipped but issue left open).
 
-Create a `/kaizen-bg` skill that:
-1. Captures context automatically (PR URL from the gate state file, changed files from git)
-2. Launches the background subagent with the standardized prompt
-3. Provides the clearing bridge when the subagent reports back
+### Future phases
 
-### Phase 3: Automatic trigger (L3, if warranted)
+**Phase 2: Automatic subagent launch (L3)**
+If agents consistently follow the launch instruction, modify `kaizen-reflect.sh` to emit a structured JSON signal that Claude Code's hook system could auto-trigger the Agent tool. This would remove the need for the agent to manually launch the subagent. Only warranted if data shows agents sometimes skip the launch.
 
-Modify `kaizen-reflect.sh` to automatically launch the background subagent instead of emitting the blocking reflection prompt. The gate still exists as a safety net, but the subagent is launched automatically.
-
-**Only if:** Phase 1-2 data shows the pattern works reliably and reflection quality doesn't degrade.
+**Phase 3: Quality telemetry**
+Track reflection quality metrics: how many issues filed, incidents added, duplicates avoided. Compare background vs inline reflection quality. This feeds into kaizen #82 (telemetry infrastructure).
