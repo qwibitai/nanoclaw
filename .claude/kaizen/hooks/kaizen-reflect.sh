@@ -109,6 +109,18 @@ REFLECT
 fi
 
 if [ "$IS_MERGE" = true ]; then
+  # L3 enforcement (kaizen #108): set state gate for post-merge kaizen action
+  # Reuses the same needs_pr_kaizen gate as PR creation — same enforcement
+  # infrastructure (enforce-pr-kaizen.sh blocks, pr-kaizen-clear.sh clears).
+  source "$(dirname "$0")/lib/state-utils.sh"
+  mkdir -p "$STATE_DIR" 2>/dev/null
+  chmod 700 "$STATE_DIR" 2>/dev/null
+  KAIZEN_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  KAIZEN_STATE_FILE="$STATE_DIR/pr-kaizen-$(echo "$PR_URL" | sed 's|https://github\.com/||;s|/pull/|_|;s|/|_|g')"
+  printf 'PR_URL=%s\nSTATUS=%s\nBRANCH=%s\n' \
+    "$PR_URL" "needs_pr_kaizen" "$KAIZEN_BRANCH" > "$KAIZEN_STATE_FILE"
+  chmod 600 "$KAIZEN_STATE_FILE" 2>/dev/null
+
   cat <<'REFLECT'
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -136,13 +148,19 @@ The PR has been merged. Reflect on the outcome:
    - Should any learnings go into CLAUDE.md or docs/?
    - Is there a pattern here that other agents should know?
 
-5. **⚡ MAKE IT ACTIONABLE:**
-   If you identified that this fix should be escalated, or found
-   friction worth fixing — act NOW before cleanup:
-   - **Create a dev case** via `case_suggest_dev` for code improvements
-   - **File a kaizen issue** via `create_github_issue` for design work
-   - Do NOT move to cleanup until actions are filed or explicitly skipped
-   Note: case_mark_done enforces kaizen reflections (L3, kaizen #57).
+5. **⚡ MAKE IT ACTIONABLE — you are GATED until you do:**
+   Reflection without action is decoration. For each improvement
+   you identified above, you MUST do one of:
+   - **File a kaizen issue** via `gh issue create --repo Garsson-io/kaizen`
+   - **Create a dev case** via `case_suggest_dev` MCP tool
+   - **Fix it now** if small enough to include in a follow-up
+   - If none apply, run: echo "KAIZEN_NO_ACTION: <your reason>" >/dev/null
+     to explicitly declare no action needed.
+   Do NOT just list ideas — every insight must become tracked work
+   or an explicit no-action declaration.
+
+   ⛔ You will be BLOCKED from non-kaizen commands until you file
+   at least one kaizen issue or explicitly declare no action needed.
 
 6. **Cleanup:**
    - Delete the merged branch (local + remote)
