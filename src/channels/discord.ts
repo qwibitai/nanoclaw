@@ -6,6 +6,8 @@
  * - Research/build threads → isMain: false (isolated contexts)
  */
 
+import fs from 'fs';
+import path from 'path';
 import {
   Client,
   GatewayIntentBits,
@@ -53,6 +55,7 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
   let connected = false;
   const discordJids = new Set<string>();
   const activeContainers = new Set<string>();
+  const reportsSent = new Set<string>(); // tracks JIDs where verified report was already attached
 
   // Slash commands collection
   const commands = new Collection<string, any>();
@@ -266,6 +269,27 @@ export function createDiscordChannel(opts: ChannelOpts): Channel | null {
           const chunks = splitMessage(text, 2000);
           for (const chunk of chunks) {
             await (discordChannel as any).send(chunk);
+          }
+
+          // Check if a verified research report is ready to attach
+          if (!reportsSent.has(jid)) {
+            const group = opts.registeredGroups()[jid];
+            if (group?.folder) {
+              const reportPath = path.join(
+                process.cwd(),
+                'groups',
+                group.folder,
+                'research-verified.md',
+              );
+              if (fs.existsSync(reportPath)) {
+                reportsSent.add(jid);
+                await (discordChannel as any).send({
+                  content: '📄 **Verified research report ready:**',
+                  files: [{ attachment: reportPath, name: 'research-report.md' }],
+                });
+                logger.info({ jid, reportPath }, 'Research report attached');
+              }
+            }
           }
         }
       } catch (err) {
