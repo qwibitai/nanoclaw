@@ -120,3 +120,8 @@ See `~/.qodo/config.json` for API key setup. Set `QODO_ENVIRONMENT_NAME` env var
 - **Not in git repo** - Inform the user that a git repository is required and exit gracefully; do not attempt code generation
 - **No API key** - Inform the user with setup instructions; set `QODO_API_KEY` or create `~/.qodo/config.json`
 - **No rules found** - Inform the user; set up rules at app.qodo.ai
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

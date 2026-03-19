@@ -133,3 +133,8 @@ npm test
 - **"Session commands require admin access"**: Only the device owner (`is_from_me`) or main-group senders can use `/compact`. Other users are denied.
 - **No compact_boundary in logs**: The SDK may not emit this event in all versions. Check the agent-runner logs for the warning message. Compaction may still have succeeded.
 - **Pre-compact failure**: If messages before `/compact` fail to process, the error message says "Failed to process messages before /compact." The cursor advances past sent output to prevent duplicates; `/compact` remains pending for the next attempt.
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

@@ -415,3 +415,7 @@ docker run nanoclaw-agent ls -la /app/src/skills/
 - `data/x-auth.json` - Auth state marker (in `.gitignore`)
 - Only main group can use X tools (enforced in `agent.ts` and `host.ts`)
 - Scripts run as subprocesses with limited environment
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

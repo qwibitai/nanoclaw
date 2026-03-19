@@ -150,3 +150,8 @@ whisper-cli -m data/models/ggml-base.bin -f /tmp/test.wav --no-timestamps -nt
 **Slow transcription**: The base model processes ~30s of audio in <1s on M1+. If slower, check CPU usage — another process may be competing.
 
 **Wrong language**: whisper.cpp auto-detects language. To force a language, you can set `WHISPER_LANG` and modify `src/transcription.ts` to pass `-l $WHISPER_LANG`.
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

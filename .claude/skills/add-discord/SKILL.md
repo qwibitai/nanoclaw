@@ -201,3 +201,8 @@ The Discord bot supports:
 - @mention translation (Discord `<@botId>` → NanoClaw trigger format)
 - Message splitting for responses over 2000 characters
 - Typing indicators while the agent processes
+
+
+## Diagnostics (Optional)
+
+After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
