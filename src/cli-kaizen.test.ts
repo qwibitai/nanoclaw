@@ -104,6 +104,7 @@ function makeDeps(overrides?: Partial<CaseCreateDeps>): CaseCreateDeps {
       worktreePath: '/tmp/worktree',
       branchName: 'case/260319-0512-test-case',
     }),
+    resolveWorktree: vi.fn().mockReturnValue(null),
     insert: vi.fn(),
     getActiveByIssue: vi.fn().mockReturnValue([]),
     ...overrides,
@@ -430,5 +431,121 @@ describe('resolveMainStoreDir', () => {
         process.env.NANOCLAW_INSTANCE = original;
       }
     }
+  });
+});
+
+// INVARIANT: When --branch-name and --worktree-path are provided and the worktree path
+//   exists, handleCaseCreate skips createWorkspace and uses the existing worktree.
+// SUT: handleCaseCreate with --branch-name and --worktree-path flags
+// VERIFICATION: Verify createWorkspace is NOT called, and the case record uses the
+//   provided branch/worktree values.
+
+describe('handleCaseCreate with existing worktree', () => {
+  test('reuses existing worktree when --branch-name and --worktree-path provided', async () => {
+    const deps = makeDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(
+      [
+        '--description',
+        'Fix auth',
+        '--type',
+        'dev',
+        '--branch-name',
+        'my-existing-branch',
+        '--worktree-path',
+        '/existing/worktree',
+      ],
+      deps,
+    );
+
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+    expect(deps.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktree_path: '/existing/worktree',
+        workspace_path: '/existing/worktree',
+        branch_name: 'my-existing-branch',
+      }),
+    );
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.worktree_path).toBe('/existing/worktree');
+    expect(output.branch_name).toBe('my-existing-branch');
+
+    logSpy.mockRestore();
+  });
+
+  test('creates new workspace when no worktree flags provided', async () => {
+    const deps = makeDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(
+      ['--description', 'Fix auth', '--type', 'dev'],
+      deps,
+    );
+
+    expect(deps.createWorkspace).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  test('errors when --branch-name provided without --worktree-path', async () => {
+    const deps = makeDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    await expect(
+      handleCaseCreate(
+        [
+          '--description',
+          'Fix auth',
+          '--type',
+          'dev',
+          '--branch-name',
+          'my-branch',
+        ],
+        deps,
+      ),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: --worktree-path and --branch-name must be used together',
+    );
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  test('errors when --worktree-path provided without --branch-name', async () => {
+    const deps = makeDeps();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    await expect(
+      handleCaseCreate(
+        [
+          '--description',
+          'Fix auth',
+          '--type',
+          'dev',
+          '--worktree-path',
+          '/some/path',
+        ],
+        deps,
+      ),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: --worktree-path and --branch-name must be used together',
+    );
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });

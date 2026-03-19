@@ -57,6 +57,7 @@ vi.mock('./cases.js', () => ({
     worktreePath: '/test/worktree',
     branchName: 'case/test',
   }),
+  resolveExistingWorktree: () => null,
   suggestDevCase: vi.fn(() => ({
     id: 'suggested-id',
     name: 'suggested-name',

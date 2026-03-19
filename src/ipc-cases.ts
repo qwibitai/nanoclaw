@@ -44,6 +44,7 @@ import {
   insertCase,
   pruneCaseWorkspace,
   removeWorktreeLock,
+  resolveExistingWorktree,
   suggestDevCase,
   updateCase,
   updateWorktreeLockHeartbeat,
@@ -382,6 +383,8 @@ async function handleCaseCreate(
     gapType?: string;
     signals?: Record<string, boolean>;
     allowDuplicate?: boolean;
+    branchName?: string;
+    worktreePath?: string;
   };
   if (!d.description) {
     logger.warn({ sourceGroup }, 'case_create missing description');
@@ -568,11 +571,13 @@ async function handleCaseCreate(
     }
   }
 
-  const { workspacePath, worktreePath, branchName } = createCaseWorkspace(
-    name,
-    caseType,
-    id,
-  );
+  // Reuse existing worktree if provided and valid, otherwise create a new one
+  const resolved =
+    d.branchName && d.worktreePath
+      ? resolveExistingWorktree(d.worktreePath, d.branchName)
+      : null;
+  const { workspacePath, worktreePath, branchName } =
+    resolved || createCaseWorkspace(name, caseType, id);
 
   // Escalation: compute priority if gap_type is provided
   let computedPriority: PriorityLevel | null = null;

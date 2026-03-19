@@ -689,6 +689,18 @@ Case types:
       .describe(
         'Explicit escalation signal overrides (e.g., { "customer_waiting": true }). Auto-detected signals are merged in.',
       ),
+    branch_name: z
+      .string()
+      .optional()
+      .describe(
+        'Existing git branch name to link this case to. Must be provided together with worktree_path. When both are provided and the worktree path exists, the case reuses the existing worktree instead of creating a new one.',
+      ),
+    worktree_path: z
+      .string()
+      .optional()
+      .describe(
+        'Existing worktree path to link this case to. Must be provided together with branch_name. When both are provided and the path exists on disk, the case reuses it.',
+      ),
   },
   async (args) => {
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -712,6 +724,8 @@ Case types:
     if (args.customer_phone) data.customer_phone = args.customer_phone;
     if (args.customer_email) data.customer_email = args.customer_email;
     if (args.customer_org) data.customer_org = args.customer_org;
+    if (args.branch_name) data.branchName = args.branch_name;
+    if (args.worktree_path) data.worktreePath = args.worktree_path;
 
     writeIpcFile(TASKS_DIR, data);
 

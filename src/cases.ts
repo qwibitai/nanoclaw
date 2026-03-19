@@ -430,6 +430,21 @@ const WORKTREES_DIR = path.join(PROJECT_ROOT, '.claude', 'worktrees');
 const WORKSPACES_DIR = path.join(DATA_DIR, 'case-workspaces');
 
 /**
+ * Validate an existing worktree path and branch for reuse.
+ * Returns workspace info if the path exists and branchName is non-empty,
+ * or null if the worktree can't be reused.
+ * Never creates files or directories.
+ */
+export function resolveExistingWorktree(
+  worktreePath: string,
+  branchName: string,
+): { workspacePath: string; worktreePath: string; branchName: string } | null {
+  if (!worktreePath || !branchName) return null;
+  if (!fs.existsSync(worktreePath)) return null;
+  return { workspacePath: worktreePath, worktreePath, branchName };
+}
+
+/**
  * Create the workspace for a case.
  * Dev cases get a git worktree; work cases get a scratch directory.
  * For dev cases, a lock file is created in the worktree to prevent

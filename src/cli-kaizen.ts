@@ -28,6 +28,7 @@ import {
   generateCaseName,
   getActiveCasesByGithubIssue,
   insertCase,
+  resolveExistingWorktree,
 } from './cases.js';
 import type { Case, CaseType } from './cases.js';
 
@@ -64,6 +65,7 @@ export interface CaseCreateDeps {
   generateId: () => string;
   generateName: (description: string, shortName?: string) => string;
   createWorkspace: typeof createCaseWorkspace;
+  resolveWorktree: typeof resolveExistingWorktree;
   insert: typeof insertCase;
   getActiveByIssue: typeof getActiveCasesByGithubIssue;
 }
@@ -73,6 +75,7 @@ const defaultDeps: CaseCreateDeps = {
   generateId: generateCaseId,
   generateName: generateCaseName,
   createWorkspace: createCaseWorkspace,
+  resolveWorktree: resolveExistingWorktree,
   insert: insertCase,
   getActiveByIssue: getActiveCasesByGithubIssue,
 };
@@ -206,7 +209,7 @@ async function main(): Promise<void> {
     );
     console.error('  node dist/cli-kaizen.js view <number>');
     console.error(
-      '  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."]',
+      '  node dist/cli-kaizen.js case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P]',
     );
     process.exit(1);
   }
