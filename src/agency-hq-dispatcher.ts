@@ -14,6 +14,9 @@ let stopping = false;
 let dispatchIntervalHandle: ReturnType<typeof setInterval> | null = null;
 let stallIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
+/** Prevents concurrent dispatch loop runs (two ticks racing for the same ready tasks). */
+let dispatchRunning = false;
+
 /** Tracks retry counts per Agency HQ task ID (resets on process restart). */
 const dispatchRetryCount = new Map<string, number>();
 
@@ -100,67 +103,80 @@ function buildPrompt(task: AgencyHqTask, sprintGoal?: string): string {
 async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
   if (stopping) return;
 
+  // Prevent concurrent dispatch runs — two ticks racing would call
+  // completeStaleTasksByPrefix on each other's newly-created local tasks,
+  // silently dropping tasks that haven't run yet.
+  if (dispatchRunning) {
+    logger.debug('Dispatch loop already running, skipping tick');
+    return;
+  }
+  dispatchRunning = true;
+
   const log = createCorrelationLogger(undefined, { op: 'dispatch-loop' });
 
-  const ceo = findCeoJid(deps);
-  if (!ceo) {
-    log.warn('CEO group not registered, skipping dispatch loop');
-    return;
-  }
-
-  let tasks: AgencyHqTask[];
   try {
-    const res = await agencyFetch('/tasks?status=ready');
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      log.error({ status: res.status, body }, 'Failed to fetch ready tasks');
+    const ceo = findCeoJid(deps);
+    if (!ceo) {
+      log.warn('CEO group not registered, skipping dispatch loop');
       return;
     }
-    const json = (await res.json()) as {
-      success: boolean;
-      data: AgencyHqTask[];
-    };
-    tasks = json.data ?? [];
-  } catch (err) {
-    log.error({ err }, 'Failed to fetch ready tasks from Agency HQ');
-    return;
-  }
 
-  if (tasks.length === 0) return;
-
-  log.info({ count: tasks.length }, 'Fetched ready tasks');
-
-  for (const task of tasks) {
-    if (stopping) return;
-
-    // Skip parked tasks
-    if (task.assigned_to === 'hold') {
-      log.debug({ taskId: task.id }, 'Skipping held task');
-      continue;
+    let tasks: AgencyHqTask[];
+    try {
+      const res = await agencyFetch('/tasks?status=ready');
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        log.error({ status: res.status, body }, 'Failed to fetch ready tasks');
+        return;
+      }
+      const json = (await res.json()) as {
+        success: boolean;
+        data: AgencyHqTask[];
+      };
+      tasks = json.data ?? [];
+    } catch (err) {
+      log.error({ err }, 'Failed to fetch ready tasks from Agency HQ');
+      return;
     }
-    if (task.scheduled_dispatch_at) {
-      const scheduledAt = new Date(task.scheduled_dispatch_at).getTime();
-      if (scheduledAt > Date.now()) {
-        log.debug(
-          { taskId: task.id, scheduledAt: task.scheduled_dispatch_at },
-          'Skipping future-scheduled task',
-        );
+
+    if (tasks.length === 0) return;
+
+    log.info({ count: tasks.length }, 'Fetched ready tasks');
+
+    for (const task of tasks) {
+      if (stopping) return;
+
+      // Skip parked tasks
+      if (task.assigned_to === 'hold') {
+        log.debug({ taskId: task.id }, 'Skipping held task');
         continue;
       }
-    }
+      if (task.scheduled_dispatch_at) {
+        const scheduledAt = new Date(task.scheduled_dispatch_at).getTime();
+        if (scheduledAt > Date.now()) {
+          log.debug(
+            { taskId: task.id, scheduledAt: task.scheduled_dispatch_at },
+            'Skipping future-scheduled task',
+          );
+          continue;
+        }
+      }
 
-    // Check retry count
-    const retries = dispatchRetryCount.get(task.id) ?? 0;
-    if (retries >= 3) {
-      log.warn(
-        { taskId: task.id, retries },
-        'Task exceeded max dispatch retries, marking blocked',
-      );
-      await markBlocked(task, log);
-      continue;
-    }
+      // Check retry count
+      const retries = dispatchRetryCount.get(task.id) ?? 0;
+      if (retries >= 3) {
+        log.warn(
+          { taskId: task.id, retries },
+          'Task exceeded max dispatch retries, marking blocked',
+        );
+        await markBlocked(task, log);
+        continue;
+      }
 
-    await dispatchTask(task, ceo.jid, deps, log);
+      await dispatchTask(task, ceo.jid, deps, log);
+    }
+  } finally {
+    dispatchRunning = false;
   }
 }
 

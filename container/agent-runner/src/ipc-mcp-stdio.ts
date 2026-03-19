@@ -146,6 +146,54 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
     writeIpcFile(TASKS_DIR, data);
 
+    // Optimistically add the task to current_tasks.json so list_tasks reflects
+    // it immediately instead of waiting up to 1 second for the host IPC watcher
+    // to process the file and write the snapshot.
+    try {
+      const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+      const existing: Array<{
+        id: string;
+        groupFolder: string;
+        prompt: string;
+        schedule_type: string;
+        schedule_value: string;
+        status: string;
+        next_run: string | null;
+      }> = fs.existsSync(tasksFile)
+        ? JSON.parse(fs.readFileSync(tasksFile, 'utf-8'))
+        : [];
+
+      // Compute next_run optimistically (mirrors host-side logic)
+      let nextRun: string | null = null;
+      if (args.schedule_type === 'cron') {
+        try {
+          nextRun = CronExpressionParser.parse(args.schedule_value).next().toISOString();
+        } catch {
+          // ignore — validation already passed above
+        }
+      } else if (args.schedule_type === 'interval') {
+        nextRun = new Date(Date.now() + parseInt(args.schedule_value, 10)).toISOString();
+      } else if (args.schedule_type === 'once') {
+        nextRun = new Date(args.schedule_value).toISOString();
+      }
+
+      const optimisticEntry = {
+        id: taskId,
+        groupFolder,
+        prompt: args.prompt,
+        schedule_type: args.schedule_type,
+        schedule_value: args.schedule_value,
+        status: 'active',
+        next_run: nextRun,
+      };
+
+      const tempPath = `${tasksFile}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify([...existing, optimisticEntry], null, 2));
+      fs.renameSync(tempPath, tasksFile);
+    } catch {
+      // Non-fatal — the host IPC watcher will update the snapshot shortly
+    }
+
     return {
       content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
     };
