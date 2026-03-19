@@ -44,6 +44,14 @@ const TOKEN_ENDPOINT = '/api/oauth/token';
 let lastRefreshAttempt = 0;
 const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between attempts
 
+// Outage tracking — self-healing when Anthropic API goes down and comes back
+let isInOutage = false;
+let outageAlertSent = false;
+let outageStartedAt = 0;
+let healthCheckTimer: ReturnType<typeof setTimeout> | null = null;
+const HEALTH_CHECK_BACKOFF_MS = [30_000, 60_000, 120_000, 300_000]; // 30s → 1m → 2m → 5m cap
+const OUTAGE_STATUS_CODES = new Set([500, 502, 503, 529]); // Anthropic outage indicators
+
 interface OAuthCredentials {
   accessToken: string;
   refreshToken: string;
@@ -110,10 +118,18 @@ function saveCredentials(newAccessToken: string, newRefreshToken: string, expire
 }
 
 /**
+ * Typed refresh result — distinguishes network errors (outage) from token errors (real auth issue).
+ */
+type RefreshResult =
+  | { ok: true; accessToken: string; refreshToken: string; expiresIn: number }
+  | { ok: false; reason: 'network_error' | 'token_invalid' | 'server_error' };
+
+/**
  * Use the refresh token to obtain a new access token.
  * Standard OAuth2 refresh_token grant.
+ * Returns typed result so callers can distinguish outage from real auth failure.
  */
-function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number } | null> {
+function refreshAccessToken(refreshToken: string): Promise<RefreshResult> {
   return new Promise((resolve) => {
     const postData = JSON.stringify({
       grant_type: 'refresh_token',
@@ -131,6 +147,7 @@ function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
         },
+        timeout: 15_000, // 15s timeout to detect unreachable API quickly
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -140,33 +157,115 @@ function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string
             const body = JSON.parse(Buffer.concat(chunks).toString());
             if (res.statusCode === 200 && body.access_token) {
               resolve({
+                ok: true,
                 accessToken: body.access_token,
-                refreshToken: body.refresh_token || refreshToken, // Keep old if not returned
+                refreshToken: body.refresh_token || refreshToken,
                 expiresIn: body.expires_in || 3600,
               });
+            } else if (OUTAGE_STATUS_CODES.has(res.statusCode!)) {
+              // Server error = outage, not a token problem
+              logger.warn(
+                { statusCode: res.statusCode },
+                'OAuth refresh got server error — likely outage',
+              );
+              resolve({ ok: false, reason: 'server_error' });
             } else {
+              // 400/401/403 = token itself is bad
               logger.error(
                 { statusCode: res.statusCode, error: body.error },
-                'OAuth refresh failed',
+                'OAuth refresh failed — token may be invalid',
               );
-              resolve(null);
+              resolve({ ok: false, reason: 'token_invalid' });
             }
           } catch (err) {
             logger.error({ err }, 'Failed to parse refresh response');
-            resolve(null);
+            resolve({ ok: false, reason: 'server_error' });
           }
         });
       },
     );
 
+    req.on('timeout', () => {
+      req.destroy();
+      logger.warn('OAuth refresh request timed out — API unreachable');
+      resolve({ ok: false, reason: 'network_error' });
+    });
+
     req.on('error', (err) => {
-      logger.error({ err }, 'OAuth refresh request error');
-      resolve(null);
+      logger.error({ err }, 'OAuth refresh request error — network issue');
+      resolve({ ok: false, reason: 'network_error' });
     });
 
     req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Enter outage mode and start background health-check recovery loop.
+ * Polls with exponential backoff. When API comes back, refreshes tokens
+ * and resumes service automatically — no CEO intervention needed.
+ */
+function startOutageRecovery(creds: { accessToken: string; refreshToken: string | null }): void {
+  if (healthCheckTimer) return; // already recovering
+
+  if (!isInOutage) {
+    isInOutage = true;
+    outageStartedAt = Date.now();
+  }
+
+  // Alert CEO once, not every 30 seconds
+  if (!outageAlertSent) {
+    outageAlertSent = true;
+    sendTelegramAlert(
+      '*Anthropic API Outage Detected*\n\n' +
+      'Atlas credential proxy cannot reach the API. ' +
+      'Auto-recovery is active — will restore service automatically when the outage ends.\n\n' +
+      'No action needed unless this persists for hours.',
+    );
+  }
+
+  let attempt = 0;
+
+  const tryRecover = async (): Promise<void> => {
+    if (!creds.refreshToken) {
+      logger.error('No refresh token available for outage recovery');
+      return;
+    }
+
+    const result = await refreshAccessToken(creds.refreshToken);
+
+    if (result.ok) {
+      // API is back — save tokens, restore service
+      saveCredentials(result.accessToken, result.refreshToken, result.expiresIn);
+      creds.accessToken = result.accessToken;
+      creds.refreshToken = result.refreshToken;
+
+      isInOutage = false;
+      outageAlertSent = false;
+      healthCheckTimer = null;
+
+      const downtimeMin = Math.round((Date.now() - outageStartedAt) / 60_000);
+      logger.info({ downtimeMinutes: downtimeMin }, 'Outage resolved — auto-recovered');
+      sendTelegramAlert(
+        '*API Recovered*\n\n' +
+        `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
+        'Tokens refreshed, service fully restored.',
+      );
+    } else if (!result.ok) {
+      // Still down — schedule next check with backoff
+      const delay = HEALTH_CHECK_BACKOFF_MS[Math.min(attempt, HEALTH_CHECK_BACKOFF_MS.length - 1)];
+      attempt++;
+      logger.info(
+        { attempt, nextCheckSec: Math.round(delay / 1000), reason: result.reason },
+        'Outage persists — scheduling next health check',
+      );
+      healthCheckTimer = setTimeout(tryRecover, delay);
+    }
+  };
+
+  // First check after 30 seconds
+  healthCheckTimer = setTimeout(tryRecover, HEALTH_CHECK_BACKOFF_MS[0]);
 }
 
 /**
@@ -257,18 +356,37 @@ export function startCredentialProxy(
         if (!oauth?.expiresAt || !oauth?.refreshToken) return;
 
         const timeToExpiry = oauth.expiresAt - Date.now();
-        // Refresh 10 minutes before expiry
-        if (timeToExpiry > 0 && timeToExpiry < 600_000) {
-          logger.info(
-            { minutesRemaining: Math.round(timeToExpiry / 60000) },
-            'Token expiring soon, proactively refreshing',
-          );
+        // Refresh when expired OR expiring within 10 minutes
+        // The <= 0 case is critical: after an outage, the token may have
+        // expired while API was unreachable. This ensures recovery.
+        if (timeToExpiry < 600_000) {
+          const label = timeToExpiry <= 0
+            ? `expired ${Math.round(-timeToExpiry / 60000)}m ago`
+            : `expiring in ${Math.round(timeToExpiry / 60000)}m`;
+          logger.info(label, 'Proactively refreshing token');
+
           refreshAccessToken(oauth.refreshToken).then((result) => {
-            if (result) {
+            if (result.ok) {
               saveCredentials(result.accessToken, result.refreshToken, result.expiresIn);
               currentCreds = { accessToken: result.accessToken, refreshToken: result.refreshToken };
+              // If we were in outage mode, clear it — we just recovered
+              if (isInOutage) {
+                const downtimeMin = Math.round((Date.now() - outageStartedAt) / 60_000);
+                isInOutage = false;
+                outageAlertSent = false;
+                if (healthCheckTimer) { clearTimeout(healthCheckTimer); healthCheckTimer = null; }
+                sendTelegramAlert(
+                  '*API Recovered*\n\n' +
+                  `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
+                  'Tokens refreshed via proactive check.',
+                );
+              }
               logger.info('Proactive token refresh succeeded');
+            } else if (!result.ok && (result.reason === 'network_error' || result.reason === 'server_error')) {
+              // API is down — enter outage recovery mode
+              startOutageRecovery(currentCreds);
             }
+            // token_invalid: proactive refresh can't fix a bad token, skip
           });
         }
 
@@ -338,7 +456,7 @@ export function startCredentialProxy(
 
             const refreshResult = await refreshAccessToken(currentCreds.refreshToken);
 
-            if (refreshResult) {
+            if (refreshResult.ok) {
               // Save new tokens and retry the request
               saveCredentials(
                 refreshResult.accessToken,
@@ -349,6 +467,12 @@ export function startCredentialProxy(
                 accessToken: refreshResult.accessToken,
                 refreshToken: refreshResult.refreshToken,
               };
+              // Clear outage state if we were in one
+              if (isInOutage) {
+                isInOutage = false;
+                outageAlertSent = false;
+                if (healthCheckTimer) { clearTimeout(healthCheckTimer); healthCheckTimer = null; }
+              }
               logger.info('Token refreshed successfully, retrying request');
 
               // Retry with new token
@@ -357,12 +481,17 @@ export function startCredentialProxy(
                 { ...options, headers: buildHeaders() },
                 body,
               );
+            } else if (!refreshResult.ok && (refreshResult.reason === 'network_error' || refreshResult.reason === 'server_error')) {
+              // API is down — this is an outage, not a token problem
+              // Start background recovery loop instead of alerting for manual intervention
+              logger.warn('Cannot refresh token — API unreachable. Entering outage recovery mode.');
+              startOutageRecovery(currentCreds);
             } else {
-              // Refresh token itself failed — alert CEO
-              logger.error('OAuth refresh token failed — manual intervention required');
+              // token_invalid — refresh token itself is broken, CEO must re-auth
+              logger.error('OAuth refresh token is invalid — manual intervention required');
               sendTelegramAlert(
                 '*OAuth Refresh Token Failed*\n\n' +
-                'The refresh token is invalid or expired. Atlas cannot auto-recover.\n\n' +
+                'The refresh token is invalid or expired. This is NOT an outage — the token needs replacing.\n\n' +
                 'From your laptop, run:\n' +
                 '`scp ~/.claude/.credentials.json root@5.78.190.56:/home/atlas/.claude/.credentials.json`\n\n' +
                 'Then: `ssh root@5.78.190.56 systemctl restart nanoclaw`',
@@ -370,14 +499,31 @@ export function startCredentialProxy(
             }
           }
 
+          // Detect outage via upstream server errors (even without 401)
+          if (
+            OUTAGE_STATUS_CODES.has(upstreamRes.statusCode) &&
+            !isInOutage &&
+            authMode === 'oauth'
+          ) {
+            logger.warn(
+              { statusCode: upstreamRes.statusCode },
+              'Upstream returned server error — possible outage',
+            );
+            startOutageRecovery(currentCreds);
+          }
+
           // Send response to client
           res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
           res.end(upstreamRes.body);
         } catch (err) {
           logger.error({ err, url: req.url }, 'Credential proxy upstream error');
+          // Connection failure to upstream = likely outage
+          if (!isInOutage && authMode === 'oauth') {
+            startOutageRecovery(currentCreds);
+          }
           if (!res.headersSent) {
-            res.writeHead(502);
-            res.end('Bad Gateway');
+            res.writeHead(isInOutage ? 503 : 502);
+            res.end(isInOutage ? 'Service Temporarily Unavailable — outage recovery in progress' : 'Bad Gateway');
           }
         }
       });

@@ -21,6 +21,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +40,18 @@ POLL_INTERVAL = 5  # seconds
 TASK_TIMEOUT = 300  # 5 minutes max per task
 MAX_OUTPUT_SIZE = 50_000  # chars to keep in result summary
 AUTH_ERROR_PATTERNS = ["authentication_error", "OAuth token has expired", "401", "token expired"]
+OUTAGE_ERROR_PATTERNS = [
+    "500 internal server error", "502 bad gateway", "503 service",
+    "529", "overloaded", "connection refused", "connection reset",
+    "service temporarily unavailable", "outage recovery in progress",
+]
+
+# Outage tracking — self-healing mode
+outage_mode = False
+outage_started_at = 0.0
+outage_alert_sent = False
+HEALTH_CHECK_BACKOFF = [30, 60, 120, 300]  # seconds: 30s → 1m → 2m → 5m cap
+health_check_attempt = 0
 
 # Tier restrictions
 TIER_READONLY_FLAG = "--allowedTools Read,Glob,Grep,WebSearch,WebFetch"
@@ -81,6 +95,65 @@ def is_auth_error(stdout: str, stderr: str) -> bool:
     """Detect authentication failures in claude -p output."""
     combined = (stdout + stderr).lower()
     return any(pattern.lower() in combined for pattern in AUTH_ERROR_PATTERNS)
+
+
+def is_outage_error(stdout: str, stderr: str) -> bool:
+    """Detect Anthropic API outage (distinct from auth failure)."""
+    combined = (stdout + stderr).lower()
+    return any(pattern in combined for pattern in OUTAGE_ERROR_PATTERNS)
+
+
+def is_api_healthy() -> bool:
+    """Check if Anthropic API is reachable. Any HTTP response = healthy.
+    Only network-level failures (timeout, connection refused) = unhealthy."""
+    try:
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            method="GET",
+            headers={"anthropic-version": "2023-06-01"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except urllib.error.HTTPError:
+        # HTTP error (401, 405, etc.) means the API is reachable
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def enter_outage_mode() -> None:
+    """Enter outage mode — skip task processing until API recovers."""
+    global outage_mode, outage_started_at, outage_alert_sent, health_check_attempt
+    if outage_mode:
+        return
+    outage_mode = True
+    outage_started_at = time.time()
+    health_check_attempt = 0
+    log("Entering outage mode — tasks will be held until API recovers")
+
+    if not outage_alert_sent:
+        outage_alert_sent = True
+        send_telegram_alert(
+            "*Host-Executor: API Outage Detected*\n\n"
+            "Claude API is unreachable. Pending tasks will be held and "
+            "retried automatically when the outage ends.\n\n"
+            "No action needed unless this persists for hours."
+        )
+
+
+def exit_outage_mode() -> None:
+    """Exit outage mode — API is back, resume processing."""
+    global outage_mode, outage_alert_sent, health_check_attempt
+    downtime_min = round((time.time() - outage_started_at) / 60)
+    outage_mode = False
+    outage_alert_sent = False
+    health_check_attempt = 0
+    log(f"Exiting outage mode — API recovered after ~{downtime_min} minutes")
+    send_telegram_alert(
+        f"*Host-Executor: API Recovered*\n\n"
+        f"Auto-recovered after ~{downtime_min} minute(s). "
+        f"Resuming task processing."
+    )
 
 
 def log_audit(entity: str, event: dict) -> None:
@@ -217,8 +290,21 @@ def process_task(task_path: Path) -> None:
         stderr = result.stderr or ""
         exit_code = result.returncode
 
+        # Detect outage errors — hold task for retry, don't delete
+        if is_outage_error(stdout, stderr):
+            enter_outage_mode()
+            log(f"Task {task_id} hit outage — holding in pending for retry")
+            # DON'T delete the task file — it stays in pending for retry
+            return
+
         # Detect auth failure — alert CEO immediately, don't silently fail
         if is_auth_error(stdout, stderr):
+            # First check if this is actually an outage masquerading as auth error
+            if not is_api_healthy():
+                enter_outage_mode()
+                log(f"Task {task_id} auth error but API unreachable — treating as outage, holding for retry")
+                return
+
             auth_msg = (
                 "*Host-Executor Auth Failure*\n\n"
                 f"Task `{task_id}` for {entity} failed due to expired authentication.\n\n"
@@ -288,12 +374,13 @@ def process_task(task_path: Path) -> None:
         write_result(task_id or "unknown", entity, "error", 1,
                      f"Host-executor error: {e}", [], False)
     finally:
-        # Remove pending task file
-        try:
-            if task_path.exists():
-                task_path.unlink()
-        except Exception:
-            pass
+        # Remove pending task file — UNLESS in outage mode (task held for retry)
+        if not outage_mode:
+            try:
+                if task_path.exists():
+                    task_path.unlink()
+            except Exception:
+                pass
 
 
 def write_result(
@@ -415,6 +502,7 @@ def check_escalations() -> None:
 
 
 def main() -> None:
+    global health_check_attempt
     log("Atlas Host-Executor starting")
     log(f"  Watching: {PENDING_DIR}")
     log(f"  Output:   {COMPLETED_DIR}")
@@ -435,12 +523,37 @@ def main() -> None:
             log(f"Seeded {len(seen)} existing escalation(s) as seen")
 
     poll_count = 0
+    last_health_check = 0.0
+
     while True:
         try:
-            # List pending tasks (sorted by name for deterministic order)
+            # --- Outage mode: health check with backoff, skip task processing ---
+            if outage_mode:
+                backoff_delay = HEALTH_CHECK_BACKOFF[
+                    min(health_check_attempt, len(HEALTH_CHECK_BACKOFF) - 1)
+                ]
+                if time.time() - last_health_check >= backoff_delay:
+                    last_health_check = time.time()
+                    if is_api_healthy():
+                        exit_outage_mode()
+                        # Fall through to process pending tasks immediately
+                    else:
+                        health_check_attempt += 1
+                        log(f"API still down — next health check in {backoff_delay}s "
+                            f"(attempt {health_check_attempt})")
+                        time.sleep(POLL_INTERVAL)
+                        continue
+                else:
+                    time.sleep(POLL_INTERVAL)
+                    continue
+
+            # --- Normal mode: process pending tasks ---
             pending = sorted(PENDING_DIR.glob("*.json"))
 
             for task_path in pending:
+                # If a task triggered outage mode, stop processing remaining tasks
+                if outage_mode:
+                    break
                 process_task(task_path)
 
             # Check escalations every 6th poll (~30 seconds)
