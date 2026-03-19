@@ -69,7 +69,16 @@ curl -fsSL onecli.sh/install | sh
 curl -fsSL onecli.sh/cli/install | sh
 ```
 
-Verify both installed: `onecli version`. If the command is not found, the install script may have printed a path — add it to PATH or use the full path.
+Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+# Persist for future sessions (append to shell profile if not already present)
+grep -q '.local/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Then re-verify with `onecli version`.
 
 Point the CLI at the local OneCLI instance (it defaults to the cloud service otherwise):
 ```bash
