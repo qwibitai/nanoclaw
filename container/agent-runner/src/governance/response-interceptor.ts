@@ -55,7 +55,12 @@ PASS EXAMPLES (should score 85+):
 
 Check the response below. Return ONLY raw JSON, no markdown fences.
 
-{"score": 0-100, "violations": [{"rule": "layman_first", "severity": "critical", "description": "quote the specific jargon that lacks a preceding analogy"}]}
+{"score": 0-100, "violations": [
+  {"rule": "layman_first", "severity": "critical", "description": "quote the specific jargon that lacks a preceding analogy"},
+  {"rule": "dismissive", "severity": "critical", "description": "quote where the response deflects instead of answering"},
+  {"rule": "decision_confirmation", "severity": "critical", "description": "what decision was presented as final without CEO approval"},
+  {"rule": "assumptions", "severity": "warning", "description": "what business assumption was unstated"}
+]}
 
 Scoring:
 - 85+ = pass. Every technical concept has a preceding analogy. Full answer provided.
