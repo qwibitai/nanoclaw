@@ -296,8 +296,8 @@ async function main(): Promise<void> {
     const payload = buildPayload(event, systemInfo, data, success);
 
     if (dryRun) {
-      // Strip secrets before showing to user
-      const { api_key, ...visible } = payload;
+      // Strip internal fields before showing to user
+      const { api_key, distinct_id, ...visible } = payload;
       console.log(JSON.stringify(visible, null, 2));
       return;
     }
