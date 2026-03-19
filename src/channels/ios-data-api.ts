@@ -129,10 +129,12 @@ export function watchWorkFiles(
 
 interface InitiativeData {
   slug: string;
+  id: string | null; // Short identifier like TF, PUSH, MUC
   status: string;
   title: string;
   content: string; // Full markdown content of the file
   isReady: boolean;
+  completedDate: string | null; // ISO date when moved to Done
   steps: { title: string; isDone: boolean; phase: string | null }[];
   hasLearnings: boolean;
 }
@@ -159,6 +161,10 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
         const content = fs.readFileSync(filePath, 'utf-8');
         const slug = file.replace(/\.md$/, '');
 
+        // Extract short ID from first line (backtick-wrapped, e.g. `TF`)
+        const idMatch = content.match(/^`([A-Z]+)`/);
+        const shortId = idMatch ? idMatch[1] : null;
+
         // Extract title from first # heading
         const titleMatch = content.match(/^#\s+(.+)$/m);
         const title = titleMatch ? titleMatch[1] : slug;
@@ -166,16 +172,40 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
         // Check for [ready] marker
         const isReady = content.includes('[ready]');
 
+        // Extract completed date (format: completed: 2026-03-19)
+        const completedMatch = content.match(/^completed:\s*(\d{4}-\d{2}-\d{2})/m);
+        const completedDate = completedMatch ? completedMatch[1] : null;
+
         // Check for learnings section
         const hasLearnings = /^##\s+Learnings/m.test(content);
 
         // Extract steps with phase info
         const steps = parseSteps(content);
 
-        initiatives.push({ slug, status, title, content, isReady, steps, hasLearnings });
+        initiatives.push({
+          slug,
+          id: shortId,
+          status,
+          title,
+          content,
+          isReady,
+          completedDate,
+          steps,
+          hasLearnings,
+        });
       }
     } catch {
       // folder might not exist
+    }
+
+    // Sort done/cancelled by completion date (most recent first)
+    if (status === 'done' || status === 'cancelled') {
+      initiatives.sort((a, b) => {
+        if (!a.completedDate && !b.completedDate) return 0;
+        if (!a.completedDate) return 1;
+        if (!b.completedDate) return -1;
+        return b.completedDate.localeCompare(a.completedDate);
+      });
     }
 
     result[status] = initiatives;
@@ -347,6 +377,24 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
       }
 
       fs.mkdirSync(path.join(INITIATIVES_DIR, to), { recursive: true });
+
+      // Add completion timestamp when moving to done (prepend to file)
+      if (to === 'done') {
+        let fileContent = fs.readFileSync(srcPath, 'utf-8');
+        if (!/^completed:/m.test(fileContent)) {
+          const today = new Date().toISOString().slice(0, 10);
+          fileContent = `completed: ${today}\n${fileContent}`;
+          fs.writeFileSync(srcPath, fileContent, 'utf-8');
+        }
+      }
+
+      // Remove completion timestamp when moving out of done
+      if (from === 'done' && to !== 'done') {
+        let fileContent = fs.readFileSync(srcPath, 'utf-8');
+        fileContent = fileContent.replace(/^completed:\s*\d{4}-\d{2}-\d{2}\n/, '');
+        fs.writeFileSync(srcPath, fileContent, 'utf-8');
+      }
+
       fs.renameSync(srcPath, dstPath);
       logger.info({ slug, from, to }, 'Initiative moved');
 
