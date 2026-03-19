@@ -581,10 +581,15 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+
+    // If the session can't be found/resumed, don't re-persist the broken
+    // session ID — omitting newSessionId tells the host to clear it so the
+    // next attempt starts a fresh conversation instead of looping forever.
+    const isSessionError = /no conversation found|session.*not found/i.test(errorMessage);
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
+      newSessionId: isSessionError ? undefined : sessionId,
       error: errorMessage
     });
     process.exit(1);

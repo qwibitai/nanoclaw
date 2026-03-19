@@ -16,6 +16,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  deleteSession,
   setSession,
 } from './db.js';
 import { findChannel, formatMessages } from './router.js';
@@ -245,6 +246,13 @@ async function runAgent(
 
     if (output.status === 'error') {
       log.error({ error: output.error }, 'Container agent error');
+      // If the error mentions a missing session, clear the stored session ID
+      // so the next attempt starts fresh instead of retrying the same broken session.
+      if (output.error && /no conversation found|session.*not found/i.test(output.error)) {
+        log.warn({ group: group.folder }, 'Clearing stale session after session-not-found error');
+        delete state.sessions[group.folder];
+        deleteSession(group.folder);
+      }
       return 'error';
     }
 
