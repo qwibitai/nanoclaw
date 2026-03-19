@@ -175,7 +175,9 @@ MERGE_INPUT2=$(jq -n '{
 OUTPUT=$(echo "$MERGE_INPUT2" | IPC_DIR="$TEST_IPC_DIR" PATH="$MOCK_DIR_CUSTOM:$PATH" bash "$HOOK" 2>/dev/null)
 
 assert_contains "merge prompt mentions GATED" "GATED" "$OUTPUT"
-assert_contains "merge prompt mentions BLOCKED" "BLOCKED" "$OUTPUT"
+# Note: "BLOCKED" comes from enforce-pr-kaizen.sh (PreToolUse gate), not kaizen-reflect.sh (PostToolUse).
+# The SUT here is kaizen-reflect.sh which uses "GATED" vocabulary.
+assert_contains "merge prompt mentions KAIZEN_IMPEDIMENTS" "KAIZEN_IMPEDIMENTS" "$OUTPUT"
 assert_contains "merge prompt mentions KAIZEN_NO_ACTION" "KAIZEN_NO_ACTION" "$OUTPUT"
 
 echo ""
@@ -213,13 +215,14 @@ fi
 echo ""
 echo "=== pr-kaizen-clear.sh clears merge-triggered gate ==="
 
-# The gate is still set from previous test — clear it via gh issue create
+# The gate is still set from previous test — clear it via KAIZEN_NO_ACTION declaration
+# (pr-kaizen-clear.sh triggers on KAIZEN_IMPEDIMENTS or KAIZEN_NO_ACTION, not gh issue create)
 CLEAR_HOOK="$(dirname "$0")/../pr-kaizen-clear.sh"
 CLEAR_INPUT=$(jq -n '{
   "tool_name": "Bash",
-  "tool_input": {"command": "gh issue create --repo Garsson-io/kaizen --title \"test\""},
+  "tool_input": {"command": "echo '\''KAIZEN_NO_ACTION [test-only]: merge gate test'\''"},
   "tool_response": {
-    "stdout": "https://github.com/Garsson-io/kaizen/issues/200",
+    "stdout": "KAIZEN_NO_ACTION [test-only]: merge gate test",
     "stderr": "",
     "exit_code": "0"
   }

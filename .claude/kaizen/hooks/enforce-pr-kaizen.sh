@@ -106,7 +106,10 @@ For trivial changes only: echo 'KAIZEN_NO_ACTION [category]: reason'
 Allowed commands during reflection:
   gh issue create/comment/list/search/view, gh pr diff/view/comment/edit
   gh api, gh run view/list/watch
-  git diff, git log, git show, git status, git branch" \
+  git diff, git log, git show, git status, git branch
+
+HOW CLEARING WORKS: Run your echo command (KAIZEN_IMPEDIMENTS or KAIZEN_NO_ACTION).
+The gate clears automatically after the command completes — no extra step needed." \
   '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

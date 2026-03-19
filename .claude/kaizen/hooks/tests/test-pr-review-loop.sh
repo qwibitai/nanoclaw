@@ -564,6 +564,150 @@ fi
 
 rm -rf "$ESC_MOCK_DIR"
 
+echo ""
+echo "=== PR create records LAST_REVIEWED_SHA (kaizen #117) ==="
+
+# INVARIANT: After PR create, state file contains LAST_REVIEWED_SHA
+# for diff-size scaling on subsequent pushes.
+# SUT: pr-review-loop.sh TRIGGER 1 (gh pr create)
+teardown
+setup
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+CURRENT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "abc123")
+
+PR_CREATE_SHA_INPUT=$(jq -n '{
+  "tool_input": {"command": "gh pr create --title \"test SHA tracking\""},
+  "tool_response": {
+    "stdout": "https://github.com/Garsson-io/nanoclaw/pull/200",
+    "stderr": "",
+    "exit_code": "0"
+  }
+}')
+
+echo "$PR_CREATE_SHA_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null >/dev/null
+
+SHA_STATE_FILE="$STATE_DIR/Garsson-io_nanoclaw_200"
+if [ -f "$SHA_STATE_FILE" ]; then
+  STORED_SHA=$(grep '^LAST_REVIEWED_SHA=' "$SHA_STATE_FILE" | cut -d= -f2-)
+  if [ -n "$STORED_SHA" ]; then
+    echo "  PASS: LAST_REVIEWED_SHA recorded after PR create"
+    ((PASS++))
+  else
+    echo "  FAIL: LAST_REVIEWED_SHA not found in state file"
+    ((FAIL++))
+  fi
+else
+  echo "  FAIL: state file not created"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== gh pr diff records LAST_REVIEWED_SHA (kaizen #117) ==="
+
+# INVARIANT: After gh pr diff (review pass), LAST_REVIEWED_SHA is updated
+# so diff-size scaling can compare against reviewed baseline.
+# SUT: pr-review-loop.sh TRIGGER 3 (gh pr diff)
+teardown
+setup
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
+DIFF_SHA_STATE="$STATE_DIR/Garsson-io_nanoclaw_201"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/201\nROUND=1\nSTATUS=needs_review\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$DIFF_SHA_STATE"
+
+DIFF_SHA_INPUT=$(jq -n '{
+  "tool_input": {"command": "gh pr diff https://github.com/Garsson-io/nanoclaw/pull/201"},
+  "tool_response": {
+    "stdout": "diff...",
+    "stderr": "",
+    "exit_code": "0"
+  }
+}')
+
+echo "$DIFF_SHA_INPUT" | STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null >/dev/null
+
+STORED_SHA=$(grep '^LAST_REVIEWED_SHA=' "$DIFF_SHA_STATE" | cut -d= -f2-)
+if [ -n "$STORED_SHA" ]; then
+  echo "  PASS: LAST_REVIEWED_SHA recorded after diff review"
+  ((PASS++))
+else
+  echo "  FAIL: LAST_REVIEWED_SHA not found after diff"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Small push auto-passes review (kaizen #117) ==="
+
+# INVARIANT: When push changes ≤15 lines since last reviewed SHA,
+# the review auto-passes with abbreviated output instead of full ceremony.
+# SUT: pr-review-loop.sh git push handler with diff-size scaling
+teardown
+setup
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+CURRENT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "abc123")
+
+# Create state with a LAST_REVIEWED_SHA that matches HEAD~1 (small diff)
+SMALL_STATE="$STATE_DIR/Garsson-io_nanoclaw_210"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/210\nROUND=1\nSTATUS=passed\nBRANCH=%s\nLAST_REVIEWED_SHA=%s\n' \
+  "$CURRENT_BRANCH" "$CURRENT_SHA" > "$SMALL_STATE"
+
+# Mock git to simulate a small diff (5 lines changed)
+# All rev-parse calls must use /usr/bin/git to avoid recursive mock calls
+SMALL_MOCK_DIR=$(mktemp -d)
+cat > "$SMALL_MOCK_DIR/git" << 'MOCK'
+#!/bin/bash
+if [ "$1" = "log" ] && echo "$@" | grep -q -- "--format=%P"; then
+  echo "abc123"
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ]; then
+  /usr/bin/git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main"
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "HEAD" ]; then
+  /usr/bin/git rev-parse HEAD
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "origin/main" ]; then
+  /usr/bin/git rev-parse origin/main 2>/dev/null || echo "no-main"
+  exit 0
+fi
+if [ "$1" = "diff" ] && echo "$@" | grep -q -- "--stat"; then
+  echo " src/foo.ts | 3 +++"
+  echo " src/bar.ts | 2 +-"
+  echo " 2 files changed, 4 insertions(+), 1 deletion(-)"
+  exit 0
+fi
+if [ "$1" = "diff" ]; then
+  echo "+// small fix"
+  echo "+const x = 1;"
+  exit 0
+fi
+/usr/bin/git "$@"
+MOCK
+chmod +x "$SMALL_MOCK_DIR/git"
+
+SMALL_PUSH_INPUT=$(jq -n '{
+  "tool_input": {"command": "git push"},
+  "tool_response": {
+    "stdout": "Everything up-to-date",
+    "stderr": "",
+    "exit_code": "0"
+  }
+}')
+
+SMALL_PUSH_OUTPUT=$(echo "$SMALL_PUSH_INPUT" | PATH="$SMALL_MOCK_DIR:$PATH" STATE_DIR="$STATE_DIR" bash "$HOOK" 2>/dev/null)
+assert_contains "small push mentions abbreviated review" "abbreviated review" "$SMALL_PUSH_OUTPUT"
+assert_contains "small push shows line count" "5 lines" "$SMALL_PUSH_OUTPUT"
+
+# Verify state auto-passed (not needs_review)
+SMALL_STATUS=$(grep '^STATUS=' "$SMALL_STATE" | cut -d= -f2-)
+assert_eq "small push auto-passes review" "passed" "$SMALL_STATUS"
+
+rm -rf "$SMALL_MOCK_DIR"
+
 teardown
 
 print_results

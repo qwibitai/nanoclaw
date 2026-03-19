@@ -269,6 +269,11 @@ if $IS_PR_CREATE; then
 
   STATE_FILE=$(pr_url_to_state_file "$PR_URL")
   write_state "$PR_URL" "1" "needs_review"
+  # Record initial SHA for diff-size scaling (kaizen #117)
+  INITIAL_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [ -n "$INITIAL_SHA" ] && [ -f "$STATE_FILE" ]; then
+    echo "LAST_REVIEWED_SHA=$INITIAL_SHA" >> "$STATE_FILE"
+  fi
 
   cat <<EOF
 
@@ -317,6 +322,42 @@ if $IS_GIT_PUSH; then
   fi
 
   NEXT_ROUND=$((ROUND + 1))
+
+  # Scale review depth to diff size (kaizen #117).
+  # If the push changed ≤15 lines of code, auto-pass with abbreviated review.
+  # This saves 2-4 minutes per iterative fix-push cycle (CI fixes, typos, etc.).
+  DIFF_LINES=0
+  LAST_SHA=$(grep -E '^LAST_REVIEWED_SHA=' "$STATE_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+  if [ -n "$LAST_SHA" ]; then
+    DIFF_LINES=$(git diff --stat "$LAST_SHA"..HEAD 2>/dev/null | tail -1 | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+    DIFF_DELS=$(git diff --stat "$LAST_SHA"..HEAD 2>/dev/null | tail -1 | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+    DIFF_LINES=$((${DIFF_LINES:-0} + ${DIFF_DELS:-0}))
+  fi
+
+  SMALL_DIFF_THRESHOLD=15
+  if [ "$DIFF_LINES" -gt 0 ] && [ "$DIFF_LINES" -le "$SMALL_DIFF_THRESHOLD" ]; then
+    # Small diff — abbreviated review: show changes inline, auto-pass
+    DIFF_PREVIEW=$(git diff "$LAST_SHA"..HEAD -- . ':!*.lock' 2>/dev/null | head -60)
+    write_state "$PR_URL" "$NEXT_ROUND" "passed"
+    # Record new SHA for next push
+    NEW_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$NEW_SHA" ] && [ -f "$STATE_FILE" ]; then
+      echo "LAST_REVIEWED_SHA=$NEW_SHA" >> "$STATE_FILE"
+    fi
+    cat <<EOF
+
+🔍 Small push detected ($DIFF_LINES lines changed) — abbreviated review (round $NEXT_ROUND/$MAX_ROUNDS).
+
+\`\`\`diff
+$DIFF_PREVIEW
+\`\`\`
+
+Changes are minor. Review auto-passed. If you pushed a substantive fix,
+run \`gh pr diff $PR_URL\` for a full review.
+
+EOF
+    exit 0
+  fi
 
   if [ "$NEXT_ROUND" -gt "$MAX_ROUNDS" ]; then
     cat <<EOF
@@ -384,6 +425,11 @@ EOF
   # passed. If the agent pushes again, that triggers the next round.
   # If they don't push, the "passed" status stops further nags.
   write_state "$PR_URL" "$ROUND" "passed"
+  # Record reviewed SHA for diff-size scaling (kaizen #117)
+  REVIEWED_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [ -n "$REVIEWED_SHA" ] && [ -f "$STATE_FILE" ]; then
+    echo "LAST_REVIEWED_SHA=$REVIEWED_SHA" >> "$STATE_FILE"
+  fi
 
   cat <<EOF
 
