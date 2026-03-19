@@ -30,13 +30,13 @@ QDRANT_COLLECTION = os.environ.get("MEM0_QDRANT_COLLECTION", "suki_memories")
 NEO4J_URL = os.environ.get("MEM0_NEO4J_URL", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("MEM0_NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("MEM0_NEO4J_PASSWORD", "")
-EMBED_PROVIDER = os.environ.get("MEM0_EMBED_PROVIDER", "openai")
-EMBED_MODEL = os.environ.get("MEM0_EMBED_MODEL", "bge-m3")
-EMBED_URL = os.environ.get("MEM0_EMBED_URL", "http://localhost:8091/v1")
+EMBED_PROVIDER = os.environ.get("MEM0_EMBED_PROVIDER", "huggingface")
+EMBED_MODEL = os.environ.get("MEM0_EMBED_MODEL", "BAAI/bge-m3")
+EMBED_URL = os.environ.get("MEM0_EMBED_URL", "")
 EMBED_DIMS = int(os.environ.get("MEM0_EMBED_DIMS", "1024"))
-LLM_PROVIDER = os.environ.get("MEM0_LLM_PROVIDER", "ollama")
-LLM_MODEL = os.environ.get("MEM0_LLM_MODEL", "qwen3:14b")
-LLM_URL = os.environ.get("MEM0_LLM_URL", "http://localhost:11434")
+LLM_PROVIDER = os.environ.get("MEM0_LLM_PROVIDER", "openai")
+LLM_MODEL = os.environ.get("MEM0_LLM_MODEL", "qwen35-35b")
+LLM_URL = os.environ.get("MEM0_LLM_URL", "http://localhost:18088/v1")
 ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "true").lower() == "true"
 SESSION_MODE = os.environ.get("MEM0_SESSION_MODE", "live")
 
@@ -72,22 +72,30 @@ def _build_config() -> dict[str, Any]:
         "version": "v1.1",
     }
 
-    # Embedder URL — openai-compatible endpoints use openai_base_url
+    # Embedder URL — provider-specific configuration
     if EMBED_PROVIDER == "openai":
         config["embedder"]["config"]["openai_base_url"] = EMBED_URL
-        # OpenAI-compatible providers need a dummy key if none set
         if not os.environ.get("OPENAI_API_KEY"):
             config["embedder"]["config"]["api_key"] = "not-needed"
     elif EMBED_PROVIDER == "ollama":
         config["embedder"]["config"]["ollama_base_url"] = EMBED_URL
+    elif EMBED_PROVIDER == "huggingface":
+        # HuggingFace provider loads model locally — no external URL needed.
+        # Model is specified by EMBED_MODEL (e.g. "BAAI/bge-m3").
+        config["embedder"]["config"]["model"] = EMBED_MODEL
+        config["embedder"]["config"]["model_kwargs"] = {"device": "cpu"}
 
-    # LLM URL
+    # LLM URL — openai provider works with any OpenAI-compatible API (vLLM, etc.)
     if LLM_PROVIDER == "ollama":
         config["llm"]["config"]["ollama_base_url"] = LLM_URL
     elif LLM_PROVIDER == "openai":
         config["llm"]["config"]["openai_base_url"] = LLM_URL
         if not os.environ.get("OPENAI_API_KEY"):
             config["llm"]["config"]["api_key"] = "not-needed"
+        # vLLM + Qwen3.5: disable thinking mode for structured extraction
+        config["llm"]["config"]["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
 
     # Graph store (Neo4j)
     if ENABLE_GRAPH:
