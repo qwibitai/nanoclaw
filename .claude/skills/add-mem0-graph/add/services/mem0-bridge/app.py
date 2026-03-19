@@ -83,7 +83,7 @@ def _build_config() -> dict[str, Any]:
         # HuggingFace provider loads model locally — no external URL needed.
         # Model is specified by EMBED_MODEL (e.g. "BAAI/bge-m3").
         config["embedder"]["config"]["model"] = EMBED_MODEL
-        config["embedder"]["config"]["model_kwargs"] = {"device": "cpu"}
+        config["embedder"]["config"]["model_kwargs"] = {"device": "cuda"}
 
     # LLM URL — openai provider works with any OpenAI-compatible API (vLLM, etc.)
     if LLM_PROVIDER == "ollama":
