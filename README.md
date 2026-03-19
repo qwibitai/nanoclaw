@@ -29,7 +29,7 @@ curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
 curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 ```
 
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
+> The one-liner installers above target macOS (Apple Silicon) and Windows (x86). On Linux, skip the installer and follow the [Linux / DigitalOcean setup](#linux--digitalocean) below.
 
 <p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
 
@@ -140,6 +140,60 @@ Skills we'd like to see:
 
 **Session Management**
 - `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+
+## Linux / DigitalOcean
+
+NanoClaw runs on Linux (Ubuntu 22.04 / 24.04 LTS recommended). All channels work, including WhatsApp via pairing code (no browser needed on headless servers).
+
+### Minimum droplet / VM size
+
+1 vCPU, 1 GB RAM. 2 GB RAM recommended if running multiple channels.
+
+### Prerequisites
+
+```bash
+# 1. Docker CE
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker   # or log out and back in
+
+# 2. Node.js 22
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 3. Build tools (needed for native modules)
+sudo apt-get install -y build-essential
+```
+
+### Setup
+
+```bash
+gh repo fork qwibitai/nanoclaw --clone
+cd nanoclaw
+claude   # then run /setup inside claude
+```
+
+`/setup` auto-detects Linux, installs dependencies, builds the container image, and creates a systemd user service.
+
+### Channel notes
+
+- **Telegram / Discord / Slack** — work exactly as on macOS; bot tokens, no display required
+- **WhatsApp** — headless servers have no display, so the skill auto-recommends **pairing code** auth. The 8-digit code is printed to your terminal; type it in WhatsApp > Settings > Linked Devices > Link with phone number
+
+### Service management
+
+```bash
+systemctl --user enable --now nanoclaw   # start on login
+systemctl --user status nanoclaw
+systemctl --user restart nanoclaw
+journalctl --user -u nanoclaw -f         # live logs
+```
+
+If your droplet doesn't have a lingering session, enable it so the service starts on boot without login:
+
+```bash
+sudo loginctl enable-linger $USER
+```
 
 ## Requirements
 

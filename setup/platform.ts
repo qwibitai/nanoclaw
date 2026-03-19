@@ -61,6 +61,11 @@ export function openBrowser(url: string): boolean {
       return true;
     }
     if (platform === 'linux') {
+      // On headless servers (no display), can't open a browser — print URL instead
+      if (isHeadless()) {
+        console.log(`\nOpen this URL in your browser:\n  ${url}\n`);
+        return false;
+      }
       // Try xdg-open first, then wslview for WSL
       if (commandExists('xdg-open')) {
         execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: 'ignore' });
