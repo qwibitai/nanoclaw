@@ -140,7 +140,9 @@ git commit -m "feat: initial implementation"
 
 ### Step 2 — Create private repo and push
 Derive a repo name from the project title: lowercase, hyphens, max 50 chars.
+The GITHUB_TOKEN environment variable is already set — authenticate gh with it, then create the repo:
 \`\`\`bash
+echo "$GITHUB_TOKEN" | gh auth login --with-token
 REPO_NAME="atlas-<project-name>"
 gh repo create "$REPO_NAME" --private --source=. --remote=origin --push
 \`\`\`
