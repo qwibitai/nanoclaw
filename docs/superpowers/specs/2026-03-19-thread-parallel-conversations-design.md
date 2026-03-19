@@ -60,8 +60,8 @@ CREATE TABLE thread_contexts (
   origin_message_id TEXT,                -- Discord message that spawned this thread
   source            TEXT NOT NULL,       -- 'mention' | 'reply' | 'scheduled_task'
   task_id           INTEGER,             -- FK to scheduled_tasks (if source=scheduled_task)
-  created_at        INTEGER NOT NULL,
-  last_active_at    INTEGER NOT NULL
+  created_at        TEXT NOT NULL,    -- ISO 8601 (matches existing codebase convention)
+  last_active_at    TEXT NOT NULL     -- ISO 8601
 );
 
 CREATE INDEX idx_thread_ctx_chat ON thread_contexts(chat_jid);
@@ -73,7 +73,7 @@ CREATE INDEX idx_thread_ctx_origin ON thread_contexts(origin_message_id);
 
 1. **Create** — new trigger or reply detected, no existing thread context. `thread_id` may be NULL initially (set when Discord thread is actually created on first response).
 2. **Resume** — message arrives in a known thread. Look up by `thread_id`, pass stored `session_id` to container.
-3. **Expire** — after configurable inactivity period (default 24h), mark stale for routing purposes. Session data persists on disk. Replying to a stale thread resurrects it with the same session.
+3. **Expire** — checked lazily on each thread context lookup: if `last_active_at` is older than `THREAD_EXPIRY_HOURS` (default 24h), the context is considered stale for routing purposes. No background timer needed. Session data persists on disk. Replying to a stale thread resurrects it by updating `last_active_at`.
 4. **No hard delete** — thread contexts are cheap. Old ones stop being active but retain their session mapping for future resurrection.
 
 **Session ID flow:**
@@ -88,19 +88,24 @@ Currently `group-queue.ts` enforces one container per group. This changes to **o
 
 **Changes to GroupQueue:**
 
-- Process registry keyed by `threadId` instead of `groupJid`
+- Process registry keyed by `{groupJid}:{threadId}` compound key instead of `groupJid` alone
+- Per-group operations (message piping, idle detection, stdin close) scoped to the specific thread's container
 - New per-group concurrency limit: `MAX_CONTAINERS_PER_GROUP` (default 3)
-- If a group hits its cap, new thread messages queue FIFO
+- If a group hits its cap, new thread messages queue FIFO per-thread within the group
 - Global `MAX_CONCURRENT_CONTAINERS` still applies across all groups
 
 **Container naming:** `nanoclaw-{groupFolder}-{threadId}-{timestamp}`
 
-**IPC namespacing:** `data/ipc/{groupFolder}/{threadId}/` — each container gets its own IPC channel so messages don't cross between threads.
+**IPC namespacing:** Both inbound and outbound IPC are namespaced per thread:
+- Outbound (agent → host): `data/ipc/{groupFolder}/{threadId}/messages/` — host watches per-thread directories
+- Inbound (host → agent): `data/ipc/{groupFolder}/{threadId}/input/` — follow-up messages routed to the correct container by thread ID
+- Sentinel: `data/ipc/{groupFolder}/{threadId}/input/_close` — per-thread container shutdown
+
+**Claude SDK session isolation:** Currently `.claude/` is mounted per-group at `data/sessions/{groupFolder}/.claude/`. With concurrent containers, this must be per-thread: `data/sessions/{groupFolder}/{threadId}/.claude/`. Each container gets its own SDK state directory, preventing lock file and settings conflicts between concurrent containers. The `settings.json` (env vars, permissions) is copied from a shared group template at container start.
 
 **Shared filesystem:**
 
 - All containers for a group mount the same `groups/{folder}/` workspace (read-write)
-- Session directories are per-session (keyed by session ID), so no conflict
 - Knowledge vault writes are naturally safe due to Obsidian's many-small-files model (see Section 5)
 
 ### 4. Scheduled Task Integration
@@ -108,8 +113,8 @@ Currently `group-queue.ts` enforces one container per group. This changes to **o
 **On task execution:**
 
 1. Task runs in an isolated session (no thread context yet)
-2. Output posted to `#general` as a top-level message
-3. Thread context created: `source='scheduled_task'`, `session_id` from the run, `origin_message_id` from the posted message, `thread_id=NULL`, `task_id` referencing the scheduled task
+2. Output posted to `#general` via `sendChannelMessage` which must now **return the posted message's ID** (update `ChannelInterface.sendChannelMessage` return type from `void` to `Promise<string | undefined>` where the string is the platform message ID)
+3. Thread context created: `source='scheduled_task'`, `session_id` from the run, `origin_message_id` from the returned message ID, `thread_id=NULL`, `task_id` referencing the scheduled task
 
 **On user reply to scheduled task message:**
 
