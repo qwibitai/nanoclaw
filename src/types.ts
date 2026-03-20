@@ -77,12 +77,20 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Media attachment support ---
+
+export interface IpcMedia {
+  filePath: string;   // Absolute path on the host filesystem
+  fileName?: string;  // Display filename for the attachment
+  caption?: string;   // Optional caption alongside the file
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, media?: IpcMedia): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
