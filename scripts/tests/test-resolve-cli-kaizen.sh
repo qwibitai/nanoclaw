@@ -147,4 +147,31 @@ else
   ((PASS++))
 fi
 
+# --- Test 8: Executable mode with explicit root ---
+echo ""
+echo "--- 8: Executable mode with explicit root (kaizen #209) ---"
+MOCK_ROOT="$TMPDIR_BASE/test8"
+mkdir -p "$MOCK_ROOT/node_modules/.bin" "$MOCK_ROOT/src"
+cat > "$MOCK_ROOT/node_modules/.bin/tsx" << 'EOF'
+#!/bin/bash
+echo "tsx"
+EOF
+chmod +x "$MOCK_ROOT/node_modules/.bin/tsx"
+touch "$MOCK_ROOT/src/cli-kaizen.ts"
+
+RESULT=$("$RESOLVER" "$MOCK_ROOT")
+EXIT_CODE=$?
+assert_eq "executable mode returns success" "0" "$EXIT_CODE"
+assert_contains "executable mode uses tsx" "tsx" "$RESULT"
+
+# --- Test 9: Executable mode fails gracefully ---
+echo ""
+echo "--- 9: Executable mode fails gracefully on empty dir (kaizen #209) ---"
+MOCK_ROOT="$TMPDIR_BASE/test9"
+mkdir -p "$MOCK_ROOT"
+
+RESULT=$("$RESOLVER" "$MOCK_ROOT" 2>/dev/null)
+EXIT_CODE=$?
+assert_eq "executable mode returns failure" "1" "$EXIT_CODE"
+
 print_results

@@ -54,14 +54,8 @@ fi
 # Check for active cases linked to kaizen issues (via domain model CLI, not raw SQL)
 KAIZEN_CASES=""
 KAIZEN_COUNT=0
-# Resolve cli-kaizen: prefer tsx from source (works without build), fall back to dist/
-RESOLVE_LIB="$(dirname "$0")/../../scripts/lib/resolve-cli-kaizen.sh"
-if [ -f "$RESOLVE_LIB" ]; then
-  source "$RESOLVE_LIB"
-  CLI_KAIZEN=$(resolve_cli_kaizen "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
-else
-  CLI_KAIZEN="node dist/cli-kaizen.js"
-fi
+# Resolve cli-kaizen (kaizen #209: single-line executable pattern)
+CLI_KAIZEN=$("$(dirname "$0")/../../scripts/lib/resolve-cli-kaizen.sh" 2>/dev/null) || CLI_KAIZEN="node dist/cli-kaizen.js"
 CASES_JSON=$($CLI_KAIZEN case-list --status suggested,backlog,active,blocked 2>/dev/null)
 if [ -n "$CASES_JSON" ] && [ "$CASES_JSON" != "[]" ]; then
   KAIZEN_CASES=$(echo "$CASES_JSON" | node -e "

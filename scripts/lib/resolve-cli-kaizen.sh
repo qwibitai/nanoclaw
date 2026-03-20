@@ -5,13 +5,14 @@
 # dist/ so `node dist/cli-kaizen.js` fails. This resolver tries tsx from source
 # first (always fresh, no build needed), then falls back to compiled dist/.
 #
-# Usage (source then call):
-#   source "path/to/resolve-cli-kaizen.sh"
-#   CLI_KAIZEN=$(resolve_cli_kaizen "/path/to/project")
+# Usage (executable — preferred, one-liner):
+#   CLI_KAIZEN=$("path/to/resolve-cli-kaizen.sh")                  # auto-detect worktree
+#   CLI_KAIZEN=$("path/to/resolve-cli-kaizen.sh" "/path/to/root")  # explicit root
 #   $CLI_KAIZEN case-list
 #
-# Or with main fallback for worktrees:
-#   CLI_KAIZEN=$(resolve_cli_kaizen_for_worktree)
+# Usage (source then call — still supported):
+#   source "path/to/resolve-cli-kaizen.sh"
+#   CLI_KAIZEN=$(resolve_cli_kaizen "/path/to/project")
 #   $CLI_KAIZEN case-list
 
 # Resolve cli-kaizen executable for a given project root.
@@ -69,3 +70,14 @@ resolve_cli_kaizen_for_worktree() {
 
   return 1
 }
+
+# Main guard: when executed (not sourced), resolve and print the command.
+# With arg: resolve_cli_kaizen "$1"
+# Without arg: resolve_cli_kaizen_for_worktree (auto-detect)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if [ -n "${1:-}" ]; then
+    resolve_cli_kaizen "$1" || { echo "error: cannot resolve cli-kaizen in $1" >&2; exit 1; }
+  else
+    resolve_cli_kaizen_for_worktree || { echo "error: cannot resolve cli-kaizen (no worktree or main checkout found)" >&2; exit 1; }
+  fi
+fi

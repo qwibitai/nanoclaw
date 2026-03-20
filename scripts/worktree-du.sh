@@ -65,9 +65,8 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve cli-kaizen: tsx from source (no build needed) or dist/ fallback
-source "$SCRIPT_DIR/lib/resolve-cli-kaizen.sh" 2>/dev/null || true
-CLI_KAIZEN=$(resolve_cli_kaizen "$PROJECT_ROOT" 2>/dev/null) || CLI_KAIZEN="node $PROJECT_ROOT/dist/cli-kaizen.js"
+# Resolve cli-kaizen (kaizen #209: single-line executable pattern)
+CLI_KAIZEN=$("$SCRIPT_DIR/lib/resolve-cli-kaizen.sh" "$PROJECT_ROOT" 2>/dev/null) || CLI_KAIZEN="node $PROJECT_ROOT/dist/cli-kaizen.js"
 
 # Helpers
 query_db() {

@@ -64,22 +64,11 @@ find_project_root() {
   echo "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 }
 
-# Resolve cli-kaizen: tsx from source (no build needed) or dist/ fallback.
+# Resolve cli-kaizen (kaizen #209: single-line executable pattern)
 _resolve_image_lib_cli() {
   local project_root
   project_root=$(find_project_root)
-  local resolve_lib="$project_root/scripts/lib/resolve-cli-kaizen.sh"
-  if [ -f "$resolve_lib" ]; then
-    source "$resolve_lib"
-    resolve_cli_kaizen "$project_root" && return 0
-  fi
-  # Fallback: compiled dist/
-  local cli="$project_root/dist/cli-kaizen.js"
-  if [ -f "$cli" ]; then
-    echo "node $cli"
-    return 0
-  fi
-  return 1
+  "$project_root/scripts/lib/resolve-cli-kaizen.sh" "$project_root" 2>/dev/null || return 1
 }
 
 # Query active case branches via domain model CLI (not raw SQL).

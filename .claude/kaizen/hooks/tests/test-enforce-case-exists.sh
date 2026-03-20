@@ -4,19 +4,12 @@ source "$(dirname "$0")/test-helpers.sh"
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/enforce-case-exists.sh"
 
-# Source resolver for querying cases (works without dist/ — kaizen #197)
-RESOLVE_LIB="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/resolve-cli-kaizen.sh"
-if [ -f "$RESOLVE_LIB" ]; then
-  source "$RESOLVE_LIB"
-fi
+# Resolve cli-kaizen (kaizen #209: single-line executable pattern)
+RESOLVE_SCRIPT="$(cd "$(dirname "$0")/../../.." && pwd)/scripts/lib/resolve-cli-kaizen.sh"
 
-# Helper: resolve cli-kaizen for case queries
 _test_cli_kaizen() {
   local main_root="$1"
-  if type resolve_cli_kaizen &>/dev/null; then
-    resolve_cli_kaizen "$main_root" 2>/dev/null && return 0
-  fi
-  echo "node $main_root/dist/cli-kaizen.js"
+  "$RESOLVE_SCRIPT" "$main_root" 2>/dev/null || echo "node $main_root/dist/cli-kaizen.js"
 }
 
 echo "Testing enforce-case-exists.sh"
