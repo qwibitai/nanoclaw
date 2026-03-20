@@ -88,10 +88,21 @@ describe('credentials detection', () => {
     expect(hasCredentials).toBe(true);
   });
 
+  it('detects AWS_REGION and AWS_BEDROCK_MODEL in env content', () => {
+    const content = 'AWS_REGION=us-east-1\nAWS_BEDROCK_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0';
+    let hasCredentials = /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
+    if (!hasCredentials && /^AWS_REGION=/m.test(content) && /^AWS_BEDROCK_MODEL=/m.test(content)) {
+      hasCredentials = true;
+    }
+    expect(hasCredentials).toBe(true);
+  });
+
   it('returns false when no credentials', () => {
-    const content = 'ASSISTANT_NAME="Andy"\nOTHER=foo';
-    const hasCredentials =
-      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
+    const content = 'ASSISTANT_NAME="Andy"\nOTHER=foo\nAWS_REGION=us-east-1'; // missing model
+    let hasCredentials = /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
+    if (!hasCredentials && /^AWS_REGION=/m.test(content) && /^AWS_BEDROCK_MODEL=/m.test(content)) {
+      hasCredentials = true;
+    }
     expect(hasCredentials).toBe(false);
   });
 });
