@@ -89,19 +89,21 @@ data/
 {"type":"tool_call","tool":"bash","args":{},"result":"...","ts":1742000002}
 ```
 
-### 2.2 セッション管理（セッションID → メッセージ配列）
+### 2.2 セッション管理（SQLite → ファイルベース）
+
+> ⚠️ **方針確定（2026-03-20）**: Claude Agent SDKの`query()`はmessages配列を受け取れない（sessionId/resumeAt方式のみ）。また常時起動方式の維持を決定。
 
 | 現状 | 設計 | アクション |
 |------|------|-----------|
-| `sessions`テーブルにClaude session IDを永続化 | JSONLから直近N件を読み、`messages`配列としてSDKの`query()`に渡す | **全面変更** |
-| コンテナにsessionIdをstdin経由で渡す | コンテナにmessages配列を渡す | **変更** |
-| `.claude/`ディレクトリをマウント | 不要（セッション状態をファイルで持たない） | **削除** |
-| コンテナ常時起動（IDLE_TIMEOUT=30分、IPC経由で追加メッセージ送信） | コンテナは毎回起動・毎回終了 | **変更** |
+| `sessions`テーブルにClaude session IDを永続化 | `data/groups/{name}/config.json`の`sessionId`フィールドに保存 | **変更（DBからファイルへ）** |
+| コンテナにsessionIdをstdin経由で渡す | 同じ（変更なし） | **維持** |
+| `.claude/`ディレクトリをマウント | 同じ（変更なし） | **維持** |
+| コンテナ常時起動（IDLE_TIMEOUT=30分、IPC経由で追加メッセージ送信） | 同じ（変更なし） | **維持** |
 
 **実装ポイント:**
-- JSONLからイベントを読み出し → `{role, content}`形式に変換
-- tool_callイベントも含めてSDKが期待する形式に整形
-- トークン上限を考慮した件数制限（設定可能に）
+- `sessions`テーブルを廃止し、sessionIdは`config.json`の`sessionId`フィールドで管理
+- `/new`コマンドでsessionIdをリセット（config.jsonから削除）すれば新規セッション開始
+- コンテナ常時起動・IPC追加メッセージ送信の仕組みはそのまま流用
 
 ### 2.3 グループ管理（DB → ファイルシステム）
 
@@ -137,14 +139,14 @@ interface ContainerInput {
   // ...
 }
 
-// 設計
+// 設計（確定版）
 interface ContainerInput {
   prompt: string;        // XML形式メッセージ（変更なし）
-  messages: Message[];   // 会話履歴（新規）
+  sessionId?: string;    // Claude session ID（維持）
   groupFolder: string;
   chatJid: string;       // DiscordチャンネルID
   model: string;         // 使用モデル（新規）
-  // isMain削除、sessionId削除
+  // isMain削除のみ（messages[]追加なし、sessionId維持）
 }
 ```
 
@@ -157,10 +159,12 @@ interface ContainerInput {
   /home/node/.claude (rw)
   /workspace/ipc (rw)
 
-設計:
-  /workspace/group (rw)     ← グループフォルダ
-  /workspace/ipc (rw)       ← IPC
-  /app/src (rw)             ← agent-runner
+設計（確定版）:
+  /workspace/group (rw)           ← グループフォルダ
+  /home/node/.claude/projects (rw) ← セッション履歴のみ（.claude/全体は不要）
+  /workspace/ipc (rw)             ← IPC
+  ※ /workspace/project と /workspace/global は削除（isMain廃止のため）
+  ※ /home/node/.claude 全体ではなく projects/ サブディレクトリのみマウント
 ```
 
 ### 2.5 メッセージループ（index.ts）
@@ -229,18 +233,10 @@ processGroup:
 - config.jsonの読み書き
 - グループ一覧の取得
 
-### 3.3 メッセージ→SDK messages配列変換
+### 3.3 ~~メッセージ→SDK messages配列変換~~ （削除）
 
-**新規ファイル or `src/router.ts`に追加**
-
-```typescript
-function buildMessagesArray(groupFolder: string, limit: number): Message[] {
-  // JSONLからイベントを読み出し
-  // type=message のみ抽出（or tool_callも含める）
-  // {role: "user"|"assistant", content: string} に変換
-  // /new コマンド以降のみ対象
-}
-```
+> ⚠️ **2026-03-20 削除確定**: Claude Agent SDKがmessages配列を受け取れないため、この機能は不要。
+> セッション管理はsessionId + resumeAt方式で行う。
 
 ### 3.4 IPC新コマンド
 
@@ -349,4 +345,4 @@ data/tasks/
 - **JSONLのパフォーマンス**: 長期運用でファイルが大きくなる → 日付ローテーションで対処（設計済み）
 - **messages配列のトークン上限**: 直近N件の"N"をどう決めるか → config.jsonで設定可能にする
 - **`/compact`の要約**: ホストプロセスがHaiku（`claude-haiku-4-5`）を直呼びして要約。Credential Proxyを通す or 直接APIキーを使う必要がある
-- **tool_callイベントの扱い**: SDK の messages配列にtool_useとtool_resultをどう含めるか要確認
+- **tool_callイベントの扱い**: messages配列方式は廃止（sessionId方式で解決済み）
