@@ -408,7 +408,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__easybits__*'
+        'mcp__easybits__*',
+        'mcp__panel__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -429,6 +430,14 @@ async function runQuery(
           args: ['-y', '@easybits.cloud/mcp'],
           env: {
             EASYBITS_API_KEY: process.env.EASYBITS_API_KEY || '',
+          },
+        },
+        panel: {
+          command: 'npx',
+          args: ['-y', 'panel-mcp'],
+          env: {
+            PANEL_API_KEY: process.env.PANEL_API_KEY || '',
+            PANEL_URL: process.env.PANEL_URL || '',
           },
         },
       },

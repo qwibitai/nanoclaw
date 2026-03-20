@@ -245,6 +245,14 @@ function buildContainerArgs(
     args.push('-e', `EASYBITS_API_KEY=${ebKey}`);
   }
 
+  // Panel MCP: pass credentials to container
+  const panelKey = readEnvFile(['PANEL_API_KEY']).PANEL_API_KEY;
+  const panelUrl = readEnvFile(['PANEL_URL']).PANEL_URL;
+  if (panelKey) {
+    args.push('-e', `PANEL_API_KEY=${panelKey}`);
+    args.push('-e', `PANEL_URL=${panelUrl || ''}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
@@ -514,11 +522,7 @@ export async function runContainerAgent(
         // Full input is only included at verbose level to avoid
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
-          logLines.push(
-            `=== Input ===`,
-            JSON.stringify(input, null, 2),
-            ``,
-          );
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
           logLines.push(
             `=== Input Summary ===`,
