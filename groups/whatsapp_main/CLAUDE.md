@@ -109,22 +109,56 @@ This is the *main channel* with elevated privileges:
 
 ## Status Command
 
-When Joseph asks "what's running?", "status", or similar:
+When Joseph asks "what's running?", "status", or similar — use the full services health check:
 
 ```bash
-curl -s http://host.docker.internal:8080/api/status | python3 -c "
+# Full system health (all services)
+HEALTH=$(curl -s http://host.docker.internal:8080/api/services/health)
+TASKS=$(curl -s http://host.docker.internal:8080/api/status)
+
+python3 -c "
 import sys, json
-d = json.load(sys.stdin)
-running = d.get('running', [])
-by_status = d.get('by_status', {})
-print(f'Active tasks: {d[\"active_tasks\"]}')
-print(f'Breakdown: {json.dumps(by_status)}')
-for t in running:
-    print(f'  - {t[\"task_id\"]} ({t[\"dept\"]}) since {t[\"created_at\"][:16]}')
-"
+h = $HEALTH if isinstance($HEALTH, dict) else json.loads('$HEALTH')
+t = $TASKS if isinstance($TASKS, dict) else json.loads('$TASKS')
+" 2>/dev/null || python3 << 'EOF'
+import subprocess, json
+
+h = json.loads(subprocess.check_output(['curl','-s','http://host.docker.internal:8080/api/services/health']))
+t = json.loads(subprocess.check_output(['curl','-s','http://host.docker.internal:8080/api/status']))
+
+icon = lambda v: '✅' if v else '❌'
+print(f"{icon(h['nanoclaw'])} Panda (me)")
+print(f"{icon(h['crewops'])} Crew dashboard")
+print(f"{icon(h['openhands'])} OpenHands (code)")
+print(f"{icon(h['ollama'])} Ollama (local AI)")
+print(f"{icon(h['playwright'])} Playwright (browser)")
+print(f"{icon(h['cua'])} CUA (desktop vision)")
+print(f"{icon(h['browserbase'])} Browserbase (stealth browser)")
+print()
+print(f"Active tasks: {t['active_tasks']}")
+for task in t.get('running', []):
+    print(f"  • {task['task_id']} ({task['dept']}) since {task['created_at'][:16]}")
+EOF
 ```
 
-Format the result using WhatsApp formatting and send it.
+Format the result using WhatsApp formatting (✅/❌ icons are fine) and send it.
+
+## Self-Healing — Restarting a Service
+
+If a service is offline, you can restart it directly:
+
+```bash
+# Restart a specific service
+curl -s -X POST http://host.docker.internal:8080/api/services/restart \
+  -H "Content-Type: application/json" \
+  -d '{"service": "openhands"}'
+
+# Available services: nanoclaw, openhands, crewops
+```
+
+The watchdog in the crew dashboard also auto-restarts services every 5 minutes — so if you see something down, wait 5 min and re-check before asking Joseph to intervene.
+
+If a service fails to restart automatically after 2 attempts, Joseph gets a WhatsApp notification automatically.
 
 ## Daily Summary
 
