@@ -51,7 +51,7 @@ Asset types: office, medical, retail, industrial, multifamily.
 
 - Monthly Reporting App: /home/atlas/projects/gpg/monthly-reporting/
 - Ops Hub: /home/atlas/projects/gpg/ops-hub/
-- Social Post Studio: /home/atlas/projects/gpg/social-post-studio/
+- Social Post Studio: MOVED to WiseStream (cross-entity) — /home/atlas/projects/wisestream/social-post-studio/
 
 ## Key Terminology
 
