@@ -82,7 +82,7 @@ export async function startCredentialProxy(
           req.url.startsWith('/v1/models')
         ) {
           const m = JSON.stringify({
-            data: [{ id: 'MiniMax-M2.5', type: 'model' }],
+            data: [{ id: 'MiniMax-M2.7', type: 'model' }],
           });
           res.writeHead(200, {
             'content-type': 'application/json',
@@ -95,7 +95,7 @@ export async function startCredentialProxy(
         if (authMode === 'minimax-oauth' && body.length > 0) {
           try {
             const p = JSON.parse(body.toString());
-            p.model = 'MiniMax-M2.5';
+            p.model = 'MiniMax-M2.7';
             delete p.betas;
             finalBody = Buffer.from(JSON.stringify(p));
             headers['content-length'] = finalBody.length;

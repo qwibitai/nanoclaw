@@ -235,8 +235,8 @@ function buildContainerArgs(
   if (authMode === 'api-key' || authMode === 'minimax-oauth') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
     if (authMode === 'minimax-oauth') {
-      args.push('-e', 'CLAUDE_MODEL=MiniMax-M2.5');
-      args.push('-e', 'ANTHROPIC_MODEL=MiniMax-M2.5');
+      args.push('-e', 'CLAUDE_MODEL=MiniMax-M2.7');
+      args.push('-e', 'ANTHROPIC_MODEL=MiniMax-M2.7');
     }
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
