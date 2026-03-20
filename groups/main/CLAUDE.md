@@ -57,9 +57,17 @@ mcporter call ms365-klaus.search_emails --args '{"query":"Phoenix","top":10}'
 mcporter call ms365-klaus.create_draft --args '{"to":["x@y.de"],"subject":"...","body":"..."}'
 mcporter call ms365-klaus.list_events --args '{"top":10}'
 
+# MS365 Email-Anhänge — PDF, DOCX etc. aus Emails lesen!
+mcporter call ms365-klaus.list_attachments --args '{"message_id":"<message_id>"}'
+mcporter call ms365-klaus.download_attachment --args '{"message_id":"<message_id>","attachment_id":"<attachment_id>"}'
+# Workflow: search_emails → read_email (get message_id) → list_attachments → download_attachment
+
 # GMX/Gmail — VOLLZUGRIFF: lesen, suchen, verschieben, löschen, markieren!
 mcporter call email.list_emails --args '{"folder":"INBOX","limit":10}'
 mcporter call email.list_emails --args '{"folder":"INBOX","limit":10,"account":"gmail"}'
+# GMX/Gmail Anhänge — PDF/DOCX Text extrahieren, Bilder per OCR lesen!
+mcporter call email.get_attachment --args '{"uid":12345,"folder":"INBOX","filename":"Rechnung.pdf","extract_text":true}'
+mcporter call email.get_attachment --args '{"uid":12345,"folder":"INBOX","filename":"scan.jpg","extract_text":true,"prompt":"Was steht auf dem Dokument?"}'
 mcporter call email.list_folders --args '{}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien"}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien","account":"gmail"}'
