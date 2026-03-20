@@ -19,8 +19,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@types/express": "^5.0.6",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "express": "^5.2.1",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",

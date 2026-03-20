@@ -106,6 +106,12 @@ async function readStdin(): Promise<string> {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const TRACE_MARKER = '---NANOCLAW_TRACE---';
+
+/** Emit a structured trace event to the host for observability. */
+function writeTrace(event: Record<string, unknown>): void {
+  process.stdout.write(`${TRACE_MARKER}${JSON.stringify({ ...event, ts: Date.now() })}\n`);
+}
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -366,6 +372,9 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Trace: accumulate tool_use input JSON across deltas before emitting tool_start
+  let currentToolBlock: { id: string; name: string; isSubagent: boolean; inputBuf: string } | null = null;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -447,6 +456,68 @@ async function runQuery(
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
+    // Trace: emit LLM and tool call events from stream_event messages
+    if (message.type === 'stream_event') {
+      const event = (message as any).event;
+      const parentToolUseId = (message as any).parent_tool_use_id;
+      const isMainAgent = parentToolUseId === null || parentToolUseId === undefined;
+
+      // Trace: LLM call start (input tokens)
+      if (event?.type === 'message_start' && isMainAgent) {
+        writeTrace({
+          type: 'llm_start',
+          input_tokens: event.message?.usage?.input_tokens ?? null,
+          model: event.message?.model ?? null,
+        });
+      }
+
+      // Trace: LLM call end (output tokens, stop reason)
+      if (event?.type === 'message_delta' && isMainAgent) {
+        writeTrace({
+          type: 'llm_end',
+          output_tokens: event.usage?.output_tokens ?? null,
+          stop_reason: event.delta?.stop_reason ?? null,
+        });
+      }
+
+      // Trace: start tracking tool_use block (input arrives via deltas)
+      if (event?.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        currentToolBlock = { id: event.content_block.id, name: event.content_block.name, isSubagent: !isMainAgent, inputBuf: '' };
+      }
+
+      // Trace: accumulate tool_use input JSON deltas
+      if (event?.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && currentToolBlock) {
+        currentToolBlock.inputBuf += event.delta.partial_json ?? '';
+      }
+
+      // Trace: emit tool_start with full input once block is complete
+      if (event?.type === 'content_block_stop' && currentToolBlock) {
+        writeTrace({
+          type: 'tool_start',
+          tool_id: currentToolBlock.id,
+          tool_name: currentToolBlock.name,
+          is_subagent: currentToolBlock.isSubagent,
+          input_preview: currentToolBlock.inputBuf,
+        });
+        currentToolBlock = null;
+      }
+    }
+
+    // Trace: tool result (captures tool output)
+    if (message.type === 'user') {
+      const content = (message as any).message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            const output = typeof block.content === 'string'
+              ? block.content
+              : JSON.stringify(block.content ?? '');
+            writeTrace({ type: 'tool_end', tool_id: block.tool_use_id, output });
+          }
+        }
+      }
+    }
+
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
@@ -505,6 +576,17 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // Emit trace start
+  const traceId = `${containerInput.groupFolder}-${Date.now()}`;
+  writeTrace({
+    type: 'trace_start',
+    trace_id: traceId,
+    group: containerInput.groupFolder,
+    chat_jid: containerInput.chatJid,
+    is_scheduled: containerInput.isScheduledTask ?? false,
+    prompt_preview: containerInput.prompt.slice(0, 200),
+  });
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
@@ -542,9 +624,11 @@ async function main(): Promise<void> {
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
     }
+    writeTrace({ type: 'trace_end', trace_id: traceId, status: 'success' });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    writeTrace({ type: 'trace_end', trace_id: traceId, status: 'error', error: errorMessage });
     writeOutput({
       status: 'error',
       result: null,

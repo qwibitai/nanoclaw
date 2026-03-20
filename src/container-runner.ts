@@ -32,6 +32,7 @@ import { RegisteredGroup } from './types.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const TRACE_MARKER = '---NANOCLAW_TRACE---';
 
 export interface ContainerInput {
   prompt: string;
@@ -269,6 +270,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onTrace?: (event: Record<string, unknown>) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -344,9 +346,30 @@ export async function runContainerAgent(
         }
       }
 
-      // Stream-parse for output markers
+      // Stream-parse for output and trace markers
       if (onOutput) {
         parseBuffer += chunk;
+
+        // Parse TRACE markers (observability events)
+        if (onTrace) {
+          let traceIdx: number;
+          while ((traceIdx = parseBuffer.indexOf(TRACE_MARKER)) !== -1) {
+            const lineEnd = parseBuffer.indexOf('\n', traceIdx);
+            if (lineEnd === -1) break;
+            const jsonStr = parseBuffer
+              .slice(traceIdx + TRACE_MARKER.length, lineEnd)
+              .trim();
+            parseBuffer =
+              parseBuffer.slice(0, traceIdx) + parseBuffer.slice(lineEnd + 1);
+            try {
+              const ev = JSON.parse(jsonStr);
+              onTrace(ev);
+            } catch {
+              // ignore malformed trace
+            }
+          }
+        }
+
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
