@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Currently Telegram-only (WhatsApp is a separate fork). Messages route to Claude Agent SDK running in Apple Container (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
@@ -14,12 +14,16 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/config.ts` | Trigger pattern, paths, intervals, session timeouts |
+| `src/container-runner.ts` | Spawns agent containers with mounts and MCP env vars |
+| `src/container-runtime.ts` | Apple Container abstraction (runtime, gateway, orphan cleanup) |
+| `src/mount-security.ts` | Validates additional mounts against external allowlist |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
+| `src/db.ts` | SQLite operations and schema migrations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `container/agent-runner/src/index.ts` | Agent runner inside container (MCP servers, SDK query loop) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `scripts/sync/sync-all.sh` | Email + calendar sync (every 8h via launchd) |
 
 ## Skills
 

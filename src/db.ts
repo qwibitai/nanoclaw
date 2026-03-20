@@ -86,58 +86,44 @@ function createSchema(database: Database.Database): void {
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
-  } catch {
-    /* column already exists */
-  }
+  // Helper: add a column if it doesn't exist (SQLite throws on duplicate)
+  const addColumn = (sql: string): boolean => {
+    try {
+      database.exec(sql);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
-  // Add last_used and created_at columns to sessions if they don't exist
-  try {
-    database.exec(`ALTER TABLE sessions ADD COLUMN last_used TEXT`);
-  } catch {
-    /* column already exists */
-  }
-  try {
-    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT`);
-  } catch {
-    /* column already exists */
-  }
+  addColumn(
+    `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
+  );
+  addColumn(`ALTER TABLE sessions ADD COLUMN last_used TEXT`);
+  addColumn(`ALTER TABLE sessions ADD COLUMN created_at TEXT`);
 
-  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
+  if (
+    addColumn(
       `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
-    );
-    // Backfill: mark existing bot messages that used the content prefix pattern
+    )
+  ) {
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
-  } catch {
-    /* column already exists */
   }
 
-  // Add is_main column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
+  if (
+    addColumn(
       `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
-    );
-    // Backfill: existing rows with folder = 'main' are the main group
+    )
+  ) {
     database.exec(
       `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
     );
-  } catch {
-    /* column already exists */
   }
 
-  // Add channel and is_group columns if they don't exist (migration for existing DBs)
-  try {
-    database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
-    database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // Backfill from JID patterns
+  if (addColumn(`ALTER TABLE chats ADD COLUMN channel TEXT`)) {
+    addColumn(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
     database.exec(
       `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
     );
@@ -150,8 +136,6 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
     );
-  } catch {
-    /* columns already exist */
   }
 }
 

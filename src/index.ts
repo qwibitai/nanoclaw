@@ -6,6 +6,8 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  SESSION_IDLE_MS,
+  SESSION_MAX_AGE_MS,
   TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -342,8 +344,7 @@ async function runAgent(
   // Two thresholds:
   //   IDLE: no activity for 2 hours → expire (prevents stale sessions)
   //   MAX_AGE: session older than 4 hours total → expire (prevents active sessions from growing forever)
-  const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
-  const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+  // Session thresholds imported from config.ts
   let sessionId: string | undefined = sessions[group.folder];
   if (sessionId) {
     const { lastUsed, createdAt } = getSessionTimestamps(group.folder);
@@ -559,7 +560,7 @@ async function startMessageLoop(): Promise<void> {
             const totalAge = createdAt
               ? Date.now() - new Date(createdAt).getTime()
               : Infinity;
-            if (totalAge > 4 * 60 * 60 * 1000) {
+            if (totalAge > SESSION_MAX_AGE_MS) {
               logger.info(
                 {
                   group: group.name,
@@ -629,10 +630,57 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function checkMcpEndpoints(): void {
+  const { readEnvFile } = require('./env.js');
+  const endpoints: Array<{ name: string; url: string | undefined }> = [
+    { name: 'QMD', url: 'http://localhost:8181/mcp' },
+    {
+      name: 'SimpleMem',
+      url:
+        process.env.SIMPLEMEM_URL || readEnvFile(['SIMPLEMEM_URL']).SIMPLEMEM_URL,
+    },
+    {
+      name: 'Apple Notes',
+      url:
+        process.env.APPLE_NOTES_URL ||
+        readEnvFile(['APPLE_NOTES_URL']).APPLE_NOTES_URL,
+    },
+    {
+      name: 'Todoist',
+      url: process.env.TODOIST_URL || readEnvFile(['TODOIST_URL']).TODOIST_URL,
+    },
+  ];
+
+  for (const ep of endpoints) {
+    if (!ep.url) continue;
+    try {
+      const parsed = new URL(ep.url);
+      const http = require('http');
+      const req = http.request(
+        { hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, method: 'GET', timeout: 3000 },
+        (res: { statusCode: number }) => {
+          logger.info({ name: ep.name, status: res.statusCode }, 'MCP endpoint reachable');
+        },
+      );
+      req.on('error', () => {
+        logger.warn({ name: ep.name, url: ep.url }, 'MCP endpoint unreachable at startup');
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        logger.warn({ name: ep.name, url: ep.url }, 'MCP endpoint timed out at startup');
+      });
+      req.end();
+    } catch {
+      logger.warn({ name: ep.name, url: ep.url }, 'Invalid MCP endpoint URL');
+    }
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+  checkMcpEndpoints();
   loadState();
   restoreRemoteControl();
 

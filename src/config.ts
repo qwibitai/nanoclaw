@@ -57,6 +57,18 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+
+// Session lifecycle: how long to keep agent sessions alive
+// IDLE: no activity for this long → expire session (free context window)
+// MAX_AGE: absolute cap regardless of activity (prevents unbounded context growth)
+export const SESSION_IDLE_MS = parseInt(
+  process.env.SESSION_IDLE_MS || `${2 * 60 * 60 * 1000}`,
+  10,
+); // 2 hours
+export const SESSION_MAX_AGE_MS = parseInt(
+  process.env.SESSION_MAX_AGE_MS || `${4 * 60 * 60 * 1000}`,
+  10,
+); // 4 hours
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

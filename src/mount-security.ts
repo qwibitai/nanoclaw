@@ -19,9 +19,11 @@ const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-// Cache the allowlist in memory - only reloads on process restart
+// Cache the allowlist with 5-minute TTL so edits are picked up without restart
+const CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
+let cacheTimestamp = 0;
 
 /**
  * Default blocked patterns - paths that should never be mounted
@@ -52,14 +54,22 @@ const DEFAULT_BLOCKED_PATTERNS = [
  * Result is cached in memory for the lifetime of the process.
  */
 export function loadMountAllowlist(): MountAllowlist | null {
-  if (cachedAllowlist !== null) {
+  const now = Date.now();
+  if (cachedAllowlist !== null && now - cacheTimestamp < CACHE_TTL_MS) {
     return cachedAllowlist;
   }
 
-  if (allowlistLoadError !== null) {
-    // Already tried and failed, don't spam logs
+  if (
+    allowlistLoadError !== null &&
+    now - cacheTimestamp < CACHE_TTL_MS
+  ) {
     return null;
   }
+
+  // Reset cache state for reload
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+  cacheTimestamp = now;
 
   try {
     if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
