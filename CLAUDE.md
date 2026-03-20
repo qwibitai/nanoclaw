@@ -72,6 +72,7 @@ Key pattern: `mcp-*` (container) → `ipc-*` (handlers) → `{domain}.ts` (model
 | `/pick-work`        | Intelligently select next kaizen issue — filters claimed, balances epic momentum vs diversity                         |
 | `/gap-analysis`     | Strategic analysis of kaizen backlog — finds tooling/testing gaps, horizon concentration, unnamed dimensions          |
 | `/make-a-dent`      | Autonomous deep-dive — fix root cause category behind repeated issues, add interaction tests, ship one high-impact PR |
+| `/audit-issues`     | Periodic issue taxonomy audit — label coverage, epic health, incident density, horizon distribution                   |
 
 ### Dev work skill chain — MUST follow this workflow
 
