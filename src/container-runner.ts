@@ -264,13 +264,50 @@ function buildContainerArgs(
     }
   }
 
-  // Pass Apple Notes MCP endpoint URL
-  const appleNotesUrl = `http://${CONTAINER_HOST_GATEWAY}:8184/mcp`;
-  args.push('-e', `APPLE_NOTES_URL=${appleNotesUrl}`);
+  // Pass Apple Notes MCP endpoint URL (only if configured in .env)
+  const appleNotesEnv = readEnvFile(['APPLE_NOTES_URL']);
+  const appleNotesUrl =
+    process.env.APPLE_NOTES_URL || appleNotesEnv.APPLE_NOTES_URL;
+  if (appleNotesUrl) {
+    try {
+      const parsed = new URL(appleNotesUrl);
+      const hostname =
+        parsed.hostname === 'localhost'
+          ? CONTAINER_HOST_GATEWAY
+          : parsed.hostname;
+      args.push(
+        '-e',
+        `APPLE_NOTES_URL=${parsed.protocol}//${hostname}:${parsed.port}${parsed.pathname}`,
+      );
+    } catch {
+      logger.warn(
+        { appleNotesUrl },
+        'Invalid APPLE_NOTES_URL, skipping Apple Notes',
+      );
+    }
+  }
 
-  // Pass Todoist MCP endpoint URL
-  const todoistUrl = `http://${CONTAINER_HOST_GATEWAY}:8186/mcp`;
-  args.push('-e', `TODOIST_URL=${todoistUrl}`);
+  // Pass Todoist MCP endpoint URL (only if configured in .env)
+  const todoistEnv = readEnvFile(['TODOIST_URL']);
+  const todoistUrl = process.env.TODOIST_URL || todoistEnv.TODOIST_URL;
+  if (todoistUrl) {
+    try {
+      const parsed = new URL(todoistUrl);
+      const hostname =
+        parsed.hostname === 'localhost'
+          ? CONTAINER_HOST_GATEWAY
+          : parsed.hostname;
+      args.push(
+        '-e',
+        `TODOIST_URL=${parsed.protocol}//${hostname}:${parsed.port}${parsed.pathname}`,
+      );
+    } catch {
+      logger.warn({ todoistUrl }, 'Invalid TODOIST_URL, skipping Todoist');
+    }
+  }
+
+  // Pass Ollama host URL for container access
+  args.push('-e', `OLLAMA_HOST=http://${CONTAINER_HOST_GATEWAY}:11434`);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
