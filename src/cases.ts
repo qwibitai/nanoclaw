@@ -430,6 +430,40 @@ const PROJECT_ROOT = resolveProjectRoot();
 const WORKTREES_DIR = path.join(PROJECT_ROOT, '.claude', 'worktrees');
 const WORKSPACES_DIR = path.join(DATA_DIR, 'case-workspaces');
 
+/** Type for injectable execSync — used by detectCurrentWorktree for testability. */
+export type ExecSyncFn = (cmd: string, opts: { encoding: 'utf-8' }) => string;
+
+/**
+ * Detect if the current process is running inside a git worktree.
+ * Returns {worktreePath, branchName} if in a worktree, null if in main checkout or not a git repo.
+ * The execFn parameter allows injection of a mock for testing without real git calls.
+ */
+export function detectCurrentWorktree(
+  execFn: ExecSyncFn = execSync as unknown as ExecSyncFn,
+): { worktreePath: string; branchName: string } | null {
+  try {
+    const opts = { encoding: 'utf-8' as const };
+    const commonDir = execFn(
+      'git rev-parse --path-format=absolute --git-common-dir',
+      opts,
+    ).trim();
+    const toplevel = execFn('git rev-parse --show-toplevel', opts).trim();
+    const mainRoot = path.dirname(commonDir);
+
+    // If toplevel equals main root, we're in the main checkout — not a worktree
+    if (path.resolve(toplevel) === path.resolve(mainRoot)) return null;
+
+    const branchName = execFn('git rev-parse --abbrev-ref HEAD', opts).trim();
+
+    // Detached HEAD — can't reliably adopt
+    if (branchName === 'HEAD') return null;
+
+    return { worktreePath: toplevel, branchName };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Validate an existing worktree path and branch for reuse.
  * Returns workspace info if the path exists and branchName is non-empty,

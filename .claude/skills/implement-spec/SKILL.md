@@ -33,6 +33,10 @@ If any check fails, create the case via the CLI before proceeding:
 ```bash
 npx tsx src/cli-kaizen.ts case-create --description "your description" --type dev --github-issue N
 ```
+The CLI **auto-detects your current worktree** — if you're already in one, it adopts it instead of creating a duplicate. No need for `--worktree-path`/`--branch-name` flags. Use `--new-worktree` to force creation of a fresh worktree instead.
+
+Works without `dist/` (uses tsx directly from source — no build step needed).
+
 For kaizen issues, always pass `--github-issue` to link the case to the existing issue. Container agents should use `case_create` MCP tool instead.
 
 **Naming convention for kaizen work:** `YYMMDD-HHMM-kNN-kebab-description` (e.g., `260318-2107-k21-fix-newline-prefix`). The `kNN` segment embeds the kaizen issue number, making it visible in worktree names, branch names, and `git worktree list` output — even if the DB step is somehow skipped.

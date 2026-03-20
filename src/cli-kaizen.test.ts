@@ -114,6 +114,8 @@ function makeDeps(overrides?: Partial<CaseCreateDeps>): CaseCreateDeps {
     resolveWorktree: vi.fn().mockReturnValue(null),
     insert: vi.fn(),
     getActiveByIssue: vi.fn().mockReturnValue([]),
+    detectWorktree: vi.fn().mockReturnValue(null),
+    getActiveByBranch: vi.fn().mockReturnValue(undefined),
     ...overrides,
   };
 }
@@ -555,6 +557,135 @@ describe('handleCaseCreate with existing worktree', () => {
 
     errorSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+});
+
+// INVARIANT: When running from inside a worktree (detected via git commands),
+// handleCaseCreate auto-adopts it instead of creating a new worktree.
+// When the worktree is already occupied by another case, it creates a new one.
+// SUT: handleCaseCreate with detectWorktree + getActiveByBranch deps
+// VERIFICATION: createWorkspace called or not depending on detection + occupancy.
+
+describe('handleCaseCreate worktree auto-detect', () => {
+  const DETECTED_WORKTREE = {
+    worktreePath: '/home/user/projects/nanoclaw/.claude/worktrees/456',
+    branchName: 'worktree-456',
+  };
+
+  test('auto-adopts current worktree when detected and unoccupied', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockReturnValue(DETECTED_WORKTREE),
+      getActiveByBranch: vi.fn().mockReturnValue(undefined),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(['--description', 'Fix bug', '--type', 'dev'], deps);
+
+    expect(deps.detectWorktree).toHaveBeenCalled();
+    expect(deps.getActiveByBranch).toHaveBeenCalledWith('worktree-456');
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.worktree_path).toBe(DETECTED_WORKTREE.worktreePath);
+    expect(output.branch_name).toBe(DETECTED_WORKTREE.branchName);
+
+    logSpy.mockRestore();
+  });
+
+  test('creates new worktree when detected but occupied by another case', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockReturnValue(DETECTED_WORKTREE),
+      getActiveByBranch: vi
+        .fn()
+        .mockReturnValue({ name: 'other-case', status: 'active' }),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(['--description', 'Fix bug', '--type', 'dev'], deps);
+
+    expect(deps.detectWorktree).toHaveBeenCalled();
+    expect(deps.getActiveByBranch).toHaveBeenCalledWith('worktree-456');
+    expect(deps.createWorkspace).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  test('skips auto-detect when not in a worktree (returns null)', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockReturnValue(null),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(['--description', 'Fix bug', '--type', 'dev'], deps);
+
+    expect(deps.detectWorktree).toHaveBeenCalled();
+    expect(deps.getActiveByBranch).not.toHaveBeenCalled();
+    expect(deps.createWorkspace).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  test('explicit --worktree-path flags take precedence over auto-detect', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockReturnValue(DETECTED_WORKTREE),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(
+      [
+        '--description',
+        'Fix bug',
+        '--type',
+        'dev',
+        '--worktree-path',
+        '/explicit/path',
+        '--branch-name',
+        'explicit-branch',
+      ],
+      deps,
+    );
+
+    // Auto-detect should NOT be called when explicit flags are provided
+    expect(deps.detectWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorkspace).not.toHaveBeenCalled();
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(output.worktree_path).toBe('/explicit/path');
+    expect(output.branch_name).toBe('explicit-branch');
+
+    logSpy.mockRestore();
+  });
+
+  test('--new-worktree flag bypasses auto-detect', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockReturnValue(DETECTED_WORKTREE),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(
+      ['--description', 'Fix bug', '--type', 'dev', '--new-worktree'],
+      deps,
+    );
+
+    expect(deps.detectWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorkspace).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  test('auto-detect failure is graceful — falls through to create', async () => {
+    const deps = makeDeps({
+      detectWorktree: vi.fn().mockImplementation(() => {
+        throw new Error('git exploded');
+      }),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleCaseCreate(['--description', 'Fix bug', '--type', 'dev'], deps);
+
+    expect(deps.createWorkspace).toHaveBeenCalled();
+
+    logSpy.mockRestore();
   });
 });
 

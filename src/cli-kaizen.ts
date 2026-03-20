@@ -23,6 +23,7 @@ import {
 import {
   createCaseWorkspace,
   createCasesSchema,
+  detectCurrentWorktree,
   generateCaseId,
   generateCaseName,
   getActiveCaseByBranch,
@@ -68,6 +69,8 @@ export interface CaseCreateDeps {
   resolveWorktree: typeof resolveExistingWorktree;
   insert: typeof insertCase;
   getActiveByIssue: typeof getActiveCasesByGithubIssue;
+  detectWorktree: typeof detectCurrentWorktree;
+  getActiveByBranch: typeof getActiveCaseByBranch;
 }
 
 const defaultDeps: CaseCreateDeps = {
@@ -78,6 +81,8 @@ const defaultDeps: CaseCreateDeps = {
   resolveWorktree: resolveExistingWorktree,
   insert: insertCase,
   getActiveByIssue: getActiveCasesByGithubIssue,
+  detectWorktree: detectCurrentWorktree,
+  getActiveByBranch: getActiveCaseByBranch,
 };
 
 export async function handleCaseCreate(
@@ -91,6 +96,7 @@ export async function handleCaseCreate(
   const worktreePathRaw = getFlag(args, '--worktree-path');
   const branchNameRaw = getFlag(args, '--branch-name');
   const allowDuplicate = args.includes('--allow-duplicate');
+  const forceNewWorktree = args.includes('--new-worktree');
 
   if (!description) {
     console.error(
@@ -136,14 +142,51 @@ export async function handleCaseCreate(
   const name = nameOverride || deps.generateName(description);
   const now = new Date().toISOString();
 
-  // Adopt existing worktree or create a new one
-  const workspace = worktreePathRaw
-    ? {
-        workspacePath: worktreePathRaw,
-        worktreePath: worktreePathRaw,
-        branchName: branchNameRaw!,
+  // Resolve workspace: explicit flags > auto-detect > create new
+  let workspace: {
+    workspacePath: string;
+    worktreePath: string | null;
+    branchName: string | null;
+  };
+
+  if (worktreePathRaw) {
+    // Explicit flags — use them directly (kaizen #112)
+    workspace = {
+      workspacePath: worktreePathRaw,
+      worktreePath: worktreePathRaw,
+      branchName: branchNameRaw!,
+    };
+  } else if (!forceNewWorktree) {
+    // Auto-detect: are we inside an existing worktree? (kaizen #148)
+    let detected: { worktreePath: string; branchName: string } | null = null;
+    try {
+      detected = deps.detectWorktree();
+    } catch {
+      // Detection failure is not fatal — fall through to create
+    }
+
+    if (detected) {
+      // Check if this worktree is already occupied by another case
+      const occupant = deps.getActiveByBranch(detected.branchName);
+      if (!occupant) {
+        // Unoccupied — auto-adopt
+        workspace = {
+          workspacePath: detected.worktreePath,
+          worktreePath: detected.worktreePath,
+          branchName: detected.branchName,
+        };
+      } else {
+        // Occupied — create new worktree
+        workspace = deps.createWorkspace(name, caseType, id);
       }
-    : deps.createWorkspace(name, caseType, id);
+    } else {
+      // Not in a worktree — create new
+      workspace = deps.createWorkspace(name, caseType, id);
+    }
+  } else {
+    // --new-worktree: explicitly bypass auto-detect
+    workspace = deps.createWorkspace(name, caseType, id);
+  }
 
   const newCase: Case = {
     id,
@@ -353,7 +396,7 @@ async function main(): Promise<void> {
     );
     console.error('  npx tsx src/cli-kaizen.ts view <number>');
     console.error(
-      '  npx tsx src/cli-kaizen.ts case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P]',
+      '  npx tsx src/cli-kaizen.ts case-create --description "..." --type dev [--github-issue N] [--name "..."] [--branch-name B --worktree-path P] [--new-worktree]',
     );
     console.error(
       '  npx tsx src/cli-kaizen.ts case-list [--status S1,S2] [--type dev|work]',

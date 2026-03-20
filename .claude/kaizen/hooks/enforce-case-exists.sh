@@ -60,49 +60,66 @@ fi
 
 # Query via the domain model (cases.ts getActiveCaseByBranch) — not raw SQL.
 # Prefer worktree's compiled dist/ (has latest code), fall back to main's.
+# If no dist/ anywhere, use tsx to run from source (kaizen #197).
 MAIN_ROOT=$(dirname "$GIT_COMMON")
 DB_PATH="$MAIN_ROOT/store/messages.db"
-
-if [ -d "$WORKTREE_ROOT/dist" ]; then
-  DIST_DIR="$WORKTREE_ROOT/dist"
-elif [ -d "$MAIN_ROOT/dist" ]; then
-  DIST_DIR="$MAIN_ROOT/dist"
-else
-  exit 0  # No compiled dist — can't enforce
-fi
 
 if [ ! -f "$DB_PATH" ]; then
   exit 0  # No DB — can't enforce
 fi
 
-# Initialize DB (readonly) and call getActiveCaseByBranch() through the domain model.
-# This uses the same code path as MCP tools / IPC handlers.
-HAS_CASE=$(ENFORCE_BRANCH="$BRANCH" ENFORCE_DB="$DB_PATH" node -e "
-  const Database = require('better-sqlite3');
-  const cases = require('$DIST_DIR/cases.js');
-  const database = new Database(process.env.ENFORCE_DB, { readonly: true });
-  cases.createCasesSchema(database);
-  const c = cases.getActiveCaseByBranch(process.env.ENFORCE_BRANCH);
-  console.log(c ? '1' : '0');
-  database.close();
-" 2>/dev/null)
+# Try compiled dist first, then tsx fallback from source
+HAS_CASE=""
+if [ -d "$WORKTREE_ROOT/dist" ]; then
+  DIST_DIR="$WORKTREE_ROOT/dist"
+elif [ -d "$MAIN_ROOT/dist" ]; then
+  DIST_DIR="$MAIN_ROOT/dist"
+else
+  DIST_DIR=""
+fi
+
+if [ -n "$DIST_DIR" ]; then
+  # Use compiled dist (fast path)
+  HAS_CASE=$(ENFORCE_BRANCH="$BRANCH" ENFORCE_DB="$DB_PATH" node -e "
+    const Database = require('better-sqlite3');
+    const cases = require('$DIST_DIR/cases.js');
+    const database = new Database(process.env.ENFORCE_DB, { readonly: true });
+    cases.createCasesSchema(database);
+    const c = cases.getActiveCaseByBranch(process.env.ENFORCE_BRANCH);
+    console.log(c ? '1' : '0');
+    database.close();
+  " 2>/dev/null)
+elif command -v npx >/dev/null 2>&1; then
+  # No dist/ — use tsx to run from source (kaizen #197: chicken-and-egg fix)
+  HAS_CASE=$(ENFORCE_BRANCH="$BRANCH" ENFORCE_DB="$DB_PATH" npx --yes tsx -e "
+    import Database from 'better-sqlite3';
+    import { createCasesSchema, getActiveCaseByBranch } from '$MAIN_ROOT/src/cases.js';
+    const database = new Database(process.env.ENFORCE_DB!, { readonly: true });
+    createCasesSchema(database);
+    const c = getActiveCaseByBranch(process.env.ENFORCE_BRANCH!);
+    console.log(c ? '1' : '0');
+    database.close();
+  " 2>/dev/null)
+fi
 
 # If query failed or case exists, allow
 if [ -z "$HAS_CASE" ] || [ "$HAS_CASE" = "1" ]; then
   exit 0
 fi
 
-# No case found — block the edit
+# No case found — block the edit with helpful guidance (kaizen #146)
+WORKTREE_PATH="$WORKTREE_ROOT"
 jq -n \
   --arg branch "$BRANCH" \
   --arg file "$FILE_PATH" \
   --arg reason "No case record found for branch '$BRANCH'. All dev work must have a case before writing code.
 
-Create a case first (works without npm run build):
+Create a case first (auto-detects your current worktree):
   npx tsx src/cli-kaizen.ts case-create --description \"your description\" --type dev --github-issue N
 
-Or if dist/ is available:
-  node dist/cli-kaizen.js case-create --description \"your description\" --type dev --github-issue N
+Or adopt this worktree explicitly:
+  npx tsx src/cli-kaizen.ts case-create --description \"your description\" --type dev --github-issue N \\
+    --worktree-path \"$WORKTREE_PATH\" --branch-name \"$BRANCH\"
 
 Or via /implement-spec (which calls the CLI for you).
 
