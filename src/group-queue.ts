@@ -129,6 +129,24 @@ export class GroupQueue {
   }
 
   /**
+   * Get info about the first active non-task thread in a group.
+   * Returns { threadId, groupFolder } or null if no active container.
+   */
+  getActiveThreadInfo(groupJid: string): { threadId: string; groupFolder: string } | null {
+    for (const [key, thread] of this.threads) {
+      if (
+        key.startsWith(`${groupJid}:`) &&
+        thread.active &&
+        !thread.isTaskContainer &&
+        thread.groupFolder
+      ) {
+        return { threadId: thread.threadId, groupFolder: thread.groupFolder };
+      }
+    }
+    return null;
+  }
+
+  /**
    * Backward-compatible entry point — uses 'default' threadId.
    */
   enqueueMessageCheck(groupJid: string): void {
