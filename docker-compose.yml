@@ -7,6 +7,8 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
     deploy:
       resources:
         reservations:
@@ -35,21 +37,20 @@ services:
         condition: on-failure
         max_attempts: 3
 
-  # Optional: Open WebUI for chatting with local models in the browser
-  # Access at http://localhost:3000
-  # webui:
-  #   image: ghcr.io/open-webui/open-webui:main
-  #   container_name: open-webui
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:8080"
-  #   environment:
-  #     - OLLAMA_BASE_URL=http://ollama:11434
-  #   volumes:
-  #     - webui_data:/app/backend/data
-  #   depends_on:
-  #     - ollama
+  # Open WebUI — chat with local models in the browser at http://localhost:3000
+  webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - webui_data:/app/backend/data
+    depends_on:
+      - ollama
 
 volumes:
   ollama_data:
-  # webui_data:
+  webui_data:
