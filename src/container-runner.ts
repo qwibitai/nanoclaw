@@ -785,10 +785,8 @@ async function rescueWorktreeChanges(
       .toISOString()
       .replace(/[:.]/g, '-')
       .slice(0, 19);
-    const threadSuffix = threadId
-      ? `/${threadId.slice(0, 12).replace(/[^a-zA-Z0-9_-]/g, '_')}`
-      : '';
-    const safeFolderName = groupFolder.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const { safeFolderName, safeThreadId } = sanitizeRescueName(groupFolder, threadId);
+    const threadSuffix = safeThreadId ? `/${safeThreadId}` : '';
     const branchName = `rescue/${safeFolderName}${threadSuffix}/${timestamp}`;
 
     await execAsync(`git push origin HEAD:refs/heads/${branchName}`, {
@@ -803,6 +801,95 @@ async function rescueWorktreeChanges(
     logger.warn(
       { group: groupFolder, threadId, repo: repoName, err },
       'Failed to rescue worktree changes (work may be lost)',
+    );
+  }
+}
+
+/** Sanitize a group folder name for use in rescue branch paths. */
+function sanitizeRescueName(groupFolder: string, threadId?: string) {
+  const safeFolderName = groupFolder.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeThreadId = threadId
+    ? threadId.slice(0, 12).replace(/[^a-zA-Z0-9_-]/g, '_')
+    : undefined;
+  return { safeFolderName, safeThreadId };
+}
+
+/**
+ * Find the most recent rescue branch for a given group/thread in a repo.
+ * Rescue branches are named: rescue/{safeFolderName}/{safeThreadId}/{timestamp}
+ * Returns the full remote ref (e.g. origin/rescue/...) or null if none found.
+ * Best-effort — returns null on any error.
+ * @internal Exported for testing.
+ */
+export async function findLatestRescueBranch(
+  repoDir: string,
+  groupFolder: string,
+  threadId: string,
+): Promise<string | null> {
+  try {
+    const { safeFolderName, safeThreadId } = sanitizeRescueName(groupFolder, threadId);
+    const pattern = `origin/rescue/${safeFolderName}/${safeThreadId}/*`;
+
+    const output = await execAsync(
+      `git branch -r --list "${pattern}"`,
+      { cwd: repoDir },
+    );
+    if (!output || !output.trim()) return null;
+
+    const branches = output
+      .trim()
+      .split('\n')
+      .map((b) => b.trim())
+      .filter(Boolean);
+    if (branches.length === 0) return null;
+
+    // Timestamps are ISO-formatted in branch names — lexicographic sort works
+    branches.sort();
+    return branches[branches.length - 1];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete all rescue branches for a given group/thread in a repo.
+ * Best-effort — logs warnings but never throws.
+ * @internal Exported for testing.
+ */
+export async function deleteRescueBranches(
+  repoDir: string,
+  groupFolder: string,
+  threadId: string,
+): Promise<void> {
+  try {
+    const { safeFolderName, safeThreadId } = sanitizeRescueName(groupFolder, threadId);
+    const pattern = `origin/rescue/${safeFolderName}/${safeThreadId}/*`;
+
+    const output = await execAsync(
+      `git branch -r --list "${pattern}"`,
+      { cwd: repoDir },
+    );
+    if (!output || !output.trim()) return;
+
+    const branches = output
+      .trim()
+      .split('\n')
+      .map((b) => b.trim().replace(/^origin\//, ''))
+      .filter(Boolean);
+    if (branches.length === 0) return;
+
+    // Delete all rescue branches in one push
+    const refspecs = branches.map((b) => `":refs/heads/${b}"`).join(' ');
+    await execAsync(`git push origin ${refspecs}`, { cwd: repoDir });
+
+    logger.info(
+      { group: groupFolder, threadId, repo: path.basename(repoDir), count: branches.length },
+      'Cleaned up rescue branches after restoration',
+    );
+  } catch (err) {
+    logger.warn(
+      { group: groupFolder, threadId, repo: path.basename(repoDir), err },
+      'Failed to clean up rescue branches (harmless)',
     );
   }
 }
@@ -1103,6 +1190,30 @@ export async function prepareThreadWorkspace(
         } catch {
           // origin/HEAD not set — use local HEAD
         }
+
+        // Check for rescue branches from previous thread runs.
+        // If found, use the most recent as the worktree base to restore
+        // previously-rescued work automatically.
+        let restoredFromRescue = false;
+        const rescueRef = await findLatestRescueBranch(
+          srcPath,
+          groupFolder,
+          threadId,
+        );
+        if (rescueRef) {
+          ref = rescueRef;
+          restoredFromRescue = true;
+          logger.info(
+            {
+              group: groupFolder,
+              threadId,
+              repo: path.basename(srcPath),
+              ref: rescueRef,
+            },
+            'Restoring worktree from rescue branch',
+          );
+        }
+
         try {
           await execAsync(`git worktree add --detach "${wtPath}" "${ref}"`, {
             cwd: srcPath,
@@ -1130,6 +1241,11 @@ export async function prepareThreadWorkspace(
           }
         }
         createdWorktrees.push({ repoDir: srcPath, wtPath });
+
+        // Clean up used rescue branches after successful worktree creation
+        if (restoredFromRescue) {
+          deleteRescueBranches(srcPath, groupFolder, threadId).catch(() => {});
+        }
       }),
     );
 
@@ -1276,6 +1392,8 @@ async function prepareAdditionalMountWorktree(
   repoDir: string,
   sessionId: string,
   containerBasename: string,
+  groupFolder: string,
+  threadId?: string,
 ): Promise<string> {
   const clonePath = path.join(
     WORKTREES_DIR,
@@ -1333,7 +1451,42 @@ async function prepareAdditionalMountWorktree(
     }
   }
 
-  await execAsync(`git checkout "${ref}"`, { cwd: clonePath });
+  // Check for rescue branches from previous sessions.
+  // Need to fetch from the real remote first (local clone only has local refs).
+  let restoredFromRescue = false;
+  if (groupFolder && threadId) {
+    try {
+      await execAsync('git fetch origin', { cwd: clonePath });
+    } catch {
+      // Offline — rescue branches won't be available
+    }
+
+    const rescueRef = await findLatestRescueBranch(
+      clonePath,
+      groupFolder,
+      threadId,
+    );
+    if (rescueRef) {
+      ref = rescueRef;
+      restoredFromRescue = true;
+      logger.info(
+        {
+          group: groupFolder,
+          threadId,
+          repo: containerBasename,
+          ref: rescueRef,
+        },
+        'Restoring additional mount from rescue branch',
+      );
+    }
+  }
+
+  await execAsync(`git checkout --detach "${ref}"`, { cwd: clonePath });
+
+  // Clean up used rescue branches after successful checkout
+  if (restoredFromRescue && groupFolder && threadId) {
+    deleteRescueBranches(clonePath, groupFolder, threadId).catch(() => {});
+  }
 
   return clonePath;
 }
@@ -1341,8 +1494,21 @@ async function prepareAdditionalMountWorktree(
 /** Clean up additional-mount clones created for a container session. */
 async function cleanupAdditionalMountWorktrees(
   sessionId: string,
-  _mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
+  mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
+  groupFolder: string,
+  threadId?: string,
 ): Promise<void> {
+  // Rescue unpushed changes from each clone before removal.
+  // Must run inside the per-repo mutex so new prepares queue behind the rescue push.
+  // Independent repos can be rescued in parallel.
+  await Promise.all(
+    mountWorktrees.map(({ repoDir, wtPath }) =>
+      withGroupMutex(repoDir, () =>
+        rescueWorktreeChanges(wtPath, groupFolder, threadId),
+      ),
+    ),
+  );
+
   // Clones are self-contained — just remove the session directory.
   // No git worktree prune needed (unlike real worktrees).
   const sessionDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR, sessionId);
@@ -2516,6 +2682,8 @@ export async function runContainerAgent(
               vm.hostPath,
               mountSessionId!,
               containerBasename,
+              group.folder,
+              input.threadId,
             ),
           );
           mountWorktrees.push({ repoDir: vm.hostPath, wtPath });
@@ -2790,9 +2958,13 @@ export async function runContainerAgent(
 
       // Clean up additional-mount worktrees (fire-and-forget)
       if (mountWorktrees.length > 0) {
-        cleanupAdditionalMountWorktrees(mountSessionId!, mountWorktrees).catch(
-          (err) =>
-            logger.warn({ err }, 'Additional mount worktree cleanup error'),
+        cleanupAdditionalMountWorktrees(
+          mountSessionId!,
+          mountWorktrees,
+          group.folder,
+          input.threadId,
+        ).catch((err) =>
+          logger.warn({ err }, 'Additional mount worktree cleanup error'),
         );
       }
 

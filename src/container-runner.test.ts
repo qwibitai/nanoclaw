@@ -92,8 +92,14 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  findLatestRescueBranch,
+  deleteRescueBranches,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { exec } from 'child_process';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -212,5 +218,195 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('rescue branch helpers', () => {
+  const mockedExec = vi.mocked(exec);
+
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('findLatestRescueBranch', () => {
+    it('returns the most recent rescue branch when multiple exist', async () => {
+      mockedExec.mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          if (typeof cmd === 'string' && cmd.includes('git branch -r --list')) {
+            if (cb) {
+              cb(
+                null,
+                '  origin/rescue/my_group/dc_1234567890/2026-03-18T14-30-45\n  origin/rescue/my_group/dc_1234567890/2026-03-20T10-00-00\n  origin/rescue/my_group/dc_1234567890/2026-03-19T08-15-22\n',
+                '',
+              );
+            }
+          } else if (cb) {
+            cb(null, '', '');
+          }
+          return new EventEmitter() as any;
+        },
+      );
+
+      const result = await findLatestRescueBranch(
+        '/tmp/repo',
+        'my-group',
+        'dc:1234567890ab:thread:xyz',
+      );
+      expect(result).toBe(
+        'origin/rescue/my_group/dc_1234567890/2026-03-20T10-00-00',
+      );
+    });
+
+    it('returns null when no rescue branches exist', async () => {
+      mockedExec.mockImplementation(
+        (_cmd: string, _opts: unknown, cb?: Function) => {
+          if (cb) cb(null, '', '');
+          return new EventEmitter() as any;
+        },
+      );
+
+      const result = await findLatestRescueBranch(
+        '/tmp/repo',
+        'my-group',
+        'dc:1234567890ab:thread:xyz',
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns null on git error', async () => {
+      mockedExec.mockImplementation(
+        (_cmd: string, _opts: unknown, cb?: Function) => {
+          if (cb) cb(new Error('git failed'), '', 'fatal: error');
+          return new EventEmitter() as any;
+        },
+      );
+
+      const result = await findLatestRescueBranch(
+        '/tmp/repo',
+        'my-group',
+        'dc:1234567890ab:thread:xyz',
+      );
+      expect(result).toBeNull();
+    });
+
+    it('sanitizes group folder and thread ID in pattern', async () => {
+      let capturedCmd = '';
+      mockedExec.mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          if (typeof cmd === 'string' && cmd.includes('git branch -r --list')) {
+            capturedCmd = cmd;
+          }
+          if (cb) cb(null, '', '');
+          return new EventEmitter() as any;
+        },
+      );
+
+      await findLatestRescueBranch(
+        '/tmp/repo',
+        'my.group/with:chars',
+        'dc:12345:thread',
+      );
+      expect(capturedCmd).toContain('my_group_with_chars');
+      expect(capturedCmd).toContain('dc_12345_thr');
+    });
+  });
+
+  describe('deleteRescueBranches', () => {
+    it('pushes delete refspecs for all matching branches', async () => {
+      const cmds: string[] = [];
+      mockedExec.mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          cmds.push(typeof cmd === 'string' ? cmd : '');
+          if (
+            typeof cmd === 'string' &&
+            cmd.includes('git branch -r --list')
+          ) {
+            if (cb) {
+              cb(
+                null,
+                '  origin/rescue/test_group/dc_1234567890/2026-03-18T14-30-45\n  origin/rescue/test_group/dc_1234567890/2026-03-20T10-00-00\n',
+                '',
+              );
+            }
+          } else if (cb) {
+            cb(null, '', '');
+          }
+          return new EventEmitter() as any;
+        },
+      );
+
+      await deleteRescueBranches(
+        '/tmp/repo',
+        'test-group',
+        'dc:1234567890ab:thread:xyz',
+      );
+
+      const pushCmd = cmds.find((c) => c.includes('git push origin "'));
+      expect(pushCmd).toBeDefined();
+      expect(pushCmd).toContain(
+        '":refs/heads/rescue/test_group/dc_1234567890/2026-03-18T14-30-45"',
+      );
+      expect(pushCmd).toContain(
+        '":refs/heads/rescue/test_group/dc_1234567890/2026-03-20T10-00-00"',
+      );
+    });
+
+    it('does nothing when no rescue branches exist', async () => {
+      const cmds: string[] = [];
+      mockedExec.mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          cmds.push(typeof cmd === 'string' ? cmd : '');
+          if (cb) cb(null, '', '');
+          return new EventEmitter() as any;
+        },
+      );
+
+      await deleteRescueBranches(
+        '/tmp/repo',
+        'test-group',
+        'dc:1234567890ab:thread:xyz',
+      );
+
+      expect(cmds.filter((c) => c.includes('git push'))).toHaveLength(0);
+    });
+
+    it('does not throw on push failure', async () => {
+      mockedExec.mockImplementation(
+        (cmd: string, _opts: unknown, cb?: Function) => {
+          if (
+            typeof cmd === 'string' &&
+            cmd.includes('git branch -r --list')
+          ) {
+            if (cb)
+              cb(
+                null,
+                '  origin/rescue/test_group/dc_1234567890/2026-03-18T14-30-45\n',
+                '',
+              );
+          } else if (
+            typeof cmd === 'string' &&
+            cmd.includes('git push')
+          ) {
+            if (cb) cb(new Error('push failed'), '', 'error');
+          } else if (cb) {
+            cb(null, '', '');
+          }
+          return new EventEmitter() as any;
+        },
+      );
+
+      // Should not throw
+      await expect(
+        deleteRescueBranches(
+          '/tmp/repo',
+          'test-group',
+          'dc:1234567890ab:thread:xyz',
+        ),
+      ).resolves.toBeUndefined();
+    });
   });
 });
