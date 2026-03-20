@@ -76,6 +76,7 @@ GATE_PR_URL=$(echo "$STATE_INFO" | cut -d'|' -f1)
 
 SHOULD_CLEAR=false
 CLEAR_REASON=""
+ALL_PASSIVE=false
 
 # Trigger 1: KAIZEN_IMPEDIMENTS structured declaration (kaizen #113)
 if echo "$CMD_LINE" | grep -qE 'KAIZEN_IMPEDIMENTS:'; then
@@ -166,10 +167,14 @@ EOF
     SHOULD_CLEAR=true
     CLEAR_REASON="no impediments identified ($EMPTY_REASON)"
   else
-    # Validate each entry
+    # Validate each entry (type-aware validation — kaizen #205, #213)
+    # - type "meta": only filed (with ref) or waived (with reason)
+    # - type "positive": also allows no-action (with reason)
+    # - no type / other: standard dispositions (filed|incident|fixed-in-pr|waived)
     VALIDATION=$(echo "$JSON" | jq -r '
       [.[] | {
         impediment: (.impediment // ""),
+        type: (.type // ""),
         disposition: (.disposition // ""),
         ref: (.ref // ""),
         reason: (.reason // "")
@@ -178,12 +183,16 @@ EOF
         "missing \"impediment\" field"
       elif .disposition == "" then
         "missing \"disposition\" for: \(.impediment)"
-      elif (.disposition | IN("filed", "incident", "fixed-in-pr", "waived") | not) then
+      elif .type == "meta" and (.disposition | IN("filed", "waived") | not) then
+        "meta-finding \"\(.impediment)\" has disposition \"\(.disposition)\" — meta-findings must be \"filed\" (with ref) or \"waived\" (with reason). If it is truly not actionable, use \"waived\" and explain why."
+      elif .type == "positive" and (.disposition | IN("filed", "incident", "fixed-in-pr", "waived", "no-action") | not) then
+        "invalid disposition \"\(.disposition)\" for: \(.impediment) (must be filed|incident|fixed-in-pr|waived|no-action)"
+      elif (.type != "meta" and .type != "positive") and (.disposition | IN("filed", "incident", "fixed-in-pr", "waived") | not) then
         "invalid disposition \"\(.disposition)\" for: \(.impediment) (must be filed|incident|fixed-in-pr|waived)"
       elif (.disposition == "filed" or .disposition == "incident") and .ref == "" then
         "disposition \"\(.disposition)\" requires \"ref\" field for: \(.impediment)"
-      elif .disposition == "waived" and .reason == "" then
-        "disposition \"waived\" requires \"reason\" field for: \(.impediment)"
+      elif (.disposition == "waived" or .disposition == "no-action") and .reason == "" then
+        "disposition \"\(.disposition)\" requires \"reason\" field for: \(.impediment)"
       else
         empty
       end
@@ -194,6 +203,9 @@ EOF
       printf '\nKAIZEN_IMPEDIMENTS: Validation failed:\n%s\n\nFix the issues and resubmit.\n' "$VALIDATION"
       exit 0
     fi
+
+    # All-passive advisory (kaizen #205): nudge when every disposition is waived/no-action
+    ALL_PASSIVE=$(echo "$JSON" | jq '[.[] | .disposition] | all(. == "waived" or . == "no-action")' 2>/dev/null)
 
     SHOULD_CLEAR=true
     CLEAR_REASON="$ITEM_COUNT impediment(s) addressed"
@@ -280,6 +292,16 @@ EOF
 fi
 
 if [ "$SHOULD_CLEAR" = true ]; then
+  # All-passive advisory (kaizen #205): print nudge before clearing
+  if [ "$ALL_PASSIVE" = "true" ]; then
+    cat <<'ADVISORY'
+
+All impediments waived — none filed or fixed-in-pr.
+"Every failure is a gift — if you file the issue."
+Are any of these actionable at L2+? If so, file them before proceeding.
+ADVISORY
+  fi
+
   clear_state_with_status "needs_pr_kaizen"
   cat <<EOF
 

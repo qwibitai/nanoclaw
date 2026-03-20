@@ -577,5 +577,289 @@ else
   ((FAIL++))
 fi
 
+echo ""
+echo "=== All-waived reflections: advisory printed, gate still clears (#205) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: All-waived impediments clear the gate but print an advisory nudge
+ALL_WAIVED_JSON='[
+  {"impediment": "slow CI", "disposition": "waived", "reason": "one-time"},
+  {"impediment": "hook confusion", "disposition": "waived", "reason": "resolved"},
+  {"impediment": "test flake", "disposition": "waived", "reason": "not reproducible"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$ALL_WAIVED_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$ALL_WAIVED_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: all-waived impediments still cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: all-waived impediments did NOT clear gate"
+  ((FAIL++))
+fi
+assert_contains "advisory printed for all-waived" "All impediments waived" "$OUTPUT"
+assert_contains "advisory quotes zen" "file the issue" "$OUTPUT"
+
+echo ""
+echo "=== Mixed filed+waived: no advisory (#205) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+MIXED_JSON='[
+  {"impediment": "slow CI", "disposition": "filed", "ref": "#200"},
+  {"impediment": "minor lint", "disposition": "waived", "reason": "one-time"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$MIXED_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$MIXED_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: mixed dispositions cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: mixed dispositions did NOT clear gate"
+  ((FAIL++))
+fi
+assert_not_contains "no advisory for mixed dispositions" "All impediments waived" "$OUTPUT"
+
+echo ""
+echo "=== Meta-finding with no-action rejected (#213) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: type "meta" with disposition "no-action" is rejected
+META_NO_ACTION_JSON='[
+  {"impediment": "spec was accurate", "type": "meta", "disposition": "no-action", "reason": "pipeline working"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$META_NO_ACTION_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$META_NO_ACTION_JSON")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: meta-finding with no-action rejected"
+  ((PASS++))
+else
+  echo "  FAIL: meta-finding with no-action incorrectly accepted"
+  ((FAIL++))
+fi
+assert_contains "error mentions meta-finding" "meta" "$OUTPUT"
+
+echo ""
+echo "=== Meta-finding with waived+reason accepted (#213) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: type "meta" with "waived" + reason is valid
+META_WAIVED_JSON='[
+  {"impediment": "could improve naming", "type": "meta", "disposition": "waived", "reason": "cosmetic only, not worth an issue"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$META_WAIVED_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$META_WAIVED_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: meta-finding with waived+reason cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: meta-finding with waived+reason did NOT clear gate"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Meta-finding with filed+ref accepted (#213) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: type "meta" with "filed" + ref is valid
+META_FILED_JSON='[
+  {"impediment": "reflection format awkward", "type": "meta", "disposition": "filed", "ref": "#300"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$META_FILED_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$META_FILED_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: meta-finding with filed+ref cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: meta-finding with filed+ref did NOT clear gate"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Positive finding with no-action+reason accepted (#213) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: type "positive" with "no-action" + reason is valid
+POSITIVE_JSON='[
+  {"impediment": "TDD worked well", "type": "positive", "disposition": "no-action", "reason": "established practice"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$POSITIVE_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$POSITIVE_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: positive finding with no-action+reason cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: positive finding with no-action+reason did NOT clear gate"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Positive finding with no-action without reason rejected ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: no-action still requires a reason field
+POSITIVE_NO_REASON_JSON='[
+  {"impediment": "TDD worked well", "type": "positive", "disposition": "no-action"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$POSITIVE_NO_REASON_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$POSITIVE_NO_REASON_JSON")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: positive no-action without reason rejected"
+  ((PASS++))
+else
+  echo "  FAIL: positive no-action without reason incorrectly accepted"
+  ((FAIL++))
+fi
+assert_contains "error mentions reason" "reason" "$OUTPUT"
+
+echo ""
+echo "=== Entry without type field: backward compat (treated as impediment) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: Entries without type field work as before (no-action rejected)
+NO_TYPE_JSON='[
+  {"impediment": "slow CI", "disposition": "filed", "ref": "#200"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$NO_TYPE_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$NO_TYPE_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: entry without type field accepted (backward compat)"
+  ((PASS++))
+else
+  echo "  FAIL: entry without type field rejected"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Entry without type field rejects no-action (backward compat) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: no-action without explicit type is still rejected
+NO_TYPE_NO_ACTION_JSON='[
+  {"impediment": "things went well", "disposition": "no-action", "reason": "smooth sailing"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$NO_TYPE_NO_ACTION_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$NO_TYPE_NO_ACTION_JSON")
+
+if has_pr_kaizen_state; then
+  echo "  PASS: no-action without type field rejected"
+  ((PASS++))
+else
+  echo "  FAIL: no-action without type field incorrectly accepted"
+  ((FAIL++))
+fi
+assert_contains "error mentions invalid disposition" "invalid disposition" "$OUTPUT"
+
+echo ""
+echo "=== Single waived impediment gets advisory too (#205) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+SINGLE_WAIVED_JSON='[
+  {"impediment": "minor issue", "disposition": "waived", "reason": "not worth filing"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$SINGLE_WAIVED_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$SINGLE_WAIVED_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: single waived still clears gate"
+  ((PASS++))
+else
+  echo "  FAIL: single waived did NOT clear gate"
+  ((FAIL++))
+fi
+assert_contains "advisory for single waived" "All impediments waived" "$OUTPUT"
+
+echo ""
+echo "=== All no-action positive findings get advisory (#205) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+ALL_POSITIVE_JSON='[
+  {"impediment": "TDD worked", "type": "positive", "disposition": "no-action", "reason": "established"},
+  {"impediment": "spec was clear", "type": "positive", "disposition": "no-action", "reason": "good process"}
+]'
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+$ALL_POSITIVE_JSON
+IMPEDIMENTS" \
+  "KAIZEN_IMPEDIMENTS:
+$ALL_POSITIVE_JSON")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: all-positive-no-action cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: all-positive-no-action did NOT clear gate"
+  ((FAIL++))
+fi
+assert_contains "advisory for all passive" "All impediments waived" "$OUTPUT"
+
 teardown
 print_results

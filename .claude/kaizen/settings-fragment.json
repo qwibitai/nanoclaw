@@ -45,6 +45,16 @@
             "type": "command",
             "command": "./.claude/kaizen/hooks/enforce-pr-kaizen.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/warn-code-quality.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/check-practices.sh",
+            "timeout": 15
           }
         ]
       },
@@ -54,6 +64,11 @@
           {
             "type": "command",
             "command": "./.claude/kaizen/hooks/enforce-worktree-writes.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/enforce-case-exists.sh",
             "timeout": 10
           },
           {
@@ -90,7 +105,22 @@
           },
           {
             "type": "command",
+            "command": "./.claude/kaizen/hooks/post-merge-clear.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "./.claude/kaizen/hooks/pr-kaizen-clear.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/post-merge-clear.sh",
             "timeout": 10
           }
         ]
@@ -102,6 +132,11 @@
           {
             "type": "command",
             "command": "./.claude/kaizen/hooks/enforce-pr-review-stop.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "./.claude/kaizen/hooks/enforce-post-merge-stop.sh",
             "timeout": 10
           },
           {
