@@ -6,12 +6,21 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  pgSyncCreateTask,
+  pgSyncDeleteTask,
+  pgSyncLogTaskRun,
+  pgSyncSetRegisteredGroup,
+  pgSyncSetRouterState,
+  pgSyncSetSession,
+  pgSyncUpdateTask,
+  pgSyncUpdateTaskAfterRun,
+} from './pg-sync.js';
+import {
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
-import { initBookingDb } from './booking-db.js';
 
 let db: Database.Database;
 
@@ -212,7 +221,6 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
-  initBookingDb(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -222,7 +230,6 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
-  initBookingDb(db);
 }
 
 /**
@@ -450,6 +457,18 @@ export function createTask(
     task.status,
     task.created_at,
   );
+  pgSyncCreateTask({
+    id: task.id,
+    group_folder: task.group_folder,
+    chat_jid: task.chat_jid,
+    prompt: task.prompt,
+    schedule_type: task.schedule_type,
+    schedule_value: task.schedule_value,
+    context_mode: task.context_mode || 'isolated',
+    next_run: task.next_run ?? null,
+    status: task.status,
+    created_at: task.created_at,
+  });
 }
 
 export function getTaskById(id: string): ScheduledTask | undefined {
@@ -511,12 +530,14 @@ export function updateTask(
   db.prepare(
     `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
   ).run(...values);
+  pgSyncUpdateTask(id, updates);
 }
 
 export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+  pgSyncDeleteTask(id);
 }
 
 export function getDueTasks(): ScheduledTask[] {
@@ -545,6 +566,7 @@ export function updateTaskAfterRun(
     WHERE id = ?
   `,
   ).run(nextRun, now, lastResult, nextRun, id);
+  pgSyncUpdateTaskAfterRun(id, nextRun, lastResult);
 }
 
 export function logTaskRun(log: TaskRunLog): void {
@@ -561,6 +583,7 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+  pgSyncLogTaskRun(log);
 }
 
 // --- Router state accessors ---
@@ -576,6 +599,7 @@ export function setRouterState(key: string, value: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
   ).run(key, value);
+  pgSyncSetRouterState(key, value);
 }
 
 // --- Session accessors ---
@@ -591,6 +615,7 @@ export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
+  pgSyncSetSession(groupFolder, sessionId);
 }
 
 export function getAllSessions(): Record<string, string> {
@@ -662,6 +687,12 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+  );
+  pgSyncSetRegisteredGroup(
+    jid, group.name, group.folder, group.trigger, group.added_at,
+    group.containerConfig ?? null,
+    group.requiresTrigger !== false,
+    group.isMain === true,
   );
 }
 

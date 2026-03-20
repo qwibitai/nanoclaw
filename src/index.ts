@@ -4,8 +4,10 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  STORE_DIR,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -15,6 +17,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -43,7 +46,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, isValidGroupFolder } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -53,8 +56,11 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startReminderLoop } from './reminder-loop.js';
+import { initPgSync } from './pg-sync.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { readEnvFile } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -465,10 +471,52 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Auto-register a new customer DM on a dedicated business session.
+ * Called when an unknown sender messages the business WhatsApp number.
+ * Creates an isolated group folder per customer, copies the tenant CLAUDE.md,
+ * and registers the chat so the bot responds immediately (no trigger needed).
+ *
+ * Folder convention: customer's phone number (e.g. "40723164661").
+ * Each customer gets their own Claude session via this unique folder.
+ */
+function autoRegisterCustomerDM(jid: string, sessionFolder: string): void {
+  const phone = jid.split('@')[0].split(':')[0];
+  if (!isValidGroupFolder(phone)) {
+    logger.warn({ jid, phone }, 'Cannot auto-register: phone is not a valid folder name');
+    return;
+  }
+  if (registeredGroups[jid]) return; // already registered (race guard)
+
+  const customerDir = path.join(GROUPS_DIR, phone);
+  fs.mkdirSync(path.join(customerDir, 'logs'), { recursive: true });
+
+  // Copy tenant CLAUDE.md so the customer's container has the right persona
+  const tenantClaudeMd = path.join(GROUPS_DIR, sessionFolder, 'CLAUDE.md');
+  const customerClaudeMd = path.join(customerDir, 'CLAUDE.md');
+  if (fs.existsSync(tenantClaudeMd) && !fs.existsSync(customerClaudeMd)) {
+    fs.copyFileSync(tenantClaudeMd, customerClaudeMd);
+  }
+
+  registerGroup(jid, {
+    name: phone,
+    folder: phone,
+    trigger: '',
+    added_at: new Date().toISOString(),
+    requiresTrigger: false,
+    containerConfig: { tenantFolder: sessionFolder },
+  });
+  logger.info({ jid, phone, sessionFolder }, 'Auto-registered customer DM');
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+  const _pgEnv = readEnvFile(['DATABASE_URL']);
+  const dbUrl = process.env.DATABASE_URL || _pgEnv.DATABASE_URL;
+  if (dbUrl) initPgSync(dbUrl);
+  else logger.warn('DATABASE_URL not set — PostgreSQL sync disabled');
   loadState();
 
   // Start credential proxy (containers route API calls through this)
@@ -535,6 +583,34 @@ async function main(): Promise<void> {
     channels.push(channel);
     await channel.connect();
   }
+  // Auto-detect additional WhatsApp sessions from store/auth-* directories.
+  // Each auth-{sessionName}/ dir gets its own Baileys connection.
+  try {
+    const storeDirEntries = fs.readdirSync(STORE_DIR);
+    const sessionDirs = storeDirEntries.filter(
+      (d) =>
+        /^auth-/.test(d) &&
+        fs.statSync(path.join(STORE_DIR, d)).isDirectory(),
+    );
+    for (const dir of sessionDirs) {
+      const sessionName = dir.slice('auth-'.length);
+      // Convention: session name = group folder (e.g. auth-whatsapp_main → groups/whatsapp_main)
+      // Auth for the barbershop number: npx tsx src/whatsapp-auth.ts --session whatsapp_main
+      logger.info({ sessionName }, 'Starting additional WhatsApp session');
+      const waChannel = new WhatsAppChannel({
+        ...channelOpts,
+        sessionName,
+        sessionFolder: sessionName,
+        hasOwnNumber: true,
+        onAutoRegisterDM: (jid) => autoRegisterCustomerDM(jid, sessionName),
+      });
+      channels.push(waChannel);
+      await waChannel.connect();
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Could not scan for additional WhatsApp sessions');
+  }
+
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -576,6 +652,7 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startReminderLoop(() => channels);
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
