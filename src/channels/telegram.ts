@@ -279,11 +279,19 @@ export class TelegramChannel implements Channel {
         const response = await fetch(downloadUrl);
         if (!response.ok) return storeNonText(ctx, `[Document: ${name}]`);
         const buffer = await response.arrayBuffer();
-        const mediaDir = path.join(process.cwd(), 'groups', group.folder, 'media');
+        const mediaDir = path.join(
+          process.cwd(),
+          'groups',
+          group.folder,
+          'media',
+        );
         await fs.mkdir(mediaDir, { recursive: true });
         const filename = `${ctx.message.message_id}_${name}`;
         await fs.writeFile(path.join(mediaDir, filename), Buffer.from(buffer));
-        logger.info({ filename, size: buffer.byteLength }, 'Telegram document saved');
+        logger.info(
+          { filename, size: buffer.byteLength },
+          'Telegram document saved',
+        );
         storeNonText(ctx, `[Document: /workspace/group/media/${filename}]`);
       } catch (err) {
         logger.warn({ err }, 'Failed to download Telegram document');
@@ -376,7 +384,10 @@ export class TelegramChannel implements Channel {
         }
       }
 
-      logger.info({ jid, photos: photoPaths.length, length: text.length }, 'Telegram message sent');
+      logger.info(
+        { jid, photos: photoPaths.length, length: text.length },
+        'Telegram message sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
