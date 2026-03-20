@@ -71,6 +71,10 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+// Tracks cursor values saved just before piping messages to an active container.
+// Used for self-healing: if the container exits without sending a reply, the cursor
+// is rolled back so the messages can be reprocessed by the next container.
+const pipedCursors = new Map<string, string>();
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -454,6 +458,11 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            // Save pre-pipe cursor for self-healing (first pipe only — preserves oldest
+            // unconfirmed cursor so recovery re-processes all pending messages)
+            if (!pipedCursors.has(chatJid)) {
+              pipedCursors.set(chatJid, lastAgentTimestamp[chatJid] || '');
+            }
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
@@ -656,6 +665,8 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      // Container sent a reply — piped messages were processed, clear self-heal tracker
+      pipedCursors.delete(jid);
       return channel.sendMessage(jid, text);
     },
     sendMedia: (jid, filePath, caption) => {
@@ -701,6 +712,29 @@ async function main(): Promise<void> {
   );
 
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // Self-healing: if a container exits without replying to piped messages, roll back
+  // the cursor so the next container reprocesses them.
+  queue.onContainerExit = (chatJid: string) => {
+    const prePipeCursor = pipedCursors.get(chatJid);
+    if (prePipeCursor === undefined) return; // No piped messages pending
+    pipedCursors.delete(chatJid);
+    logger.warn(
+      { chatJid, rolledBackTo: prePipeCursor || '(start)' },
+      'Container exited without replying to piped messages — rolling back cursor for recovery',
+    );
+    lastAgentTimestamp[chatJid] = prePipeCursor;
+    saveState();
+    // Send recovery notice then re-enqueue
+    const channel = findChannel(channels, chatJid);
+    channel
+      ?.sendMessage(chatJid, '_Picking up where I left off..._')
+      .catch((err) =>
+        logger.warn({ chatJid, err }, 'Failed to send self-heal notice'),
+      );
+    queue.enqueueMessageCheck(chatJid);
+  };
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
