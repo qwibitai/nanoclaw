@@ -574,24 +574,26 @@ Use this when:
 - You need to do complex multi-step development tasks
 
 The task runs asynchronously. Claude Code works in the specified directory with full permissions.
-Results are returned as text. For long tasks, keep the prompt focused and specific.`,
+Results include the session_id — save it with memory_save so you can resume the session later.
+To resume a previous session, pass the session_id parameter.`,
   {
     prompt: z.string().describe('The task for Claude Code to perform. Be specific about what files to change and what the expected outcome is.'),
     workdir: z.string().default('/home/admin/projects/nanoclaw').describe('Working directory for Claude Code (absolute path on host)'),
+    session_id: z.string().optional().describe('Resume a previous Claude Code session by ID. Get this from a previous run_claude_code result.'),
     timeout_seconds: z.number().default(120).describe('Timeout in seconds (default: 120, max: 600)'),
   },
   async (args) => {
-    const data = {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data: Record<string, unknown> = {
       type: 'run_claude_code',
       prompt: args.prompt,
       workdir: args.workdir || '/home/admin/projects/nanoclaw',
+      session_id: args.session_id || undefined,
       timeout_seconds: Math.min(args.timeout_seconds || 120, 600),
+      request_id: requestId,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
-    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    data.type = 'run_claude_code';
-    (data as Record<string, unknown>).request_id = requestId;
     writeIpcFile(TASKS_DIR, data);
     const response = await pollForResponse(requestId, Math.min((args.timeout_seconds || 120) * 1000 + 5000, 605000));
     return { content: [{ type: 'text' as const, text: response }] };

@@ -275,6 +275,7 @@ export async function processTaskIpc(
     workdir?: string;
     timeout_seconds?: number;
     request_id?: string;
+    session_id?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -495,27 +496,48 @@ export async function processTaskIpc(
 
     case 'run_claude_code': {
       const prompt = data.prompt as string;
-      const workdir = data.workdir as string || process.cwd();
+      const workdir = (data.workdir as string) || process.cwd();
       const timeoutSec = Math.min((data.timeout_seconds as number) || 120, 600);
       const requestId = data.request_id as string;
+      const resumeSessionId = data.session_id as string | undefined;
 
       if (!prompt || !requestId) {
         logger.warn({ data }, 'Invalid run_claude_code request');
         break;
       }
 
-      // Run claude CLI asynchronously, write response when done
       const { execFile } = await import('child_process');
       const { promisify } = await import('util');
       const execFileAsync = promisify(execFile);
 
-      logger.info({ workdir, timeoutSec, sourceGroup }, 'Running Claude Code task via IPC');
+      logger.info(
+        { workdir, timeoutSec, sourceGroup, resume: resumeSessionId },
+        'Running Claude Code task via IPC',
+      );
 
       (async () => {
+        const responseFile = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'memory',
+          `res-${requestId}.json`,
+        );
         try {
+          const args = [
+            '-p',
+            prompt,
+            '--dangerously-skip-permissions',
+            '--output-format',
+            'json',
+          ];
+          if (resumeSessionId) {
+            args.push('--resume', resumeSessionId);
+          }
+
           const { stdout } = await execFileAsync(
             '/home/admin/.local/bin/claude',
-            ['-p', prompt, '--dangerously-skip-permissions', '--output-format', 'text'],
+            args,
             {
               cwd: workdir,
               timeout: timeoutSec * 1000,
@@ -523,13 +545,50 @@ export async function processTaskIpc(
               env: { ...process.env, HOME: '/home/admin' },
             },
           );
-          const responseFile = path.join(DATA_DIR, 'ipc', sourceGroup, 'memory', `res-${requestId}.json`);
-          fs.writeFileSync(responseFile, JSON.stringify(stdout.trim()));
-          logger.info({ sourceGroup, chars: stdout.length }, 'Claude Code task completed');
+
+          // Parse JSON output to extract session_id and result text
+          let sessionId = '';
+          let resultText = '';
+          try {
+            const events = stdout.trim().split('\n').filter(Boolean);
+            for (const line of events) {
+              const evt = JSON.parse(line.startsWith('[') ? line : `[${line}]`);
+              const items = Array.isArray(evt) ? evt : [evt];
+              for (const item of items) {
+                if (item.session_id) sessionId = item.session_id;
+                if (item.type === 'result' && item.result) {
+                  resultText = typeof item.result === 'string'
+                    ? item.result
+                    : JSON.stringify(item.result);
+                }
+                // Also capture assistant text messages
+                if (item.type === 'assistant' && item.message?.content) {
+                  for (const block of item.message.content) {
+                    if (block.type === 'text') resultText = block.text;
+                  }
+                }
+              }
+            }
+          } catch {
+            resultText = stdout.slice(0, 5000);
+          }
+
+          const response = {
+            result: resultText || '(no output)',
+            session_id: sessionId,
+            resumed: !!resumeSessionId,
+          };
+          fs.writeFileSync(responseFile, JSON.stringify(response));
+          logger.info(
+            { sourceGroup, sessionId, chars: resultText.length },
+            'Claude Code task completed',
+          );
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          const responseFile = path.join(DATA_DIR, 'ipc', sourceGroup, 'memory', `res-${requestId}.json`);
-          fs.writeFileSync(responseFile, JSON.stringify(`Error: ${errMsg.slice(0, 500)}`));
+          fs.writeFileSync(
+            responseFile,
+            JSON.stringify({ error: errMsg.slice(0, 500), session_id: '' }),
+          );
           logger.error({ err, sourceGroup }, 'Claude Code task failed');
         }
       })();
