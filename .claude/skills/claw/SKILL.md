@@ -21,7 +21,7 @@ author: kenbolton
 
 ## Prerequisites
 
-- Python 3.10 or later
+- Python 3.8 or later
 - NanoClaw installed at `~/src/nanoclaw` with a built and tagged container image (`nanoclaw-agent:latest`)
 - Either `container` (Apple Container, macOS 15+) or `docker` available in `PATH`
 
@@ -55,6 +55,8 @@ Usage:
   echo "prompt text" | claw --pipe -g <channel_name>
   cat prompt.txt | claw --pipe
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -413,6 +415,9 @@ claw --list-groups
 # Force a specific runtime
 claw --runtime docker "Hello"
 
+# Use a custom image tag (e.g. after rebuilding with a new tag)
+claw --image nanoclaw-agent:dev "Hello"
+
 # Verbose mode (debug info, secrets redacted)
 claw -v "Hello"
 
@@ -437,6 +442,20 @@ The default timeout is 300 seconds. For longer tasks, pass `--timeout 600` (or h
 ### "group not found"
 
 Run `claw --list-groups` to see what's registered. Group lookup does a fuzzy partial match on name and folder — if your query matches multiple groups, you'll get an error listing the ambiguous matches.
+
+### Container crashes mid-stream
+
+`claw` runs containers with `--rm`, so they are automatically removed whether they exit cleanly or crash. If the agent crashes before emitting the output sentinel, `claw` will fall back to printing raw stdout. Use `-v` to see what the container produced. Rebuild the image with `./container/build.sh` if crashes are consistent.
+
+### Use a custom image tag
+
+If you built the image with a different tag (e.g. during development), pass `--image`:
+
+```bash
+claw --image nanoclaw-agent:dev "Hello"
+```
+
+Set `NANOCLAW_IMAGE=nanoclaw-agent:dev` in your shell profile to make it the default.
 
 ### Override the NanoClaw directory
 
