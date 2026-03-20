@@ -16,6 +16,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -54,6 +55,35 @@ interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+}
+
+function chownRecursive(targetPath: string, uid: number, gid: number): void {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(targetPath);
+    fs.chownSync(targetPath, uid, gid);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  if (!stat.isDirectory()) return;
+
+  for (const entry of fs.readdirSync(targetPath)) {
+    chownRecursive(path.join(targetPath, entry), uid, gid);
+  }
+}
+
+function ensureContainerWritableOwnership(paths: string[]): void {
+  if (process.getuid?.() !== 0) return;
+
+  for (const targetPath of paths) {
+    if (!fs.existsSync(targetPath)) continue;
+    try {
+      chownRecursive(targetPath, 1000, 1000);
+    } catch (err) {
+      logger.warn({ targetPath, err }, 'Failed to chown container mount path');
+    }
+  }
 }
 
 function buildVolumeMounts(
@@ -122,6 +152,7 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -209,6 +240,13 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  ensureContainerWritableOwnership([
+    groupDir,
+    groupSessionsDir,
+    groupIpcDir,
+    groupAgentRunnerDir,
+  ]);
+
   return mounts;
 }
 
@@ -217,6 +255,7 @@ function buildContainerArgs(
   containerName: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const envVars = readEnvFile(['ANTHROPIC_MODEL']);
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -226,6 +265,13 @@ function buildContainerArgs(
     '-e',
     `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
+
+  if (process.env.ANTHROPIC_MODEL || envVars.ANTHROPIC_MODEL) {
+    args.push(
+      '-e',
+      `ANTHROPIC_MODEL=${process.env.ANTHROPIC_MODEL || envVars.ANTHROPIC_MODEL}`,
+    );
+  }
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.

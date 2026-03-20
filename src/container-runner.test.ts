@@ -28,6 +28,11 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
+// Mock env file reader
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
 // Mock fs
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -87,6 +92,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { readEnvFile } from './env.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -114,7 +120,9 @@ function emitOutputMarker(
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     fakeProc = createFakeProcess();
+    vi.mocked(readEnvFile).mockReturnValue({});
   });
 
   afterEach(() => {
@@ -206,5 +214,22 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('passes ANTHROPIC_MODEL into the container when configured', async () => {
+    vi.mocked(readEnvFile).mockReturnValue({
+      ANTHROPIC_MODEL: 'qwen3-coder-plus',
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+    const { spawn } = await import('child_process');
+    const containerArgs = vi.mocked(spawn).mock.calls[0]?.[1] as string[];
+
+    expect(containerArgs).toContain('-e');
+    expect(containerArgs).toContain('ANTHROPIC_MODEL=qwen3-coder-plus');
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });
