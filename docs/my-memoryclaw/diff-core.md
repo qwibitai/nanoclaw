@@ -51,8 +51,8 @@
 ### 1.6 その他削除
 | 現状 | 設計 | アクション |
 |------|------|-----------|
-| `remote-control.ts` | 設計に記載なし | **削除** |
-| `mount-security.ts` / `mount-allowlist.json` | コンテナ全権限なので不要 | **削除** |
+| `remote-control.ts` | 設計に記載なし（NanoClaw固有のリモートUI機能） | **削除** |
+| `mount-security.ts` / `mount-allowlist.json` | `--privileged`なし・コンテナ内は全許可なので不要 | **削除** |
 | `group-folder.ts` — バリデーション | Discordチャンネル名ベースに変更 | **書き換え** |
 
 ---
@@ -96,6 +96,7 @@ data/
 | `sessions`テーブルにClaude session IDを永続化 | JSONLから直近N件を読み、`messages`配列としてSDKの`query()`に渡す | **全面変更** |
 | コンテナにsessionIdをstdin経由で渡す | コンテナにmessages配列を渡す | **変更** |
 | `.claude/`ディレクトリをマウント | 不要（セッション状態をファイルで持たない） | **削除** |
+| コンテナ常時起動（IDLE_TIMEOUT=30分、IPC経由で追加メッセージ送信） | コンテナは毎回起動・毎回終了 | **変更** |
 
 **実装ポイント:**
 - JSONLからイベントを読み出し → `{role, content}`形式に変換
@@ -215,7 +216,7 @@ processGroup:
 |----------|------|----------|
 | `/new` | セッションリセット | グループのJSONLに区切りマーカーを書き込み、次回のmessages配列生成時に古い履歴を含めない |
 | `/model` | モデル切り替え | `config.json`の`model`フィールドを書き換え |
-| `/compact` | コンテキスト圧縮 | 要検討（Claude Agent SDKの機能に依存） |
+| `/compact` | コンテキスト圧縮 | ホストプロセスがClaude APIで会話を要約 → `{"type":"summary"}` をJSONLに書き込み。`buildMessagesArray()`はsummaryを起点にする |
 
 **実装場所:** `src/channels/discord.ts` にスラッシュコマンドハンドラを追加
 
@@ -267,7 +268,7 @@ data/tasks/
 
 | モジュール | 流用度 | 備考 |
 |-----------|--------|------|
-| `group-queue.ts` | **ほぼそのまま** | キュー・並行制御のロジックはそのまま使える |
+| `group-queue.ts` | **ロジック流用** | キュー・並行制御は流用。ただしIPC経由の追加メッセージ送信（`sendMessage`/`notifyIdle`/`closeStdin`）は削除（毎回起動方式のため） |
 | `credential-proxy.ts` | **そのまま** | Credential Proxy方式は同一 |
 | `router.ts` — XMLフォーマット | **そのまま** | メッセージのXMLフォーマットは踏襲 |
 | `router.ts` — `<internal>`除去 | **そのまま** | |
@@ -297,5 +298,5 @@ data/tasks/
 - **JSONLの同時書き込み**: キュー直列化で対処するが、タスク実行とメッセージ受信が同時に書き込む可能性 → ファイルロックまたはwrite queue必要
 - **JSONLのパフォーマンス**: 長期運用でファイルが大きくなる → 日付ローテーションで対処（設計済み）
 - **messages配列のトークン上限**: 直近N件の"N"をどう決めるか → config.jsonで設定可能にする
-- **`/compact`の実装方法**: Claude Agent SDKの`query()`でどう実現するか未定
+- **`/compact`の要約**: ホストプロセスがHaiku（`claude-haiku-4-5`）を直呼びして要約。Credential Proxyを通す or 直接APIキーを使う必要がある
 - **tool_callイベントの扱い**: SDK の messages配列にtool_useとtool_resultをどう含めるか要確認
