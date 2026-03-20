@@ -30,9 +30,9 @@ QDRANT_COLLECTION = os.environ.get("MEM0_QDRANT_COLLECTION", "suki_memories")
 NEO4J_URL = os.environ.get("MEM0_NEO4J_URL", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("MEM0_NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("MEM0_NEO4J_PASSWORD", "")
-EMBED_PROVIDER = os.environ.get("MEM0_EMBED_PROVIDER", "huggingface")
-EMBED_MODEL = os.environ.get("MEM0_EMBED_MODEL", "BAAI/bge-m3")
-EMBED_URL = os.environ.get("MEM0_EMBED_URL", "")
+EMBED_PROVIDER = os.environ.get("MEM0_EMBED_PROVIDER", "openai")
+EMBED_MODEL = os.environ.get("MEM0_EMBED_MODEL", "bge-m3")
+EMBED_URL = os.environ.get("MEM0_EMBED_URL", "http://127.0.0.1:8091/v1")
 EMBED_DIMS = int(os.environ.get("MEM0_EMBED_DIMS", "1024"))
 LLM_PROVIDER = os.environ.get("MEM0_LLM_PROVIDER", "openai")
 LLM_MODEL = os.environ.get("MEM0_LLM_MODEL", "qwen35-35b")
@@ -92,10 +92,6 @@ def _build_config() -> dict[str, Any]:
         config["llm"]["config"]["openai_base_url"] = LLM_URL
         if not os.environ.get("OPENAI_API_KEY"):
             config["llm"]["config"]["api_key"] = "not-needed"
-        # vLLM + Qwen3.5: disable thinking mode for structured extraction
-        config["llm"]["config"]["extra_body"] = {
-            "chat_template_kwargs": {"enable_thinking": False}
-        }
 
     # Graph store (Neo4j)
     if ENABLE_GRAPH:
@@ -118,6 +114,44 @@ def _build_config() -> dict[str, Any]:
 _memory_instance: Any = None
 
 
+def _patch_openai_client_for_thinking(mem: Any) -> None:
+    """Monkey-patch mem0's OpenAI LLM client to handle Qwen3.5 thinking mode.
+
+    Qwen3.5 on vLLM with --reasoning-parser puts the actual response in the
+    'reasoning' field (model_extra) instead of 'content', regardless of whether
+    thinking mode is on or off. mem0 only reads 'content', so we post-process
+    every response to move reasoning → content when content is null/empty.
+    """
+    try:
+        client = mem.llm.client  # openai.OpenAI instance
+        original_create = client.chat.completions.create
+
+        def patched_create(*args: Any, **kwargs: Any) -> Any:
+            # Disable thinking to avoid wasting tokens on reasoning
+            extra = kwargs.get("extra_body", {}) or {}
+            ctk = extra.get("chat_template_kwargs", {})
+            ctk["enable_thinking"] = False
+            extra["chat_template_kwargs"] = ctk
+            kwargs["extra_body"] = extra
+
+            resp = original_create(*args, **kwargs)
+
+            # Post-process: if content is null, copy from reasoning field
+            for choice in resp.choices:
+                msg = choice.message
+                if not msg.content and hasattr(msg, "model_extra") and msg.model_extra:
+                    reasoning = msg.model_extra.get("reasoning")
+                    if reasoning and isinstance(reasoning, str):
+                        msg.content = reasoning.strip()
+
+            return resp
+
+        client.chat.completions.create = patched_create
+        logger.info("Patched OpenAI client for Qwen3.5 reasoning→content mapping")
+    except Exception as exc:
+        logger.warning("Could not patch OpenAI client for thinking mode: %s", exc)
+
+
 def _get_memory() -> Any:
     """Lazy-initialize and return the mem0 Memory instance."""
     global _memory_instance
@@ -130,6 +164,7 @@ def _get_memory() -> Any:
             for k, v in config.items()
         })
         _memory_instance = Memory.from_config(config)
+        _patch_openai_client_for_thinking(_memory_instance)
     return _memory_instance
 
 
