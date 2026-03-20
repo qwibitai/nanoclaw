@@ -73,7 +73,12 @@ export interface SchedulerDependencies {
     containerName: string,
     groupFolder: string,
   ) => void;
-  sendMessage: (jid: string, text: string, taskId?: string, sessionId?: string) => Promise<void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    taskId?: string,
+    sessionId?: string,
+  ) => Promise<void>;
 }
 
 async function runTask(
@@ -191,7 +196,12 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result, task.id, capturedSessionId);
+          await deps.sendMessage(
+            task.chat_jid,
+            streamedOutput.result,
+            task.id,
+            capturedSessionId,
+          );
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

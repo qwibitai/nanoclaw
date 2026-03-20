@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll GitHub for NanoClaw updates every 2 minutes
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=2min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

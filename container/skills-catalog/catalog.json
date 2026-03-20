@@ -133,6 +133,15 @@
       "path": "/skills-catalog/local/materials-simulation-skills/skills/core-numerical/mesh-generation"
     },
     {
+      "name": "metrics",
+      "source": "local",
+      "description": "Log structured metrics events for agent observability. Use to record tool calls, skill activations, message processing, and errors to /home/node/work/metrics.jsonl for Grafana/Prometheus monitoring.",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/metrics"
+    },
+    {
       "name": "nonlinear-solvers",
       "source": "local",
       "description": "Select and configure nonlinear solvers for f(x)=0 or min F(x). Use for Newton methods, quasi-Newton (BFGS, L-BFGS), Broyden, Anderson acceleration, diagnosing convergence issues, choosing line search vs trust region, and analyzing Jacobian quality.",

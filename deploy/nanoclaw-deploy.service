@@ -1,0 +1,13 @@
+[Unit]
+Description=NanoClaw auto-deploy (pull, rebuild, restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/nanoclaw
+ExecStart=/root/nanoclaw/deploy/auto-deploy.sh
+Environment=HOME=/root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+StandardOutput=append:/root/nanoclaw/logs/auto-deploy.log
+StandardError=append:/root/nanoclaw/logs/auto-deploy.log

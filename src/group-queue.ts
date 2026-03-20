@@ -117,7 +117,11 @@ export class GroupQueue {
     const group = this.groups.get(groupJid);
     if (!group) return false;
     for (const [key, thread] of this.threads) {
-      if (key.startsWith(`${groupJid}:`) && thread.active && !thread.isTaskContainer) {
+      if (
+        key.startsWith(`${groupJid}:`) &&
+        thread.active &&
+        !thread.isTaskContainer
+      ) {
         return true;
       }
     }
@@ -241,7 +245,11 @@ export class GroupQueue {
    */
   private preemptIdleThreads(groupJid: string): void {
     for (const [key, thread] of this.threads) {
-      if (key.startsWith(`${groupJid}:`) && thread.active && thread.idleWaiting) {
+      if (
+        key.startsWith(`${groupJid}:`) &&
+        thread.active &&
+        thread.idleWaiting
+      ) {
         const colonIdx = key.indexOf(':');
         const tid = key.slice(colonIdx + 1);
         this.closeStdin(groupJid, tid);
@@ -419,16 +427,21 @@ export class GroupQueue {
       'Starting container for thread',
     );
 
-    await this.withContainer(groupJid, threadId, { isTask: false }, async () => {
-      if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid, threadId);
-        if (success) {
-          group.retryCount = 0;
-        } else {
-          this.scheduleRetry(groupJid, threadId, group);
+    await this.withContainer(
+      groupJid,
+      threadId,
+      { isTask: false },
+      async () => {
+        if (this.processMessagesFn) {
+          const success = await this.processMessagesFn(groupJid, threadId);
+          if (success) {
+            group.retryCount = 0;
+          } else {
+            this.scheduleRetry(groupJid, threadId, group);
+          }
         }
-      }
-    }).catch((err) => {
+      },
+    ).catch((err) => {
       logger.error(
         { groupJid, threadId, err },
         'Error processing messages for thread',

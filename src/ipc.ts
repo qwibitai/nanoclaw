@@ -98,9 +98,17 @@ function resolveContainerPath(
   return null;
 }
 
-const KNOWN_IPC_SUBDIRS = new Set(['messages', 'tasks', 'files', 'prs', 'input']);
+const KNOWN_IPC_SUBDIRS = new Set([
+  'messages',
+  'tasks',
+  'files',
+  'prs',
+  'input',
+]);
 
-function getIpcDirsForGroup(groupIpcDir: string): Array<{ basePath: string; threadId?: string }> {
+function getIpcDirsForGroup(
+  groupIpcDir: string,
+): Array<{ basePath: string; threadId?: string }> {
   const dirs: Array<{ basePath: string; threadId?: string }> = [];
 
   // Legacy flat structure (non-threaded)
@@ -111,10 +119,15 @@ function getIpcDirsForGroup(groupIpcDir: string): Array<{ basePath: string; thre
     const entries = fs.readdirSync(groupIpcDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && !KNOWN_IPC_SUBDIRS.has(entry.name)) {
-        dirs.push({ basePath: path.join(groupIpcDir, entry.name), threadId: entry.name });
+        dirs.push({
+          basePath: path.join(groupIpcDir, entry.name),
+          threadId: entry.name,
+        });
       }
     }
-  } catch { /* dir may not exist yet */ }
+  } catch {
+    /* dir may not exist yet */
+  }
 
   return dirs;
 }
@@ -253,7 +266,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
             }
           } catch (err) {
-            logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+            logger.error(
+              { err, sourceGroup },
+              'Error reading IPC tasks directory',
+            );
           }
         }
 
@@ -289,7 +305,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   }
 
                   // Resolve and validate each file
-                  const resolvedFiles: Array<{ path: string; name: string }> = [];
+                  const resolvedFiles: Array<{ path: string; name: string }> =
+                    [];
                   let valid = true;
                   for (const f of data.files) {
                     const hostPath = resolveContainerPath(f.path, sourceGroup);
@@ -366,7 +383,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
             }
           }
         } catch (err) {
-          logger.error({ err, sourceGroup, threadId }, 'Error reading IPC files directory');
+          logger.error(
+            { err, sourceGroup, threadId },
+            'Error reading IPC files directory',
+          );
         }
 
         // Process PR watch requests from this IPC directory (only from the flat/legacy path)
@@ -435,7 +455,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
             }
           } catch (err) {
-            logger.error({ err, sourceGroup }, 'Error reading IPC prs directory');
+            logger.error(
+              { err, sourceGroup },
+              'Error reading IPC prs directory',
+            );
           }
         }
       }

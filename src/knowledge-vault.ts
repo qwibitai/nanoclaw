@@ -4,7 +4,13 @@ import { execSync } from 'child_process';
 import { GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
 
-const VAULT_DIRS = ['people', 'projects', 'preferences', 'decisions', 'reference'];
+const VAULT_DIRS = [
+  'people',
+  'projects',
+  'preferences',
+  'decisions',
+  'reference',
+];
 
 const VAULT_GITIGNORE = `.obsidian/workspace.json
 .obsidian/workspace-mobile.json
@@ -13,11 +19,15 @@ const VAULT_GITIGNORE = `.obsidian/workspace.json
 `;
 
 const OBSIDIAN_CONFIG = {
-  'app.json': JSON.stringify({
-    livePreview: true,
-    showFrontmatter: true,
-    defaultViewMode: 'source',
-  }, null, 2),
+  'app.json': JSON.stringify(
+    {
+      livePreview: true,
+      showFrontmatter: true,
+      defaultViewMode: 'source',
+    },
+    null,
+    2,
+  ),
 };
 
 export function initKnowledgeVault(groupFolder: string): string {
@@ -44,16 +54,25 @@ export function initKnowledgeVault(groupFolder: string): string {
     const gitEnv = {
       ...process.env,
       GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || 'NanoClaw',
-      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || 'noreply@nanoclaw.local',
+      GIT_AUTHOR_EMAIL:
+        process.env.GIT_AUTHOR_EMAIL || 'noreply@nanoclaw.local',
       GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || 'NanoClaw',
-      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || 'noreply@nanoclaw.local',
+      GIT_COMMITTER_EMAIL:
+        process.env.GIT_COMMITTER_EMAIL || 'noreply@nanoclaw.local',
     };
     execSync('git init', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
     execSync('git add -A', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
-    execSync('git commit -m "Initial knowledge vault"', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
+    execSync('git commit -m "Initial knowledge vault"', {
+      cwd: vaultPath,
+      stdio: 'pipe',
+      env: gitEnv,
+    });
     logger.info({ groupFolder, vaultPath }, 'Knowledge vault initialized');
   } catch (err) {
-    logger.warn({ groupFolder, err }, 'Failed to initialize knowledge vault git repo');
+    logger.warn(
+      { groupFolder, err },
+      'Failed to initialize knowledge vault git repo',
+    );
   }
 
   return vaultPath;

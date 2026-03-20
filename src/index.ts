@@ -333,7 +333,8 @@ async function runAgent(
   sessionOverride?: string,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessionOverride !== undefined ? sessionOverride : sessions[group.folder];
+  const sessionId =
+    sessionOverride !== undefined ? sessionOverride : sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -421,7 +422,15 @@ async function runAgent(
           );
           return 'error';
         }
-        return runAgent(group, prompt, chatJid, onOutput, true, threadId, sessionOverride);
+        return runAgent(
+          group,
+          prompt,
+          chatJid,
+          onOutput,
+          true,
+          threadId,
+          sessionOverride,
+        );
       }
 
       logger.error(

@@ -501,9 +501,7 @@ describe('GroupQueue', () => {
           currentPerGroup,
         );
         activeThreadIds.push(threadId ?? 'default');
-        await new Promise<void>((resolve) =>
-          completionCallbacks.push(resolve),
-        );
+        await new Promise<void>((resolve) => completionCallbacks.push(resolve));
         currentPerGroup--;
         return true;
       },
@@ -533,9 +531,7 @@ describe('GroupQueue', () => {
     const processMessages = vi.fn(
       async (groupJid: string, threadId?: string) => {
         startOrder.push(threadId ?? 'default');
-        await new Promise<void>((resolve) =>
-          completionCallbacks.push(resolve),
-        );
+        await new Promise<void>((resolve) => completionCallbacks.push(resolve));
         return true;
       },
     );
@@ -680,9 +676,7 @@ describe('GroupQueue', () => {
     const processMessages = vi.fn(
       async (groupJid: string, threadId?: string) => {
         startOrder.push(threadId ?? 'default');
-        await new Promise<void>((resolve) =>
-          completionCallbacks.push(resolve),
-        );
+        await new Promise<void>((resolve) => completionCallbacks.push(resolve));
         return true;
       },
     );

@@ -897,4 +897,3 @@ describe('getActiveThreadContexts', () => {
     expect(active[0].thread_id).toBe('thread-b');
   });
 });
-
