@@ -40,3 +40,13 @@ agents-sdk-docs
 # mem0-bridge
 services/mem0-bridge/venv/
 services/mem0-bridge/__pycache__/
+
+# mem0-bridge secrets
+services/mem0-bridge/.env
+
+# Standalone scripts (not part of nanoclaw)
+llm-proxy.py
+
+# Services runtime
+services/*/venv/
+services/*/__pycache__/
