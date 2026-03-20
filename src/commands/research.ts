@@ -19,7 +19,7 @@ export const researchCommand = {
       option
         .setName('topic')
         .setDescription('The research topic or question')
-        .setRequired(true)
+        .setRequired(true),
     )
     .addStringOption((option) =>
       option
@@ -27,8 +27,8 @@ export const researchCommand = {
         .setDescription('Research scope: broad or focused')
         .addChoices(
           { name: 'Broad (survey of the field)', value: 'broad' },
-          { name: 'Focused (deep dive on specific aspect)', value: 'focused' }
-        )
+          { name: 'Focused (deep dive on specific aspect)', value: 'focused' },
+        ),
     ),
 
   async execute(interaction: ChatInputCommandInteraction, onMessage: any) {
@@ -49,7 +49,9 @@ export const researchCommand = {
       await interaction.deferReply();
 
       if (!('threads' in interaction.channel)) {
-        await interaction.editReply('This command must be used in a text channel.');
+        await interaction.editReply(
+          'This command must be used in a text channel.',
+        );
         return;
       }
 
@@ -67,7 +69,7 @@ export const researchCommand = {
           scope,
           user: interaction.user.tag,
         },
-        'Research thread created'
+        'Research thread created',
       );
 
       // Send initial message to thread
@@ -76,7 +78,7 @@ export const researchCommand = {
           `**Topic:** ${topic}\n` +
           `**Scope:** ${scope}\n` +
           `**Initiated by:** ${interaction.user}\n\n` +
-          `Research agent is starting up...`
+          `Research agent is starting up...`,
       );
 
       // Reply to the interaction with thread link

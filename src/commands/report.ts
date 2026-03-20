@@ -46,7 +46,9 @@ export const reportCommand = {
     .addStringOption((o) =>
       o
         .setName('topic')
-        .setDescription('What to research and report on (e.g. "LLM development updates")')
+        .setDescription(
+          'What to research and report on (e.g. "LLM development updates")',
+        )
         .setRequired(true),
     )
     .addStringOption((o) =>
@@ -81,7 +83,9 @@ export const reportCommand = {
     .addChannelOption((o) =>
       o
         .setName('channel')
-        .setDescription('Channel to post reports in (defaults to current channel)')
+        .setDescription(
+          'Channel to post reports in (defaults to current channel)',
+        )
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false),
     ),
@@ -98,7 +102,10 @@ export const reportCommand = {
       interaction.options.getChannel('channel') ?? interaction.channel;
 
     if (!targetChannel) {
-      await interaction.reply({ content: 'Could not resolve target channel.', ephemeral: true });
+      await interaction.reply({
+        content: 'Could not resolve target channel.',
+        ephemeral: true,
+      });
       return;
     }
 
@@ -121,10 +128,15 @@ export const reportCommand = {
       if (!registeredGroups()[channelId]) {
         const groupDir = path.join(process.cwd(), 'groups', folder);
         fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-        fs.writeFileSync(path.join(groupDir, 'CLAUDE.md'), RESEARCH_SYSTEM_PROMPT);
+        fs.writeFileSync(
+          path.join(groupDir, 'CLAUDE.md'),
+          RESEARCH_SYSTEM_PROMPT,
+        );
 
         onRegisterGroup(channelId, {
-          name: ('name' in targetChannel ? targetChannel.name : null) ?? `report-${suffix}`,
+          name:
+            ('name' in targetChannel ? targetChannel.name : null) ??
+            `report-${suffix}`,
           folder,
           trigger: `@Atlas`,
           added_at: new Date().toISOString(),
@@ -171,7 +183,9 @@ export const reportCommand = {
       };
 
       const nextRun = taskBase.next_run
-        ? new Date(taskBase.next_run!).toLocaleString('en-US', { timeZone: TIMEZONE })
+        ? new Date(taskBase.next_run!).toLocaleString('en-US', {
+            timeZone: TIMEZONE,
+          })
         : 'unknown';
 
       logger.info({ taskId, topic, cron, channelId }, 'Report scheduled');

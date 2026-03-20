@@ -22,7 +22,7 @@ export const buildCommand = {
       option
         .setName('description')
         .setDescription('Brief description of what to build')
-        .setRequired(true)
+        .setRequired(true),
     ),
 
   async execute(interaction: ChatInputCommandInteraction, onMessage: any) {
@@ -40,7 +40,9 @@ export const buildCommand = {
       await interaction.deferReply();
 
       if (!('threads' in interaction.channel)) {
-        await interaction.editReply('This command must be used in a text channel.');
+        await interaction.editReply(
+          'This command must be used in a text channel.',
+        );
         return;
       }
 
@@ -58,7 +60,7 @@ export const buildCommand = {
           description,
           user: interaction.user.tag,
         },
-        'Build thread created'
+        'Build thread created',
       );
 
       // Create action buttons for build workflow
@@ -74,7 +76,7 @@ export const buildCommand = {
         new ButtonBuilder()
           .setCustomId('cancel-build')
           .setLabel('Cancel')
-          .setStyle(ButtonStyle.Danger)
+          .setStyle(ButtonStyle.Danger),
       );
 
       // Send initial message to thread
