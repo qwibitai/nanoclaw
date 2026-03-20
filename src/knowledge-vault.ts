@@ -41,9 +41,16 @@ export function initKnowledgeVault(groupFolder: string): string {
   fs.writeFileSync(path.join(vaultPath, '.gitignore'), VAULT_GITIGNORE);
 
   try {
-    execSync('git init', { cwd: vaultPath, stdio: 'pipe' });
-    execSync('git add -A', { cwd: vaultPath, stdio: 'pipe' });
-    execSync('git commit -m "Initial knowledge vault"', { cwd: vaultPath, stdio: 'pipe' });
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || 'NanoClaw',
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || 'noreply@nanoclaw.local',
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || 'NanoClaw',
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || 'noreply@nanoclaw.local',
+    };
+    execSync('git init', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
+    execSync('git add -A', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
+    execSync('git commit -m "Initial knowledge vault"', { cwd: vaultPath, stdio: 'pipe', env: gitEnv });
     logger.info({ groupFolder, vaultPath }, 'Knowledge vault initialized');
   } catch (err) {
     logger.warn({ groupFolder, err }, 'Failed to initialize knowledge vault git repo');

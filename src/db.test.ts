@@ -8,10 +8,8 @@ import {
   deleteTask,
   getActiveThreadContexts,
   getActiveWatchedPrs,
-  getAllActiveThreads,
   getAllChats,
   getAllRegisteredGroups,
-  getActiveThread,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
@@ -20,8 +18,6 @@ import {
   getThreadContextByOriginMessage,
   getThreadContextByThreadId,
   getWatchedPr,
-  setActiveThread,
-  deleteActiveThread,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -902,48 +898,3 @@ describe('getActiveThreadContexts', () => {
   });
 });
 
-// --- deprecated active thread wrappers ---
-
-describe('deprecated active thread wrappers (backward compatibility)', () => {
-  it('setActiveThread creates a thread context and getActiveThread retrieves it', () => {
-    setActiveThread('dc:compat', 'thread-compat');
-    const tid = getActiveThread('dc:compat');
-    expect(tid).toBe('thread-compat');
-  });
-
-  it('setActiveThread is idempotent for same chatJid+threadId', () => {
-    setActiveThread('dc:idem', 'thread-idem');
-    setActiveThread('dc:idem', 'thread-idem');
-    const active = getActiveThreadContexts('dc:idem', 24);
-    expect(active).toHaveLength(1);
-  });
-
-  it('setActiveThread adds a new context for different threadId', () => {
-    setActiveThread('dc:two', 'thread-one');
-    setActiveThread('dc:two', 'thread-two');
-    const active = getActiveThreadContexts('dc:two', 24);
-    expect(active).toHaveLength(2);
-  });
-
-  it('deleteActiveThread removes all contexts for a chatJid', () => {
-    setActiveThread('dc:del', 'thread-to-delete');
-    deleteActiveThread('dc:del');
-    expect(getActiveThread('dc:del')).toBeUndefined();
-  });
-
-  it('getAllActiveThreads returns map of most recent thread per chatJid', () => {
-    setActiveThread('dc:map1', 'thread-m1');
-    setActiveThread('dc:map2', 'thread-m2');
-    const map = getAllActiveThreads();
-    expect(map.get('dc:map1')).toBe('thread-m1');
-    expect(map.get('dc:map2')).toBe('thread-m2');
-  });
-
-  it('getAllActiveThreads returns most recent thread when multiple exist', () => {
-    setActiveThread('dc:recent', 'thread-old');
-    setActiveThread('dc:recent', 'thread-new');
-    const map = getAllActiveThreads();
-    // Most recent should be thread-new (last set)
-    expect(map.get('dc:recent')).toBe('thread-new');
-  });
-});

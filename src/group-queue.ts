@@ -364,34 +364,62 @@ export class GroupQueue {
     }
   }
 
-  private async runForThread(
+  /**
+   * Common setup/teardown for running a container (messages or tasks).
+   */
+  private async withContainer(
     groupJid: string,
     threadId: string,
-    reason: 'messages' | 'drain',
+    opts: { isTask: boolean; taskId?: string },
+    fn: () => Promise<void>,
   ): Promise<void> {
     const group = this.getGroup(groupJid);
     const thread = this.getThread(groupJid, threadId);
 
     thread.active = true;
     thread.idleWaiting = false;
-    thread.isTaskContainer = false;
-    group.pendingMessages.delete(threadId);
+    thread.isTaskContainer = opts.isTask;
+    if (!opts.isTask) group.pendingMessages.delete(threadId);
+    if (opts.taskId) group.runningTaskId = opts.taskId;
     group.activeThreadCount++;
     this.activeCount++;
     this.writeStatus();
+
+    try {
+      await fn();
+    } finally {
+      thread.active = false;
+      thread.isTaskContainer = false;
+      thread.process = null;
+      thread.containerName = null;
+      thread.groupFolder = null;
+      if (opts.taskId) group.runningTaskId = null;
+      group.activeThreadCount--;
+      this.activeCount--;
+      this.writeStatus();
+      this.drainGroup(groupJid);
+    }
+  }
+
+  private async runForThread(
+    groupJid: string,
+    threadId: string,
+    reason: 'messages' | 'drain',
+  ): Promise<void> {
+    const group = this.getGroup(groupJid);
 
     logger.debug(
       {
         groupJid,
         threadId,
         reason,
-        activeCount: this.activeCount,
-        activeThreadCount: group.activeThreadCount,
+        activeCount: this.activeCount + 1,
+        activeThreadCount: group.activeThreadCount + 1,
       },
       'Starting container for thread',
     );
 
-    try {
+    await this.withContainer(groupJid, threadId, { isTask: false }, async () => {
       if (this.processMessagesFn) {
         const success = await this.processMessagesFn(groupJid, threadId);
         if (success) {
@@ -400,59 +428,33 @@ export class GroupQueue {
           this.scheduleRetry(groupJid, threadId, group);
         }
       }
-    } catch (err) {
+    }).catch((err) => {
       logger.error(
         { groupJid, threadId, err },
         'Error processing messages for thread',
       );
       this.scheduleRetry(groupJid, threadId, group);
-    } finally {
-      thread.active = false;
-      thread.process = null;
-      thread.containerName = null;
-      thread.groupFolder = null;
-      group.activeThreadCount--;
-      this.activeCount--;
-      this.writeStatus();
-      this.drainGroup(groupJid);
-    }
+    });
   }
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
-    const group = this.getGroup(groupJid);
-    // Tasks use a special 'task' pseudo-thread entry for backward compatibility
     const taskThreadId = `task:${task.id}`;
-    const thread = this.getThread(groupJid, taskThreadId);
-
-    thread.active = true;
-    thread.idleWaiting = false;
-    thread.isTaskContainer = true;
-    group.runningTaskId = task.id;
-    group.activeThreadCount++;
-    this.activeCount++;
-    this.writeStatus();
 
     logger.debug(
-      { groupJid, taskId: task.id, activeCount: this.activeCount },
+      { groupJid, taskId: task.id, activeCount: this.activeCount + 1 },
       'Running queued task',
     );
 
-    try {
-      await task.fn();
-    } catch (err) {
+    await this.withContainer(
+      groupJid,
+      taskThreadId,
+      { isTask: true, taskId: task.id },
+      async () => {
+        await task.fn();
+      },
+    ).catch((err) => {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
-    } finally {
-      thread.active = false;
-      thread.isTaskContainer = false;
-      thread.process = null;
-      thread.containerName = null;
-      thread.groupFolder = null;
-      group.runningTaskId = null;
-      group.activeThreadCount--;
-      this.activeCount--;
-      this.writeStatus();
-      this.drainGroup(groupJid);
-    }
+    });
   }
 
   private scheduleRetry(
@@ -576,7 +578,8 @@ export class GroupQueue {
           break;
         }
       } else if (group.pendingMessages.size > 0) {
-        const nextThreadId = group.pendingMessages.keys().next().value!;
+        const nextThreadId = group.pendingMessages.keys().next().value;
+        if (nextThreadId === undefined) continue;
         group.pendingMessages.delete(nextThreadId);
         this.runForThread(nextJid, nextThreadId, 'drain').catch((err) =>
           logger.error(

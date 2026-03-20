@@ -237,9 +237,9 @@ async function processGroupMessages(
     }, IDLE_TIMEOUT);
   };
 
-  // Set thread context on Discord channel before streaming
-  if (channel.name === 'discord' && threadContext && threadId) {
-    (channel as any).setCurrentThreadContext(chatJid, threadId, threadContext);
+  // Set thread context on channel before streaming
+  if (threadContext && threadId) {
+    channel.setCurrentThreadContext?.(chatJid, threadId, threadContext);
   }
 
   await channel.setTyping?.(chatJid, true);
@@ -296,8 +296,8 @@ async function processGroupMessages(
   if (idleTimer) clearTimeout(idleTimer);
 
   // Clean up send target so future messages don't route to a stale thread
-  if (channel.name === 'discord' && threadId) {
-    (channel as any).setCurrentThreadContext(chatJid, threadId, null);
+  if (threadId) {
+    channel.setCurrentThreadContext?.(chatJid, threadId, null);
   }
 
   if (output === 'error' || hadError) {
@@ -888,10 +888,10 @@ async function main(): Promise<void> {
     },
     setThreadContext: (jid: string, threadId: string) => {
       const channel = findChannel(channels, jid);
-      if (channel && 'setCurrentThreadContext' in channel) {
+      if (channel) {
         const ctx = getThreadContextByThreadId(threadId);
         if (ctx) {
-          (channel as any).setCurrentThreadContext(jid, threadId, ctx);
+          channel.setCurrentThreadContext?.(jid, threadId, ctx);
         }
       }
     },

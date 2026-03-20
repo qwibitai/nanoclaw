@@ -735,61 +735,6 @@ export function getActiveThreadContexts(
     .all(chatJid, cutoff) as ThreadContext[];
 }
 
-// --- Active thread accessors (deprecated — now wrappers around thread_contexts) ---
-
-/** @deprecated Use createThreadContext / getThreadContextByThreadId instead. */
-export function getActiveThread(chatJid: string): string | undefined {
-  const row = db
-    .prepare(
-      'SELECT thread_id FROM thread_contexts WHERE chat_jid = ? ORDER BY last_active_at DESC, id DESC LIMIT 1',
-    )
-    .get(chatJid) as { thread_id: string | null } | undefined;
-  return row?.thread_id ?? undefined;
-}
-
-/** @deprecated Use createThreadContext instead. */
-export function setActiveThread(chatJid: string, threadId: string): void {
-  // Upsert: if a context already exists for this chatJid+threadId, touch it; otherwise create one.
-  const existing = db
-    .prepare(
-      'SELECT id FROM thread_contexts WHERE chat_jid = ? AND thread_id = ? ORDER BY last_active_at DESC, id DESC LIMIT 1',
-    )
-    .get(chatJid, threadId) as { id: number } | undefined;
-  if (existing) {
-    touchThreadContext(existing.id);
-  } else {
-    createThreadContext({
-      chatJid,
-      threadId,
-      sessionId: null,
-      originMessageId: null,
-      source: 'mention',
-    });
-  }
-}
-
-/** @deprecated Use deleteActiveThread only removes by chatJid now (no-op if not found). */
-export function deleteActiveThread(chatJid: string): void {
-  db.prepare('DELETE FROM thread_contexts WHERE chat_jid = ?').run(chatJid);
-}
-
-/** @deprecated Use getActiveThreadContexts instead. */
-export function getAllActiveThreads(): Map<string, string> {
-  const rows = db
-    .prepare(
-      'SELECT chat_jid, thread_id FROM thread_contexts WHERE thread_id IS NOT NULL ORDER BY last_active_at DESC, id DESC',
-    )
-    .all() as Array<{ chat_jid: string; thread_id: string }>;
-  // Return most-recent thread per chatJid
-  const result = new Map<string, string>();
-  for (const row of rows) {
-    if (!result.has(row.chat_jid)) {
-      result.set(row.chat_jid, row.thread_id);
-    }
-  }
-  return result;
-}
-
 // --- Watched PR accessors ---
 
 export interface WatchedPr {

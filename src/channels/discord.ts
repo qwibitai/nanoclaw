@@ -32,6 +32,21 @@ export interface DiscordChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/**
+ * Find the best split point for a chunk of text within maxLength.
+ * Prefers newline boundaries, then spaces, then hard cut. Avoids splitting UTF-16 surrogate pairs.
+ */
+function findSplitPoint(text: string, maxLength: number): number {
+  if (text.length <= maxLength) return text.length;
+  let splitAt = text.lastIndexOf('\n', maxLength);
+  if (splitAt <= 0) splitAt = text.lastIndexOf(' ', maxLength);
+  if (splitAt <= 0) splitAt = maxLength;
+  // Don't split a UTF-16 surrogate pair
+  const code = text.charCodeAt(splitAt - 1);
+  if (code >= 0xd800 && code <= 0xdbff) splitAt--;
+  return splitAt;
+}
+
 export class DiscordChannel implements Channel {
   name = 'discord';
 
@@ -320,17 +335,7 @@ export class DiscordChannel implements Channel {
   ): Promise<void> {
     const MAX_LENGTH = 2000;
     while (text.length > 0) {
-      if (text.length <= MAX_LENGTH) {
-        await target.send(text);
-        break;
-      }
-      // Split on last newline or space within limit to avoid breaking words/codepoints
-      let splitAt = text.lastIndexOf('\n', MAX_LENGTH);
-      if (splitAt <= 0) splitAt = text.lastIndexOf(' ', MAX_LENGTH);
-      if (splitAt <= 0) splitAt = MAX_LENGTH;
-      // Don't split a UTF-16 surrogate pair
-      const code = text.charCodeAt(splitAt - 1);
-      if (code >= 0xd800 && code <= 0xdbff) splitAt--;
+      const splitAt = findSplitPoint(text, MAX_LENGTH);
       await target.send(text.slice(0, splitAt));
       text = text.slice(splitAt).replace(/^\n/, '');
     }
@@ -430,15 +435,7 @@ export class DiscordChannel implements Channel {
       }
       const textChannel = channel as TextChannel;
       // Send first chunk directly to capture the message ID
-      const MAX_LENGTH = 2000;
-      let splitAt = text.length;
-      if (text.length > MAX_LENGTH) {
-        splitAt = text.lastIndexOf('\n', MAX_LENGTH);
-        if (splitAt <= 0) splitAt = text.lastIndexOf(' ', MAX_LENGTH);
-        if (splitAt <= 0) splitAt = MAX_LENGTH;
-        const code = text.charCodeAt(splitAt - 1);
-        if (code >= 0xd800 && code <= 0xdbff) splitAt--;
-      }
+      const splitAt = findSplitPoint(text, 2000);
       const firstChunk = text.slice(0, splitAt);
       const sentMessage = await textChannel.send(firstChunk);
       // Send remaining chunks
