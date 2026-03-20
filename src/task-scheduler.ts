@@ -49,7 +49,11 @@ export function computeNextRun(task: ScheduledTask): string | null {
       const second = interval.next();
       if (second.getTime() - nextMs < MIN_GAP_MS) {
         logger.warn(
-          { taskId: task.id, cron: task.schedule_value, gapMs: second.getTime() - nextMs },
+          {
+            taskId: task.id,
+            cron: task.schedule_value,
+            gapMs: second.getTime() - nextMs,
+          },
           'Cron fires too frequently (< 30min), throttling to next safe run',
         );
         // Skip ahead until we find a gap >= 30min from now
