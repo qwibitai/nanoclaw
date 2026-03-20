@@ -35,10 +35,11 @@ else
   exit 0
 fi
 
-# Get dirty files, excluding noise patterns
+# Get dirty files, excluding noise patterns and lifecycle-managed files
 # Uses git status --porcelain: first two chars are status, then filename
+# .worktree-lock.json: managed by worktree lifecycle (kaizen #225)
 DIRTY=$(git status --porcelain 2>/dev/null | \
-  grep -vE '(node_modules/|\.DS_Store|dist/|\.tsbuildinfo|\.env\.local)' || true)
+  grep -vE '(node_modules/|\.DS_Store|dist/|\.tsbuildinfo|\.env\.local|\.worktree-lock\.json)' || true)
 
 # No dirty files → allow
 if [ -z "$DIRTY" ]; then

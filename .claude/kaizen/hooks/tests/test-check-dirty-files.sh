@@ -105,4 +105,23 @@ assert_contains "shows staged category" "Staged but not committed" "$OUTPUT"
 assert_contains "shows modified category" "Modified" "$OUTPUT"
 assert_contains "shows untracked category" "Untracked" "$OUTPUT"
 
+echo ""
+echo "=== .worktree-lock.json excluded from dirty check (kaizen #225) ==="
+
+setup_git_status_mock " D .worktree-lock.json"
+
+OUTPUT=$(run_hook "$HOOK" "git push origin my-branch")
+assert_eq "worktree-lock.json alone → allow" "" "$OUTPUT"
+
+echo ""
+echo "=== .worktree-lock.json excluded but real dirty files still block ==="
+
+setup_git_status_mock " D .worktree-lock.json
+ M src/real-change.ts"
+
+OUTPUT=$(run_hook "$HOOK" "git push origin my-branch")
+assert_contains "real dirty file still blocks" "deny" "$OUTPUT"
+assert_contains "real file listed" "real-change" "$OUTPUT"
+assert_not_contains "worktree-lock not listed as dirty" "worktree-lock" "$OUTPUT"
+
 print_results
