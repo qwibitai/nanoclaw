@@ -119,6 +119,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
