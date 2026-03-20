@@ -67,6 +67,12 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Webhook server — lets host processes (dashboard, cron) push messages into WhatsApp
+export const WEBHOOK_PORT = parseInt(
+  process.env.WEBHOOK_PORT || '3002',
+  10,
+);
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

@@ -8,8 +8,10 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
+  WEBHOOK_PORT,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startWebhookServer } from './webhook-server.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -510,9 +512,11 @@ async function main(): Promise<void> {
   );
 
   // Graceful shutdown handlers
+  let webhookServer: ReturnType<typeof startWebhookServer> | null = null;
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    webhookServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -681,6 +685,13 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Start webhook server — lets crewops dashboard push messages into WhatsApp
+  webhookServer = startWebhookServer(
+    WEBHOOK_PORT,
+    () => channels,
+    () => registeredGroups,
+  );
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
