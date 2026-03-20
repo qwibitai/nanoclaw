@@ -1,0 +1,27 @@
+#!/bin/sh
+# Auto-deploy after merge to main.
+# Triggers build + restart + notification via scripts/deploy.sh.
+# Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
+#
+# Only runs in the main checkout on the main branch.
+# The deploy script handles all safety checks (build-before-restart,
+# health check, failure notification).
+
+# Only run in the main checkout (not worktrees)
+GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null)
+GIT_COMMON_PATH=$(git rev-parse --git-common-dir 2>/dev/null)
+
+if [ "$GIT_DIR_PATH" != "$GIT_COMMON_PATH" ]; then
+  # In a worktree — skip deploy
+  exit 0
+fi
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  exit 0
+fi
+
+# Run deploy in background so git merge returns immediately
+# The deploy script logs to logs/deploy.log
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+nohup "$SCRIPT_DIR/scripts/deploy.sh" >> "$SCRIPT_DIR/logs/deploy.log" 2>&1 &

@@ -331,49 +331,9 @@ The point of review is to catch gaps. A gap identified but not closed is not a r
 
 Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `npx tsx src/cli-kaizen.ts list|view` and create cases via `npx tsx src/cli-kaizen.ts case-create`. Include: what, why, when, how, reproduction steps, and verification criteria.
 
-## Post-Merge: Deploy & Maintenance Policy
+## Post-Merge: Auto-Deploy
 
-After merging to main, classify the change and follow the appropriate procedure. **Leads (Aviad/Liraz) MUST be notified** via Telegram at every stage.
-
-### Change classification
-
-| Change type                               | Action needed                       | Downtime                            |
-| ----------------------------------------- | ----------------------------------- | ----------------------------------- |
-| CLAUDE.md, docs/                          | None — read on next conversation    | Zero                                |
-| Vertical repo (tools, workflows)          | None — mounted live into containers | Zero                                |
-| `src/` code                               | `npm run build` + service restart   | ~10s                                |
-| `container/Dockerfile` or `agent-runner/` | `./container/build.sh` then restart | Build: 1-5min (zero), restart: ~10s |
-| `package.json` deps                       | `npm install` + build + restart     | ~10s                                |
-
-### Procedure for restart-required changes
-
-```
-1. CLASSIFY — what action is needed?
-2. PRE-FLIGHT checks:
-   - `git status` on main checkout — must be clean. If dirty, investigate (don't blindly stash).
-   - `docker ps` — verify Docker is available (if container build needed).
-   - `git pull origin main` — ensure main is up to date.
-3. NOTIFY leads BEFORE starting:
-   "🔧 Maintenance: [what changed]. Building now, will restart when ready (~Xmin)."
-4. BUILD while still running (zero downtime during build):
-   - npm install (if deps changed)
-   - npm run build (if src/ changed)
-   - ./container/build.sh (if Dockerfile changed)
-5. If build FAILS → DO NOT restart. Report:
-   "❌ Build failed: [error]. Still running previous version."
-   Stop and investigate.
-6. If build SUCCEEDS → report:
-   "🔧 Build done. Restarting now (~10s downtime)."
-   Then restart the service.
-7. Verify health — can the service respond to messages?
-8. Report completion:
-   "✅ Maintenance complete. New capabilities: [list]."
-   OR "❌ Restart failed: [error]. Investigating."
-```
-
-### For zero-downtime changes
-
-Notify only: "✅ Updated [what]. Active on next conversation, no restart needed."
+After merging to main, sync local main — the `.husky/post-merge` hook automatically triggers `scripts/deploy.sh` which builds, restarts, health-checks, and notifies on Telegram. See [`docs/auto-deploy.md`](docs/auto-deploy.md) for full details.
 
 ### After every merge: sync local main
 
@@ -384,15 +344,16 @@ MAIN_CHECKOUT="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
 git -C "$MAIN_CHECKOUT" fetch origin main && git -C "$MAIN_CHECKOUT" merge --ff-only origin/main
 ```
 
-This ensures hooks, settings, and CLAUDE.md changes take effect in the current session. Skipping this causes hooks registered in merged PRs to remain inactive. The `git worktree list` resolution works from any worktree and doesn't depend on username or install location.
+This triggers the post-merge hook which handles build + restart + notification automatically. The `git worktree list` resolution works from any worktree and doesn't depend on username or install location.
 
-**NEVER `cd` to the main checkout.** The main checkout is the production instance — other agents may be using it, and dirtying it can cause cross-agent contamination. Always use `git -C` for the sync and stay in your worktree. If you need follow-up work after merge, create a new branch from within your worktree.
+**NEVER `cd` to the main checkout.** The main checkout is the production instance — other agents may be using it, and dirtying it can cause cross-agent contamination. Always use `git -C` for the sync and stay in your worktree.
 
-### Critical rules
+### Deploy safety rules
 
-- **Build BEFORE restart** — never restart with an untested build
-- **Never leave leads uninformed** — they must know if the system is down or degraded
+- **Build BEFORE restart** — if the build fails, old version keeps running
+- **Leads are auto-notified** on Telegram at start, success, and failure
 - **If anything fails, keep running on the old version** — availability > new features
+- **Manual override**: `./scripts/deploy.sh --dry-run` to preview, `--build-only` to skip restart
 
 ## Database
 
