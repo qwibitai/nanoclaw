@@ -9,10 +9,9 @@ import {
   POLL_INTERVAL,
   TELEGRAM_BOT_POOL,
   TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
+  X_HEALTH_CHECK_INTERVAL,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { initBotPool } from './channels/telegram.js';
 import {
@@ -45,6 +44,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop, triggerSchedulerDrain } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { startXHealthCheck } from './x-health.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -54,8 +54,9 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let lastMessageLoopTick = 0;
+const startTime = Date.now();
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -387,6 +388,7 @@ async function startMessageLoop(): Promise<void> {
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
+    lastMessageLoopTick = Date.now();
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
@@ -448,15 +450,10 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Update reply context to the first message of this new batch
-            // so the agent's response replies to the triggering message
-            const triggerMsgId = messagesToSend[0].id;
-            const groupIpcDir = resolveGroupIpcPath(group.folder);
-            fs.mkdirSync(groupIpcDir, { recursive: true });
-            fs.writeFileSync(
-              path.join(groupIpcDir, 'reply_context.json'),
-              JSON.stringify({ lastMessageId: triggerMsgId }),
-            );
+            // Do NOT update reply_context.json here. The piped messages are
+            // supplemental input; the agent may still be composing a response
+            // to the original batch. Overwriting reply context would cause
+            // those in-flight replies to point at the wrong message.
             // Show typing indicator while the container processes the piped message
             channel.setTyping?.(chatJid, true)?.catch((err) =>
               logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
@@ -505,16 +502,87 @@ function recoverPendingMessages(): void {
   }
 }
 
+function startHealthMonitor(): void {
+  // 1. Event loop lag detection
+  //    A setTimeout(fn, 5000) that fires >30s late means the event loop was blocked.
+  const LAG_CHECK_INTERVAL = 5_000;
+  const LAG_THRESHOLD = 30_000;
+
+  let lastTick = Date.now();
+  let currentLagMs = 0;
+  const checkLag = () => {
+    const now = Date.now();
+    const lag = now - lastTick - LAG_CHECK_INTERVAL;
+    currentLagMs = lag;
+    lastTick = now;
+    if (lag > LAG_THRESHOLD) {
+      logger.fatal({ lagMs: lag }, 'Event loop blocked, exiting for restart');
+      process.exit(1);
+    }
+    setTimeout(checkLag, LAG_CHECK_INTERVAL);
+  };
+  setTimeout(checkLag, LAG_CHECK_INTERVAL);
+
+  // 2. Heartbeat log (every 5 minutes)
+  const HEARTBEAT_INTERVAL = 5 * 60 * 1000;
+  setInterval(() => {
+    const status = queue.getStatus();
+    const activeContainers = status.filter(
+      (s) => s.activeMessage || s.activeTask,
+    ).length;
+    const pendingMessages = status.filter((s) => s.pendingMessages).length;
+    const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    logger.info(
+      {
+        uptimeMin: Math.round((Date.now() - startTime) / 60_000),
+        activeContainers,
+        pendingMessages,
+        rssMb,
+        lagMs: currentLagMs,
+      },
+      'Heartbeat',
+    );
+  }, HEARTBEAT_INTERVAL);
+
+  // 3. Message loop stall detection
+  //    The message loop updates lastMessageLoopTick every ~2s. If it hasn't
+  //    been updated for 60s, the loop is stuck.
+  const LOOP_STALL_THRESHOLD = 60_000;
+  setInterval(() => {
+    if (
+      messageLoopRunning &&
+      lastMessageLoopTick > 0 &&
+      Date.now() - lastMessageLoopTick > LOOP_STALL_THRESHOLD
+    ) {
+      logger.fatal(
+        { stalledForMs: Date.now() - lastMessageLoopTick },
+        'Message loop stalled, exiting for restart',
+      );
+      process.exit(1);
+    }
+  }, 30_000);
+}
+
 async function main(): Promise<void> {
+  // Crash on unhandled rejections instead of silently continuing in a broken state
+  process.on('unhandledRejection', (err) => {
+    logger.fatal({ err }, 'Unhandled promise rejection');
+    process.exit(1);
+  });
+
   ensureContainerRuntimeRunning();
   cleanupOrphans();
   initDatabase();
   logger.info('Database initialized');
   loadState();
 
+  // X health check: hoisted so shutdown handler can stop it
+  let stopXHealthCheck: (() => void) | null = null;
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    stopXHealthCheck?.();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -531,12 +599,6 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
-
   if (TELEGRAM_BOT_TOKEN) {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
       ...channelOpts,
@@ -577,7 +639,6 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     restart: async () => {
@@ -592,6 +653,8 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  startHealthMonitor();
+  stopXHealthCheck = startXHealthCheck(X_HEALTH_CHECK_INTERVAL);
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
