@@ -67,19 +67,28 @@ export function watchWorkFiles(
     }
   }
 
-  // Also watch individual .md files within each folder for content changes
+  // Also watch individual initiative files for content changes
+  // Supports both flat files (idea.md) and folders (idea/initiative.md)
   for (const status of STATUSES) {
     const dir = path.join(INITIATIVES_DIR, status);
     try {
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
-      for (const file of files) {
-        const filePath = path.join(dir, file);
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        let filePath: string;
+        if (entry.isDirectory()) {
+          filePath = path.join(dir, entry.name, 'initiative.md');
+          if (!fs.existsSync(filePath)) continue;
+        } else if (entry.name.endsWith('.md')) {
+          filePath = path.join(dir, entry.name);
+        } else {
+          continue;
+        }
         const watcher = fs.watch(filePath, () => {
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             const payload = JSON.stringify(scanInitiatives());
             onChanged(payload, 'initiatives');
-            logger.info({ file }, 'Initiative file changed, broadcasting update');
+            logger.info({ file: entry.name }, 'Initiative file changed, broadcasting update');
           }, 500);
         });
         watchers.push(watcher);
@@ -153,15 +162,27 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
     const initiatives: InitiativeData[] = [];
 
     try {
-      const files = fs
-        .readdirSync(dir)
-        .filter((f) => f.endsWith('.md'))
-        .sort();
+      // Support both flat files (some-idea.md) and folders (some-idea/initiative.md)
+      const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 
-      for (const file of files) {
-        const filePath = path.join(dir, file);
+      for (const entry of entries) {
+        let filePath: string;
+        let slug: string;
+
+        if (entry.isDirectory()) {
+          // Folder-based initiative: read initiative.md inside the folder
+          filePath = path.join(dir, entry.name, 'initiative.md');
+          if (!fs.existsSync(filePath)) continue;
+          slug = entry.name;
+        } else if (entry.name.endsWith('.md')) {
+          // Flat file initiative
+          filePath = path.join(dir, entry.name);
+          slug = entry.name.replace(/\.md$/, '');
+        } else {
+          continue;
+        }
+
         const content = fs.readFileSync(filePath, 'utf-8');
-        const slug = file.replace(/\.md$/, '');
 
         // Extract short ID from first line (backtick-wrapped, e.g. `TF`)
         const idMatch = content.match(/^`([A-Z]+)`/);
@@ -349,9 +370,9 @@ function handleGetInitiativeFile(req: http.IncomingMessage, res: http.ServerResp
       return;
     }
     const [status, slug] = parts;
-    const filePath = path.join(INITIATIVES_DIR, status, `${slug}.md`);
+    const filePath = resolveInitiativePath(status, slug);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Initiative not found' }));
       return;
@@ -365,6 +386,19 @@ function handleGetInitiativeFile(req: http.IncomingMessage, res: http.ServerResp
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to read initiative' }));
   }
+}
+
+/**
+ * Resolve the path to an initiative file, supporting both formats:
+ * - Flat file: initiatives/{status}/{slug}.md
+ * - Folder: initiatives/{status}/{slug}/initiative.md
+ */
+function resolveInitiativePath(status: string, slug: string): string | null {
+  const folderPath = path.join(INITIATIVES_DIR, status, slug, 'initiative.md');
+  if (fs.existsSync(folderPath)) return folderPath;
+  const flatPath = path.join(INITIATIVES_DIR, status, `${slug}.md`);
+  if (fs.existsSync(flatPath)) return flatPath;
+  return null;
 }
 
 function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -381,8 +415,14 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
         return;
       }
 
-      const srcPath = path.join(INITIATIVES_DIR, from, `${slug}.md`);
-      const dstPath = path.join(INITIATIVES_DIR, to, `${slug}.md`);
+      // Support both flat files and folders
+      const isFolder = fs.existsSync(path.join(INITIATIVES_DIR, from, slug, 'initiative.md'));
+      const srcPath = isFolder
+        ? path.join(INITIATIVES_DIR, from, slug)
+        : path.join(INITIATIVES_DIR, from, `${slug}.md`);
+      const dstPath = isFolder
+        ? path.join(INITIATIVES_DIR, to, slug)
+        : path.join(INITIATIVES_DIR, to, `${slug}.md`);
 
       if (!fs.existsSync(srcPath)) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -392,21 +432,26 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
 
       fs.mkdirSync(path.join(INITIATIVES_DIR, to), { recursive: true });
 
+      // The initiative.md file for completion timestamp operations
+      const initFilePath = isFolder
+        ? path.join(srcPath, 'initiative.md')
+        : srcPath;
+
       // Add completion timestamp when moving to done (prepend to file)
       if (to === 'done') {
-        let fileContent = fs.readFileSync(srcPath, 'utf-8');
+        let fileContent = fs.readFileSync(initFilePath, 'utf-8');
         if (!/^completed:/m.test(fileContent)) {
           const today = new Date().toISOString().slice(0, 10);
           fileContent = `completed: ${today}\n${fileContent}`;
-          fs.writeFileSync(srcPath, fileContent, 'utf-8');
+          fs.writeFileSync(initFilePath, fileContent, 'utf-8');
         }
       }
 
       // Remove completion timestamp when moving out of done
       if (from === 'done' && to !== 'done') {
-        let fileContent = fs.readFileSync(srcPath, 'utf-8');
+        let fileContent = fs.readFileSync(initFilePath, 'utf-8');
         fileContent = fileContent.replace(/^completed:\s*\d{4}-\d{2}-\d{2}\n/, '');
-        fs.writeFileSync(srcPath, fileContent, 'utf-8');
+        fs.writeFileSync(initFilePath, fileContent, 'utf-8');
       }
 
       fs.renameSync(srcPath, dstPath);
