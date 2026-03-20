@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -59,10 +60,13 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  mountIntegrations?: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  // Mount integrations for main group OR when explicitly requested (e.g. scheduled tasks)
+  const shouldMountIntegrations = isMain || !!mountIntegrations;
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -199,6 +203,23 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // MCP credential mounts (main group or scheduled tasks that need integrations)
+  if (shouldMountIntegrations) {
+    const homeDir = process.env.HOME || os.homedir();
+    const gmailMcp = path.join(homeDir, '.gmail-mcp');
+    if (fs.existsSync(gmailMcp)) {
+      mounts.push({ hostPath: gmailMcp, containerPath: '/home/node/.gmail-mcp', readonly: false });
+    }
+    const calendarMcp = path.join(homeDir, '.calendar-mcp');
+    if (fs.existsSync(calendarMcp)) {
+      mounts.push({ hostPath: calendarMcp, containerPath: '/home/node/.calendar-mcp', readonly: false });
+    }
+    const todoistMcp = path.join(homeDir, '.todoist-mcp');
+    if (fs.existsSync(todoistMcp)) {
+      mounts.push({ hostPath: todoistMcp, containerPath: '/home/node/.todoist-mcp', readonly: true });
+    }
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -275,7 +296,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.isScheduledTask);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
