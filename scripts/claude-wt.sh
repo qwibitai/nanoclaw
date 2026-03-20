@@ -73,17 +73,10 @@ fi
 
 parse_claude_wt_args "$@"
 
-# Auto-prune stale worktrees and branches before creating a new one.
-# This is the automatic trigger for cleanup — every new session starts clean.
-# Runs in background so it doesn't delay startup if cleanup takes time.
+# Advisory disk usage report before creating a new worktree.
+# Analysis only — never auto-cleans. Other Claude instances may be active in worktrees.
 if [ -x "$CLAUDE_WT_DIR/worktree-du.sh" ]; then
-  "$CLAUDE_WT_DIR/worktree-du.sh" cleanup 2>/dev/null &
-  CLEANUP_PID=$!
-  # Give it a moment — if it finishes fast, great; if not, let it run in background
-  sleep 0.5
-  if kill -0 "$CLEANUP_PID" 2>/dev/null; then
-    echo "Cleanup running in background (PID $CLEANUP_PID)..."
-  fi
+  "$CLAUDE_WT_DIR/worktree-du.sh" analyze --fast
 fi
 
 # Generate nonce for worktree name (YYMMDD-HHMM-random)
