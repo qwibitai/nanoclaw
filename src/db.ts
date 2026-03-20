@@ -689,7 +689,7 @@ export function getThreadContextByOriginMessage(
 
 export function updateThreadContext(
   id: number,
-  updates: { threadId?: string; sessionId?: string; taskId?: number },
+  updates: { threadId?: string; sessionId?: string | null; taskId?: number },
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];

@@ -412,6 +412,13 @@ async function runAgent(
         );
         delete sessions[group.folder];
         deleteSession(group.folder);
+        // Also clear thread-level session so retry uses a fresh one
+        if (threadId) {
+          const ctx = getThreadContextByThreadId(threadId);
+          if (ctx) {
+            updateThreadContext(ctx.id, { sessionId: null });
+          }
+        }
         if (_retried) {
           logger.error(
             { group: group.name },
@@ -426,7 +433,7 @@ async function runAgent(
           onOutput,
           true,
           threadId,
-          sessionOverride,
+          undefined,
         );
       }
 
