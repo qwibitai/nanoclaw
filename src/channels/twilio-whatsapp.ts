@@ -1,9 +1,12 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
+import https from 'https';
+import path from 'path';
 
 import twilio from 'twilio';
 
-import { ASSISTANT_NAME } from '../config.js';
+import { GROUPS_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -30,6 +33,43 @@ interface TwilioWhatsAppChannelOpts {
 
 /** Max message length for WhatsApp via Twilio */
 const MAX_MESSAGE_LENGTH = 1600;
+
+/**
+ * Download media from a Twilio media URL using Basic Auth.
+ * Twilio media URLs redirect once, so we follow redirects.
+ */
+function downloadTwilioMedia(
+  url: string,
+  accountSid: string,
+  authToken: string,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const auth = `${accountSid}:${authToken}`;
+    const get = (targetUrl: string) => {
+      https.get(targetUrl, { auth }, (res) => {
+        // Follow redirects
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          get(res.headers.location);
+          return;
+        }
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode} downloading media`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', reject);
+      });
+    };
+    get(url);
+  });
+}
 
 /**
  * Parse URL-encoded form body from Twilio webhook POST.
@@ -176,7 +216,10 @@ export class TwilioWhatsAppChannel implements Channel {
           }
         }
 
-        this.processInboundMessage(params);
+        // Fire and forget — respond immediately, process in background
+        this.processInboundMessage(params).catch((err) => {
+          logger.error({ err }, 'Error in Twilio message processing');
+        });
 
         res.writeHead(200, { 'Content-Type': 'text/xml' });
         if (this.config.ackMessage) {
@@ -194,7 +237,9 @@ export class TwilioWhatsAppChannel implements Channel {
     });
   }
 
-  private processInboundMessage(params: Record<string, string>): void {
+  private async processInboundMessage(
+    params: Record<string, string>,
+  ): Promise<void> {
     const from = params.From || '';
     const body = params.Body || '';
     const profileName = params.ProfileName || '';
@@ -209,28 +254,6 @@ export class TwilioWhatsAppChannel implements Channel {
     const chatJid = from;
     const phone = from.replace(/^whatsapp:/, '');
     const timestamp = new Date().toISOString();
-
-    // Build content with media placeholders
-    let content = body;
-    if (numMedia > 0) {
-      const mediaPlaceholders: string[] = [];
-      for (let i = 0; i < numMedia; i++) {
-        const contentType = params[`MediaContentType${i}`] || 'unknown';
-        mediaPlaceholders.push(`[Media: ${contentType}]`);
-      }
-      const mediaText = mediaPlaceholders.join(' ');
-      content = content ? `${content}\n${mediaText}` : mediaText;
-    }
-
-    if (!content) {
-      logger.debug({ chatJid }, 'Twilio webhook: empty message, skipping');
-      return;
-    }
-
-    logger.info(
-      { chatJid, profileName, numMedia, length: content.length },
-      'Twilio WhatsApp message received',
-    );
 
     // Store chat metadata for discovery
     this.opts.onChatMetadata(
@@ -250,6 +273,58 @@ export class TwilioWhatsAppChannel implements Channel {
       );
       return;
     }
+
+    // Process media attachments
+    let content = body;
+    if (numMedia > 0) {
+      const groupDir = path.join(GROUPS_DIR, group.folder);
+      const mediaParts: string[] = [];
+
+      for (let i = 0; i < numMedia; i++) {
+        const mediaUrl = params[`MediaUrl${i}`];
+        const contentType = params[`MediaContentType${i}`] || 'unknown';
+
+        if (mediaUrl && contentType.startsWith('image/')) {
+          try {
+            const buffer = await downloadTwilioMedia(
+              mediaUrl,
+              this.config.accountSid,
+              this.config.authToken,
+            );
+            const result = await processImage(buffer, groupDir, body);
+            if (result) {
+              // processImage includes caption in content, so use it directly
+              content = result.content;
+            }
+            logger.info(
+              { chatJid, contentType },
+              'Twilio image processed',
+            );
+          } catch (err) {
+            logger.warn({ err, chatJid }, 'Twilio image download failed');
+            mediaParts.push(`[Media: ${contentType}]`);
+          }
+        } else {
+          mediaParts.push(`[Media: ${contentType}]`);
+        }
+      }
+
+      // Append non-image media placeholders
+      if (mediaParts.length > 0) {
+        const mediaText = mediaParts.join(' ');
+        content = content ? `${content}\n${mediaText}` : mediaText;
+      }
+    }
+
+    if (!content) {
+      logger.debug({ chatJid }, 'Twilio webhook: empty message, skipping');
+      return;
+    }
+
+    logger.info(
+      { chatJid, profileName, numMedia, length: content.length },
+      'Twilio WhatsApp message received',
+    );
 
     this.opts.onMessage(chatJid, {
       id: messageSid,
