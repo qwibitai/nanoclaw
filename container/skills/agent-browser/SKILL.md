@@ -1,7 +1,7 @@
 ---
 name: agent-browser
 description: Browse the web for any task — research topics, read articles, interact with web apps, fill forms, take screenshots, extract data, and test web pages. Use whenever a browser would be useful, not just when the user explicitly asks.
-allowed-tools: Bash(agent-browser:*)
+allowed-tools: Bash(agent-browser:*), Bash(host-browser:*)
 ---
 
 # Browser Automation with agent-browser
@@ -9,12 +9,28 @@ allowed-tools: Bash(agent-browser:*)
 ## Quick start
 
 ```bash
-agent-browser open <url>        # Navigate to page
+agent-browser open <url>        # Navigate to page (headless, in container)
 agent-browser snapshot -i       # Get interactive elements with refs
 agent-browser click @e1         # Click element by ref
 agent-browser fill @e2 "text"   # Fill input by ref
 agent-browser close             # Close browser
 ```
+
+## Headed mode (visible browser on host)
+
+Use `host-browser` instead of `agent-browser` to run commands in a visible browser window on the host machine. Same syntax, same commands — the browser just opens on the host's display instead of running headless in the container.
+
+```bash
+host-browser open <url>         # Opens visible browser on host
+host-browser snapshot -i        # Same commands work
+host-browser click @e1
+host-browser close
+```
+
+Use `host-browser` when you need to:
+- See the browser visually (debugging, demos)
+- Interact with sites that detect and block headless browsers
+- Access host-local services (localhost, VPN-only sites)
 
 ## Core workflow
 

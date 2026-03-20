@@ -33,6 +33,10 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
+# Install host-browser IPC proxy (headed browser via host)
+COPY scripts/host-browser.mjs /usr/local/bin/host-browser
+RUN chmod +x /usr/local/bin/host-browser
+
 # Create app directory
 WORKDIR /app
 
