@@ -55,7 +55,24 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Compilation cache: /tmp/dist-cache persists on the host between container runs.
+# We hash /app/src to detect changes — only recompile when source changes.
+RUN printf '#!/bin/bash\nset -e\n\
+SRC_HASH=$(find /app/src -name "*.ts" | sort | xargs md5sum 2>/dev/null | md5sum | cut -d" " -f1)\n\
+CACHE_DIR=/tmp/dist-cache\n\
+HASH_FILE="$CACHE_DIR/.src-hash"\n\
+if [ -f "$HASH_FILE" ] && [ "$(cat $HASH_FILE)" = "$SRC_HASH" ] && [ -f "$CACHE_DIR/index.js" ]; then\n\
+  echo "[entrypoint] Using cached dist (hash: $SRC_HASH)" >&2\n\
+else\n\
+  echo "[entrypoint] Compiling agent-runner..." >&2\n\
+  cd /app && npx tsc --outDir "$CACHE_DIR" 2>&1 >&2\n\
+  echo "$SRC_HASH" > "$HASH_FILE"\n\
+  echo "[entrypoint] Compilation done" >&2\n\
+fi\n\
+[ -L "$CACHE_DIR/node_modules" ] || ln -s /app/node_modules "$CACHE_DIR/node_modules"\n\
+cat > /tmp/input.json\n\
+node "$CACHE_DIR/index.js" < /tmp/input.json\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
