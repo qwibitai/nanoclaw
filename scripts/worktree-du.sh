@@ -14,13 +14,27 @@
 
 set -euo pipefail
 
-# Resolve project root — works from any worktree or main checkout
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"
-if [ -z "$PROJECT_ROOT" ] || [ ! -d "$PROJECT_ROOT" ]; then
-  PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Resolve project root — works from any worktree, subdirectory, or main checkout.
+# Extracted as a named function so tests can exercise the resolution logic directly.
+resolve_project_root() {
+  local dir="$1"
+  local root
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"
+  if [ -z "$root" ] || [ ! -d "$root" ]; then
+    root="$(cd "$dir/.." && pwd)"
+  fi
+  echo "$root"
+}
+
+# Test guard — when sourced for testing, export functions but don't execute.
+# Same pattern as claude-wt.sh (CLAUDE_WT_TEST).
+if [[ "${WORKTREE_DU_TEST:-}" = "1" ]]; then
+  return 0 2>/dev/null || true
 fi
 
+PROJECT_ROOT="$(resolve_project_root "$SCRIPT_DIR")"
 WORKTREES_DIR="$PROJECT_ROOT/.claude/worktrees"
 DB_PATH="$PROJECT_ROOT/store/messages.db"
 

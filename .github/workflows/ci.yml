@@ -37,6 +37,9 @@ jobs:
       - name: Tests (agent-runner)
         run: cd container/agent-runner && npx vitest run
 
+      - name: Tests (shell scripts)
+        run: bash scripts/run-all-tests.sh
+
   e2e:
     runs-on: ubuntu-latest
     steps:
