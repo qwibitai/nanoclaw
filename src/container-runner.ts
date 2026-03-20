@@ -240,12 +240,29 @@ function buildContainerArgs(
   }
 
   // Pass secrets needed by content registry MCP server inside containers
-  const contentRegistryEnv = readEnvFile(['OPENAI_API_KEY', 'POSTGRES_PASSWORD']);
+  const contentRegistryEnv = readEnvFile([
+    'OPENAI_API_KEY',
+    'POSTGRES_PASSWORD',
+    'ZOTERO_API_KEY',
+    'ZOTERO_LIBRARY_ID',
+  ]);
   if (contentRegistryEnv.OPENAI_API_KEY) {
     args.push('-e', `OPENAI_API_KEY=${contentRegistryEnv.OPENAI_API_KEY}`);
   }
   if (contentRegistryEnv.POSTGRES_PASSWORD) {
-    args.push('-e', `NANOCLAW_PG_PASSWORD=${contentRegistryEnv.POSTGRES_PASSWORD}`);
+    args.push(
+      '-e',
+      `NANOCLAW_PG_PASSWORD=${contentRegistryEnv.POSTGRES_PASSWORD}`,
+    );
+  }
+  if (contentRegistryEnv.ZOTERO_API_KEY) {
+    args.push('-e', `ZOTERO_API_KEY=${contentRegistryEnv.ZOTERO_API_KEY}`);
+  }
+  if (contentRegistryEnv.ZOTERO_LIBRARY_ID) {
+    args.push(
+      '-e',
+      `ZOTERO_LIBRARY_ID=${contentRegistryEnv.ZOTERO_LIBRARY_ID}`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution
