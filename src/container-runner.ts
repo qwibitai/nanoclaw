@@ -178,7 +178,9 @@ export async function buildVolumeMounts(
   });
   await fs.promises.mkdir(path.join(groupIpcDir, 'tasks'), { recursive: true });
   await fs.promises.mkdir(path.join(groupIpcDir, 'input'), { recursive: true });
-  await fs.promises.mkdir(path.join(groupIpcDir, 'memory'), { recursive: true });
+  await fs.promises.mkdir(path.join(groupIpcDir, 'memory'), {
+    recursive: true,
+  });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',

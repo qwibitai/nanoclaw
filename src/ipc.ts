@@ -230,7 +230,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading IPC memory directory');
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC memory directory',
+        );
       }
     }
 
@@ -507,13 +510,19 @@ async function processMemoryIpc(
 
     case 'memory_update': {
       await updateMemory(data.memory_id as string, data.content as string);
-      logger.info({ sourceGroup, memoryId: data.memory_id }, 'Memory updated via IPC');
+      logger.info(
+        { sourceGroup, memoryId: data.memory_id },
+        'Memory updated via IPC',
+      );
       break;
     }
 
     case 'memory_remove': {
       await removeMemory(data.memory_id as string);
-      logger.info({ sourceGroup, memoryId: data.memory_id }, 'Memory removed via IPC');
+      logger.info(
+        { sourceGroup, memoryId: data.memory_id },
+        'Memory removed via IPC',
+      );
       break;
     }
 
@@ -524,27 +533,43 @@ async function processMemoryIpc(
         (data.limit as number) || 10,
       );
       // Write response file for the container to read
-      const responseFile = path.join(memoryDir, `res-${data.request_id || Date.now()}.json`);
+      const responseFile = path.join(
+        memoryDir,
+        `res-${data.request_id || Date.now()}.json`,
+      );
       fs.writeFileSync(responseFile, JSON.stringify({ results }, null, 2));
-      logger.debug({ sourceGroup, resultCount: results.length }, 'Memory search via IPC');
+      logger.debug(
+        { sourceGroup, resultCount: results.length },
+        'Memory search via IPC',
+      );
       break;
     }
 
     case 'memory_forget_session': {
       await forgetSession(data.run_id as string);
-      logger.info({ sourceGroup, runId: data.run_id }, 'Session forgotten via IPC');
+      logger.info(
+        { sourceGroup, runId: data.run_id },
+        'Session forgotten via IPC',
+      );
       break;
     }
 
     case 'memory_forget_timerange': {
-      const deleted = await forgetTimerange(userId, data.before as string, data.after as string);
+      const deleted = await forgetTimerange(
+        userId,
+        data.before as string,
+        data.after as string,
+      );
       logger.info({ sourceGroup, deleted }, 'Timerange forgotten via IPC');
       break;
     }
 
     case 'memory_history': {
       const history = await getMemoryHistory(data.memory_id as string);
-      const responseFile = path.join(memoryDir, `res-${data.request_id || Date.now()}.json`);
+      const responseFile = path.join(
+        memoryDir,
+        `res-${data.request_id || Date.now()}.json`,
+      );
       fs.writeFileSync(responseFile, JSON.stringify({ history }, null, 2));
       break;
     }

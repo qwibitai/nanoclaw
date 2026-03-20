@@ -81,6 +81,10 @@ export const DISCORD_ONLY =
 
 // Memory bridge configuration
 export const MEM0_BRIDGE_URL =
-  process.env.MEM0_BRIDGE_URL || envConfig.MEM0_BRIDGE_URL || 'http://localhost:8095';
+  process.env.MEM0_BRIDGE_URL ||
+  envConfig.MEM0_BRIDGE_URL ||
+  'http://localhost:8095';
 export const MEM0_USER_ID =
-  process.env.MEM0_USER_ID || envConfig.MEM0_USER_ID || ASSISTANT_NAME.toLowerCase();
+  process.env.MEM0_USER_ID ||
+  envConfig.MEM0_USER_ID ||
+  ASSISTANT_NAME.toLowerCase();

@@ -94,11 +94,11 @@ async function bridgeFetch<T>(
  * Return `true` when every message in the batch is noise (short greeting,
  * ack, emoji, etc.).
  */
-function allNoise(
-  messages: Array<{ role: string; content: string }>,
-): boolean {
+function allNoise(messages: Array<{ role: string; content: string }>): boolean {
   return messages.every(
-    (m) => m.content.length < NOISE_MIN_LENGTH || NOISE_PATTERNS.test(m.content.trim()),
+    (m) =>
+      m.content.length < NOISE_MIN_LENGTH ||
+      NOISE_PATTERNS.test(m.content.trim()),
   );
 }
 

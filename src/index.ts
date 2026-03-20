@@ -60,7 +60,11 @@ import {
   endToolCall,
 } from './trace-db.js';
 import { startTraceServer } from './trace-server.js';
-import { initMemory, retrieveMemoryContext, captureConversation } from './mem0-memory.js';
+import {
+  initMemory,
+  retrieveMemoryContext,
+  captureConversation,
+} from './mem0-memory.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -217,10 +221,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     memoryContext = await retrieveMemoryContext(
       group.folder,
       MEM0_USER_ID,
-      missedMessages.map((m) => ({ content: m.content, sender_name: m.sender_name })),
+      missedMessages.map((m) => ({
+        content: m.content,
+        sender_name: m.sender_name,
+      })),
     );
   } catch (err) {
-    logger.warn({ err, group: group.name }, 'Memory retrieval failed, proceeding without');
+    logger.warn(
+      { err, group: group.name },
+      'Memory retrieval failed, proceeding without',
+    );
   }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -271,6 +281,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
   let firstOutputSeen = false;
+  let memoryCaptured = false;
 
   const output = await runAgent(
     group,
@@ -306,6 +317,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (result.status === 'success') {
         statusTracker.markAllDone(chatJid);
         queue.notifyIdle(chatJid);
+
+        // Capture conversation in memory (fire-and-forget, on first success)
+        if (!memoryCaptured) {
+          memoryCaptured = true;
+          const sessionId = sessions[group.folder] || 'unknown';
+          const sessionMode = process.env.NANOCLAW_MODE || 'live';
+          captureConversation(
+            group.folder,
+            MEM0_USER_ID,
+            sessionId,
+            sessionMode,
+            missedMessages.map((m) => ({
+              role: m.is_from_me ? 'assistant' : 'user',
+              content: m.content,
+              sender_name: m.sender_name,
+              timestamp: m.timestamp,
+            })),
+          ).catch((err) =>
+            logger.warn({ err, group: group.name }, 'Memory capture failed'),
+          );
+        }
       }
 
       if (result.status === 'error') {
@@ -354,23 +386,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Success — clear pipe tracking (markAllDone already fired in streaming callback)
   delete cursorBeforePipe[chatJid];
-
-  // Capture conversation in memory (fire-and-forget)
-  const sessionId = sessions[group.folder] || 'unknown';
-  const sessionMode = process.env.NANOCLAW_MODE || 'live';
-  captureConversation(
-    group.folder,
-    MEM0_USER_ID,
-    sessionId,
-    sessionMode,
-    missedMessages.map((m) => ({
-      role: m.is_from_me ? 'assistant' : 'user',
-      content: m.content,
-      sender_name: m.sender_name,
-      timestamp: m.timestamp,
-    })),
-  ).catch((err) => logger.warn({ err, group: group.name }, 'Memory capture failed'));
-
   saveState();
   return true;
 }
@@ -645,6 +660,29 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            // Capture piped messages in memory (fire-and-forget)
+            const pipedGroup = registeredGroups[chatJid];
+            if (pipedGroup) {
+              const pipedSessionId = sessions[pipedGroup.folder] || 'unknown';
+              const pipedMode = process.env.NANOCLAW_MODE || 'live';
+              captureConversation(
+                pipedGroup.folder,
+                MEM0_USER_ID,
+                pipedSessionId,
+                pipedMode,
+                messagesToSend.map((m) => ({
+                  role: m.is_from_me ? 'assistant' : 'user',
+                  content: m.content,
+                  sender_name: m.sender_name,
+                  timestamp: m.timestamp,
+                })),
+              ).catch((err) =>
+                logger.warn(
+                  { err, group: pipedGroup.name },
+                  'Piped memory capture failed',
+                ),
+              );
+            }
             // Mark new user messages as thinking (only groupMessages were markReceived'd;
             // accumulated allPending context messages are untracked and would no-op)
             for (const msg of groupMessages) {

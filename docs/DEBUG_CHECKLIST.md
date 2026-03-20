@@ -141,3 +141,101 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nanoclaw.plist
 # Rebuild after code changes
 npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
+
+## vLLM as Anthropic-Compatible Backend
+
+NanoClaw can use [vLLM](https://github.com/vllm-project/vllm)'s Anthropic-compatible `/v1/messages` endpoint instead of the Anthropic API. Set `ANTHROPIC_BASE_URL` to point at your vLLM instance and use `--served-model-name` to match the model name NanoClaw expects.
+
+### Tool Calls Not Working (Raw XML in Response)
+
+**Symptom**: Agent receives tool call markup as plain text instead of structured tool calls. Container logs show `tool_calls: []` (empty) even though the response contains `<function=Bash>` or `<tool_call>` blocks.
+
+**Cause**: Wrong `--tool-call-parser`. Each model family uses a different tool call format:
+
+| Model | Parser |
+|-------|--------|
+| Qwen3.5 (MoE, e.g. `Qwen3.5-35B-A3B`) | `qwen3_xml` |
+| Qwen2.5 / Qwen3 (dense) | `hermes` |
+| Llama / Mistral | `hermes` |
+
+**Fix**: Restart vLLM with the correct parser:
+
+```bash
+# Example for Qwen3.5:
+--enable-auto-tool-choice --tool-call-parser qwen3_xml
+```
+
+### Tool Calls Detected but `command` Parameter Missing (Streaming Bug)
+
+**Symptom**: `stop_reason: tool_use` is correct, but the agent SDK reports:
+
+```
+InputValidationError: Bash failed: required parameter 'command' is missing
+```
+
+The container crashes (exit code 1) and the user receives no response.
+
+**Cause**: A bug in vLLM's Anthropic streaming converter (`vllm/entrypoints/anthropic/serving.py`). The `qwen3_xml` parser sets `tool_call.id` on every streaming delta (not just the first one). The converter's `message_stream_converter()` interprets each delta with an `id` as a **new** tool call, creating a new `content_block_start` for each chunk. The first block gets `name="Bash"` with `input: {}` (empty), then immediately closes. The actual `{"command": "..."}` fragments end up in subsequent orphaned blocks that the SDK ignores.
+
+**Affected versions**: vLLM 0.16.x with `--tool-call-parser qwen3_xml` and streaming enabled (which NanoClaw always uses).
+
+**Fix**: Patch `message_stream_converter()` in the vLLM installation to track the current tool call ID and only create a new content block when the ID actually changes:
+
+```python
+# File: vllm/entrypoints/anthropic/serving.py
+# In message_stream_converter(), find the variable initialization block:
+
+            content_block_index = 0
+            content_block_started = False
+            current_tool_call_id = None          # ← ADD THIS LINE
+
+# Then find this condition (in the tool_calls handling):
+
+                            if tool_call.id is not None:
+
+# Replace with:
+
+                            if tool_call.id is not None and tool_call.id != current_tool_call_id:
+                                current_tool_call_id = tool_call.id
+```
+
+This ensures continuation deltas (which carry the same `id`) are correctly appended to the existing content block instead of spawning new ones.
+
+**Applying the patch inside a running container**:
+
+```bash
+docker exec <vllm-container> python3 -c "
+with open('/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/anthropic/serving.py', 'r') as f:
+    content = f.read()
+
+content = content.replace(
+    'content_block_index = 0\n            content_block_started = False',
+    'content_block_index = 0\n            content_block_started = False\n            current_tool_call_id = None'
+)
+content = content.replace(
+    'if tool_call.id is not None:',
+    'if tool_call.id is not None and tool_call.id != current_tool_call_id:\n                                current_tool_call_id = tool_call.id'
+)
+
+with open('/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/anthropic/serving.py', 'w') as f:
+    f.write(content)
+print('Patch applied')
+"
+docker restart <vllm-container>
+```
+
+**Verification**: After patching, a streaming tool call should show exactly one `content_block_start` of type `tool_use` followed by multiple `input_json_delta` events on the same block index:
+
+```bash
+curl -s -N http://localhost:8088/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "your-model-name",
+    "max_tokens": 200,
+    "stream": true,
+    "tools": [{"name":"Bash","description":"Run bash","input_schema":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}],
+    "messages": [{"role":"user","content":"Run: echo hello"}]
+  }'
+# Expected: one content_block_start with tool_use, then input_json_delta chunks
+# building up {"command": "echo hello"}, all on the same index.
+```
