@@ -58,9 +58,12 @@ mcporter call ms365-klaus.create_draft --args '{"to":["x@y.de"],"subject":"...",
 mcporter call ms365-klaus.list_events --args '{"top":10}'
 
 # MS365 Email-Anhänge — PDF, DOCX etc. aus Emails lesen!
+# ⚠️ KRITISCH: IMMER list_attachments ZUERST aufrufen um die attachment_id zu bekommen!
+# attachment_id ist NICHT der Dateiname! Es ist ein langer Base64-String.
 mcporter call ms365-klaus.list_attachments --args '{"message_id":"<message_id>"}'
-mcporter call ms365-klaus.download_attachment --args '{"message_id":"<message_id>","attachment_id":"<attachment_id>"}'
-# Workflow: search_emails → read_email (get message_id) → list_attachments → download_attachment
+# → gibt Liste mit {id, name, contentType, size} zurück
+mcporter call ms365-klaus.download_attachment --args '{"message_id":"<message_id>","attachment_id":"<attachment_id_aus_list_attachments>"}'
+# Workflow: search_emails → read_email → list_attachments → download_attachment(attachment_id)
 
 # GMX/Gmail — VOLLZUGRIFF: lesen, suchen, verschieben, löschen, markieren!
 mcporter call email.list_emails --args '{"folder":"INBOX","limit":10}'
