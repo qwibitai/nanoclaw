@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  HEALTH_MONITOR_INTERVAL,
   IDLE_TIMEOUT,
   MAX_CONTAINER_SPAWNS_PER_HOUR,
   MAX_ERRORS_PER_HOUR,
@@ -85,6 +86,7 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let healthMonitor: HealthMonitor;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -344,6 +346,15 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
 
+  // Check if group is paused by health monitor
+  if (healthMonitor?.isGroupPaused(group.folder)) {
+    logger.warn(
+      { group: group.name },
+      'Skipping agent — group paused by health monitor',
+    );
+    return 'error';
+  }
+
   // Expire sessions to prevent unbounded context growth.
   // Two thresholds:
   //   IDLE: no activity for 2 hours → expire (prevents stale sessions)
@@ -432,6 +443,8 @@ async function runAgent(
       wrappedOnOutput,
     );
 
+    healthMonitor?.recordSpawn(group.folder);
+
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
@@ -445,12 +458,14 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      healthMonitor?.recordError(group.folder, output.error || 'container error');
       return 'error';
     }
 
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    healthMonitor?.recordError(group.folder, String(err));
     return 'error';
   }
 }
@@ -711,7 +726,7 @@ async function main(): Promise<void> {
   restoreRemoteControl();
 
   // Health monitor — tracks spawn/error rates, alerts on anomalies
-  const healthMonitor = new HealthMonitor({
+  healthMonitor = new HealthMonitor({
     maxSpawnsPerHour: MAX_CONTAINER_SPAWNS_PER_HOUR,
     maxErrorsPerHour: MAX_ERRORS_PER_HOUR,
     onAlert: (alert) => {
@@ -725,10 +740,15 @@ async function main(): Promise<void> {
       );
       if (mainJid) {
         const channel = findChannel(channels, mainJid);
-        channel?.sendMessage(mainJid, `System alert: ${alert.detail}`).catch(() => {});
+        channel
+          ?.sendMessage(mainJid, `System alert: ${alert.detail}`)
+          .catch(() => {});
       }
     },
   });
+
+  // Periodically check health thresholds
+  setInterval(() => healthMonitor.checkThresholds(), HEALTH_MONITOR_INTERVAL);
 
   // Inter-agent message bus
   const messageBus = new MessageBus(path.join(process.cwd(), 'data', 'bus'));
