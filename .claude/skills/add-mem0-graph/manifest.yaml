@@ -8,6 +8,7 @@ adds:
   - services/mem0-bridge/app.py
   - services/mem0-bridge/requirements.txt
   - services/mem0-bridge/mem0-bridge.service
+  - services/mem0-bridge/embed-proxy.py
 
 modifies:
   - src/config.ts
