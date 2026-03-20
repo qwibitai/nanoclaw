@@ -1135,7 +1135,8 @@ describe('GitHubChannel ack', () => {
           id: 12345,
           body: 'Hello @Andy',
           user: { login: 'chris' },
-          html_url: 'https://github.com/cmraible/seb/issues/42#issuecomment-12345',
+          html_url:
+            'https://github.com/cmraible/seb/issues/42#issuecomment-12345',
         },
         sender: { login: 'chris' },
       },
@@ -1188,9 +1189,9 @@ describe('GitHubChannel ack', () => {
   });
 
   it('ack() calls GitHub Reactions API with eyes emoji', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 201 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 201 }));
 
     await channel.ack('gh:cmraible/seb#42', {
       github_repo: 'cmraible/seb',
@@ -1209,9 +1210,9 @@ describe('GitHubChannel ack', () => {
   });
 
   it('ack() uses pulls endpoint for PR review comments', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 201 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 201 }));
 
     await channel.ack('gh:cmraible/seb#99', {
       github_repo: 'cmraible/seb',

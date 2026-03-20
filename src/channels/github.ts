@@ -486,7 +486,10 @@ export class GitHubChannel implements Channel {
         );
       }
     } catch (err) {
-      logger.warn({ repo, commentId, reaction, err }, 'Failed to add GitHub reaction');
+      logger.warn(
+        { repo, commentId, reaction, err },
+        'Failed to add GitHub reaction',
+      );
     }
   }
 
