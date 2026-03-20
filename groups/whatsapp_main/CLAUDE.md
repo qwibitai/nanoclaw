@@ -161,25 +161,30 @@ Format the result using WhatsApp formatting (✅/❌ icons are fine) and send it
 
 ## Self-Healing — Restarting a Service
 
-If a service is offline, you can restart it directly:
+⚠️ **You run inside a Docker container. `systemctl` is NOT available to you. Never attempt to run it.**
+
+To restart a service, ALWAYS use the dashboard API (reachable from the container):
 
 ```bash
-# Restart a specific service
+# Restart crewops dashboard
+curl -s -X POST http://host.docker.internal:8080/api/services/restart \
+  -H "Content-Type: application/json" \
+  -d '{"service": "crewops"}'
+
+# Restart OpenHands
 curl -s -X POST http://host.docker.internal:8080/api/services/restart \
   -H "Content-Type: application/json" \
   -d '{"service": "openhands"}'
 
-# Available services: nanoclaw, openhands, crewops
+# Restart NanoClaw (this restarts your own process — use only as last resort)
+curl -s -X POST http://host.docker.internal:8080/api/services/restart \
+  -H "Content-Type: application/json" \
+  -d '{"service": "nanoclaw"}'
 ```
 
-*Service name reference* (systemd on host):
-- crewops dashboard → `agent-dashboard` (NOT "crewops")
-- OpenHands → `openhands-backend`
-- NanoClaw → `nanoclaw`
+Available service names for this API: `crewops`, `openhands`, `nanoclaw`
 
-Never tell Joseph to run `systemctl --user restart crewops` — the correct command is `systemctl --user restart agent-dashboard`.
-
-The watchdog in the crew dashboard also auto-restarts services every 5 minutes — so if you see something down, wait 5 min and re-check before asking Joseph to intervene.
+The watchdog auto-restarts services every 5 minutes — so if you see something down, wait 5 min and re-check before manually restarting.
 
 If a service fails to restart automatically after 2 attempts, Joseph gets a WhatsApp notification automatically.
 
