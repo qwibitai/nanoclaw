@@ -225,61 +225,6 @@ export async function sendDebugQuery(
   // Piping into an active container is unreliable — the agent treats the
   // debug prompt as part of the ongoing conversation and responds via the
   // normal channel instead of writing to the debug response file.
-  if (false) {
-    // Active container — deliver via IPC input + poll debug response
-    const debugDir = getDebugDir(groupFolder, activeInfo.threadId);
-
-    // Check for existing query (allow override if stale)
-    const queryFile = path.join(debugDir, 'query.json');
-    if (fs.existsSync(queryFile)) {
-      if (!isStaleQuery(queryFile)) {
-        return {
-          status: 'error',
-          error: 'A debug query is already in progress for this group',
-        };
-      }
-      logger.info({ groupFolder }, 'Removing stale debug query file');
-      try {
-        fs.unlinkSync(queryFile);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    // Write query file (for the agent to find context about what's being asked)
-    const query = { id: queryId, question, timestamp: Date.now() };
-    fs.writeFileSync(queryFile, JSON.stringify(query));
-
-    // Deliver the debug question via IPC input (existing mechanism)
-    const debugPrompt =
-      `[NANOCLAW_DEBUG_QUERY:${queryId}]\n` +
-      `[DEBUG QUERY FROM SUPERVISOR]\n` +
-      `A supervising agent is asking you the following question for debugging purposes.\n` +
-      `Respond concisely and factually about your current state, what you're working on, any errors, etc.\n\n` +
-      `Question: ${question}\n\n` +
-      `IMPORTANT: Send your response using the mcp__nanoclaw__debug_response tool with id="${queryId}" and your answer. Do NOT use Write or Bash to create the response file.`;
-
-    const sent = groupQueue.sendMessage(
-      groupJid,
-      activeInfo.threadId,
-      debugPrompt,
-    );
-    if (!sent) {
-      cleanup(debugDir, queryId);
-      return {
-        status: 'error',
-        error: 'Failed to deliver debug query to active container',
-      };
-    }
-
-    logger.info(
-      { groupFolder, queryId, threadId: activeInfo.threadId },
-      'Debug query sent to active container',
-    );
-    return pollForResponse(debugDir, queryId, DEBUG_QUERY_TIMEOUT_ACTIVE);
-  }
-
-  // No active container — spawn a fresh one in debug mode
   const debugDir = getDebugDir(groupFolder);
 
   // Check for existing query (allow override if stale)
