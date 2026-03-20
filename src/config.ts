@@ -62,8 +62,8 @@ export const CREDENTIAL_PROXY_PORT = parseIntEnv(
   3001,
 );
 export const IPC_POLL_INTERVAL = 1000;
-export const DEBUG_QUERY_TIMEOUT_ACTIVE = 60_000;  // 60s for active containers
-export const DEBUG_QUERY_TIMEOUT_FRESH = 120_000;   // 120s for fresh containers
+export const DEBUG_QUERY_TIMEOUT_ACTIVE = 120_000; // 120s for active containers (accounts for rate limits)
+export const DEBUG_QUERY_TIMEOUT_FRESH = 300_000; // 5min for fresh containers (needs boot + possible rate limits)
 export const IDLE_TIMEOUT = parseIntEnv(process.env.IDLE_TIMEOUT, 1800000); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,

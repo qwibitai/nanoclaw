@@ -48,6 +48,8 @@ export interface IpcDeps {
   onTasksChanged: () => void;
   /** Optional: set thread context on a channel before sending a threaded IPC message */
   setThreadContext?: (jid: string, threadId: string) => void;
+  /** Optional: handle debug queries from external tools (e.g., /ask-agent skill) */
+  onDebugQuery?: (sourceGroup: string, queryId: string, question: string) => void;
 }
 
 /**
@@ -490,6 +492,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For debug_query
+    queryId?: string;
+    question?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -770,6 +775,18 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'debug_query':
+      if (data.queryId && data.question && deps.onDebugQuery) {
+        deps.onDebugQuery(sourceGroup, data.queryId, data.question);
+        logger.info(
+          { sourceGroup, queryId: data.queryId },
+          'Debug query forwarded via IPC',
+        );
+      } else if (!deps.onDebugQuery) {
+        logger.warn({ sourceGroup }, 'Debug query received but no handler registered');
       }
       break;
 

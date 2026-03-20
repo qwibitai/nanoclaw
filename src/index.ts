@@ -53,6 +53,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { sendDebugQuery } from './debug-query.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -933,6 +934,11 @@ async function main(): Promise<void> {
           channel.setCurrentThreadContext?.(jid, threadId, ctx);
         }
       }
+    },
+    onDebugQuery: (sourceGroup, queryId, question) => {
+      sendDebugQuery(sourceGroup, question, queue, registeredGroups).catch(
+        (err) => logger.error({ err, sourceGroup, queryId }, 'Debug query failed'),
+      );
     },
   });
   queue.setProcessMessagesFn(async (groupJid: string, threadId?: string) => {
