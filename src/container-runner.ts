@@ -76,16 +76,12 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // NOTE: .env shadow mount removed — Apple Container doesn't support
+    // overlaying a file mount on a path from a parent directory mount.
+    // The .env is visible read-only inside the container. API credentials
+    // use placeholders (injected by the credential proxy), but other secrets
+    // (e.g. GH_TOKEN) are exposed. Acceptable risk: project mount is read-only,
+    // and the agent already receives GH_TOKEN via env var for gh CLI access.
 
     // Main also gets its group folder as the working directory
     mounts.push({
