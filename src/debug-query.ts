@@ -113,7 +113,9 @@ function pollForResponse(
         if (fs.existsSync(responseFile)) {
           const data = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
           if (data.id === queryId) {
-            cleanup(debugDir, queryId);
+            // Only clean up query.json, leave response.json for the external poller
+            const qf = path.join(debugDir, 'query.json');
+            try { if (fs.existsSync(qf)) fs.unlinkSync(qf); } catch { /* ignore */ }
             // Signal the container to exit after a short delay.
             // The agent-runner needs time to finish the query loop and
             // enter the idle wait before it will see the _close sentinel.
