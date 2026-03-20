@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
-    "discord.js": "^14.18.0",
     "cron-parser": "^5.5.0",
     "discord.js": "^14.25.1",
     "pino": "^9.6.0",
