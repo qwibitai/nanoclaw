@@ -114,8 +114,10 @@ function pollForResponse(
           const data = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
           if (data.id === queryId) {
             cleanup(debugDir, queryId);
-            // Signal the container to exit (write _close sentinel)
-            closeContainer(debugDir);
+            // Signal the container to exit after a short delay.
+            // The agent-runner needs time to finish the query loop and
+            // enter the idle wait before it will see the _close sentinel.
+            setTimeout(() => closeContainer(debugDir), 3000);
             const status = VALID_RESPONSE_STATUSES.has(data.status)
               ? data.status
               : 'success';
