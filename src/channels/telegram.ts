@@ -1,7 +1,8 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { formatNextRun, formatSchedule } from '../format-schedule.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -9,6 +10,7 @@ import {
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
+  ScheduledTask,
 } from '../types.js';
 
 /** Sanitize a string for use as a folder name segment */
@@ -25,6 +27,8 @@ export interface TelegramChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup?: (jid: string, group: RegisteredGroup) => void;
+  getActiveTasks?: () => ScheduledTask[];
+  cancelTask?: (taskId: string) => void;
 }
 
 export class TelegramChannel implements Channel {
@@ -62,6 +66,91 @@ export class TelegramChannel implements Channel {
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to list and manage scheduled tasks
+    this.bot.command('tasks', (ctx) => {
+      if (!this.opts.getActiveTasks) {
+        ctx.reply('Task management is not available.');
+        return;
+      }
+
+      const tasks = this.opts.getActiveTasks();
+      if (tasks.length === 0) {
+        ctx.reply('No active scheduled tasks.');
+        return;
+      }
+
+      // Find group names for cross-group task display
+      const groups = this.opts.registeredGroups();
+      const jidToName = new Map<string, string>();
+      for (const [jid, group] of Object.entries(groups)) {
+        jidToName.set(jid, group.name);
+      }
+
+      const lines: string[] = ['📋 *Scheduled Tasks*\n'];
+      const keyboard = new InlineKeyboard();
+
+      for (let i = 0; i < tasks.length; i++) {
+        const t = tasks[i];
+        const num = i + 1;
+        const preview =
+          t.prompt.length > 80 ? t.prompt.slice(0, 77) + '...' : t.prompt;
+        const schedule = formatSchedule(t.schedule_type, t.schedule_value);
+        const nextRun = formatNextRun(t.next_run);
+        const groupName = jidToName.get(t.chat_jid);
+
+        let line = `*${num}.* ${preview}\n    ⏰ ${schedule}`;
+        if (nextRun) line += ` (next: ${nextRun})`;
+        if (groupName) line += `\n    📍 ${groupName}`;
+        if (t.status === 'running') line += '\n    🔄 Currently running';
+        lines.push(line);
+
+        keyboard.text(`✕ Cancel ${num}`, `cancel_task:${t.id}`);
+        if (i % 2 === 1 || i === tasks.length - 1) keyboard.row();
+      }
+
+      ctx.reply(lines.join('\n\n'), {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+      });
+    });
+
+    // Handle inline button callbacks for task cancellation
+    this.bot.on('callback_query:data', async (ctx) => {
+      const data = ctx.callbackQuery.data;
+      if (!data.startsWith('cancel_task:')) return;
+
+      const taskId = data.slice('cancel_task:'.length);
+
+      if (!this.opts.cancelTask || !this.opts.getActiveTasks) {
+        await ctx.answerCallbackQuery({ text: 'Task management unavailable.' });
+        return;
+      }
+
+      // Verify the task still exists
+      const tasks = this.opts.getActiveTasks();
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) {
+        await ctx.answerCallbackQuery({
+          text: 'Task not found or already cancelled.',
+        });
+        return;
+      }
+
+      this.opts.cancelTask(taskId);
+      await ctx.answerCallbackQuery({ text: '✅ Task cancelled.' });
+
+      // Update the message to show the task was cancelled
+      try {
+        await ctx.editMessageText(
+          `${ctx.callbackQuery.message?.text}\n\n✅ Cancelled: ${task.prompt.slice(0, 60)}`,
+        );
+      } catch {
+        // Message may have been deleted or is too old to edit
+      }
+
+      logger.info({ taskId }, 'Task cancelled via inline button');
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -313,5 +402,7 @@ registerChannel('telegram', (opts: ChannelOpts) => {
   return new TelegramChannel(token, {
     ...opts,
     registerGroup: opts.registerGroup,
+    getActiveTasks: opts.getActiveTasks,
+    cancelTask: opts.cancelTask,
   });
 });

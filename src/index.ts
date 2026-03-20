@@ -25,6 +25,7 @@ import {
 } from './container-runner.js';
 import { PROXY_BIND_HOST } from './container-runtime.js';
 import {
+  deleteTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -585,6 +586,11 @@ async function main(): Promise<void> {
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
     registerGroup,
+    getActiveTasks: () =>
+      getAllTasks().filter(
+        (t) => t.status === 'active' || t.status === 'running',
+      ),
+    cancelTask: (taskId: string) => deleteTask(taskId),
   };
 
   // Create and connect all registered channels.
