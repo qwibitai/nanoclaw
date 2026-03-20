@@ -1,8 +1,9 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -20,6 +21,39 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+/**
+ * Purge pending IPC send_message files for a group folder so that the
+ * IPC watcher does not re-deliver content that was already forwarded to
+ * the user via the task-scheduler streaming callback.
+ *
+ * Background: when a scheduled task calls mcp__nanoclaw__send_message, the
+ * tool writes a JSON file to data/ipc/<groupFolder>/messages/.  The IPC watcher
+ * picks those files up on its next poll cycle and calls sendMessage.  At the
+ * same time the streaming callback in runTask also calls sendMessage when the
+ * container emits its final result marker — typically carrying the same text.
+ * Purging the IPC files right after the callback send ensures only one copy
+ * reaches the user.
+ */
+function purgeIpcMessages(groupFolder: string): void {
+  try {
+    const messagesDir = path.join(DATA_DIR, 'ipc', groupFolder, 'messages');
+    if (!fs.existsSync(messagesDir)) return;
+    for (const file of fs.readdirSync(messagesDir)) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        fs.unlinkSync(path.join(messagesDir, file));
+      } catch (err) {
+        logger.warn(
+          { groupFolder, file, err },
+          'Failed to purge IPC message file after task result send',
+        );
+      }
+    }
+  } catch (err) {
+    logger.warn({ groupFolder, err }, 'Failed to read IPC messages dir during purge');
+  }
+}
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -187,6 +221,9 @@ async function runTask(
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Purge any pending IPC send_message files so the IPC watcher does
+          // not deliver the same content a second time (double-send bug).
+          purgeIpcMessages(task.group_folder);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
