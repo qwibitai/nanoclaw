@@ -22,6 +22,9 @@ import {
 } from './platform.js';
 import { emitStatus } from './status.js';
 
+export const CREDENTIALS_ENV_VAR_PATTERN =
+  /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)=/m;
+
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const platform = getPlatform();
@@ -101,7 +104,7 @@ export async function run(_args: string[]): Promise<void> {
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
+    if (CREDENTIALS_ENV_VAR_PATTERN.test(envContent)) {
       credentials = 'configured';
     }
   }
