@@ -91,12 +91,12 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenCalledTimes(1);
     expect(mockExecFileSync).toHaveBeenCalledWith(
       CONTAINER_RUNTIME_BIN,
-      ['stop', 'nanoclaw-group1-111'],
+      ['stop', '-t', '1', 'nanoclaw-group1-111'],
       expect.objectContaining({ stdio: 'pipe' }),
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
       CONTAINER_RUNTIME_BIN,
-      ['stop', 'nanoclaw-group2-222'],
+      ['stop', '-t', '1', 'nanoclaw-group2-222'],
       expect.objectContaining({ stdio: 'pipe' }),
     );
     expect(logger.info).toHaveBeenCalledWith(
