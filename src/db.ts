@@ -361,9 +361,43 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+/**
+ * Validate a cron expression and ensure it doesn't fire too frequently.
+ * Minimum interval: 30 minutes. Rejects expressions that would burn tokens.
+ */
+function validateCronSchedule(cronExpr: string): void {
+  const { CronExpressionParser } = require('cron-parser');
+  const interval = CronExpressionParser.parse(cronExpr);
+  const first = interval.next().getTime();
+  const second = interval.next().getTime();
+  const gapMs = second - first;
+  const MIN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+  if (gapMs < MIN_INTERVAL_MS) {
+    const gapMin = Math.round(gapMs / 60000);
+    throw new Error(
+      `Cron "${cronExpr}" fires every ${gapMin} minute(s). ` +
+        `Minimum allowed interval is 30 minutes. ` +
+        `If you meant hours, use 5-field cron (min hour dom mon dow).`,
+    );
+  }
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
+  if (task.schedule_type === 'cron') {
+    validateCronSchedule(task.schedule_value);
+  }
+  if (
+    task.schedule_type === 'interval' &&
+    parseInt(task.schedule_value, 10) < 30 * 60 * 1000
+  ) {
+    throw new Error(
+      `Interval ${task.schedule_value}ms is too frequent. Minimum: 30 minutes (1800000ms).`,
+    );
+  }
+
   db.prepare(
     `
     INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)

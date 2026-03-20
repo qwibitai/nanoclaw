@@ -39,7 +39,29 @@ export function computeNextRun(task: ScheduledTask): string | null {
     const interval = CronExpressionParser.parse(task.schedule_value, {
       tz: TIMEZONE,
     });
-    return interval.next().toISOString();
+    const next = interval.next();
+    const nextMs = next.getTime();
+
+    // Safety net: never schedule sooner than 30 minutes from now.
+    // Catches 6-field cron expressions that fire every few minutes.
+    const MIN_GAP_MS = 30 * 60 * 1000;
+    if (nextMs - now < MIN_GAP_MS) {
+      const second = interval.next();
+      if (second.getTime() - nextMs < MIN_GAP_MS) {
+        logger.warn(
+          { taskId: task.id, cron: task.schedule_value, gapMs: second.getTime() - nextMs },
+          'Cron fires too frequently (< 30min), throttling to next safe run',
+        );
+        // Skip ahead until we find a gap >= 30min from now
+        let candidate = second;
+        while (candidate.getTime() - now < MIN_GAP_MS) {
+          candidate = interval.next();
+        }
+        return candidate.toISOString();
+      }
+    }
+
+    return next.toISOString();
   }
 
   if (task.schedule_type === 'interval') {
