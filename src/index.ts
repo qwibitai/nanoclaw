@@ -315,6 +315,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
 
       if (result.status === 'success') {
+        // Detect silent success: LLM responded but result was null (e.g. Qwen3.5 thinking-mode).
+        // Send a fallback message so the user isn't left waiting.
+        if (!outputSentToUser && !firstOutputSeen) {
+          logger.warn(
+            { group: group.name },
+            'Agent completed with no output (null result) — sending fallback',
+          );
+          await channel.sendMessage(
+            chatJid,
+            'Ich habe die Aufgabe bearbeitet, aber die Antwort ging verloren. Bitte frag nochmal nach.',
+          );
+          outputSentToUser = true;
+        }
+
         statusTracker.markAllDone(chatJid);
         queue.notifyIdle(chatJid);
 
