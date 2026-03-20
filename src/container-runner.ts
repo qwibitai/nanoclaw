@@ -232,8 +232,12 @@ function buildContainerArgs(
   // OAuth mode:   SDK exchanges placeholder token for temp API key,
   //               proxy injects real OAuth token on that exchange request.
   const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
+  if (authMode === 'api-key' || authMode === 'minimax-oauth') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    if (authMode === 'minimax-oauth') {
+      args.push('-e', 'CLAUDE_MODEL=MiniMax-M2.7');
+      args.push('-e', 'ANTHROPIC_MODEL=MiniMax-M2.7');
+    }
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
