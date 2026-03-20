@@ -420,6 +420,41 @@ Use this after generating output files (renders, archives, exports) to share the
   },
 );
 
+server.tool(
+  'debug_response',
+  'Write a response to a debug query from a supervisor agent. Only use this when you receive a [DEBUG QUERY FROM SUPERVISOR] prompt.',
+  {
+    id: z.string().describe('The query ID from the debug query prompt'),
+    answer: z.string().describe('Your concise answer to the debug question'),
+    status: z.enum(['success', 'error']).default('success').describe('Whether you could answer the question'),
+  },
+  async (args) => {
+    const debugDir = path.join(IPC_DIR, 'debug');
+    fs.mkdirSync(debugDir, { recursive: true });
+
+    const response = {
+      id: args.id,
+      answer: args.answer,
+      status: args.status,
+      timestamp: Date.now(),
+    };
+
+    const filepath = path.join(debugDir, 'response.json');
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(response, null, 2));
+    fs.renameSync(tempPath, filepath);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Debug response written successfully.',
+        },
+      ],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
