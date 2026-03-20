@@ -557,9 +557,10 @@ export async function processTaskIpc(
               for (const item of items) {
                 if (item.session_id) sessionId = item.session_id;
                 if (item.type === 'result' && item.result) {
-                  resultText = typeof item.result === 'string'
-                    ? item.result
-                    : JSON.stringify(item.result);
+                  resultText =
+                    typeof item.result === 'string'
+                      ? item.result
+                      : JSON.stringify(item.result);
                 }
                 // Also capture assistant text messages
                 if (item.type === 'assistant' && item.message?.content) {
