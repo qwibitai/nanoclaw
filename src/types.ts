@@ -77,6 +77,50 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Behavioral skills ---
+
+export interface BehavioralSkill {
+  id: string;
+  name: string;
+  version: number;
+  content: string; // Full content including evolution notes
+  description: string; // Short description for browsing
+  parent_id: string | null;
+  status: 'active' | 'candidate' | 'retired';
+  created_at: string;
+  group_folder: string | null; // NULL = global skill
+}
+
+export interface SkillTaskRun {
+  id: string;
+  group_folder: string;
+  chat_jid: string;
+  prompt_summary: string | null;
+  response_summary: string | null;
+  duration_ms: number | null;
+  status: string;
+  created_at: string;
+  evaluation_deadline: string | null;
+}
+
+export interface SkillEvaluation {
+  id: string;
+  run_id: string;
+  score: number;
+  dimensions: string | null; // JSON: {helpfulness, accuracy, efficiency, tone}
+  evaluation_source: 'user_reaction' | 'evaluator_agent';
+  raw_feedback: string | null;
+  evaluated_at: string;
+}
+
+export interface SkillPerformance {
+  skill_id: string;
+  total_runs: number;
+  avg_score: number;
+  recent_avg_score: number;
+  last_updated: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {

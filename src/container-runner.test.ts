@@ -16,6 +16,12 @@ vi.mock('./config.js', () => ({
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+  BEHAVIORAL_SKILLS_DIR: '/tmp/nanoclaw-test-data/behavioral-skills',
+}));
+
+// Mock skills deployer
+vi.mock('./skills/deployer.js', () => ({
+  deploySkillFiles: vi.fn(() => '/tmp/nanoclaw-test-data/behavioral-skills/test-group'),
 }));
 
 // Mock logger

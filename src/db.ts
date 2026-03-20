@@ -6,9 +6,13 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  BehavioralSkill,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
+  SkillEvaluation,
+  SkillPerformance,
+  SkillTaskRun,
   TaskRunLog,
 } from './types.js';
 
@@ -81,6 +85,75 @@ function createSchema(database: Database.Database): void {
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
+    );
+
+    -- Behavioral skills
+    CREATE TABLE IF NOT EXISTS behavioral_skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      description TEXT NOT NULL,
+      parent_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      group_folder TEXT,
+      FOREIGN KEY (parent_id) REFERENCES behavioral_skills(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_skills_status ON behavioral_skills(status);
+    CREATE INDEX IF NOT EXISTS idx_skills_name ON behavioral_skills(name, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_version ON behavioral_skills(name, group_folder, version);
+
+    CREATE TABLE IF NOT EXISTS skill_task_runs (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      prompt_summary TEXT,
+      response_summary TEXT,
+      duration_ms INTEGER,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      evaluation_deadline TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_skill_runs_deadline ON skill_task_runs(evaluation_deadline);
+
+    CREATE TABLE IF NOT EXISTS skill_run_selections (
+      run_id TEXT NOT NULL,
+      skill_id TEXT NOT NULL,
+      PRIMARY KEY (run_id, skill_id),
+      FOREIGN KEY (run_id) REFERENCES skill_task_runs(id),
+      FOREIGN KEY (skill_id) REFERENCES behavioral_skills(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS skill_evaluations (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      score REAL NOT NULL,
+      dimensions TEXT,
+      evaluation_source TEXT NOT NULL,
+      raw_feedback TEXT,
+      evaluated_at TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES skill_task_runs(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_run ON skill_evaluations(run_id);
+
+    CREATE TABLE IF NOT EXISTS skill_performance (
+      skill_id TEXT PRIMARY KEY,
+      total_runs INTEGER NOT NULL DEFAULT 0,
+      avg_score REAL NOT NULL DEFAULT 0.0,
+      recent_avg_score REAL NOT NULL DEFAULT 0.0,
+      last_updated TEXT NOT NULL,
+      FOREIGN KEY (skill_id) REFERENCES behavioral_skills(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS skill_evolution_log (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT,
+      action TEXT NOT NULL,
+      skill_id TEXT NOT NULL,
+      changes_summary TEXT,
+      trigger_reason TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
 
@@ -632,6 +705,281 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Behavioral skills accessors ---
+
+export function getActiveSkills(
+  groupFolder?: string | null,
+): BehavioralSkill[] {
+  return db
+    .prepare(
+      `SELECT * FROM behavioral_skills
+       WHERE status IN ('active', 'candidate')
+         AND (group_folder IS NULL OR group_folder = ?)
+       ORDER BY name`,
+    )
+    .all(groupFolder ?? null) as BehavioralSkill[];
+}
+
+export function getSkillByName(
+  name: string,
+  groupFolder?: string | null,
+): BehavioralSkill | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM behavioral_skills
+       WHERE name = ? AND status = 'active'
+         AND (group_folder IS NULL OR group_folder = ?)
+       ORDER BY version DESC LIMIT 1`,
+    )
+    .get(name, groupFolder ?? null) as BehavioralSkill | undefined;
+}
+
+export function getSkillById(id: string): BehavioralSkill | undefined {
+  return db
+    .prepare('SELECT * FROM behavioral_skills WHERE id = ?')
+    .get(id) as BehavioralSkill | undefined;
+}
+
+export function insertSkill(skill: BehavioralSkill): void {
+  db.prepare(
+    `INSERT INTO behavioral_skills (id, name, version, content, description, parent_id, status, created_at, group_folder)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    skill.id,
+    skill.name,
+    skill.version,
+    skill.content,
+    skill.description,
+    skill.parent_id,
+    skill.status,
+    skill.created_at,
+    skill.group_folder,
+  );
+}
+
+export function updateSkillStatus(
+  id: string,
+  status: BehavioralSkill['status'],
+): void {
+  db.prepare('UPDATE behavioral_skills SET status = ? WHERE id = ?').run(
+    status,
+    id,
+  );
+}
+
+export function recordSkillTaskRun(run: SkillTaskRun): void {
+  db.prepare(
+    `INSERT INTO skill_task_runs (id, group_folder, chat_jid, prompt_summary, response_summary, duration_ms, status, created_at, evaluation_deadline)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    run.id,
+    run.group_folder,
+    run.chat_jid,
+    run.prompt_summary,
+    run.response_summary,
+    run.duration_ms,
+    run.status,
+    run.created_at,
+    run.evaluation_deadline,
+  );
+}
+
+export function getTaskRun(id: string): SkillTaskRun | undefined {
+  return db.prepare('SELECT * FROM skill_task_runs WHERE id = ?').get(id) as
+    | SkillTaskRun
+    | undefined;
+}
+
+export function recordSkillSelections(
+  runId: string,
+  skillIds: string[],
+): void {
+  const stmt = db.prepare(
+    'INSERT OR IGNORE INTO skill_run_selections (run_id, skill_id) VALUES (?, ?)',
+  );
+  for (const skillId of skillIds) {
+    stmt.run(runId, skillId);
+  }
+}
+
+export function getRunsNeedingEvaluation(): SkillTaskRun[] {
+  const now = new Date().toISOString();
+  return db
+    .prepare(
+      `SELECT r.* FROM skill_task_runs r
+       LEFT JOIN skill_evaluations e ON e.run_id = r.id
+       WHERE r.evaluation_deadline IS NOT NULL
+         AND r.evaluation_deadline <= ?
+         AND e.id IS NULL
+       ORDER BY r.created_at`,
+    )
+    .all(now) as SkillTaskRun[];
+}
+
+export function recordEvaluation(evaluation: SkillEvaluation): void {
+  db.prepare(
+    `INSERT INTO skill_evaluations (id, run_id, score, dimensions, evaluation_source, raw_feedback, evaluated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    evaluation.id,
+    evaluation.run_id,
+    evaluation.score,
+    evaluation.dimensions,
+    evaluation.evaluation_source,
+    evaluation.raw_feedback,
+    evaluation.evaluated_at,
+  );
+}
+
+export function getEvaluationForRun(
+  runId: string,
+): SkillEvaluation | undefined {
+  return db
+    .prepare('SELECT * FROM skill_evaluations WHERE run_id = ?')
+    .get(runId) as SkillEvaluation | undefined;
+}
+
+export function updateSkillPerformance(skillId: string): void {
+  const now = new Date().toISOString();
+
+  // Calculate avg score from all evaluations where this skill was used
+  const stats = db
+    .prepare(
+      `SELECT COUNT(*) as total, AVG(e.score) as avg_score
+       FROM skill_evaluations e
+       JOIN skill_run_selections s ON s.run_id = e.run_id
+       WHERE s.skill_id = ?`,
+    )
+    .get(skillId) as { total: number; avg_score: number | null };
+
+  // Recent average (last 10 evaluations)
+  const recent = db
+    .prepare(
+      `SELECT AVG(e.score) as recent_avg
+       FROM (
+         SELECT e.score FROM skill_evaluations e
+         JOIN skill_run_selections s ON s.run_id = e.run_id
+         WHERE s.skill_id = ?
+         ORDER BY e.evaluated_at DESC LIMIT 10
+       ) e`,
+    )
+    .get(skillId) as { recent_avg: number | null };
+
+  db.prepare(
+    `INSERT INTO skill_performance (skill_id, total_runs, avg_score, recent_avg_score, last_updated)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(skill_id) DO UPDATE SET
+       total_runs = excluded.total_runs,
+       avg_score = excluded.avg_score,
+       recent_avg_score = excluded.recent_avg_score,
+       last_updated = excluded.last_updated`,
+  ).run(
+    skillId,
+    stats.total,
+    stats.avg_score ?? 0,
+    recent.recent_avg ?? 0,
+    now,
+  );
+}
+
+export function getSkillPerformance(
+  skillId: string,
+): SkillPerformance | undefined {
+  return db
+    .prepare('SELECT * FROM skill_performance WHERE skill_id = ?')
+    .get(skillId) as SkillPerformance | undefined;
+}
+
+export function getAllSkillPerformance(): SkillPerformance[] {
+  return db.prepare('SELECT * FROM skill_performance').all() as SkillPerformance[];
+}
+
+export function getSkillSelectionsForRun(runId: string): string[] {
+  const rows = db
+    .prepare('SELECT skill_id FROM skill_run_selections WHERE run_id = ?')
+    .all(runId) as Array<{ skill_id: string }>;
+  return rows.map((r) => r.skill_id);
+}
+
+export function getRecentEvaluationCount(sinceTimestamp: string): number {
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) as cnt FROM skill_evaluations WHERE evaluated_at > ?',
+    )
+    .get(sinceTimestamp) as { cnt: number };
+  return row.cnt;
+}
+
+export function getLowScoringRuns(
+  minRuns: number,
+  maxScore: number,
+  limit: number = 20,
+): Array<SkillTaskRun & { score: number; dimensions: string | null }> {
+  return db
+    .prepare(
+      `SELECT r.*, e.score, e.dimensions
+       FROM skill_task_runs r
+       JOIN skill_evaluations e ON e.run_id = r.id
+       WHERE e.score < ?
+       ORDER BY e.score ASC
+       LIMIT ?`,
+    )
+    .all(maxScore, limit) as Array<
+    SkillTaskRun & { score: number; dimensions: string | null }
+  >;
+}
+
+export function insertEvolutionLog(log: {
+  id: string;
+  group_folder: string | null;
+  action: string;
+  skill_id: string;
+  changes_summary: string | null;
+  trigger_reason: string;
+  created_at: string;
+}): void {
+  db.prepare(
+    `INSERT INTO skill_evolution_log (id, group_folder, action, skill_id, changes_summary, trigger_reason, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    log.id,
+    log.group_folder,
+    log.action,
+    log.skill_id,
+    log.changes_summary,
+    log.trigger_reason,
+    log.created_at,
+  );
+}
+
+export function getLastEvolutionTimestamp(): string | null {
+  const row = db
+    .prepare(
+      'SELECT created_at FROM skill_evolution_log ORDER BY created_at DESC LIMIT 1',
+    )
+    .get() as { created_at: string } | undefined;
+  return row?.created_at ?? null;
+}
+
+export function getSkillVersionCount(
+  name: string,
+  groupFolder: string | null,
+): number {
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) as cnt FROM behavioral_skills WHERE name = ? AND (group_folder IS NULL AND ? IS NULL OR group_folder = ?)',
+    )
+    .get(name, groupFolder, groupFolder) as { cnt: number };
+  return row.cnt;
+}
+
+export function getTotalEvaluatedRuns(): number {
+  const row = db
+    .prepare('SELECT COUNT(*) as cnt FROM skill_evaluations')
+    .get() as { cnt: number };
+  return row.cnt;
 }
 
 // --- JSON migration ---

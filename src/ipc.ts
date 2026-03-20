@@ -5,7 +5,14 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getActiveSkills,
+  getTaskById,
+  recordSkillSelections,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -23,6 +30,19 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onSkillsUsed?: (groupFolder: string, chatJid: string, skills: string[]) => void;
+}
+
+// Pending skills-used reports, keyed by groupFolder.
+// Consumed by index.ts when recording a task run.
+const pendingSkillsUsed = new Map<string, string[]>();
+
+export function consumePendingSkills(groupFolder: string): string[] | undefined {
+  const skills = pendingSkillsUsed.get(groupFolder);
+  if (skills) {
+    pendingSkillsUsed.delete(groupFolder);
+  }
+  return skills;
 }
 
 let ipcWatcherRunning = false;
@@ -144,6 +164,64 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process skills_used reports from this group's IPC directory
+      const skillsDir = path.join(ipcBaseDir, sourceGroup, 'skills');
+      try {
+        if (fs.existsSync(skillsDir)) {
+          const skillFiles = fs
+            .readdirSync(skillsDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of skillFiles) {
+            const filePath = path.join(skillsDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              if (
+                data.type === 'skills_used' &&
+                Array.isArray(data.skills) &&
+                data.groupFolder === sourceGroup
+              ) {
+                // Resolve skill names to IDs
+                const activeSkills = getActiveSkills(sourceGroup);
+                const nameToId = new Map(
+                  activeSkills.map((s) => [s.name, s.id]),
+                );
+                const resolvedIds = data.skills
+                  .map((name: string) => nameToId.get(name))
+                  .filter(Boolean) as string[];
+
+                // Store for consumption when the task run is recorded
+                pendingSkillsUsed.set(sourceGroup, resolvedIds);
+
+                logger.info(
+                  {
+                    sourceGroup,
+                    skillNames: data.skills,
+                    resolvedCount: resolvedIds.length,
+                  },
+                  'Skills used report received',
+                );
+
+                if (deps.onSkillsUsed) {
+                  deps.onSkillsUsed(sourceGroup, data.chatJid, resolvedIds);
+                }
+              }
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC skills_used',
+              );
+              fs.unlinkSync(filePath);
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC skills directory',
+        );
       }
     }
 

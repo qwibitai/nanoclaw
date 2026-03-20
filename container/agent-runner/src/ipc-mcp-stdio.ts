@@ -333,6 +333,26 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+const SKILLS_DIR = path.join(IPC_DIR, 'skills');
+
+server.tool(
+  'report_skills_used',
+  'Report which behavioral skills you selected for this interaction. Call this after reading relevant skills from /workspace/behavioral-skills/.',
+  {
+    skills: z.array(z.string()).describe('Names of skills used (filename without .md)'),
+  },
+  async (args) => {
+    writeIpcFile(SKILLS_DIR, {
+      type: 'skills_used',
+      chatJid,
+      groupFolder,
+      skills: args.skills,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: `Recorded ${args.skills.length} skill(s).` }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -26,6 +26,7 @@ import {
   ensureContainerRuntimeRunning,
   PROXY_BIND_HOST,
 } from './container-runtime.js';
+import { EVALUATION_DELAY_MS } from './config.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -36,6 +37,8 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  recordSkillSelections,
+  recordSkillTaskRun,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -44,7 +47,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import { consumePendingSkills, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -57,6 +60,8 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startEvaluationLoop } from './skills/evaluator.js';
+import { startEvolutionLoop } from './skills/evolution.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -211,6 +216,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  const runStartTime = Date.now();
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -241,6 +247,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Record this interaction as a skill task run for evaluation
+  const runDuration = Date.now() - runStartTime;
+  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const runStatus = output === 'error' || hadError ? 'error' : 'success';
+  try {
+    recordSkillTaskRun({
+      id: runId,
+      group_folder: group.folder,
+      chat_jid: chatJid,
+      prompt_summary: prompt.slice(0, 500),
+      response_summary: null, // Streamed output, not easily captured
+      duration_ms: runDuration,
+      status: runStatus,
+      created_at: new Date().toISOString(),
+      evaluation_deadline:
+        runStatus === 'success'
+          ? new Date(Date.now() + EVALUATION_DELAY_MS).toISOString()
+          : null,
+    });
+
+    // Link any skills the agent reported using
+    const pendingSkills = consumePendingSkills(group.folder);
+    if (pendingSkills && pendingSkills.length > 0) {
+      recordSkillSelections(runId, pendingSkills);
+    }
+  } catch (err) {
+    logger.warn({ err, group: group.name }, 'Failed to record skill task run');
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -650,6 +685,8 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  startEvaluationLoop();
+  startEvolutionLoop();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
