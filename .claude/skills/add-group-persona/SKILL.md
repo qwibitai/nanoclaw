@@ -27,15 +27,15 @@ test -f src/channels/whatsapp.ts && echo "OK" || echo "MISSING"
 
 If MISSING, run `/add-whatsapp` first.
 
-## Phase 2: Apply Changes
+## Phase 2: Apply Code Changes
 
-### Ensure remote
+### Ensure WhatsApp fork remote
 
 ```bash
 git remote -v
 ```
 
-If a `whatsapp` remote is already present, use it. Otherwise add the group-persona branch source:
+If `whatsapp` is missing, add it:
 
 ```bash
 git remote add whatsapp https://github.com/vaddisrinivas/nanoclaw-whatsapp.git
@@ -52,10 +52,10 @@ git merge whatsapp/skill/group-persona || {
 }
 ```
 
-This adds:
-- Group description sync in `src/channels/whatsapp.ts` — writes `metadata.desc` to `groups/{folder}/group-persona.md` inside the existing `syncGroupMetadata` loop (Baileys already fetches this field, it was just unused)
-- Persona injection in `src/index.ts` — prepends `group-persona.md` as a `<group_persona>` block before building the agent prompt
-- 4 new tests in `src/channels/whatsapp.test.ts`
+This merges in:
+- `src/channels/whatsapp.ts` — syncs group description to `groups/{folder}/group-persona.md` inside the existing `syncGroupMetadata` loop
+- `src/channels/whatsapp.test.ts` — 4 tests covering write/no-op/multi-group scenarios
+- `src/index.ts` — prepends `<group_persona>` block to agent prompt when file exists
 
 ### Build and verify
 
@@ -130,6 +130,6 @@ Send `@<assistant name> hello` in the group. The agent should respond according 
 3. Restart after rebuilding
 4. Persona is injected fresh on every agent run — no session state to clear
 
-### Merge conflict on package-lock.json
+### Build error: GROUPS_DIR not found
 
-Run the merge handler shown in Phase 2 — always take `--theirs` for `package-lock.json` and continue.
+Check `src/config.ts` for the exact export name and match it in the import.
