@@ -457,6 +457,16 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            // Ack directly — container is already running so IPC startup ack won't fire
+            const lastMsg = [...messagesToSend]
+              .reverse()
+              .find((m) => messageMetadataCache.has(m.id));
+            if (lastMsg && channel.ack) {
+              const meta = messageMetadataCache.get(lastMsg.id);
+              channel.ack(chatJid, meta).catch((err) =>
+                logger.warn({ chatJid, err }, 'Failed to ack piped message'),
+              );
+            }
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
