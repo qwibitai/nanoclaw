@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { logger } from './logger.js';
 
@@ -38,5 +39,28 @@ export function readEnvFile(keys: string[]): Record<string, string> {
     if (value) result[key] = value;
   }
 
+  return result;
+}
+
+/**
+ * Read env values from the host's ~/.claude/settings.json.
+ * Returns only the requested keys from the `env` block.
+ * Used to support host-auth passthrough without copying secrets into .env.
+ */
+export function readHostClaudeEnv(keys: string[]): Record<string, string> {
+  const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+  let settings: { env?: Record<string, unknown> };
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+  const env = settings.env ?? {};
+  const result: Record<string, string> = {};
+  for (const key of keys) {
+    const val = env[key];
+    if (typeof val === 'string' && val) result[key] = val;
+    else if (typeof val === 'number') result[key] = String(val);
+  }
   return result;
 }
