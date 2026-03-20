@@ -159,10 +159,25 @@ RESULT=$(resolve_cli_kaizen "$MAIN_ROOT")
 EXIT_CODE=$?
 assert_eq "resolves for main checkout" "0" "$EXIT_CODE"
 
-# Actually run it to verify
-HELP_OUTPUT=$($RESULT 2>&1 || true)
-# cli-kaizen with no args prints usage
-assert_contains "produces output" "cli-kaizen" "$HELP_OUTPUT"
+# Actually run it to verify — capture stderr separately to catch script errors
+# RESULT contains a multi-word command (e.g., "tsx path/cli-kaizen.ts"), use eval
+STDERR_FILE=$(mktemp)
+HELP_OUTPUT=$(eval "$RESULT" 2>"$STDERR_FILE") || true
+HELP_STDERR=$(<"$STDERR_FILE")
+rm -f "$STDERR_FILE"
+# cli-kaizen with no args prints usage (may go to stdout or stderr)
+HELP_COMBINED="$HELP_OUTPUT $HELP_STDERR"
+assert_contains "produces output" "cli-kaizen" "$HELP_COMBINED"
+# Fail on script-level errors in stderr
+SCRIPT_ERROR_PATTERN='syntax error|bad substitution|unbound variable|command not found|arithmetic|not a valid identifier|unexpected token'
+if echo "$HELP_STDERR" | grep -qiE "$SCRIPT_ERROR_PATTERN"; then
+  echo "  FAIL: cli-kaizen produced script errors on stderr"
+  echo "    stderr: $HELP_STDERR"
+  ((FAIL++))
+else
+  echo "  PASS: cli-kaizen no script errors on stderr"
+  ((PASS++))
+fi
 
 echo ""
 echo "================================"

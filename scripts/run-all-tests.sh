@@ -31,6 +31,8 @@ run_test() {
   fi
 }
 
+SCRIPT_ERROR_PATTERN='syntax error|bad substitution|unbound variable|command not found|arithmetic|not a valid identifier|unexpected token'
+
 run_smoke() {
   local name="$1"
   local script="$2"
@@ -42,9 +44,17 @@ run_smoke() {
     ((SKIP++)) || true
     return
   fi
-  local output
-  output=$("$script" "$@" 2>&1) || true
-  if [ -n "$output" ]; then
+  local output stderr_file stderr_content
+  stderr_file=$(mktemp)
+  output=$("$script" "$@" 2>"$stderr_file") || true
+  stderr_content=$(<"$stderr_file")
+  rm -f "$stderr_file"
+  # Fail on script-level errors in stderr (syntax, arithmetic, unbound vars, etc.)
+  if echo "$stderr_content" | grep -qiE "$SCRIPT_ERROR_PATTERN"; then
+    echo "  FAIL (script errors on stderr)"
+    echo "  stderr: $stderr_content"
+    ((FAIL++)) || true
+  elif [ -n "$output" ]; then
     echo "  PASS (produced output)"
     ((PASS++)) || true
   else

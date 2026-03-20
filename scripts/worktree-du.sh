@@ -299,8 +299,8 @@ analyze_branches() {
   echo ""
 
   local merged_count unmerged_count local_only=0
-  merged_count=$(git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null | grep -cv '^\*\|main$' || echo "0")
-  unmerged_count=$(git -C "$PROJECT_ROOT" branch --no-merged main 2>/dev/null | wc -l || echo "0")
+  merged_count=$(git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null | grep -cv '^\*\|main$' || true)
+  unmerged_count=$(git -C "$PROJECT_ROOT" branch --no-merged main 2>/dev/null | wc -l | tr -d ' ')
   local total=$((merged_count + unmerged_count + 1))
 
   echo "  Total: $total  |  Unmerged: $unmerged_count  |  Merged (deletable): ${GREEN}$merged_count${NC}"
