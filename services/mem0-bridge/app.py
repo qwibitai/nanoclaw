@@ -165,6 +165,9 @@ def _get_memory() -> Any:
         })
         _memory_instance = Memory.from_config(config)
         _patch_openai_client_for_thinking(_memory_instance)
+        logger.info("Graph store: enabled=%s, type=%s",
+                     getattr(_memory_instance, 'enable_graph', False),
+                     type(getattr(_memory_instance, 'graph', None)).__name__)
     return _memory_instance
 
 
@@ -421,9 +424,10 @@ async def graph_search(req: GraphSearchRequest) -> dict[str, Any]:
         mem = _get_memory()
         uid = req.user_id or USER_ID
 
-        # mem0's graph memory search
-        if hasattr(mem, "graph_memory") and mem.graph_memory is not None:
-            results = mem.graph_memory.search(query=req.query, user_id=uid)
+        # mem0's graph store search
+        if hasattr(mem, "enable_graph") and mem.enable_graph and mem.graph is not None:
+            filters = {"user_id": uid}
+            results = mem.graph.search(query=req.query, filters=filters)
             return {"results": results}
         else:
             raise HTTPException(
