@@ -570,7 +570,7 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 |------|--------------|---------|
 | `cron` | Cron expression | `0 9 * * 1` (Mondays at 9am) |
 | `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | ISO timestamp | `2024-12-25T09:00:00Z` |
+| `once` | Local timestamp (no timezone suffix) | `2024-12-25T09:00:00` |
 
 ### Creating a Task
 
