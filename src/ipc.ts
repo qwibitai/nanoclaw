@@ -11,7 +11,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteSession, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -482,6 +482,15 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'reset_session': {
+      const resetGroup = data.groupFolder as string;
+      if (resetGroup && (isMain || resetGroup === sourceGroup)) {
+        deleteSession(resetGroup);
+        logger.info({ groupFolder: resetGroup, sourceGroup }, 'Session reset via IPC');
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

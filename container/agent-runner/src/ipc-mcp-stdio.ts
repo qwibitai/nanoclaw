@@ -564,6 +564,21 @@ server.tool(
   },
 );
 
+server.tool(
+  'reset_session',
+  'Reset the current session and start fresh. Use when the user says "neue Session", "reset", "fang neu an", "vergiss alles" or similar. The next message will start a completely new session with no prior context.',
+  {},
+  async () => {
+    const data = {
+      type: 'reset_session',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Session wird zurückgesetzt. Der nächste Satz startet frisch.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
