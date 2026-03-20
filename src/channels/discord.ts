@@ -368,6 +368,13 @@ export class DiscordChannel implements Channel {
           });
           // Update the thread context with the actual Discord thread ID
           updateThreadContext(triggerInfo.contextId, { threadId: thread.id });
+          // Update in-memory send target so subsequent streaming outputs go to this thread
+          for (const [key, ctx] of this.currentSendTarget) {
+            if (key.startsWith(`${jid}:`)) {
+              ctx.thread_id = thread.id;
+              break;
+            }
+          }
           await this.sendChunked(thread, text);
           logger.info(
             { jid, threadId: thread.id, length: text.length },
