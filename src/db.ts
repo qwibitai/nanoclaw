@@ -437,6 +437,26 @@ export function getAllTasks(): ScheduledTask[] {
     .all() as ScheduledTask[];
 }
 
+export function getRecentMessages(
+  groupFolder: string,
+  limit: number = 10,
+): Array<{ sender: string; content: string; timestamp: string }> {
+  return db
+    .prepare(
+      `SELECT m.sender, m.content, m.timestamp
+       FROM messages m
+       JOIN registered_groups rg ON m.chat_jid = rg.jid
+       WHERE rg.folder = ?
+       ORDER BY m.timestamp DESC
+       LIMIT ?`,
+    )
+    .all(groupFolder, limit) as Array<{
+    sender: string;
+    content: string;
+    timestamp: string;
+  }>;
+}
+
 export function updateTask(
   id: string,
   updates: Partial<
