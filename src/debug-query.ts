@@ -11,10 +11,7 @@ import {
   DEBUG_QUERY_TIMEOUT_ACTIVE,
   DEBUG_QUERY_TIMEOUT_FRESH,
 } from './config.js';
-import {
-  ContainerInput,
-  runContainerAgent,
-} from './container-runner.js';
+import { ContainerInput, runContainerAgent } from './container-runner.js';
 import { getAllRegisteredGroups } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
@@ -46,7 +43,12 @@ export function listGroupsForDebug(
   groupQueue: GroupQueue,
 ): Array<{ name: string; folder: string; jid: string; isActive: boolean }> {
   const groups = getAllRegisteredGroups();
-  const result: Array<{ name: string; folder: string; jid: string; isActive: boolean }> = [];
+  const result: Array<{
+    name: string;
+    folder: string;
+    jid: string;
+    isActive: boolean;
+  }> = [];
   for (const [jid, group] of Object.entries(groups)) {
     result.push({
       name: group.name,
@@ -91,13 +93,19 @@ function pollForResponse(
     const poll = () => {
       if (abortSignal?.aborted) {
         cleanup(debugDir, queryId);
-        resolve({ status: 'error', error: 'Container exited before responding' });
+        resolve({
+          status: 'error',
+          error: 'Container exited before responding',
+        });
         return;
       }
 
       if (Date.now() - startTime > timeoutMs) {
         cleanup(debugDir, queryId);
-        resolve({ status: 'timeout', error: `Agent did not respond within ${timeoutMs / 1000}s` });
+        resolve({
+          status: 'timeout',
+          error: `Agent did not respond within ${timeoutMs / 1000}s`,
+        });
         return;
       }
 
@@ -106,8 +114,9 @@ function pollForResponse(
           const data = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
           if (data.id === queryId) {
             cleanup(debugDir, queryId);
+            const status = VALID_RESPONSE_STATUSES.has(data.status) ? data.status : 'success';
             resolve({
-              status: data.status || 'success',
+              status,
               answer: data.answer,
             });
             return;
@@ -138,8 +147,27 @@ function cleanup(debugDir: string, queryId: string): void {
         }
       }
     } catch {
-      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        /* ignore */
+      }
     }
+  }
+}
+
+const VALID_RESPONSE_STATUSES = new Set(['success', 'error', 'timeout']);
+
+/**
+ * Check if a query.json file is stale (older than the max timeout + buffer).
+ */
+function isStaleQuery(queryFile: string): boolean {
+  try {
+    const data = JSON.parse(fs.readFileSync(queryFile, 'utf-8'));
+    const age = Date.now() - (data.timestamp || 0);
+    return age > DEBUG_QUERY_TIMEOUT_FRESH + 30_000;
+  } catch {
+    return true; // Unparseable = stale
   }
 }
 
@@ -158,7 +186,10 @@ export async function sendDebugQuery(
   const queryId = crypto.randomUUID();
   const groupJid = findGroupJid(groupFolder, registeredGroups);
   if (!groupJid) {
-    return { status: 'error', error: `No registered group found for folder: ${groupFolder}` };
+    return {
+      status: 'error',
+      error: `No registered group found for folder: ${groupFolder}`,
+    };
   }
 
   const group = registeredGroups[groupJid];
@@ -168,10 +199,17 @@ export async function sendDebugQuery(
     // Active container — deliver via IPC input + poll debug response
     const debugDir = getDebugDir(groupFolder, activeInfo.threadId);
 
-    // Check for existing query
+    // Check for existing query (allow override if stale)
     const queryFile = path.join(debugDir, 'query.json');
     if (fs.existsSync(queryFile)) {
-      return { status: 'error', error: 'A debug query is already in progress for this group' };
+      if (!isStaleQuery(queryFile)) {
+        return {
+          status: 'error',
+          error: 'A debug query is already in progress for this group',
+        };
+      }
+      logger.info({ groupFolder }, 'Removing stale debug query file');
+      try { fs.unlinkSync(queryFile); } catch { /* ignore */ }
     }
 
     // Write query file (for the agent to find context about what's being asked)
@@ -179,7 +217,8 @@ export async function sendDebugQuery(
     fs.writeFileSync(queryFile, JSON.stringify(query));
 
     // Deliver the debug question via IPC input (existing mechanism)
-    const debugPrompt = `[NANOCLAW_DEBUG_QUERY:${queryId}]\n` +
+    const debugPrompt =
+      `[NANOCLAW_DEBUG_QUERY:${queryId}]\n` +
       `[DEBUG QUERY FROM SUPERVISOR]\n` +
       `A supervising agent is asking you the following question for debugging purposes.\n` +
       `Respond concisely and factually about your current state, what you're working on, any errors, etc.\n\n` +
@@ -187,23 +226,40 @@ export async function sendDebugQuery(
       `Write your response to /workspace/ipc/debug/response.json as JSON: ` +
       `{"id": "${queryId}", "answer": "your answer here", "status": "success", "timestamp": ${Date.now()}}`;
 
-    const sent = groupQueue.sendMessage(groupJid, activeInfo.threadId, debugPrompt);
+    const sent = groupQueue.sendMessage(
+      groupJid,
+      activeInfo.threadId,
+      debugPrompt,
+    );
     if (!sent) {
       cleanup(debugDir, queryId);
-      return { status: 'error', error: 'Failed to deliver debug query to active container' };
+      return {
+        status: 'error',
+        error: 'Failed to deliver debug query to active container',
+      };
     }
 
-    logger.info({ groupFolder, queryId, threadId: activeInfo.threadId }, 'Debug query sent to active container');
+    logger.info(
+      { groupFolder, queryId, threadId: activeInfo.threadId },
+      'Debug query sent to active container',
+    );
     return pollForResponse(debugDir, queryId, DEBUG_QUERY_TIMEOUT_ACTIVE);
   }
 
   // No active container — spawn a fresh one in debug mode
   const debugDir = getDebugDir(groupFolder);
 
-  // Check for existing query
+  // Check for existing query (allow override if stale)
   const queryFile = path.join(debugDir, 'query.json');
   if (fs.existsSync(queryFile)) {
-    return { status: 'error', error: 'A debug query is already in progress for this group' };
+    if (!isStaleQuery(queryFile)) {
+      return {
+        status: 'error',
+        error: 'A debug query is already in progress for this group',
+      };
+    }
+    logger.info({ groupFolder }, 'Removing stale debug query file');
+    try { fs.unlinkSync(queryFile); } catch { /* ignore */ }
   }
 
   // Write query file
@@ -230,19 +286,23 @@ export async function sendDebugQuery(
   const abortSignal = { aborted: false };
 
   // Start polling for response before spawning container
-  const responsePromise = pollForResponse(debugDir, queryId, DEBUG_QUERY_TIMEOUT_FRESH, abortSignal);
+  const responsePromise = pollForResponse(
+    debugDir,
+    queryId,
+    DEBUG_QUERY_TIMEOUT_FRESH,
+    abortSignal,
+  );
 
   // Spawn container (fire and forget — response comes via IPC file)
-  runContainerAgent(
-    group,
-    containerInput,
-    (proc, containerName) => {
-      logger.info({ containerName, groupFolder, queryId }, 'Debug container spawned');
-      proc.on('close', () => {
-        abortSignal.aborted = true;
-      });
-    },
-  ).catch((err) => {
+  runContainerAgent(group, containerInput, (proc, containerName) => {
+    logger.info(
+      { containerName, groupFolder, queryId },
+      'Debug container spawned',
+    );
+    proc.on('close', () => {
+      abortSignal.aborted = true;
+    });
+  }).catch((err) => {
     logger.error({ err, groupFolder, queryId }, 'Debug container failed');
     abortSignal.aborted = true;
   });
