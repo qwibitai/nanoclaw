@@ -51,6 +51,15 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
+export const OAS_PROXY_PORT = parseInt(
+  process.env.OAS_PROXY_PORT || '3002',
+  10,
+);
+
+// OAS MCP is enabled when its URL is configured in .env
+const oasEnv = readEnvFile(['OAS_MCP_URL']);
+export const OAS_ENABLED = !!oasEnv.OAS_MCP_URL;
+
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(

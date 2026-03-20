@@ -15,6 +15,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OAS_ENABLED,
+  OAS_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -247,6 +249,14 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // OAS MCP proxy URL (when configured)
+  if (OAS_ENABLED) {
+    args.push(
+      '-e',
+      `OAS_MCP_URL=http://${CONTAINER_HOST_GATEWAY}:${OAS_PROXY_PORT}/mcp`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution

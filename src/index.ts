@@ -5,11 +5,14 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  OAS_ENABLED,
+  OAS_PROXY_PORT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startOasProxy } from './oas-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -477,10 +480,17 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start OAS MCP proxy (if configured)
+  let oasProxyServer: import('http').Server | undefined;
+  if (OAS_ENABLED) {
+    oasProxyServer = await startOasProxy(OAS_PROXY_PORT, PROXY_BIND_HOST);
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    oasProxyServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

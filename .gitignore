@@ -13,10 +13,13 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/oas-analysis/
 groups/main/*
 groups/global/*
+groups/oas-analysis/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/oas-analysis/CLAUDE.md
 
 # Secrets
 *.keys.json
