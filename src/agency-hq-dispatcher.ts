@@ -47,6 +47,27 @@ interface AgencyHqSprint {
 
 // --- Helpers ---
 
+/**
+ * Find the dispatch target for Agency HQ tasks.
+ * Prefers a registered main group; falls back to CEO group's JID
+ * with folder='main' so tasks execute in the main container
+ * but results get sent to the CEO's Telegram chat.
+ */
+function findDispatchTarget(
+  deps: SchedulerDependencies,
+): { jid: string; folder: string } | null {
+  const groups = deps.registeredGroups();
+  // Prefer an explicit main group
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.isMain) return { jid, folder: group.folder };
+  }
+  // Fall back: use CEO's JID but execute in main folder
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.folder === 'ceo') return { jid, folder: 'main' };
+  }
+  return null;
+}
+
 function findCeoJid(
   deps: SchedulerDependencies,
 ): { jid: string; folder: string } | null {
@@ -71,7 +92,27 @@ async function agencyFetch(
   });
 }
 
-function buildPrompt(task: AgencyHqTask, sprintGoal?: string): string {
+const DEFAULT_PLANNING_PERSONA = 'agency/leadership/engineering-manager';
+const PROMPT_REGISTRY_URL = 'https://prompt-api.jeffreykeyser.net';
+
+async function fetchPersona(catalogKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${PROMPT_REGISTRY_URL}/api/v1/prompts/${encodeURIComponent(catalogKey)}`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { value?: string } };
+    return json.data?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildPrompt(
+  task: AgencyHqTask,
+  sprintGoal?: string,
+): Promise<string> {
   const parts = [`/orchestrate ${task.title}`, '', task.description];
 
   if (task.acceptance_criteria) {
@@ -82,6 +123,23 @@ function buildPrompt(task: AgencyHqTask, sprintGoal?: string): string {
   }
   if (sprintGoal) {
     parts.push('', `Sprint Goal: ${sprintGoal}`);
+  }
+
+  // Inject planning persona — use assigned_to as catalog key, fall back to default
+  const personaKey =
+    task.assigned_to && task.assigned_to !== 'hold'
+      ? task.assigned_to
+      : DEFAULT_PLANNING_PERSONA;
+  const persona = await fetchPersona(personaKey);
+  if (persona) {
+    parts.push(
+      '',
+      `## Planning Persona (${personaKey})`,
+      '',
+      'Use the following persona to guide your planning and task decomposition:',
+      '',
+      persona,
+    );
   }
 
   parts.push(
@@ -115,9 +173,9 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
   const log = createCorrelationLogger(undefined, { op: 'dispatch-loop' });
 
   try {
-    const ceo = findCeoJid(deps);
-    if (!ceo) {
-      log.warn('CEO group not registered, skipping dispatch loop');
+    const target = findDispatchTarget(deps);
+    if (!target) {
+      log.warn('No dispatch target found (no main or CEO group), skipping');
       return;
     }
 
@@ -173,7 +231,7 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
         continue;
       }
 
-      await dispatchTask(task, ceo.jid, deps, log);
+      await dispatchTask(task, target.jid, target.folder, deps, log);
     }
   } finally {
     dispatchRunning = false;
@@ -182,7 +240,8 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
 
 async function dispatchTask(
   task: AgencyHqTask,
-  ceoJid: string,
+  targetJid: string,
+  targetFolder: string,
   deps: SchedulerDependencies,
   parentLog: ReturnType<typeof createCorrelationLogger>,
 ): Promise<void> {
@@ -195,7 +254,7 @@ async function dispatchTask(
   const count = (dispatchRetryCount.get(task.id) ?? 0) + 1;
   dispatchRetryCount.set(task.id, count);
 
-  log.info({ taskId: task.id, attempt: count }, 'Dispatching ready task');
+  log.info({ taskId: task.id, attempt: count, targetFolder }, 'Dispatching ready task');
 
   // Mark in-progress in Agency HQ before enqueuing
   try {
@@ -238,7 +297,7 @@ async function dispatchTask(
   }
 
   // Build prompt and create local task
-  const prompt = buildPrompt(task, sprintGoal);
+  const prompt = await buildPrompt(task, sprintGoal);
   const now = new Date().toISOString();
   const localTaskId = `ahq-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -255,8 +314,8 @@ async function dispatchTask(
   try {
     createTask({
       id: localTaskId,
-      group_folder: 'ceo',
-      chat_jid: ceoJid,
+      group_folder: targetFolder,
+      chat_jid: targetJid,
       prompt,
       schedule_type: 'once',
       schedule_value: now,
@@ -276,8 +335,8 @@ async function dispatchTask(
   // Enqueue for execution
   const localTask = {
     id: localTaskId,
-    group_folder: 'ceo',
-    chat_jid: ceoJid,
+    group_folder: targetFolder,
+    chat_jid: targetJid,
     prompt,
     schedule_type: 'once' as const,
     schedule_value: now,
@@ -289,7 +348,7 @@ async function dispatchTask(
     created_at: now,
   };
 
-  deps.queue.enqueueTask(ceoJid, localTaskId, async () => {
+  deps.queue.enqueueTask(targetJid, localTaskId, async () => {
     const result = await runScheduledTask(localTask, deps);
 
     // Write result back to Agency HQ (programmatic — doesn't rely on agent)
@@ -537,6 +596,7 @@ export const _testInternals = {
   dispatchReadyTasks,
   detectStalledTasks,
   buildPrompt,
+  findDispatchTarget,
   findCeoJid,
   resetStopping: () => {
     stopping = false;

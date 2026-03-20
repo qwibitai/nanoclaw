@@ -24,6 +24,7 @@ const {
   dispatchReadyTasks,
   detectStalledTasks,
   buildPrompt,
+  findDispatchTarget,
   findCeoJid,
   resetStopping,
 } = _testInternals;
@@ -110,8 +111,8 @@ describe('agency-hq-dispatcher', () => {
   });
 
   describe('buildPrompt', () => {
-    it('builds prompt with task details and write-back instructions', () => {
-      const prompt = buildPrompt(
+    it('builds prompt with task details and write-back instructions', async () => {
+      const prompt = await buildPrompt(
         {
           id: 'task-1',
           title: 'Fix login bug',
@@ -213,12 +214,16 @@ describe('agency-hq-dispatcher', () => {
       );
       // PUT in-progress
       fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+      // GET planning persona (from prompt registry)
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { value: '# Test Persona' } }),
+      );
 
       const deps = makeMockDeps();
       await dispatchReadyTasks(deps);
 
-      // Should have called PUT to mark in-progress
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // Should have called: GET ready tasks, PUT in-progress, GET persona
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       const putCall = fetchMock.mock.calls[1];
       expect(putCall[0]).toContain('/tasks/t3');
       expect(putCall[1].method).toBe('PUT');
