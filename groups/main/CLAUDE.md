@@ -96,6 +96,15 @@ mcporter call gdrive.move_file --args '{"file_id":"<id>","target_folder_id":"<fo
 mcporter call gdrive.rename_file --args '{"file_id":"<id>","new_name":"NeuerName"}'
 mcporter call gdrive.delete_file --args '{"file_id":"<id>"}'
 
+# GitHub (Repos, Issues, PRs, Code)
+mcporter call github.search_repositories --args '{"query":"nanoclaw"}'
+mcporter call github.list_issues --args '{"owner":"qwibitai","repo":"nanoclaw","state":"open"}'
+mcporter call github.get_issue --args '{"owner":"qwibitai","repo":"nanoclaw","issue_number":1256}'
+mcporter call github.create_issue --args '{"owner":"klapom","repo":"nanoclaw","title":"...","body":"..."}'
+mcporter call github.search_code --args '{"q":"memory in:file repo:qwibitai/nanoclaw"}'
+mcporter call github.list_pull_requests --args '{"owner":"qwibitai","repo":"nanoclaw","state":"open"}'
+mcporter call github.get_pull_request --args '{"owner":"qwibitai","repo":"nanoclaw","pull_number":1256}'
+
 # Places / Navigation (Google Maps)
 mcporter call places.search_places --args '{"query":"Zahnarzt München","max_results":5}'
 mcporter call places.search_nearby --args '{"latitude":48.1351,"longitude":11.5820,"types":["restaurant"],"radius_meters":500}'
@@ -172,6 +181,22 @@ Format der injizierten Inhalte:
 Bei Prompt/Caption wird diese als Frage ans VLM übergeben.
 Bei mehrseitigen Dokumenten: `[Seite N] ...` pro Seite.
 Bei zu großen Dokumenten: Warnung im Inhalt — Klaus darauf hinweisen und nach relevantem Abschnitt fragen.
+
+## Claude Code — Aufgaben an Claude delegieren
+
+Du kannst Entwicklungsaufgaben an Claude Code auf dem Host delegieren. Claude Code hat vollen Dateisystem-Zugriff und kann Code lesen, schreiben, Tests ausführen und committen.
+
+`mcp__nanoclaw__run_claude_code` — Aufgabe an Claude Code übergeben:
+- `prompt`: Was Claude tun soll (konkret und spezifisch formulieren)
+- `workdir`: Arbeitsverzeichnis (Standard: `/home/admin/projects/nanoclaw`)
+- `timeout_seconds`: Timeout (Standard: 120, max: 600)
+
+Beispiele:
+- "Lies src/config.ts und füge eine neue Konfigurationsvariable FEATURE_X hinzu"
+- "Führe npm test aus und fixe alle fehlschlagenden Tests"
+- "Erstelle eine neue Datei src/utils/helpers.ts mit einer formatDate() Funktion"
+
+Verwende dies wenn du Dateien auf dem Host ändern musst — dein Container hat nur Lesezugriff auf den Quellcode.
 
 ## Chat registrieren (register_group)
 

@@ -565,6 +565,40 @@ server.tool(
 );
 
 server.tool(
+  'run_claude_code',
+  `Delegate a coding task to Claude Code on the host machine. Claude Code has full filesystem access and can read, edit, create files, run commands, and commit code.
+Use this when:
+- You need to modify source code in a project
+- You need to run tests and fix failures
+- You need to create or edit files outside the container
+- You need to do complex multi-step development tasks
+
+The task runs asynchronously. Claude Code works in the specified directory with full permissions.
+Results are returned as text. For long tasks, keep the prompt focused and specific.`,
+  {
+    prompt: z.string().describe('The task for Claude Code to perform. Be specific about what files to change and what the expected outcome is.'),
+    workdir: z.string().default('/home/admin/projects/nanoclaw').describe('Working directory for Claude Code (absolute path on host)'),
+    timeout_seconds: z.number().default(120).describe('Timeout in seconds (default: 120, max: 600)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'run_claude_code',
+      prompt: args.prompt,
+      workdir: args.workdir || '/home/admin/projects/nanoclaw',
+      timeout_seconds: Math.min(args.timeout_seconds || 120, 600),
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    data.type = 'run_claude_code';
+    (data as Record<string, unknown>).request_id = requestId;
+    writeIpcFile(TASKS_DIR, data);
+    const response = await pollForResponse(requestId, Math.min((args.timeout_seconds || 120) * 1000 + 5000, 605000));
+    return { content: [{ type: 'text' as const, text: response }] };
+  },
+);
+
+server.tool(
   'reset_session',
   'Reset the current session and start fresh. Use when the user says "neue Session", "reset", "fang neu an", "vergiss alles" or similar. The next message will start a completely new session with no prior context.',
   {},

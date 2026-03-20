@@ -11,7 +11,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteSession, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteSession,
+  deleteTask,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -265,6 +271,10 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For run_claude_code
+    workdir?: string;
+    timeout_seconds?: number;
+    request_id?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -483,11 +493,57 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'run_claude_code': {
+      const prompt = data.prompt as string;
+      const workdir = data.workdir as string || process.cwd();
+      const timeoutSec = Math.min((data.timeout_seconds as number) || 120, 600);
+      const requestId = data.request_id as string;
+
+      if (!prompt || !requestId) {
+        logger.warn({ data }, 'Invalid run_claude_code request');
+        break;
+      }
+
+      // Run claude CLI asynchronously, write response when done
+      const { execFile } = await import('child_process');
+      const { promisify } = await import('util');
+      const execFileAsync = promisify(execFile);
+
+      logger.info({ workdir, timeoutSec, sourceGroup }, 'Running Claude Code task via IPC');
+
+      (async () => {
+        try {
+          const { stdout } = await execFileAsync(
+            '/home/admin/.local/bin/claude',
+            ['-p', prompt, '--dangerously-skip-permissions', '--output-format', 'text'],
+            {
+              cwd: workdir,
+              timeout: timeoutSec * 1000,
+              maxBuffer: 10 * 1024 * 1024,
+              env: { ...process.env, HOME: '/home/admin' },
+            },
+          );
+          const responseFile = path.join(DATA_DIR, 'ipc', sourceGroup, 'memory', `res-${requestId}.json`);
+          fs.writeFileSync(responseFile, JSON.stringify(stdout.trim()));
+          logger.info({ sourceGroup, chars: stdout.length }, 'Claude Code task completed');
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const responseFile = path.join(DATA_DIR, 'ipc', sourceGroup, 'memory', `res-${requestId}.json`);
+          fs.writeFileSync(responseFile, JSON.stringify(`Error: ${errMsg.slice(0, 500)}`));
+          logger.error({ err, sourceGroup }, 'Claude Code task failed');
+        }
+      })();
+      break;
+    }
+
     case 'reset_session': {
       const resetGroup = data.groupFolder as string;
       if (resetGroup && (isMain || resetGroup === sourceGroup)) {
         deleteSession(resetGroup);
-        logger.info({ groupFolder: resetGroup, sourceGroup }, 'Session reset via IPC');
+        logger.info(
+          { groupFolder: resetGroup, sourceGroup },
+          'Session reset via IPC',
+        );
       }
       break;
     }
