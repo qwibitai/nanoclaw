@@ -280,7 +280,56 @@ data/tasks/
 
 ---
 
-## 5. 実装優先順
+## 5. テスト差分（Vitest、現状253テスト全パス）
+
+### 5.1 全削除（不要になるテスト）
+
+| ファイル | テスト数 | 理由 |
+|----------|----------|------|
+| `src/db.test.ts` | 23 | SQLite廃止 → `store.test.ts`として新規作成 |
+| `src/sender-allowlist.test.ts` | 19 | sender-allowlist機能ごと削除 |
+| `src/remote-control.test.ts` | 17 | remote-control機能ごと削除 |
+| `src/channels/registry.test.ts` | 4 | チャンネルレジストリ廃止 |
+| **計** | **63** | |
+
+### 5.2 大幅変更（書き換え or 大部分削除）
+
+| ファイル | テスト数 | 変更内容 |
+|----------|----------|----------|
+| `src/ipc-auth.test.ts` | 33 | isMain認可テスト全削除。`update_config`/`send_message`新コマンドのテスト追加 |
+| `src/task-scheduler.test.ts` | 4 | DB操作→ファイルI/Oに書き換え |
+| `src/group-folder.test.ts` | 5 | Discordチャンネル名ベースのバリデーションに書き換え |
+| `setup/*.test.ts` | 42 | Linux/systemd固定に簡素化（macOS/WSL分岐テスト削除） |
+
+### 5.3 軽微な変更
+
+| ファイル | テスト数 | 変更内容 |
+|----------|----------|----------|
+| `src/channels/discord.test.ts` | 34 | スラッシュコマンド（`/new`, `/model`, `/compact`）のテスト追加。@mention→トリガー変換テストは削除 |
+| `src/group-queue.test.ts` | 13 | `sendMessage`/`closeStdin`/`notifyIdle`関連テスト削除（毎回起動方式） |
+| `src/container-runner.test.ts` | 3 | input型変更、マウント構成変更の反映 |
+| `src/container-runtime.test.ts` | 8 | プラットフォーム分岐テスト削除（Linux固定） |
+
+### 5.4 変更なし
+
+| ファイル | テスト数 |
+|----------|----------|
+| `src/formatting.test.ts` | 33 |
+| `src/routing.test.ts` | 8 |
+| `src/credential-proxy.test.ts` | 5 |
+| `src/timezone.test.ts` | 2 |
+
+### 5.5 新規テスト
+
+| ファイル | テスト対象 |
+|----------|-----------|
+| `src/store.test.ts` | JSONL読み書き、日付ローテーション、config.json操作、`listRegisteredGroups()` |
+| `src/compact.test.ts` | `/compact`の要約→summaryイベント書き込み、`buildMessagesArray()`のsummary起点動作 |
+| `src/session.test.ts` | JSONL→messages配列変換、`session_reset`境界、トークン上限のN件制限 |
+
+---
+
+## 6. 実装優先順
 
 1. **ストレージ層**（store.ts）— 全ての土台
 2. **Discord直接接続**（registry廃止、スラッシュコマンド追加）
@@ -290,10 +339,11 @@ data/tasks/
 6. **IPC変更**（コマンド追加/削除、認可簡素化）
 7. **タスクのファイルベース化**
 8. **不要コード削除**（マルチチャンネル、SQLite、mount-security等）
+9. **テスト**（各ステップと並行して書く。store.test.ts → session.test.ts → compact.test.ts の順）
 
 ---
 
-## 6. リスク・注意点
+## 7. リスク・注意点
 
 - **JSONLの同時書き込み**: キュー直列化で対処するが、タスク実行とメッセージ受信が同時に書き込む可能性 → ファイルロックまたはwrite queue必要
 - **JSONLのパフォーマンス**: 長期運用でファイルが大きくなる → 日付ローテーションで対処（設計済み）
