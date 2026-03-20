@@ -51,17 +51,21 @@ Finding an existing issue and adding an incident comment is MORE VALUABLE than f
 
 ### 4. Take action
 For each impediment:
-- **Match found** → Add an incident comment to the existing issue:
+- **Match found** → Add an incident comment to the existing issue (THIS IS THE HIGHEST-VALUE ACTION):
   ```bash
   gh issue comment {N} --repo Garsson-io/kaizen --body "## Incident ($(date +%Y-%m-%d))
   **PR/Context:** {PR_URL}
   **Impact:** [time wasted | blocked | wrong output]
   **Details:** [what happened, why it matters]"
   ```
-- **No match** → File a new kaizen issue:
+- **No match** → File a new kaizen issue with REQUIRED labels:
   ```bash
-  gh issue create --repo Garsson-io/kaizen --title "[LN] description" --body "..."
+  gh issue create --repo Garsson-io/kaizen \
+    --title "[LN] description" \
+    --label "kaizen,level-{N},area/{subsystem}" \
+    --body "..."
   ```
+  Required labels: `kaizen` + level (`level-1`/`level-2`/`level-3`) + area (`area/hooks`, `area/skills`, `area/cases`, `area/deploy`, `area/testing`, `area/container`, `area/worktree`). Add `horizon/{name}` if it maps to a known horizon.
 - **Trivial / not worth filing** → Note the reason
 
 ### 5. Report results
@@ -83,3 +87,5 @@ The main agent will use this to construct the KAIZEN_IMPEDIMENTS declaration and
 - Do NOT modify hook scripts or settings
 - Focus on reflection quality — you have time, use it well
 - When in doubt about whether something is a duplicate, ADD AN INCIDENT to the closest match rather than filing a new issue
+- **Incident recording is your highest-value action.** A new issue with no incidents is less useful than an incident comment on an existing issue. The kaizen system's prioritization depends on incident data — without it, everything is opinion-based.
+- See [`docs/issue-taxonomy.md`](../../docs/issue-taxonomy.md) for the full labeling and incident recording policy

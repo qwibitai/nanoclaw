@@ -331,6 +331,8 @@ The point of review is to catch gaps. A gap identified but not closed is not a r
 
 Future work, process improvements, and cross-repo engineering proposals are tracked as GitHub Issues in [`Garsson-io/kaizen`](https://github.com/Garsson-io/kaizen). Dev agents file improvements via `case_suggest_dev` MCP tool (never raw `gh` CLI). Host-side skills query the backlog via `npx tsx src/cli-kaizen.ts list|view` and create cases via `npx tsx src/cli-kaizen.ts case-create`. Include: what, why, when, how, reproduction steps, and verification criteria.
 
+**Issue taxonomy:** See [`docs/issue-taxonomy.md`](docs/issue-taxonomy.md) for labeling requirements, epic lifecycle policy, and incident recording format. Every issue MUST have: `kaizen` + level (`level-1`/`level-2`/`level-3`) + area (`area/hooks`, `area/skills`, etc.). Epics are directions that stay open; specs are deliverables that close when shipped.
+
 ## Post-Merge: Auto-Deploy
 
 After merging to main, sync local main — the `.husky/post-merge` hook automatically triggers `scripts/deploy.sh` which builds, restarts, health-checks, and notifies on Telegram. See [`docs/auto-deploy.md`](docs/auto-deploy.md) for full details.

@@ -143,15 +143,19 @@ Is the check fully automatable (no judgment needed)?
 All improvements that are too large for the current PR go to:
 **[github.com/Garsson-io/kaizen/issues](https://github.com/Garsson-io/kaizen/issues)**
 
+See [`docs/issue-taxonomy.md`](../../../docs/issue-taxonomy.md) for the full labeling taxonomy, epic lifecycle policy, and incident recording format.
+
 Issue format:
 - **Title:** `[L{level}] Brief description`
-- **Labels:** `kaizen`, `level-1`/`level-2`/`level-3`, relevant repo
+- **Required labels:** `kaizen` + level (`level-1`/`level-2`/`level-3`) + area (`area/hooks`, `area/skills`, `area/cases`, `area/deploy`, `area/testing`, `area/container`, `area/worktree`) + horizon (recommended)
 - **Body:**
   - What failed (incident description)
   - Why it failed (root cause)
   - Current level of fix (if any)
   - Proposed improvement and target level
   - Verification: how to confirm the fix works
+
+**Before filing a new issue:** Search for existing issues first (`gh issue list --repo Garsson-io/kaizen --search "<keywords>"`). If a match exists, add an incident comment instead of filing a duplicate. Incidents compound evidence; duplicates fragment it.
 
 ## PR Kaizen Section
 

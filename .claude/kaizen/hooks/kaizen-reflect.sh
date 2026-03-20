@@ -80,6 +80,10 @@ Launch a background kaizen-bg subagent to handle reflection while you continue w
   - Branch: $BRANCH
   - Changed files: $CHANGED
   - List any impediments/friction you encountered during this work
+  - IMPORTANT: For each impediment, search existing kaizen issues FIRST.
+    Recording an incident on an existing issue is MORE VALUABLE than filing new.
+    New issues MUST have labels: kaizen + level-N + area/{subsystem}.
+    See docs/issue-taxonomy.md for the full policy.
 
 The kaizen-bg subagent will search for duplicate issues, file incidents, and
 create new kaizen issues as needed. It will report results back to you.
@@ -145,6 +149,10 @@ with post-merge steps (deploy verification, main sync, case closure).
   - Changed files: $CHANGED
   - List any impediments/friction you encountered during this work
   - Ask it to also check if any open kaizen issues are now resolved by this merge
+  - IMPORTANT: For each impediment, search existing kaizen issues FIRST.
+    Recording an incident on an existing issue is MORE VALUABLE than filing new.
+    New issues MUST have labels: kaizen + level-N + area/{subsystem}.
+    See docs/issue-taxonomy.md for the full policy.
 
 The kaizen-bg subagent will search for duplicate issues, file incidents, and
 create new kaizen issues as needed. It will report results back to you.
