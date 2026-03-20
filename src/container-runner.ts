@@ -268,6 +268,10 @@ function buildContainerArgs(
   const appleNotesUrl = `http://${CONTAINER_HOST_GATEWAY}:8184/mcp`;
   args.push('-e', `APPLE_NOTES_URL=${appleNotesUrl}`);
 
+  // Pass Todoist MCP endpoint URL
+  const todoistUrl = `http://${CONTAINER_HOST_GATEWAY}:8186/mcp`;
+  args.push('-e', `TODOIST_URL=${todoistUrl}`);
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 

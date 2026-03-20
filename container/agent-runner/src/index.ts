@@ -411,7 +411,8 @@ async function runQuery(
         'mcp__qmd__*',
         'mcp__simplemem__*',
         'mcp__apple_notes__*',
-        'mcp__ollama__*'
+        'mcp__ollama__*',
+        'mcp__todoist__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -457,6 +458,13 @@ async function runQuery(
           command: 'node',
           args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
         },
+        ...(process.env.TODOIST_URL ? {
+          todoist: {
+            type: 'http' as const,
+            url: process.env.TODOIST_URL,
+            headers: { Accept: 'application/json, text/event-stream' },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
