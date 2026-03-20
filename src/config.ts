@@ -67,6 +67,14 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseIntEnv(process.env.MAX_CONCURRENT_CONTAINERS, 5),
 );
+export const MAX_CONTAINERS_PER_GROUP = Math.max(
+  1,
+  parseIntEnv(process.env.MAX_CONTAINERS_PER_GROUP, 3),
+);
+export const THREAD_EXPIRY_HOURS = parseIntEnv(
+  process.env.THREAD_EXPIRY_HOURS,
+  24,
+);
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

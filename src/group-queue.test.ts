@@ -6,6 +6,7 @@ import { GroupQueue } from './group-queue.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  MAX_CONTAINERS_PER_GROUP: 2,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -34,9 +35,9 @@ describe('GroupQueue', () => {
     vi.useRealTimers();
   });
 
-  // --- Single group at a time ---
+  // --- Single group at a time (backward compat) ---
 
-  it('only runs one container per group at a time', async () => {
+  it('only runs one container per thread at a time', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
@@ -51,7 +52,7 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue two messages for the same group
+    // Enqueue two messages for the same group (same default thread)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group1@g.us');
 
@@ -79,7 +80,7 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue 3 groups (limit is 2)
+    // Enqueue 3 groups (global limit is 2)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
     queue.enqueueMessageCheck('group3@g.us');
@@ -225,7 +226,7 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots
+    // Fill both global slots
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
     await vi.advanceTimersByTimeAsync(10);
@@ -475,6 +476,272 @@ describe('GroupQueue', () => {
 
     closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // =========================================================
+  // New tests: multi-thread concurrency
+  // =========================================================
+
+  it('runs multiple containers per group up to per-group limit', async () => {
+    const completionCallbacks: Array<() => void> = [];
+    const activeThreadIds: string[] = [];
+    let maxConcurrentPerGroup = 0;
+    let currentPerGroup = 0;
+
+    const processMessages = vi.fn(
+      async (groupJid: string, threadId?: string) => {
+        currentPerGroup++;
+        maxConcurrentPerGroup = Math.max(
+          maxConcurrentPerGroup,
+          currentPerGroup,
+        );
+        activeThreadIds.push(threadId ?? 'default');
+        await new Promise<void>((resolve) =>
+          completionCallbacks.push(resolve),
+        );
+        currentPerGroup--;
+        return true;
+      },
+    );
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Enqueue two different threads for the same group (limit is 2)
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-B');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Both should be active simultaneously
+    expect(maxConcurrentPerGroup).toBe(2);
+    expect(activeThreadIds).toContain('thread-A');
+    expect(activeThreadIds).toContain('thread-B');
+
+    completionCallbacks[0]();
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('queues threads when per-group limit is reached', async () => {
+    const completionCallbacks: Array<() => void> = [];
+    const startOrder: string[] = [];
+
+    const processMessages = vi.fn(
+      async (groupJid: string, threadId?: string) => {
+        startOrder.push(threadId ?? 'default');
+        await new Promise<void>((resolve) =>
+          completionCallbacks.push(resolve),
+        );
+        return true;
+      },
+    );
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Enqueue 3 threads but limit is 2
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-B');
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-C');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Only 2 should have started
+    expect(startOrder).toHaveLength(2);
+    expect(startOrder).toContain('thread-A');
+    expect(startOrder).toContain('thread-B');
+
+    // Complete one — thread-C should start
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(startOrder).toHaveLength(3);
+    expect(startOrder).toContain('thread-C');
+
+    completionCallbacks[1]();
+    completionCallbacks[2]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('routes IPC messages to thread-specific paths', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'group-folder',
+      'thread-A',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // 3-arg form
+    const result = queue.sendMessage('group1@g.us', 'thread-A', 'hello');
+    expect(result).toBe(true);
+
+    // Should have written to the thread-specific temp path
+    const mkdirSync = vi.mocked(fs.default.mkdirSync);
+    const mkdirCall = mkdirSync.mock.calls.find(
+      (call) =>
+        typeof call[0] === 'string' && call[0].includes('/thread-A/input'),
+    );
+    expect(mkdirCall).toBeTruthy();
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('backward compat: enqueueMessageCheck still works with default threadId', async () => {
+    const called: Array<[string, string | undefined]> = [];
+
+    const processMessages = vi.fn(
+      async (groupJid: string, threadId?: string) => {
+        called.push([groupJid, threadId]);
+        return true;
+      },
+    );
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(called).toHaveLength(1);
+    expect(called[0][0]).toBe('group1@g.us');
+    expect(called[0][1]).toBe('default');
+  });
+
+  it('isActive returns false without threadId when no threads active', () => {
+    expect(queue.isActive('group1@g.us')).toBe(false);
+  });
+
+  it('isActive with threadId returns true only for that thread', async () => {
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // thread-A is active, thread-B is not
+    expect(queue.isActive('group1@g.us', 'thread-A')).toBe(true);
+    expect(queue.isActive('group1@g.us', 'thread-B')).toBe(false);
+
+    // Without threadId — returns true because thread-A is active
+    expect(queue.isActive('group1@g.us')).toBe(true);
+
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('isActive returns false for task containers', async () => {
+    let resolveTask: () => void;
+
+    const taskFn = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // isActive should be false even though there's an active task container
+    expect(queue.isActive('group1@g.us')).toBe(false);
+    expect(queue.isActive('group1@g.us', 'default')).toBe(false);
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('drain logic: waiting threads processed after a thread completes', async () => {
+    const completionCallbacks: Array<() => void> = [];
+    const startOrder: string[] = [];
+
+    const processMessages = vi.fn(
+      async (groupJid: string, threadId?: string) => {
+        startOrder.push(threadId ?? 'default');
+        await new Promise<void>((resolve) =>
+          completionCallbacks.push(resolve),
+        );
+        return true;
+      },
+    );
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill per-group limit (2) and global limit (2) simultaneously
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-B');
+    // thread-C has to wait for per-group slot
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-C');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(startOrder).toHaveLength(2);
+
+    // Complete thread-A — thread-C should start (per-group slot freed)
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(startOrder).toHaveLength(3);
+    expect(startOrder[2]).toBe('thread-C');
+
+    completionCallbacks[1]();
+    completionCallbacks[2]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('closeStdin writes to thread-specific path', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueThreadMessageCheck('group1@g.us', 'thread-A');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'group-folder',
+      'thread-A',
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.closeStdin('group1@g.us', 'thread-A');
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/thread-A/input/_close'),
     );
     expect(closeWrites).toHaveLength(1);
 

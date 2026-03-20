@@ -29,6 +29,7 @@ import { detectAuthMode } from './credential-proxy.js';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { initKnowledgeVault } from './knowledge-vault.js';
 
 /**
  * Copy skills from the catalog into a group's .claude/skills/ directory,
@@ -109,6 +110,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  threadId?: string;
 }
 
 export interface ContainerOutput {
@@ -124,13 +126,17 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-function buildVolumeMounts(
+export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  threadId?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+
+  // Initialize knowledge vault if it doesn't exist
+  initKnowledgeVault(group.folder);
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -181,17 +187,32 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
-  const groupSessionsDir = path.join(
+  // Per-group (or per-thread) Claude sessions directory
+  // Each group gets their own .claude/ to prevent cross-group session access.
+  // When threadId is provided, use a per-thread subdirectory so concurrent
+  // containers don't share SDK state.
+  const sessionBase = threadId
+    ? path.join(DATA_DIR, 'sessions', group.folder, threadId)
+    : path.join(DATA_DIR, 'sessions', group.folder);
+  const groupSessionsDir = path.join(sessionBase, '.claude');
+  fs.mkdirSync(groupSessionsDir, { recursive: true });
+
+  const groupTemplateSettings = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
     '.claude',
+    'settings.json',
   );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
+  if (
+    threadId &&
+    !fs.existsSync(settingsFile) &&
+    fs.existsSync(groupTemplateSettings)
+  ) {
+    // Copy settings from the group-level template into the thread-specific dir
+    fs.copyFileSync(groupTemplateSettings, settingsFile);
+  } else if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(
@@ -226,9 +247,12 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-group IPC namespace: each group gets its own IPC directory
-  // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = resolveGroupIpcPath(group.folder);
+  // Per-group (or per-thread) IPC namespace.
+  // When threadId is provided, use a per-thread subdirectory so concurrent
+  // containers have isolated IPC channels.
+  const groupIpcDir = threadId
+    ? path.join(resolveGroupIpcPath(group.folder), threadId)
+    : resolveGroupIpcPath(group.folder);
   // Container runs as node (uid 1000) and needs write access to IPC subdirs.
   // Use 0o770 (not 0o777) so other local users cannot inject/read IPC files.
   for (const sub of ['messages', 'tasks', 'input', 'files', 'prs']) {
@@ -385,9 +409,10 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.threadId);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  const threadSuffix = input.threadId ? `-${input.threadId.slice(0, 8)}` : '';
+  const containerName = `nanoclaw-${safeName}${threadSuffix}-${Date.now()}`;
   const containerArgs = buildContainerArgs(
     mounts,
     containerName,

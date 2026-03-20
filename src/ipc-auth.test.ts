@@ -53,6 +53,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    sendChannelMessage: async () => undefined,
     sendFile: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {

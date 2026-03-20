@@ -73,7 +73,7 @@ export interface SchedulerDependencies {
     containerName: string,
     groupFolder: string,
   ) => void;
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, taskId?: string, sessionId?: string) => Promise<void>;
 }
 
 async function runTask(
@@ -149,6 +149,7 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  let capturedSessionId: string | undefined;
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -184,10 +185,13 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        if (streamedOutput.newSessionId) {
+          capturedSessionId = streamedOutput.newSessionId;
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          await deps.sendMessage(task.chat_jid, streamedOutput.result, task.id, capturedSessionId);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

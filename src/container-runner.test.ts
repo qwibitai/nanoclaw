@@ -41,7 +41,12 @@ vi.mock('fs', async () => {
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      lstatSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      chownSync: vi.fn(),
+      chmodSync: vi.fn(),
+      cpSync: vi.fn(),
+      rmSync: vi.fn(),
     },
   };
 });
@@ -86,13 +91,24 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  buildVolumeMounts,
+  ContainerOutput,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
   folder: 'test-group',
   trigger: '@Andy',
+  added_at: new Date().toISOString(),
+};
+
+const mockGroup: RegisteredGroup = {
+  name: 'Mock Group',
+  folder: 'mock-group',
+  trigger: '@Bot',
   added_at: new Date().toISOString(),
 };
 
@@ -206,5 +222,58 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('buildVolumeMounts per-thread isolation', () => {
+  it('creates per-thread session directory when threadId provided', () => {
+    const mounts = buildVolumeMounts(mockGroup, false, 'thread_123');
+    const claudeMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.claude',
+    );
+    expect(claudeMount).toBeDefined();
+    expect(claudeMount!.hostPath).toContain('thread_123');
+  });
+
+  it('creates per-thread IPC directory when threadId provided', () => {
+    const mounts = buildVolumeMounts(mockGroup, false, 'thread_123');
+    const ipcMount = mounts.find((m) => m.containerPath === '/workspace/ipc');
+    expect(ipcMount).toBeDefined();
+    expect(ipcMount!.hostPath).toContain('thread_123');
+  });
+
+  it('uses default paths when no threadId', () => {
+    const mounts = buildVolumeMounts(mockGroup, false);
+    const claudeMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.claude',
+    );
+    expect(claudeMount).toBeDefined();
+    expect(claudeMount!.hostPath).not.toContain('thread_');
+  });
+
+  it('IPC path does not contain threadId when not provided', () => {
+    const mounts = buildVolumeMounts(mockGroup, false);
+    const ipcMount = mounts.find((m) => m.containerPath === '/workspace/ipc');
+    expect(ipcMount).toBeDefined();
+    expect(ipcMount!.hostPath).not.toContain('thread_');
+  });
+
+  it('session path contains group folder name for non-thread mounts', () => {
+    const mounts = buildVolumeMounts(mockGroup, false);
+    const claudeMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.claude',
+    );
+    expect(claudeMount).toBeDefined();
+    expect(claudeMount!.hostPath).toContain('mock-group');
+  });
+
+  it('session path contains both group folder and threadId for thread mounts', () => {
+    const mounts = buildVolumeMounts(mockGroup, false, 'thread_abc');
+    const claudeMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.claude',
+    );
+    expect(claudeMount).toBeDefined();
+    expect(claudeMount!.hostPath).toContain('mock-group');
+    expect(claudeMount!.hostPath).toContain('thread_abc');
   });
 });

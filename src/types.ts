@@ -52,6 +52,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  thread_context_id?: number; // Thread context ID (Discord only, not persisted to DB)
 }
 
 export interface ScheduledTask {
@@ -92,8 +93,9 @@ export interface Channel {
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
   /** Always sends to the main channel, never a thread. Use for scheduled tasks and system announcements.
-   *  Falls back to sendMessage for channels that don't implement thread routing. */
-  sendChannelMessage?(jid: string, text: string): Promise<void>;
+   *  Falls back to sendMessage for channels that don't implement thread routing.
+   *  Returns the platform message ID if available (used for thread context tracking). */
+  sendChannelMessage?(jid: string, text: string): Promise<string | undefined>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

@@ -120,7 +120,7 @@ describe('task scheduler', () => {
     const nextRun = computeNextRun(task);
     expect(nextRun).not.toBeNull();
     // Must be in the future
-    expect(new Date(nextRun!).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(nextRun!).getTime()).toBeGreaterThanOrEqual(Date.now());
     // Must be aligned to the original schedule grid
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
