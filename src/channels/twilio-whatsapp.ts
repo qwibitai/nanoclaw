@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import https from 'https';
 import path from 'path';
@@ -33,6 +34,12 @@ interface TwilioWhatsAppChannelOpts {
 
 /** Max message length for WhatsApp via Twilio */
 const MAX_MESSAGE_LENGTH = 1600;
+
+/** Matches [Image: attachments/filename.jpg] references in agent output */
+const IMAGE_REF_PATTERN = /\[Image: (attachments\/[^\]]+)\]/g;
+
+/** Allowed image extensions for media serving */
+const ALLOWED_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 
 /**
  * Download media from a Twilio media URL using Basic Auth.
@@ -126,24 +133,69 @@ export class TwilioWhatsAppChannel implements Channel {
     try {
       const to = jid;
 
-      if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.client.messages.create({
-          from: this.config.fromNumber,
-          to,
-          body: text,
-        });
+      // Extract image references and build media URLs
+      const mediaUrls: string[] = [];
+      let cleanText = text;
+      const group = this.findGroupByJid(jid);
+
+      if (group && this.config.webhookUrl) {
+        const baseUrl = this.config.webhookUrl.replace(/\/webhook\/?$/, '');
+        IMAGE_REF_PATTERN.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = IMAGE_REF_PATTERN.exec(text)) !== null) {
+          const relativePath = match[1]; // e.g. "attachments/img-123.jpg"
+          const filePath = path.join(GROUPS_DIR, group.folder, relativePath);
+          const ext = path.extname(relativePath).toLowerCase();
+          if (fs.existsSync(filePath) && ALLOWED_IMAGE_EXTS.has(ext)) {
+            mediaUrls.push(
+              `${baseUrl}/media/${encodeURIComponent(group.folder)}/${relativePath}`,
+            );
+          }
+        }
+        // Strip image references from text
+        if (mediaUrls.length > 0) {
+          cleanText = text.replace(IMAGE_REF_PATTERN, '').trim();
+        }
+      }
+
+      // Twilio supports up to 10 mediaUrl per message
+      const msgOpts: {
+        from: string;
+        to: string;
+        body: string;
+        mediaUrl?: string[];
+      } = {
+        from: this.config.fromNumber,
+        to,
+        body: cleanText || '📷',
+      };
+      if (mediaUrls.length > 0) {
+        msgOpts.mediaUrl = mediaUrls.slice(0, 10);
+      }
+
+      if (cleanText.length <= MAX_MESSAGE_LENGTH) {
+        await this.client.messages.create(msgOpts);
       } else {
-        // Split long messages
-        for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
+        // Send images with first chunk, text-only for the rest
+        const firstChunk = cleanText.slice(0, MAX_MESSAGE_LENGTH);
+        await this.client.messages.create({ ...msgOpts, body: firstChunk });
+        for (
+          let i = MAX_MESSAGE_LENGTH;
+          i < cleanText.length;
+          i += MAX_MESSAGE_LENGTH
+        ) {
           await this.client.messages.create({
             from: this.config.fromNumber,
             to,
-            body: text.slice(i, i + MAX_MESSAGE_LENGTH),
+            body: cleanText.slice(i, i + MAX_MESSAGE_LENGTH),
           });
         }
       }
 
-      logger.info({ jid, length: text.length }, 'Twilio WhatsApp message sent');
+      logger.info(
+        { jid, length: text.length, mediaCount: mediaUrls.length },
+        'Twilio WhatsApp message sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Twilio WhatsApp message');
     }
@@ -171,6 +223,60 @@ export class TwilioWhatsAppChannel implements Channel {
 
   // --- Private ---
 
+  private findGroupByJid(jid: string): RegisteredGroup | undefined {
+    return this.opts.registeredGroups()[jid];
+  }
+
+  private serveMedia(url: string, res: ServerResponse): void {
+    // URL format: /media/<group>/attachments/<filename>
+    const parts = url.replace(/^\/media\//, '').split('/');
+    if (parts.length < 2) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const groupFolder = decodeURIComponent(parts[0]);
+    const relativePath = parts.slice(1).join('/');
+
+    // Security: only serve from attachments/ with allowed image extensions
+    if (!relativePath.startsWith('attachments/')) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+    const ext = path.extname(relativePath).toLowerCase();
+    if (!ALLOWED_IMAGE_EXTS.has(ext)) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+
+    // Prevent path traversal
+    const filePath = path.resolve(GROUPS_DIR, groupFolder, relativePath);
+    if (!filePath.startsWith(path.resolve(GROUPS_DIR))) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const mimeTypes: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+    };
+    res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'image/jpeg' });
+    fs.createReadStream(filePath).pipe(res);
+  }
+
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = req.url || '/';
     const method = req.method || 'GET';
@@ -183,6 +289,12 @@ export class TwilioWhatsAppChannel implements Channel {
 
     if (method === 'POST' && url === '/webhook') {
       this.handleWebhook(req, res);
+      return;
+    }
+
+    // Serve images for Twilio mediaUrl: GET /media/<group>/attachments/<file>
+    if (method === 'GET' && url.startsWith('/media/')) {
+      this.serveMedia(url, res);
       return;
     }
 
@@ -296,10 +408,7 @@ export class TwilioWhatsAppChannel implements Channel {
               // processImage includes caption in content, so use it directly
               content = result.content;
             }
-            logger.info(
-              { chatJid, contentType },
-              'Twilio image processed',
-            );
+            logger.info({ chatJid, contentType }, 'Twilio image processed');
           } catch (err) {
             logger.warn({ err, chatJid }, 'Twilio image download failed');
             mediaParts.push(`[Media: ${contentType}]`);
