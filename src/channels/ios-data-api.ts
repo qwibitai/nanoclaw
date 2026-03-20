@@ -307,6 +307,12 @@ export function handleDataApi(
     return true;
   }
 
+  // Create new initiative: POST /api/initiatives
+  if (req.method === 'POST' && url === '/api/initiatives') {
+    authGuard(req, res, token, () => handleCreateInitiative(req, res));
+    return true;
+  }
+
   // Move initiative between statuses: POST /api/initiatives/move
   if (req.method === 'POST' && url === '/api/initiatives/move') {
     authGuard(req, res, token, () => handleMoveInitiative(req, res));
@@ -399,6 +405,40 @@ function resolveInitiativePath(status: string, slug: string): string | null {
   const flatPath = path.join(INITIATIVES_DIR, status, `${slug}.md`);
   if (fs.existsSync(flatPath)) return flatPath;
   return null;
+}
+
+function handleCreateInitiative(req: http.IncomingMessage, res: http.ServerResponse): void {
+  let body = '';
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    try {
+      const { slug, status, content } = JSON.parse(body);
+      if (!slug || !content) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing slug or content' }));
+        return;
+      }
+
+      const targetStatus = status || 'next';
+      const dir = path.join(INITIATIVES_DIR, targetStatus);
+      fs.mkdirSync(dir, { recursive: true });
+
+      const filePath = path.join(dir, `${slug}.md`);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      logger.info({ slug, status: targetStatus }, 'Initiative created');
+
+      if (broadcastChange) broadcastChange('initiatives');
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'created' }));
+    } catch (err) {
+      logger.error({ err }, 'Failed to create initiative');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to create initiative' }));
+    }
+  });
 }
 
 function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerResponse): void {
