@@ -27,23 +27,28 @@ A Python CLI tool built on pyzotero, installed in the agent container image. Pro
 | `zotero-cli search <query> [--limit N]` | Search library, return results as JSON |
 | `zotero-cli add --title "..." --authors "..." [--doi "..."] [--url "..."] [--note "..."] --collection "To Read"` | Add an item to a collection |
 | `zotero-cli list <collection-name> [--limit N]` | List items in a collection |
-| `zotero-cli move <item-key> <collection-name>` | Move item to a different collection |
+| `zotero-cli add-to <item-key> <collection-name>` | Add item to a collection (items can belong to multiple collections) |
 | `zotero-cli remove <item-key> <collection-name>` | Remove item from a collection |
 | `zotero-cli collections` | List all collections |
 
 ### Configuration
 
 - Reads `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID` from environment variables
-- These are injected into the container by the container runner (same pattern as other API keys)
+- Injected by the container runner: requires adding these keys to `buildContainerArgs()` in `src/container-runner.ts`, following the same `readEnvFile()` + `-e` flag pattern used for `OPENAI_API_KEY` and `POSTGRES_PASSWORD`
 
 ### Output
 
 - Default: JSON to stdout (parseable by agent)
 - `--format text` flag for human-readable output
 
+### Notes on `--note` flag
+
+The `--note` value is stored in Zotero's "Extra" field on the item itself (not as a child note attachment). This is appropriate for short relevance explanations like "Supports community-sorting project — uses same ABM approach."
+
 ### Installation
 
-- Added to container Dockerfile: `pip install pyzotero`
+- Container Dockerfile must add `python3` and `python3-pip` (the base `node:22-slim` image does not include Python)
+- Then `pip install pyzotero`
 - CLI script copied to container and made executable on PATH
 - No desktop Zotero installation required — Web API only
 
@@ -72,7 +77,7 @@ A scheduled skill that runs twice weekly. It gathers context from the researcher
 ### Process
 
 1. **Gather context** — read researcher profile, active project statuses, recent literature monitor output
-2. **Suggest additions** — identify papers/books from literature monitor findings and project needs not already in Zotero. Add via `zotero-cli add --collection "To Read"` with a `--note` explaining relevance (which project, why timely)
+2. **Suggest additions** — identify papers/books from literature monitor findings and project needs not already in Zotero. Check for duplicates via `zotero-cli search` before adding. Add via `zotero-cli add --collection "To Read"` with a `--note` explaining relevance (which project, why timely)
 3. **Prioritize the queue** — rank everything in "To Read" by:
    - **Project relevance** — directly supports active work (highest weight)
    - **Urgency** — time-sensitive topics, fast-moving fields
@@ -106,7 +111,7 @@ Body:
 
 A small addition to the existing `container/skills/literature-monitoring/SKILL.md`.
 
-**New step after the existing queue.md update (step 5):**
+**New step 6, inserted after the existing queue.md update (step 5). The existing "Report back" step becomes step 7.**
 
 6. **Add must-read papers to Zotero** — for each Must-Read paper:
    - Check if already in Zotero via `zotero-cli search` (avoid duplicates)
@@ -120,12 +125,14 @@ This bridges the two skills: literature monitor discovers, reading list skill pr
 
 ### Dockerfile changes
 
+- Add `python3` and `python3-pip` to `apt-get install` (base image is `node:22-slim`, no Python included)
 - `pip install pyzotero`
 - Copy `container/tools/zotero-cli/` to container, add to PATH
 
 ### Container runner changes
 
-- Inject `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID` as environment variables (sourced from `.env` or NanoClaw config)
+- Add `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID` to `buildContainerArgs()` in `src/container-runner.ts` (add to `readEnvFile()` call and `-e` flags, same pattern as existing API keys)
+- Add values to `.env`
 
 ### Zotero account setup (one-time)
 
@@ -136,9 +143,18 @@ This bridges the two skills: literature monitor discovers, reading list skill pr
 
 ---
 
+## Error handling
+
+If `zotero-cli` fails during a scheduled run (API key expired, rate limiting, network timeout, Zotero outage):
+- The reading-list skill should still produce the vault note from whatever data it can gather (e.g. from cached/previous Zotero data or vault-only sources), noting that Zotero was unreachable
+- The literature monitor should complete its existing steps (weekly note, queue.md) and skip the Zotero addition step, logging the failure
+- Neither skill should abort entirely due to Zotero unavailability
+
+---
+
 ## Migration
 
-- The existing `literature/queue.md` content should be imported into Zotero's "To Read" collection as a one-time migration step
+- The existing `literature/queue.md` content should be imported into Zotero's "To Read" collection as a one-time migration step via a script that parses the markdown entries and calls `zotero-cli add` for each. Entries lacking structured metadata (DOI, authors) should be added with whatever is available (title at minimum) and flagged for manual enrichment
 - After migration, `literature/queue.md` is superseded by `literature/reading-list.md` (the prioritized view) and the Zotero collection (the source of truth)
 - The literature monitor skill continues to append to `queue.md` for backwards compatibility until the reading-list skill is confirmed working, then the queue.md append step can be removed
 
@@ -150,3 +166,5 @@ This bridges the two skills: literature monitor discovers, reading list skill pr
 - Zotero MCP server (may promote `zotero-cli` to MCP later)
 - Reading progress tracking (read/unread status)
 - Full Zotero library management (this is just the "To Read" workflow)
+- Zotero tagging for priority tiers (future consideration: tagging items as "read-next", "on-deck" in Zotero itself)
+- Content registry integration (the content registry and Zotero are independent paths for now; may unify later)
