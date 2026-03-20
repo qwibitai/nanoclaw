@@ -73,7 +73,10 @@ export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // --- Behavioral skills ---
-export const BEHAVIORAL_SKILLS_DIR = path.resolve(DATA_DIR, 'behavioral-skills');
+export const BEHAVIORAL_SKILLS_DIR = path.resolve(
+  DATA_DIR,
+  'behavioral-skills',
+);
 export const EVALUATION_DELAY_MS = 30 * 60 * 1000; // 30 minutes
 export const EVALUATION_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 export const EVOLUTION_POLL_INTERVAL = 60 * 60 * 1000; // 1 hour

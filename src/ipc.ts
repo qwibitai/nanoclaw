@@ -30,14 +30,20 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
-  onSkillsUsed?: (groupFolder: string, chatJid: string, skills: string[]) => void;
+  onSkillsUsed?: (
+    groupFolder: string,
+    chatJid: string,
+    skills: string[],
+  ) => void;
 }
 
 // Pending skills-used reports, keyed by groupFolder.
 // Consumed by index.ts when recording a task run.
 const pendingSkillsUsed = new Map<string, string[]>();
 
-export function consumePendingSkills(groupFolder: string): string[] | undefined {
+export function consumePendingSkills(
+  groupFolder: string,
+): string[] | undefined {
   const skills = pendingSkillsUsed.get(groupFolder);
   if (skills) {
     pendingSkillsUsed.delete(groupFolder);

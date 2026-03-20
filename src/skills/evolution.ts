@@ -114,7 +114,10 @@ function shouldRunEvolution(): boolean {
   // Check if any skill's recent score dropped below threshold
   const performances = getAllSkillPerformance();
   for (const perf of performances) {
-    if (perf.total_runs >= 3 && perf.recent_avg_score < EVOLUTION_SCORE_THRESHOLD) {
+    if (
+      perf.total_runs >= 3 &&
+      perf.recent_avg_score < EVOLUTION_SCORE_THRESHOLD
+    ) {
       logger.info(
         { skillId: perf.skill_id, score: perf.recent_avg_score },
         'Skill score decline detected, triggering evolution',
@@ -355,10 +358,7 @@ async function applyAction(
         created_at: now,
       });
 
-      logger.info(
-        { skill: action.skill_name },
-        'Skill retired by evolution',
-      );
+      logger.info({ skill: action.skill_name }, 'Skill retired by evolution');
       break;
     }
   }
@@ -498,7 +498,10 @@ async function runEvolution(): Promise<void> {
 
     const text =
       response.content[0].type === 'text' ? response.content[0].text : '';
-    const cleaned = text.replace(/^```json?\s*/m, '').replace(/```\s*$/m, '').trim();
+    const cleaned = text
+      .replace(/^```json?\s*/m, '')
+      .replace(/```\s*$/m, '')
+      .trim();
     const result = JSON.parse(cleaned) as EvolutionResponse;
 
     // Determine trigger reason

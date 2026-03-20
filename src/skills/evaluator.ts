@@ -86,7 +86,10 @@ async function evaluateRun(
     const text =
       response.content[0].type === 'text' ? response.content[0].text : '';
     // Parse JSON from response, stripping any markdown fencing
-    const cleaned = text.replace(/^```json?\s*/m, '').replace(/```\s*$/m, '').trim();
+    const cleaned = text
+      .replace(/^```json?\s*/m, '')
+      .replace(/```\s*$/m, '')
+      .trim();
     return JSON.parse(cleaned) as EvaluatorResponse;
   } catch (err) {
     logger.error({ err, runId: run.id }, 'Evaluator API call failed');

@@ -737,9 +737,9 @@ export function getSkillByName(
 }
 
 export function getSkillById(id: string): BehavioralSkill | undefined {
-  return db
-    .prepare('SELECT * FROM behavioral_skills WHERE id = ?')
-    .get(id) as BehavioralSkill | undefined;
+  return db.prepare('SELECT * FROM behavioral_skills WHERE id = ?').get(id) as
+    | BehavioralSkill
+    | undefined;
 }
 
 export function insertSkill(skill: BehavioralSkill): void {
@@ -792,10 +792,7 @@ export function getTaskRun(id: string): SkillTaskRun | undefined {
     | undefined;
 }
 
-export function recordSkillSelections(
-  runId: string,
-  skillIds: string[],
-): void {
+export function recordSkillSelections(runId: string, skillIds: string[]): void {
   const stmt = db.prepare(
     'INSERT OR IGNORE INTO skill_run_selections (run_id, skill_id) VALUES (?, ?)',
   );
@@ -893,7 +890,9 @@ export function getSkillPerformance(
 }
 
 export function getAllSkillPerformance(): SkillPerformance[] {
-  return db.prepare('SELECT * FROM skill_performance').all() as SkillPerformance[];
+  return db
+    .prepare('SELECT * FROM skill_performance')
+    .all() as SkillPerformance[];
 }
 
 export function getSkillSelectionsForRun(runId: string): string[] {

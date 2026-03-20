@@ -21,7 +21,9 @@ vi.mock('./config.js', () => ({
 
 // Mock skills deployer
 vi.mock('./skills/deployer.js', () => ({
-  deploySkillFiles: vi.fn(() => '/tmp/nanoclaw-test-data/behavioral-skills/test-group'),
+  deploySkillFiles: vi.fn(
+    () => '/tmp/nanoclaw-test-data/behavioral-skills/test-group',
+  ),
 }));
 
 // Mock logger
