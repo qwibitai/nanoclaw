@@ -407,23 +407,33 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__imap__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      mcpServers: (() => {
+        const servers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-      },
+        };
+        const imapSrv = path.join(path.dirname(fileURLToPath(import.meta.url)), 'imap-mcp-stdio.js');
+        const imapGlobal = '/home/node/.imap-mcp-global/config.json';
+        const imapPersonal = '/home/node/.imap-mcp-personal/config.json';
+        if (fs.existsSync(imapSrv) && (fs.existsSync(imapGlobal) || fs.existsSync(imapPersonal))) {
+          servers.imap = { command: 'node', args: [imapSrv], env: {} };
+        }
+        return servers;
+      })(),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },

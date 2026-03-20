@@ -21,6 +21,8 @@
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "imapflow": "^1.0.0",
+    "nodemailer": "^6.9.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.23",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
