@@ -1,0 +1,18 @@
+skill: google-workspace
+version: 1.0.0
+description: "Google Workspace integration via official gws CLI (Gmail, Drive, Calendar, Docs, Sheets, Chat)"
+min_skills_system_version: 1.0.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies_global:
+    "@googleworkspace/cli": "latest"
+conflicts:
+  - gmail  # add-gws provides superior Gmail support
+depends: []
+test: "gws auth status"
+modes:
+  - tool-only
+  - channel
