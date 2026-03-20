@@ -92,10 +92,10 @@ describe('parameterized SQL registration', () => {
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run('789@s.whatsapp.net', 'Personal', 'main', '@Andy', '2024-01-01T00:00:00.000Z', 0);
+    ).run('tg:789', 'Personal', 'main', '@Andy', '2024-01-01T00:00:00.000Z', 0);
 
     const row = db.prepare('SELECT requires_trigger FROM registered_groups WHERE jid = ?')
-      .get('789@s.whatsapp.net') as { requires_trigger: number };
+      .get('tg:789') as { requires_trigger: number };
 
     expect(row.requires_trigger).toBe(0);
   });

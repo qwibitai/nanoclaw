@@ -52,7 +52,14 @@ async function scrapeTweet(input: ScrapeInput): Promise<ScriptResult> {
   }
 
   const scraper = await createScraper();
-  const tweet = await scraper.getTweet(tweetId);
+
+  let tweet;
+  try {
+    tweet = await scraper.getTweet(tweetId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `X API error fetching tweet ${tweetId}: ${msg}` };
+  }
 
   if (!tweet) {
     return { success: false, message: 'Tweet not found. It may have been deleted or the URL is invalid.' };
@@ -140,7 +147,7 @@ async function main(): Promise<void> {
       success: false,
       message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`,
     });
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

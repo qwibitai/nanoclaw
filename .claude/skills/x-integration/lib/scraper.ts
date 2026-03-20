@@ -142,13 +142,17 @@ async function applyCookies(scraper: Scraper, rawCookies: CachedCookieEntry[]): 
 /**
  * Create and authenticate a Scraper instance.
  * Enables xClientTransactionId for SearchTimeline and other protected endpoints.
+ * Logs telemetry for diagnosing auth and API issues.
  */
 export async function createScraper(): Promise<Scraper> {
+  const scraperStart = Date.now();
+
   if (!fs.existsSync(config.authPath)) {
     throw new Error('X authentication not configured. Run /x-integration to complete login.');
   }
 
   const rawCookies = await loadCookies();
+  const cookieLoadMs = Date.now() - scraperStart;
 
   const scraper = new Scraper({
     experimental: {
@@ -160,16 +164,22 @@ export async function createScraper(): Promise<Scraper> {
 
   // Verify authentication
   const loggedIn = await scraper.isLoggedIn();
+  const authCheckMs = Date.now() - scraperStart;
+
   if (!loggedIn) {
+    console.error(`[x-scraper] Auth check failed after ${authCheckMs}ms (${rawCookies.length} cookies loaded in ${cookieLoadMs}ms), re-extracting from browser`);
     // Try re-extracting cookies from browser (cache may be stale)
     const freshCookies = await extractCookiesFromBrowser();
     await scraper.clearCookies();
     await applyCookies(scraper, freshCookies);
 
     const retryLoggedIn = await scraper.isLoggedIn();
+    const totalMs = Date.now() - scraperStart;
     if (!retryLoggedIn) {
+      console.error(`[x-scraper] Auth retry also failed after ${totalMs}ms`);
       throw new Error('Not logged in to X. Cookies may be expired. Please re-authenticate via /x-integration setup.');
     }
+    console.error(`[x-scraper] Auth recovered with fresh cookies (${totalMs}ms total)`);
   }
 
   return scraper;

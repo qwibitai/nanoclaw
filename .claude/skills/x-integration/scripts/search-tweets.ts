@@ -90,10 +90,16 @@ async function scrapeTimeline(input: TimelineInput): Promise<ScriptResult> {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
     if (msg.includes('rate limit') || msg.includes('429')) {
       return { success: false, message: `Rate limited by X. Try again in a few minutes. Error: ${msg}` };
     }
-    throw err;
+    // Return error as result instead of crashing -- lets the agent handle
+    // the failure gracefully (retry, skip, or use an alternative).
+    return {
+      success: false,
+      message: `X API error during search: ${msg}${stack ? `\n${stack}` : ''}`,
+    };
   }
 
   if (tweets.length === 0) {
@@ -140,7 +146,7 @@ async function main(): Promise<void> {
       success: false,
       message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`,
     });
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

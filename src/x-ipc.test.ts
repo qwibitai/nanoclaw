@@ -224,8 +224,33 @@ process.stdin.on('data', () => {
       const result = await runScript('__test-fail', {}, 5000);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('exited with code: 1');
+      expect(result.message).toContain('crashed');
+      expect(result.message).toContain('exit 1');
       expect(result.message).toContain('something went wrong');
+    } finally {
+      try { unlinkSync(targetPath); } catch { /* ignore */ }
+    }
+  });
+
+  it('parses JSON result from stdout even when script exits non-zero', async () => {
+    const { writeFileSync, unlinkSync } = await import('fs');
+
+    const skillsScriptsDir = path.join(PROJECT_ROOT, '.claude', 'skills', 'x-integration', 'scripts');
+    const targetPath = path.join(skillsScriptsDir, '__test-exit1-json.ts');
+
+    writeFileSync(targetPath, `
+process.stdin.resume();
+process.stdin.on('data', () => {
+  console.log(JSON.stringify({ success: false, message: 'X API error: 403 Forbidden' }));
+  process.exitCode = 1;
+});
+`);
+
+    try {
+      const result = await runScript('__test-exit1-json', {}, 5000);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('X API error: 403 Forbidden');
     } finally {
       try { unlinkSync(targetPath); } catch { /* ignore */ }
     }
@@ -249,7 +274,7 @@ process.stdin.on('data', () => {
       const result = await runScript('__test-badjson', {}, 5000);
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('Failed to parse output');
+      expect(result.message).toContain('No output');
     } finally {
       try { unlinkSync(targetPath); } catch { /* ignore */ }
     }

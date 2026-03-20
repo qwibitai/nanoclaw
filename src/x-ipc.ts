@@ -39,6 +39,7 @@ const SCRIPT_TIMEOUT_MS = 120_000;
 export async function runScript(script: string, args: object, timeoutMs = SCRIPT_TIMEOUT_MS): Promise<SkillResult> {
   const scriptPath = path.join(PROJECT_ROOT, '.claude', 'skills', 'x-integration', 'scripts', `${script}.ts`);
   const tsxBin = path.join(PROJECT_ROOT, 'node_modules', '.bin', 'tsx');
+  const startTime = Date.now();
 
   return new Promise((resolve) => {
     const proc = spawn(tsxBin, [scriptPath], {
@@ -63,28 +64,67 @@ export async function runScript(script: string, args: object, timeoutMs = SCRIPT
     proc.stdin.end();
 
     const timer = setTimeout(() => {
+      const durationMs = Date.now() - startTime;
       // Kill the entire process group (tsx + all children like Chrome)
       try { process.kill(-proc.pid!, 'SIGKILL'); } catch { proc.kill('SIGKILL'); }
-      resolve({ success: false, message: `Script timed out (${timeoutMs / 1000}s). stderr: ${stderr.slice(0, 300)}` });
+      logger.error(
+        { script, durationMs, timeoutMs, stderrTail: stderr.slice(-500) },
+        'X script timed out',
+      );
+      resolve({ success: false, message: `Script timed out after ${timeoutMs / 1000}s` });
     }, timeoutMs);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
+      const durationMs = Date.now() - startTime;
+
+      // Try to parse structured result from stdout regardless of exit code.
+      // Scripts write JSON to stdout via writeResult() even on error paths,
+      // so we should always attempt to parse it.
+      const stdoutTrimmed = stdout.trim();
+      if (stdoutTrimmed) {
+        try {
+          const lines = stdoutTrimmed.split('\n');
+          const parsed: SkillResult = JSON.parse(lines[lines.length - 1]);
+          if (code !== 0) {
+            logger.warn(
+              { script, code, durationMs, parsed: parsed.message?.slice(0, 200), stderrTail: stderr.slice(-300) },
+              'X script exited non-zero but produced parseable output',
+            );
+          } else {
+            logger.debug({ script, durationMs, success: parsed.success }, 'X script completed');
+          }
+          resolve(parsed);
+          return;
+        } catch {
+          // stdout wasn't valid JSON, fall through
+        }
+      }
+
       if (code !== 0) {
-        resolve({ success: false, message: `Script exited with code: ${code}. stderr: ${stderr.slice(0, 300)}` });
+        logger.error(
+          { script, code, durationMs, stdoutTail: stdout.slice(-300), stderrTail: stderr.slice(-500) },
+          'X script crashed with no parseable output',
+        );
+        resolve({
+          success: false,
+          message: `Script ${script} crashed (exit ${code}). stderr: ${stderr.slice(-300) || '(empty)'}. stdout: ${stdout.slice(-200) || '(empty)'}`,
+        });
         return;
       }
-      try {
-        const lines = stdout.trim().split('\n');
-        resolve(JSON.parse(lines[lines.length - 1]));
-      } catch {
-        resolve({ success: false, message: `Failed to parse output: ${stdout.slice(0, 200)}` });
-      }
+
+      logger.warn(
+        { script, durationMs, stdoutLength: stdout.length },
+        'X script exited 0 but produced no parseable output',
+      );
+      resolve({ success: false, message: `No output from script ${script}` });
     });
 
     proc.on('error', (err) => {
       clearTimeout(timer);
-      resolve({ success: false, message: `Failed to spawn: ${err.message}` });
+      const durationMs = Date.now() - startTime;
+      logger.error({ script, durationMs, err }, 'X script spawn error');
+      resolve({ success: false, message: `Failed to spawn ${script}: ${err.message}` });
     });
   });
 }
@@ -127,6 +167,7 @@ export async function handleXIpc(
   }
 
   logger.info({ type, requestId }, 'Processing X request');
+  const requestStart = Date.now();
 
   let result: SkillResult;
 
@@ -233,10 +274,14 @@ export async function handleXIpc(
   }
 
   writeResult(dataDir, sourceGroup, requestId, result);
+  const requestDurationMs = Date.now() - requestStart;
   if (result.success) {
-    logger.info({ type, requestId }, 'X request completed');
+    logger.info({ type, requestId, requestDurationMs }, 'X request completed');
   } else {
-    logger.error({ type, requestId, message: result.message }, 'X request failed');
+    logger.error(
+      { type, requestId, requestDurationMs, error: result.message },
+      'X request failed',
+    );
   }
   return true;
 }

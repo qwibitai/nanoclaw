@@ -129,7 +129,9 @@ export async function navigateToTweet(
 }
 
 /**
- * Run script with error handling
+ * Run script with error handling.
+ * Errors are returned as JSON results (not process.exit) so the host
+ * can parse the structured error from stdout.
  */
 export async function runScript<T>(
   handler: (input: T) => Promise<ScriptResult>
@@ -143,6 +145,8 @@ export async function runScript<T>(
       success: false,
       message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`
     });
-    process.exit(1);
+    // Exit non-zero so the host knows something went wrong, but the
+    // structured JSON result on stdout will still be parsed.
+    process.exitCode = 1;
   }
 }

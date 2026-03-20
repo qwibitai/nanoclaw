@@ -107,6 +107,9 @@ export class TelegramChannel implements Channel {
   private opts: TelegramChannelOpts;
   private botToken: string;
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+  private pollingWatchdog: ReturnType<typeof setInterval> | null = null;
+  private stopping = false;
+  private lastUpdateTime = Date.now();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -266,6 +269,8 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:text', async (ctx) => {
+      this.lastUpdateTime = Date.now();
+
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
 
@@ -338,6 +343,7 @@ export class TelegramChannel implements Channel {
 
     // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = (ctx: any, placeholder: string) => {
+      this.lastUpdateTime = Date.now();
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -364,6 +370,7 @@ export class TelegramChannel implements Channel {
 
     // Handle photo messages — download the image and store with a reference
     this.bot.on('message:photo', async (ctx) => {
+      this.lastUpdateTime = Date.now();
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -440,7 +447,8 @@ export class TelegramChannel implements Channel {
 
     // Start polling — returns a Promise that resolves when started
     return new Promise<void>((resolve) => {
-      this.bot!.start({
+      const polling = this.bot!.start({
+        drop_pending_updates: true,
         onStart: (botInfo) => {
           logger.info(
             { username: botInfo.username, id: botInfo.id },
@@ -450,8 +458,53 @@ export class TelegramChannel implements Channel {
           console.log(
             `  Send /chatid to the bot to get a chat's registration ID\n`,
           );
+
+          // Start watchdog to detect silent polling death
+          this.pollingWatchdog = setInterval(() => {
+            if (this.bot && !this.bot.isRunning() && !this.stopping) {
+              logger.fatal('Telegram polling stopped unexpectedly, exiting for restart');
+              process.exit(1);
+            }
+
+            // Detect silently dead polling: if no updates received for an
+            // extended period and there are registered groups, the HTTP
+            // connection to Telegram is likely dead.
+            //
+            // IMPORTANT: Only treat silence as fatal when grammY's polling
+            // loop has actually stopped. When bot.isRunning() is true the
+            // long-poll connection is healthy — there are simply no new
+            // messages. Exiting in that case causes an infinite restart
+            // loop via launchd/systemd KeepAlive.
+            if (!this.stopping) {
+              const silenceMs = Date.now() - this.lastUpdateTime;
+              const hasGroups = Object.keys(this.opts.registeredGroups()).length > 0;
+              const pollingAlive = this.bot?.isRunning() ?? false;
+
+              if (hasGroups && silenceMs > 10 * 60 * 1000 && !pollingAlive) {
+                logger.fatal(
+                  { silenceMs, lastUpdateTime: new Date(this.lastUpdateTime).toISOString() },
+                  'No Telegram updates for 10+ minutes and polling stopped, exiting for restart',
+                );
+                process.exit(1);
+              } else if (hasGroups && silenceMs > 30 * 60 * 1000) {
+                // Polling is alive but 30+ minutes of silence is unusual —
+                // log a warning but do NOT exit.
+                logger.warn(
+                  { silenceMs, lastUpdateTime: new Date(this.lastUpdateTime).toISOString(), pollingAlive },
+                  'No Telegram updates for 30+ minutes — polling appears alive, monitoring',
+                );
+              }
+            }
+          }, 30_000);
+
           resolve();
         },
+      });
+
+      // Catch fatal polling errors (409 Conflict, 401 Unauthorized, etc.)
+      polling.catch((err) => {
+        logger.fatal({ err }, 'Telegram polling loop crashed');
+        process.exit(1);
       });
     });
   }
@@ -512,7 +565,19 @@ export class TelegramChannel implements Channel {
     return jid.startsWith('tg:');
   }
 
+  getLastUpdateTime(): number {
+    return this.lastUpdateTime;
+  }
+
   async disconnect(): Promise<void> {
+    this.stopping = true;
+
+    // Clear polling watchdog
+    if (this.pollingWatchdog) {
+      clearInterval(this.pollingWatchdog);
+      this.pollingWatchdog = null;
+    }
+
     // Clear all typing intervals
     for (const interval of this.typingIntervals.values()) {
       clearInterval(interval);

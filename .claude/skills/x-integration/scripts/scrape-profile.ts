@@ -52,7 +52,7 @@ async function scrapeProfile(input: ProfileInput): Promise<ScriptResult> {
     if (msg.includes('not found') || msg.includes('suspended') || msg.includes('404')) {
       return { success: false, message: `Profile @${cleanUsername} not found or suspended` };
     }
-    throw err;
+    return { success: false, message: `X API error fetching profile @${cleanUsername}: ${msg}` };
   }
 
   if (!profile || !profile.username) {
@@ -88,7 +88,7 @@ async function scrapeProfile(input: ProfileInput): Promise<ScriptResult> {
         return { success: false, message: `Rate limited while fetching tweets for @${cleanUsername}. Try again later.` };
       }
     } else {
-      throw err;
+      return { success: false, message: `X API error fetching tweets for @${cleanUsername}: ${msg}` };
     }
   }
 
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
       success: false,
       message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`,
     });
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

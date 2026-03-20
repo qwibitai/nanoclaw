@@ -292,6 +292,14 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (value: ContainerOutput) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyNet);
+      resolve(value);
+    };
+
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -491,7 +499,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
-            resolve({
+            safeResolve({
               status: 'success',
               result: null,
               newSessionId,
@@ -505,7 +513,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -583,7 +591,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -598,7 +606,7 @@ export async function runContainerAgent(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
           );
-          resolve({
+          safeResolve({
             status: 'success',
             result: null,
             newSessionId,
@@ -608,7 +616,7 @@ export async function runContainerAgent(
             { group: group.name, duration, err },
             'Output chain failed during container completion',
           );
-          resolve({
+          safeResolve({
             status: 'error',
             result: null,
             error: `Output chain error: ${err}`,
@@ -646,7 +654,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        resolve(output);
+        safeResolve(output);
       } catch (err) {
         logger.error(
           {
@@ -658,7 +666,7 @@ export async function runContainerAgent(
           'Failed to parse container output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -676,12 +684,27 @@ export async function runContainerAgent(
         { group: group.name, containerName, isScheduledTask: !!input.isScheduledTask, error: err },
         'Container spawn error',
       );
-      resolve({
+      safeResolve({
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,
       });
     });
+
+    // Safety net: if container's close event never fires (e.g. Docker daemon
+    // frozen), the Promise never settles and permanently consumes a concurrency
+    // slot. This timer fires well after the hard timeout should have killed it.
+    const safetyNet = setTimeout(() => {
+      logger.fatal(
+        { group: group.name, containerName, safetyNetMs: timeoutMs + 60_000 },
+        'Container safety net triggered — close event never fired',
+      );
+      safeResolve({
+        status: 'error',
+        result: null,
+        error: 'Container safety net: close event never fired',
+      });
+    }, timeoutMs + 60_000);
   });
 }
 
