@@ -29,102 +29,35 @@ If MISSING, run `/add-whatsapp` first.
 
 ## Phase 2: Apply Changes
 
-Two surgical edits. Read each file before editing.
+### Ensure remote
 
-### 2a. whatsapp.ts — sync group description to disk
-
-Read `src/channels/whatsapp.ts`.
-
-Find the imports from `../config.js` and add `GROUPS_DIR`:
-
-```typescript
-import {
-  ASSISTANT_HAS_OWN_NUMBER,
-  ASSISTANT_NAME,
-  GROUPS_DIR,        // ← add this
-  STORE_DIR,
-} from '../config.js';
+```bash
+git remote -v
 ```
 
-Find the import from `../db.js` and add `getRegisteredGroup`:
+If a `whatsapp` remote is already present, use it. Otherwise add the group-persona branch source:
 
-```typescript
-import { getLastGroupSync, getRegisteredGroup, setLastGroupSync, updateChatName } from '../db.js';
+```bash
+git remote add whatsapp https://github.com/vaddisrinivas/nanoclaw-whatsapp.git
 ```
 
-Find the `syncGroupMetadata` method. It has a loop like:
+### Merge the skill branch
 
-```typescript
-for (const [jid, metadata] of Object.entries(groups)) {
-  if (metadata.subject) {
-    updateChatName(jid, metadata.subject);
-    count++;
-  }
+```bash
+git fetch whatsapp skill/group-persona
+git merge whatsapp/skill/group-persona || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
 }
 ```
 
-Add the persona sync block **inside** that same loop, after the subject block:
+This adds:
+- Group description sync in `src/channels/whatsapp.ts` — writes `metadata.desc` to `groups/{folder}/group-persona.md` inside the existing `syncGroupMetadata` loop (Baileys already fetches this field, it was just unused)
+- Persona injection in `src/index.ts` — prepends `group-persona.md` as a `<group_persona>` block before building the agent prompt
+- 4 new tests in `src/channels/whatsapp.test.ts`
 
-```typescript
-for (const [jid, metadata] of Object.entries(groups)) {
-  if (metadata.subject) {
-    updateChatName(jid, metadata.subject);
-    count++;
-  }
-
-  // Sync group description → group-persona.md for per-group agent persona
-  if (metadata.desc) {
-    const group = getRegisteredGroup(jid);
-    if (group) {
-      const personaPath = path.join(GROUPS_DIR, group.folder, 'group-persona.md');
-      fs.writeFileSync(personaPath, metadata.desc, 'utf-8');
-      logger.debug({ jid, folder: group.folder }, 'Updated group-persona.md from WhatsApp description');
-    }
-  }
-}
-```
-
-`fs` and `path` are already imported — no additional imports needed.
-
-### 2b. index.ts — inject persona into agent prompt
-
-Read `src/index.ts`.
-
-Find the imports from `./config.js` and add `GROUPS_DIR` if not already present:
-
-```typescript
-import {
-  ASSISTANT_NAME,
-  GROUPS_DIR,        // ← add if missing
-  ...
-} from './config.js';
-```
-
-Find the line that builds the prompt:
-
-```typescript
-const prompt = formatMessages(missedMessages, TIMEZONE);
-```
-
-Replace it with:
-
-```typescript
-const rawPrompt = formatMessages(missedMessages, TIMEZONE);
-const personaPath = path.join(GROUPS_DIR, group.folder, 'group-persona.md');
-const personaPrefix = fs.existsSync(personaPath)
-  ? `<group_persona>\n${fs.readFileSync(personaPath, 'utf-8').trim()}\n</group_persona>\n\n`
-  : '';
-const prompt = personaPrefix + rawPrompt;
-```
-
-If `fs` or `path` are not already imported at the top, add:
-
-```typescript
-import fs from 'fs';
-import path from 'path';
-```
-
-### 2c. Build and verify
+### Build and verify
 
 ```bash
 npm run build
@@ -197,6 +130,6 @@ Send `@<assistant name> hello` in the group. The agent should respond according 
 3. Restart after rebuilding
 4. Persona is injected fresh on every agent run — no session state to clear
 
-### Build error: GROUPS_DIR not found
+### Merge conflict on package-lock.json
 
-Check `src/config.ts` for the exact export name and match it in the import.
+Run the merge handler shown in Phase 2 — always take `--theirs` for `package-lock.json` and continue.
