@@ -8,6 +8,7 @@ import {
   DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MEM0_USER_ID,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -59,6 +60,7 @@ import {
   endToolCall,
 } from './trace-db.js';
 import { startTraceServer } from './trace-server.js';
+import { initMemory, retrieveMemoryContext, captureConversation } from './mem0-memory.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -209,6 +211,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages);
 
+  // Retrieve relevant memories for context injection
+  let memoryContext = '';
+  try {
+    memoryContext = await retrieveMemoryContext(
+      group.folder,
+      MEM0_USER_ID,
+      missedMessages.map((m) => ({ content: m.content, sender_name: m.sender_name })),
+    );
+  } catch (err) {
+    logger.warn({ err, group: group.name }, 'Memory retrieval failed, proceeding without');
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -260,7 +274,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(
     group,
-    datePrefix() + prompt,
+    datePrefix() + memoryContext + prompt,
     chatJid,
     async (result) => {
       // Streaming output callback — called for each agent result
@@ -340,6 +354,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Success — clear pipe tracking (markAllDone already fired in streaming callback)
   delete cursorBeforePipe[chatJid];
+
+  // Capture conversation in memory (fire-and-forget)
+  const sessionId = sessions[group.folder] || 'unknown';
+  const sessionMode = process.env.NANOCLAW_MODE || 'live';
+  captureConversation(
+    group.folder,
+    MEM0_USER_ID,
+    sessionId,
+    sessionMode,
+    missedMessages.map((m) => ({
+      role: m.is_from_me ? 'assistant' : 'user',
+      content: m.content,
+      sender_name: m.sender_name,
+      timestamp: m.timestamp,
+    })),
+  ).catch((err) => logger.warn({ err, group: group.name }, 'Memory capture failed'));
+
   saveState();
   return true;
 }
@@ -699,6 +730,7 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   initTraceDb();
+  await initMemory();
   startTraceServer();
   logger.info('Database initialized');
   loadState();

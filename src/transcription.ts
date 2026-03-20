@@ -107,7 +107,10 @@ async function transcribeWithHttpServer(
       return null;
     }
     if (!data.text) {
-      logger.warn({ response: response.slice(0, 200) }, 'Whisper server returned no text');
+      logger.warn(
+        { response: response.slice(0, 200) },
+        'Whisper server returned no text',
+      );
       return null;
     }
     return data.text.trim() || null;

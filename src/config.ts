@@ -12,6 +12,8 @@ const envConfig = readEnvFile([
   'ANTHROPIC_MODEL',
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
+  'MEM0_BRIDGE_URL',
+  'MEM0_USER_ID',
 ]);
 
 export const ASSISTANT_NAME =
@@ -76,3 +78,9 @@ export const DISCORD_BOT_TOKEN =
   process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 export const DISCORD_ONLY =
   (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
+
+// Memory bridge configuration
+export const MEM0_BRIDGE_URL =
+  process.env.MEM0_BRIDGE_URL || envConfig.MEM0_BRIDGE_URL || 'http://localhost:8095';
+export const MEM0_USER_ID =
+  process.env.MEM0_USER_ID || envConfig.MEM0_USER_ID || ASSISTANT_NAME.toLowerCase();

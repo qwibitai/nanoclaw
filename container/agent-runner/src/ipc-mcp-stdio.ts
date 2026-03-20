@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const MEMORY_DIR = path.join(IPC_DIR, 'memory');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -32,6 +33,22 @@ function writeIpcFile(dir: string, data: object): string {
   fs.renameSync(tempPath, filepath);
 
   return filename;
+}
+
+async function pollForResponse(requestId: string, timeoutMs = 5000): Promise<string> {
+  const responseFile = path.join(MEMORY_DIR, `res-${requestId}.json`);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      if (fs.existsSync(responseFile)) {
+        const data = fs.readFileSync(responseFile, 'utf-8');
+        fs.unlinkSync(responseFile);
+        return data;
+      }
+    } catch { /* retry */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return JSON.stringify({ error: 'Memory search timed out' });
 }
 
 const server = new McpServer({
@@ -274,9 +291,9 @@ Only provide the fields you want to change — unspecified fields remain unchang
 If you change schedule_type or schedule_value, the next execution time will be recalculated automatically.
 
 SCHEDULE VALUE FORMAT (same as schedule_task, all times are LOCAL timezone):
-• cron: Standard cron expression (e.g., "*/5 * * * *", "0 9 * * *")
-• interval: Milliseconds between runs (e.g., "300000" for 5 minutes)
-• once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00")`,
+\u2022 cron: Standard cron expression (e.g., "*/5 * * * *", "0 9 * * *")
+\u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes)
+\u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00")`,
   {
     task_id: z.string().describe('The ID of the task to update (e.g., "task-1772008617164-yhg6ws")'),
     prompt: z.string().optional().describe('New prompt/instructions for the task'),
@@ -398,6 +415,152 @@ Use available_groups.json to find the JID for a group. The folder name should be
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+// Memory tools — explicit agent-driven memory operations via IPC
+
+server.tool(
+  'memory_save',
+  `Save a fact, preference, or important information to long-term memory.
+Use this proactively when the user shares personal information, makes decisions, or states preferences.
+Categories: preference, contact, account, fact, decision, instruction.`,
+  {
+    content: z.string().describe('The fact or information to remember'),
+    category: z.enum(['preference', 'contact', 'account', 'fact', 'decision', 'instruction']).describe('Category of the memory'),
+  },
+  async (args) => {
+    const data = {
+      type: 'memory_add',
+      content: args.content,
+      category: args.category,
+      user_id: undefined,
+      run_id: `${groupFolder}:ipc:live`,
+      metadata: { category: args.category, source: 'agent' },
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Memory saved: "${args.content.slice(0, 50)}..."` }] };
+  },
+);
+
+server.tool(
+  'memory_search',
+  'Search past memories, conversations, and knowledge graph. Use when the user asks about something that may have been discussed before or when you need context.',
+  {
+    query: z.string().describe('What to search for'),
+    limit: z.number().default(10).describe('Max results to return'),
+  },
+  async (args) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = {
+      type: 'memory_search',
+      query: args.query,
+      limit: args.limit || 10,
+      request_id: requestId,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    const response = await pollForResponse(requestId);
+    return { content: [{ type: 'text' as const, text: response }] };
+  },
+);
+
+server.tool(
+  'memory_update',
+  'Update an existing memory entry with new content. Use when information has changed or needs correction.',
+  {
+    memory_id: z.string().describe('The ID of the memory to update'),
+    content: z.string().describe('The new content for this memory'),
+  },
+  async (args) => {
+    const data = {
+      type: 'memory_update',
+      memory_id: args.memory_id,
+      content: args.content,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Memory ${args.memory_id} update requested.` }] };
+  },
+);
+
+server.tool(
+  'memory_remove',
+  'Remove a memory entry permanently. Use when the user asks to forget something or information is no longer relevant.',
+  {
+    memory_id: z.string().describe('The ID of the memory to remove'),
+  },
+  async (args) => {
+    const data = {
+      type: 'memory_remove',
+      memory_id: args.memory_id,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Memory ${args.memory_id} removal requested.` }] };
+  },
+);
+
+server.tool(
+  'memory_forget_session',
+  'Forget all memories from a specific session/conversation run. Use when the user wants to erase a conversation from memory.',
+  {
+    run_id: z.string().describe('The run/session ID to forget'),
+  },
+  async (args) => {
+    const data = {
+      type: 'memory_forget_session',
+      run_id: args.run_id,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Session ${args.run_id} forget requested.` }] };
+  },
+);
+
+server.tool(
+  'memory_forget_timerange',
+  'Forget all memories within a time range. Use when the user wants to erase memories from a specific period.',
+  {
+    before: z.string().optional().describe('ISO timestamp upper bound (forget memories before this time)'),
+    after: z.string().optional().describe('ISO timestamp lower bound (forget memories after this time)'),
+  },
+  async (args) => {
+    if (!args.before && !args.after) {
+      return {
+        content: [{ type: 'text' as const, text: 'At least one of "before" or "after" must be provided.' }],
+        isError: true,
+      };
+    }
+    const data = {
+      type: 'memory_forget_timerange',
+      before: args.before,
+      after: args.after,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Timerange forget requested (before: ${args.before || 'N/A'}, after: ${args.after || 'N/A'}).` }] };
+  },
+);
+
+server.tool(
+  'memory_history',
+  'Get the edit history of a specific memory entry. Shows how a memory has evolved over time.',
+  {
+    memory_id: z.string().describe('The ID of the memory to get history for'),
+  },
+  async (args) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = {
+      type: 'memory_history',
+      memory_id: args.memory_id,
+      request_id: requestId,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MEMORY_DIR, data);
+    const response = await pollForResponse(requestId);
+    return { content: [{ type: 'text' as const, text: response }] };
   },
 );
 

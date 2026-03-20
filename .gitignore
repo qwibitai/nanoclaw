@@ -36,3 +36,7 @@ config/
 .nanoclaw/
 
 agents-sdk-docs
+
+# mem0-bridge
+services/mem0-bridge/venv/
+services/mem0-bridge/__pycache__/
