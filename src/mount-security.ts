@@ -59,10 +59,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     return cachedAllowlist;
   }
 
-  if (
-    allowlistLoadError !== null &&
-    now - cacheTimestamp < CACHE_TTL_MS
-  ) {
+  if (allowlistLoadError !== null && now - cacheTimestamp < CACHE_TTL_MS) {
     return null;
   }
 

@@ -637,7 +637,8 @@ function checkMcpEndpoints(): void {
     {
       name: 'SimpleMem',
       url:
-        process.env.SIMPLEMEM_URL || readEnvFile(['SIMPLEMEM_URL']).SIMPLEMEM_URL,
+        process.env.SIMPLEMEM_URL ||
+        readEnvFile(['SIMPLEMEM_URL']).SIMPLEMEM_URL,
     },
     {
       name: 'Apple Notes',
@@ -657,17 +658,32 @@ function checkMcpEndpoints(): void {
       const parsed = new URL(ep.url);
       const http = require('http');
       const req = http.request(
-        { hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, method: 'GET', timeout: 3000 },
+        {
+          hostname: parsed.hostname,
+          port: parsed.port,
+          path: parsed.pathname,
+          method: 'GET',
+          timeout: 3000,
+        },
         (res: { statusCode: number }) => {
-          logger.info({ name: ep.name, status: res.statusCode }, 'MCP endpoint reachable');
+          logger.info(
+            { name: ep.name, status: res.statusCode },
+            'MCP endpoint reachable',
+          );
         },
       );
       req.on('error', () => {
-        logger.warn({ name: ep.name, url: ep.url }, 'MCP endpoint unreachable at startup');
+        logger.warn(
+          { name: ep.name, url: ep.url },
+          'MCP endpoint unreachable at startup',
+        );
       });
       req.on('timeout', () => {
         req.destroy();
-        logger.warn({ name: ep.name, url: ep.url }, 'MCP endpoint timed out at startup');
+        logger.warn(
+          { name: ep.name, url: ep.url },
+          'MCP endpoint timed out at startup',
+        );
       });
       req.end();
     } catch {
