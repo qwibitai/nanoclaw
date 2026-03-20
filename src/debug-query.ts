@@ -115,7 +115,11 @@ function pollForResponse(
           if (data.id === queryId) {
             // Only clean up query.json, leave response.json for the external poller
             const qf = path.join(debugDir, 'query.json');
-            try { if (fs.existsSync(qf)) fs.unlinkSync(qf); } catch { /* ignore */ }
+            try {
+              if (fs.existsSync(qf)) fs.unlinkSync(qf);
+            } catch {
+              /* ignore */
+            }
             // Signal the container to exit after a short delay.
             // The agent-runner needs time to finish the query loop and
             // enter the idle wait before it will see the _close sentinel.
@@ -216,9 +220,12 @@ export async function sendDebugQuery(
   }
 
   const group = registeredGroups[groupJid];
-  const activeInfo = groupQueue.getActiveThreadInfo(groupJid);
 
-  if (activeInfo) {
+  // Always spawn a fresh container for debug queries.
+  // Piping into an active container is unreliable — the agent treats the
+  // debug prompt as part of the ongoing conversation and responds via the
+  // normal channel instead of writing to the debug response file.
+  if (false) {
     // Active container — deliver via IPC input + poll debug response
     const debugDir = getDebugDir(groupFolder, activeInfo.threadId);
 
