@@ -5,6 +5,8 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  MAX_CONTAINER_SPAWNS_PER_HOUR,
+  MAX_ERRORS_PER_HOUR,
   POLL_INTERVAL,
   SESSION_IDLE_MS,
   SESSION_MAX_AGE_MS,
@@ -72,6 +74,8 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { HealthMonitor } from './health-monitor.js';
+import { MessageBus } from './message-bus.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -706,6 +710,29 @@ async function main(): Promise<void> {
   loadState();
   restoreRemoteControl();
 
+  // Health monitor — tracks spawn/error rates, alerts on anomalies
+  const healthMonitor = new HealthMonitor({
+    maxSpawnsPerHour: MAX_CONTAINER_SPAWNS_PER_HOUR,
+    maxErrorsPerHour: MAX_ERRORS_PER_HOUR,
+    onAlert: (alert) => {
+      logger.error({ alert }, 'Health monitor alert');
+      if (alert.group) {
+        healthMonitor.pauseGroup(alert.group, alert.detail);
+      }
+      // Best-effort Telegram notification to main group
+      const mainJid = Object.keys(registeredGroups).find(
+        (jid) => registeredGroups[jid]?.isMain,
+      );
+      if (mainJid) {
+        const channel = findChannel(channels, mainJid);
+        channel?.sendMessage(mainJid, `System alert: ${alert.detail}`).catch(() => {});
+      }
+    },
+  });
+
+  // Inter-agent message bus
+  const messageBus = new MessageBus(path.join(process.cwd(), 'data', 'bus'));
+
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
     CREDENTIAL_PROXY_PORT,
@@ -881,6 +908,7 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    messageBus,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
