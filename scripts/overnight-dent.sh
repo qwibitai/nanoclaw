@@ -38,6 +38,8 @@ COOLDOWN=30             # seconds between runs
 BUDGET=""               # per-run budget
 MAX_FAILURES=3          # consecutive failures before stopping
 DRY_RUN=false
+TEST_TASK=false         # synthetic fast task for pipeline testing (kaizen #322)
+EXPERIMENT=false        # extra diagnostics for pipeline debugging (kaizen #322)
 GUIDANCE=""
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
@@ -55,6 +57,8 @@ Options:
   --budget N.NN        Max USD per run (passed to claude --max-budget-usd)
   --max-failures N     Stop after N consecutive failures (default: 3)
   --dry-run            Show what would run without executing
+  --test-task          Use synthetic fast task instead of /make-a-dent (kaizen #322)
+  --experiment         Enable extra pipeline diagnostics (kaizen #322)
   --status             Show status of all batches (active and stopped)
   --halt [batch-id]    Halt a specific batch, or all active batches
   --help               Show this help
@@ -96,15 +100,22 @@ while [[ $# -gt 0 ]]; do
     --total-budget) echo "Warning: --total-budget is not yet enforced (L3 work)" >&2; shift 2 ;;
     --max-failures) MAX_FAILURES="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --test-task) TEST_TASK=true; shift ;;
+    --experiment) EXPERIMENT=true; shift ;;
     -*) echo "Unknown option: $1" >&2; exit 1 ;;
     *) GUIDANCE="$1"; shift ;;
   esac
 done
 
-if [[ -z "$GUIDANCE" ]]; then
-  echo "Error: guidance prompt is required" >&2
+if [[ -z "$GUIDANCE" && "$TEST_TASK" != true ]]; then
+  echo "Error: guidance prompt is required (or use --test-task)" >&2
   echo "Usage: overnight-dent.sh [options] <guidance>" >&2
   exit 1
+fi
+
+# Default guidance for test-task mode
+if [[ -z "$GUIDANCE" && "$TEST_TASK" = true ]]; then
+  GUIDANCE="synthetic pipeline test"
 fi
 
 # ── Batch identity ────────────────────────────────────────────────────────────
@@ -143,7 +154,9 @@ cat > "$STATE_FILE" << STATEOF
   "last_case": "",
   "last_branch": "",
   "last_worktree": "",
-  "progress_issue": ""
+  "progress_issue": "",
+  "test_task": $TEST_TASK,
+  "experiment": $EXPERIMENT
 }
 STATEOF
 
@@ -203,6 +216,8 @@ echo "║ Guidance:  $GUIDANCE"
 echo "║ Max runs:  $([ "$MAX_RUNS" -eq 0 ] && echo "unlimited" || echo "$MAX_RUNS")"
 echo "║ Cooldown:  ${COOLDOWN}s"
 [[ -n "$BUDGET" ]] && echo "║ Budget/run: \$$BUDGET"
+[[ "$TEST_TASK" = true ]] && echo "║ Mode:      TEST TASK (synthetic pipeline probe)"
+[[ "$EXPERIMENT" = true ]] && echo "║ Experiment: enabled (extra diagnostics)"
 echo "║ Max consecutive failures: $MAX_FAILURES"
 echo "║ Logs:      $LOG_DIR"
 echo "║ State:     $STATE_FILE"
@@ -251,11 +266,24 @@ while true; do
   fi
 
   # ── Self-update: pull main before each run ──────────────────────────────
+  if [[ "$EXPERIMENT" = true ]]; then
+    MAIN_HEAD_BEFORE=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo ">>> [experiment] main HEAD before pull: ${MAIN_HEAD_BEFORE:0:8}"
+  fi
   echo ">>> Pulling main for self-update..."
   if git -C "$REPO_ROOT" pull --ff-only origin main 2>/dev/null; then
     echo ">>> Main updated."
   else
     echo ">>> Main already up-to-date (or pull failed, continuing with current)."
+  fi
+  if [[ "$EXPERIMENT" = true ]]; then
+    MAIN_HEAD_AFTER=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo ">>> [experiment] main HEAD after pull: ${MAIN_HEAD_AFTER:0:8}"
+    if [[ "$MAIN_HEAD_BEFORE" != "$MAIN_HEAD_AFTER" ]]; then
+      echo ">>> [experiment] main ADVANCED (PR merged between runs)"
+    else
+      echo ">>> [experiment] main UNCHANGED (no PR merged yet)"
+    fi
   fi
 
   # ── Resolve runner (re-resolve after pull in case it was added/moved) ───
@@ -297,6 +325,15 @@ while true; do
   echo "  Runs: $RUNS_LABEL completed | $CONSEC_FAIL consecutive failures"
   echo "  PRs:  $PR_COUNT created | Issues: $CLOSED_COUNT closed"
   echo "  Time: ${HOURS}h ${MINS}m elapsed"
+  if [[ "$EXPERIMENT" = true ]]; then
+    # Check merge status of all PRs in the batch
+    ALL_PRS=$(node -e "JSON.parse(require('fs').readFileSync('$STATE_FILE','utf8')).prs.forEach(p=>console.log(p))")
+    for PR_URL in $ALL_PRS; do
+      PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+      PR_STATE=$(gh pr view "$PR_NUM" --repo Garsson-io/nanoclaw --json state,mergeStateStatus,autoMergeRequest --jq '.state + " | " + .mergeStateStatus + " | auto:" + (if .autoMergeRequest then "yes" else "no" end)' 2>/dev/null || echo "unknown")
+      echo "  [experiment] PR #$PR_NUM: $PR_STATE"
+    done
+  fi
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # Check max-runs after run

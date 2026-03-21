@@ -20,6 +20,8 @@ import {
   ensureBatchProgressIssue,
   updateBatchProgressIssue,
   closeBatchProgressIssue,
+  buildPrompt,
+  checkMergeStatus,
   type RunResult,
   type BatchState,
 } from './overnight-dent-run.js';
@@ -416,5 +418,132 @@ describe('closeBatchProgressIssue', () => {
   it('does nothing when no progress issue', () => {
     closeBatchProgressIssue('', sampleState());
     expect(mockExecSync).not.toHaveBeenCalled();
+  });
+});
+
+// ── Test-task & experiment mode tests (kaizen #322) ─────────────────────
+
+describe('buildPrompt', () => {
+  // INVARIANT: buildPrompt with test_task=true produces a synthetic prompt
+  // that does NOT invoke /make-a-dent, and instead creates a trivial PR lifecycle.
+
+  it('uses /make-a-dent for normal runs', () => {
+    const state = sampleState();
+    const prompt = buildPrompt(state, 1);
+    expect(prompt).toContain('/make-a-dent');
+  });
+
+  it('uses synthetic task when test_task is true', () => {
+    const state = sampleState({ test_task: true });
+    const prompt = buildPrompt(state, 1);
+    expect(prompt).not.toContain('/make-a-dent');
+    expect(prompt).toContain('test-probe');
+  });
+
+  it('synthetic task prompt includes full PR lifecycle (create + merge)', () => {
+    const state = sampleState({ test_task: true });
+    const prompt = buildPrompt(state, 1);
+    expect(prompt).toContain('gh pr create');
+    expect(prompt).toContain('gh pr merge');
+  });
+
+  it('includes run tag in both modes', () => {
+    const normalPrompt = buildPrompt(sampleState(), 3);
+    const testPrompt = buildPrompt(sampleState({ test_task: true }), 3);
+    expect(normalPrompt).toContain('batch-260321-0210-4b50/run-3');
+    expect(testPrompt).toContain('batch-260321-0210-4b50/run-3');
+  });
+
+  it('includes merge policy in both modes', () => {
+    const normalPrompt = buildPrompt(sampleState(), 1);
+    const testPrompt = buildPrompt(sampleState({ test_task: true }), 1);
+    expect(normalPrompt).toContain('--auto');
+    expect(testPrompt).toContain('--auto');
+  });
+
+  it('includes previously created PRs to avoid overlap', () => {
+    const state = sampleState({
+      prs: ['https://github.com/Garsson-io/nanoclaw/pull/100'],
+    });
+    const prompt = buildPrompt(state, 2);
+    expect(prompt).toContain('pull/100');
+  });
+});
+
+describe('checkMergeStatus', () => {
+  // INVARIANT: checkMergeStatus returns the merge state of a PR
+  // by calling gh pr view and parsing the result.
+
+  beforeEach(() => {
+    mockExecSync.mockReset();
+    mockExecSync.mockReturnValue('');
+  });
+
+  it('returns "merged" when PR state is MERGED', () => {
+    mockExecSync.mockReturnValue(
+      JSON.stringify({ state: 'MERGED', mergeStateStatus: 'CLEAN' }),
+    );
+    const result = checkMergeStatus(
+      'https://github.com/Garsson-io/nanoclaw/pull/99',
+    );
+    expect(result).toBe('merged');
+  });
+
+  it('returns "auto_queued" when autoMergeRequest is set', () => {
+    mockExecSync.mockReturnValue(
+      JSON.stringify({
+        state: 'OPEN',
+        mergeStateStatus: 'BEHIND',
+        autoMergeRequest: { mergeMethod: 'SQUASH' },
+      }),
+    );
+    const result = checkMergeStatus(
+      'https://github.com/Garsson-io/nanoclaw/pull/99',
+    );
+    expect(result).toBe('auto_queued');
+  });
+
+  it('returns "open" when PR is open with no auto-merge', () => {
+    mockExecSync.mockReturnValue(
+      JSON.stringify({
+        state: 'OPEN',
+        mergeStateStatus: 'BEHIND',
+        autoMergeRequest: null,
+      }),
+    );
+    const result = checkMergeStatus(
+      'https://github.com/Garsson-io/nanoclaw/pull/99',
+    );
+    expect(result).toBe('open');
+  });
+
+  it('returns "unknown" on gh CLI failure', () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error('gh: not found');
+    });
+    const result = checkMergeStatus(
+      'https://github.com/Garsson-io/nanoclaw/pull/99',
+    );
+    expect(result).toBe('unknown');
+  });
+});
+
+describe('BatchState test_task and experiment fields', () => {
+  // INVARIANT: BatchState accepts test_task and experiment optional fields
+  // without breaking existing functionality.
+
+  it('sampleState accepts test_task field', () => {
+    const state = sampleState({ test_task: true });
+    expect(state.test_task).toBe(true);
+  });
+
+  it('sampleState defaults test_task to undefined', () => {
+    const state = sampleState();
+    expect(state.test_task).toBeUndefined();
+  });
+
+  it('sampleState accepts experiment field', () => {
+    const state = sampleState({ experiment: true });
+    expect(state.experiment).toBe(true);
   });
 });
