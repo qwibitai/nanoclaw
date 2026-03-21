@@ -10,11 +10,11 @@ import {
   getActiveWatchedPrs,
   getAllChats,
   getAllRegisteredGroups,
-  getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
   getUnprocessedMessages,
   markMessagesProcessed,
+  markMessagesUnprocessed,
   getTaskById,
   getThreadContextById,
   getThreadContextByOriginMessage,
@@ -70,11 +70,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:00.000Z',
-      'Andy',
-    );
+    const messages = getUnprocessedMessages('group@g.us', 'Andy');
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('msg-1');
     expect(messages[0].sender).toBe('123@s.whatsapp.net');
@@ -94,11 +90,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:04.000Z',
     });
 
-    const messages = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:00.000Z',
-      'Andy',
-    );
+    const messages = getUnprocessedMessages('group@g.us', 'Andy');
     expect(messages).toHaveLength(0);
   });
 
@@ -116,11 +108,7 @@ describe('storeMessage', () => {
     });
 
     // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
-    const messages = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:00.000Z',
-      'Andy',
-    );
+    const messages = getUnprocessedMessages('group@g.us', 'Andy');
     expect(messages).toHaveLength(1);
   });
 
@@ -145,19 +133,33 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:00.000Z',
-      'Andy',
-    );
+    const messages = getUnprocessedMessages('group@g.us', 'Andy');
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('original');
   });
+
+  it('stores bot messages with processed = 1', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-bot',
+      chat_jid: 'group@g.us',
+      sender: 'bot@s.whatsapp.net',
+      sender_name: 'Bot',
+      content: 'bot reply',
+      timestamp: '2024-01-01T00:00:06.000Z',
+      is_bot_message: true,
+    });
+
+    // Bot message should NOT appear in unprocessed queries
+    const messages = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(messages).toHaveLength(0);
+  });
 });
 
-// --- getMessagesSince ---
+// --- getUnprocessedMessages ---
 
-describe('getMessagesSince', () => {
+describe('getUnprocessedMessages', () => {
   beforeEach(() => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
@@ -196,31 +198,16 @@ describe('getMessagesSince', () => {
     });
   });
 
-  it('returns all unprocessed non-bot messages (timestamp param ignored)', () => {
-    const msgs = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:02.000Z',
-      'Andy',
-    );
-    // getMessagesSince now delegates to getUnprocessedMessages, ignoring timestamp
+  it('returns all unprocessed non-bot messages', () => {
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
     // Returns all 3 non-bot unprocessed messages (m1, m2, m4)
     expect(msgs).toHaveLength(3);
   });
 
-  it('excludes bot messages via is_bot_message flag', () => {
-    const msgs = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:00.000Z',
-      'Andy',
-    );
+  it('excludes bot messages (born with processed = 1)', () => {
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
     const botMsgs = msgs.filter((m) => m.content === 'bot reply');
     expect(botMsgs).toHaveLength(0);
-  });
-
-  it('returns all non-bot messages when sinceTimestamp is empty', () => {
-    const msgs = getMessagesSince('group@g.us', '', 'Andy');
-    // 3 user messages (bot message excluded)
-    expect(msgs).toHaveLength(3);
   });
 
   it('filters pre-migration bot messages via content prefix backstop', () => {
@@ -233,13 +220,39 @@ describe('getMessagesSince', () => {
       content: 'Andy: old bot reply',
       timestamp: '2024-01-01T00:00:05.000Z',
     });
-    const msgs = getMessagesSince(
-      'group@g.us',
-      '2024-01-01T00:00:04.000Z',
-      'Andy',
-    );
-    // m5 is filtered by content prefix backstop, but m1, m2, m4 are still unprocessed
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    // m5 is filtered by content prefix backstop, m1, m2, m4 are still unprocessed
     expect(msgs).toHaveLength(3);
+  });
+
+  it('excludes messages marked as processed', () => {
+    markMessagesProcessed([
+      { id: 'm1', chat_jid: 'group@g.us' },
+      { id: 'm2', chat_jid: 'group@g.us' },
+    ]);
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].content).toBe('third');
+  });
+
+  it('includes messages marked back to unprocessed', () => {
+    // Mark all as processed
+    markMessagesProcessed([
+      { id: 'm1', chat_jid: 'group@g.us' },
+      { id: 'm2', chat_jid: 'group@g.us' },
+      { id: 'm4', chat_jid: 'group@g.us' },
+    ]);
+    expect(getUnprocessedMessages('group@g.us', 'Andy')).toHaveLength(0);
+
+    // Mark some back to unprocessed
+    markMessagesUnprocessed([
+      { id: 'm1', chat_jid: 'group@g.us' },
+      { id: 'm4', chat_jid: 'group@g.us' },
+    ]);
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toBe('first');
+    expect(msgs[1].content).toBe('third');
   });
 });
 
@@ -305,6 +318,85 @@ describe('getNewMessages', () => {
 
   it('returns empty for no registered groups', () => {
     const { messages } = getNewMessages([], 'Andy');
+    expect(messages).toHaveLength(0);
+  });
+
+  it('re-includes messages after markMessagesUnprocessed', () => {
+    // Mark all as processed
+    markMessagesProcessed([
+      { id: 'a1', chat_jid: 'group1@g.us' },
+      { id: 'a2', chat_jid: 'group2@g.us' },
+      { id: 'a4', chat_jid: 'group1@g.us' },
+    ]);
+    expect(
+      getNewMessages(['group1@g.us', 'group2@g.us'], 'Andy').messages,
+    ).toHaveLength(0);
+
+    // Mark one back to unprocessed
+    markMessagesUnprocessed([{ id: 'a2', chat_jid: 'group2@g.us' }]);
+    const { messages } = getNewMessages(['group1@g.us', 'group2@g.us'], 'Andy');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('g2 msg1');
+  });
+});
+
+// --- markMessagesProcessed / markMessagesUnprocessed ---
+
+describe('markMessagesProcessed / markMessagesUnprocessed', () => {
+  beforeEach(() => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    store({
+      id: 'p1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'msg one',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+    store({
+      id: 'p2',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'msg two',
+      timestamp: '2024-01-01T00:00:02.000Z',
+    });
+  });
+
+  it('markMessagesProcessed excludes messages from unprocessed results', () => {
+    markMessagesProcessed([{ id: 'p1', chat_jid: 'group@g.us' }]);
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].id).toBe('p2');
+  });
+
+  it('markMessagesUnprocessed re-includes messages in unprocessed results', () => {
+    markMessagesProcessed([
+      { id: 'p1', chat_jid: 'group@g.us' },
+      { id: 'p2', chat_jid: 'group@g.us' },
+    ]);
+    expect(getUnprocessedMessages('group@g.us', 'Andy')).toHaveLength(0);
+
+    markMessagesUnprocessed([{ id: 'p1', chat_jid: 'group@g.us' }]);
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].id).toBe('p1');
+  });
+
+  it('handles empty arrays as no-ops', () => {
+    markMessagesProcessed([]);
+    markMessagesUnprocessed([]);
+    const msgs = getUnprocessedMessages('group@g.us', 'Andy');
+    expect(msgs).toHaveLength(2);
+  });
+
+  it('markMessagesProcessed excludes from getNewMessages', () => {
+    markMessagesProcessed([
+      { id: 'p1', chat_jid: 'group@g.us' },
+      { id: 'p2', chat_jid: 'group@g.us' },
+    ]);
+    const { messages } = getNewMessages(['group@g.us'], 'Andy');
     expect(messages).toHaveLength(0);
   });
 });
