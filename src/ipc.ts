@@ -304,7 +304,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     (!targetGroup || targetGroup.folder !== sourceGroup)
                   ) {
                     logger.warn(
-                      { chatJid: data.chatJid, sourceGroup },
+                      { chatJid: data.chatJid, sourceGroup, threadId },
                       'Unauthorized file send attempt blocked',
                     );
                     fs.unlinkSync(filePath);
@@ -331,7 +331,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     }
                     if (!hostPath) {
                       logger.warn(
-                        { containerPath: f.path, sourceGroup },
+                        { containerPath: f.path, sourceGroup, threadId, basePath },
                         'File send rejected: path outside allowed mounts',
                       );
                       valid = false;
@@ -340,7 +340,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     const ext = path.extname(f.name || f.path).toLowerCase();
                     if (!FILE_SEND_ALLOWLIST.includes(ext)) {
                       logger.warn(
-                        { ext, sourceGroup },
+                        { ext, sourceGroup, threadId, containerPath: f.path, fileName: f.name },
                         'File send rejected: extension not in allowlist',
                       );
                       valid = false;
@@ -348,7 +348,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     }
                     if (!fs.existsSync(hostPath)) {
                       logger.warn(
-                        { hostPath, sourceGroup },
+                        { hostPath, containerPath: f.path, sourceGroup, threadId, basePath },
                         'File send rejected: file not found',
                       );
                       valid = false;
@@ -357,7 +357,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     const stat = fs.statSync(hostPath);
                     if (stat.size > 25 * 1024 * 1024) {
                       logger.warn(
-                        { hostPath, size: stat.size, sourceGroup },
+                        { hostPath, size: stat.size, sourceGroup, threadId },
                         'File send rejected: exceeds 25MB limit',
                       );
                       valid = false;
