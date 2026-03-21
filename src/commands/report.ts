@@ -147,13 +147,67 @@ export const reportCommand = {
 
       // Create the scheduled task
       const taskId = crypto.randomUUID();
-      const prompt =
-        `You are writing a recurring research briefing. Topic: "${topic}"\n\n` +
-        `Produce a concise, well-sourced briefing covering the latest developments. ` +
-        `Focus on what is new or notable since the last report. ` +
-        `Write the briefing directly as your response — do not write to a file. ` +
-        `Keep it under 1500 words. Use clear headers, inline citations [Source](URL), ` +
-        `and a short "Key Takeaways" section at the top.`;
+      const isJobTopic = /\b(job|jobs|hiring|openings?|positions?|roles?|careers?|salary|salaries|recruit)\b/i.test(topic);
+
+      const prompt = isJobTopic
+        ? `You are writing a recurring job market briefing. Topic: "${topic}"
+
+Research and write a concise briefing on current job openings. Write directly as your response — do not write to a file.
+
+Use this exact Discord-optimized format:
+
+## 🏔️ [Topic] — [Month Day]
+
+> **[N] new roles found** · [notable stat] · [notable stat]
+
+Then for each notable opening, one entry per role:
+**[Job Title] — [Company]** · [City] ([Remote/Hybrid/On-site])
+\`[$min–$max]\` · [1-2 key requirements] · [[Apply →](url)]
+
+Then a short section:
+**What's in demand**
+- [bullet: skill or trend]
+- [bullet: skill or trend]
+
+End with:
+*Sources: [source1] · [source2] · Next update [schedule]*
+
+Rules:
+- No tables — Discord doesn't render them
+- Use inline code backticks for salary ranges
+- Link directly to job postings where possible, otherwise to the company careers page
+- Skip roles older than 2 weeks
+- Keep it under 800 words`
+        : `You are writing a recurring research briefing. Topic: "${topic}"
+
+Research and write a concise briefing on the latest developments. Write directly as your response — do not write to a file.
+
+Use this exact Discord-optimized format:
+
+## 📋 [Topic] — [Month Day]
+
+> **Top takeaways:** [2-3 sentence summary of biggest items]
+
+**What's New**
+
+For each notable item, one short paragraph with a bolded lead:
+**[Entity/Product/Event]** — [[brief description with key facts](url)]. 1-3 sentences max.
+
+**Why It Matters**
+1-2 sentences on the broader significance or trend.
+
+**On the Horizon**
+- [upcoming thing to watch]
+- [upcoming thing to watch]
+
+End with:
+*[N] sources · Next briefing [schedule]*
+
+Rules:
+- No tables — Discord doesn't render them
+- Bold the most important word or phrase in each item
+- Inline citations as hyperlinks on the relevant text, not footnotes
+- Keep it under 800 words`;
 
       const group = registeredGroups()[channelId]!;
       const taskBase = {

@@ -82,40 +82,44 @@ After completing Phase 1, re-read your draft critically and run a dedicated veri
 - Check that the Sources section lists every URL cited inline
 - Ensure section headers are clear and parallel
 
-**Write the final polished report to /workspace/group/research-verified.md** using this exact structure:
+**Write the final polished report to /workspace/group/research-verified.md** using this Discord-optimized format:
 
 ---
 
-### Executive Summary
-3-4 sentences. Key takeaway + most important findings.
+## 📋 [Topic]
 
-### Findings
-Organized by theme (not by source). For each section:
-- Narrative prose, not bullet points
-- Inline citations: [Source Name](URL)
-- Compare perspectives where they differ
-- Note evidence strength for major claims
+> **Summary:** [3-4 sentence executive summary — key takeaway + most important findings]
 
-### Confidence & Gaps
-- What you are confident about and why
-- What is uncertain and why
-- Open questions that remain
-- What further research would be most valuable
+---
 
-### Sources
-All URLs grouped by type:
+**[Theme 1 heading]**
 
-**Academic / Primary Research**
-- [Title](URL)
+Narrative prose organized by theme, not by source. Inline citations as hyperlinks on the relevant text: [Source Name](URL). Compare perspectives where they differ. Note evidence strength for major claims.
 
-**Official Documentation & Reports**
-- [Title](URL)
+**[Theme 2 heading]**
 
-**News & Analysis**
-- [Title](URL)
+Continue for each major theme.
 
-**Other**
-- [Title](URL)
+---
+
+**Confidence & Gaps**
+- ✅ [What you are confident about and why]
+- ⚠️ [What is uncertain and why]
+- ❓ [Open questions that remain]
+
+**Sources**
+- [Title](URL) — Academic / Primary Research
+- [Title](URL) — Official Documentation
+- [Title](URL) — News & Analysis
+
+---
+
+Rules:
+- No tables — Discord doesn't render them
+- Use > blockquote only for the summary callout at the top
+- Bold the most important term or phrase in each paragraph
+- Keep headers to ## and **bold** — avoid H3/H4 which render small
+- Inline citations as hyperlinks on relevant text, not footnotes
 
 ---
 
