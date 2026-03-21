@@ -447,6 +447,7 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mountCount: mounts.length,
+      mounts: mounts.map(m => `${m.hostPath} -> ${m.containerPath} (${m.readonly ? 'ro' : 'rw'})`),
       isMain: input.isMain,
     },
     'Spawning container agent',
