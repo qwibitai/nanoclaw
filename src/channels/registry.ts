@@ -3,6 +3,7 @@ import {
   OnInboundMessage,
   OnChatMetadata,
   RegisteredGroup,
+  ScheduledTask,
 } from '../types.js';
 
 export interface ChannelOpts {
@@ -10,6 +11,7 @@ export interface ChannelOpts {
   onChatMetadata: OnChatMetadata;
   onRegisterGroup: (jid: string, group: RegisteredGroup) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  runTask: (task: ScheduledTask) => Promise<void>;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;

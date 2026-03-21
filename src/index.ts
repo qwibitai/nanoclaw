@@ -57,8 +57,12 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  startSchedulerLoop,
+  runTask,
+  SchedulerDependencies,
+} from './task-scheduler.js';
+import { Channel, NewMessage, RegisteredGroup, ScheduledTask } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -537,6 +541,24 @@ async function main(): Promise<void> {
     }
   }
 
+  // Scheduler deps — built before channelOpts so runTask can be forwarded
+  const schedulerDeps: SchedulerDependencies = {
+    registeredGroups: () => registeredGroups,
+    getSessions: () => sessions,
+    queue,
+    onProcess: (groupJid, proc, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot send message');
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+  };
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -577,6 +599,7 @@ async function main(): Promise<void> {
     onRegisterGroup: (jid: string, group: RegisteredGroup) =>
       registerGroup(jid, group),
     registeredGroups: () => registeredGroups,
+    runTask: (task: ScheduledTask) => runTask(task, schedulerDeps),
   };
 
   // Create and connect all registered channels.
@@ -601,22 +624,7 @@ async function main(): Promise<void> {
   }
 
   // Start subsystems (independently of connection handler)
-  startSchedulerLoop({
-    registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
-    queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
-    sendMessage: async (jid, rawText) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
-        return;
-      }
-      const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
-    },
-  });
+  startSchedulerLoop(schedulerDeps);
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
