@@ -11,6 +11,15 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
+// Prevent tests from reading the real macOS Keychain
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    execFileSync: vi.fn(() => { throw new Error('no keychain in tests'); }),
+  };
+});
+
 import { startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
