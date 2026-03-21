@@ -1,0 +1,38 @@
+name: Deploy
+
+on:
+  push:
+    branches: [skill/easybits]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to DigitalOcean
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /home/nanoclaw/app
+
+            # Pull latest
+            sudo -u nanoclaw git pull origin skill/easybits
+
+            # Install & build
+            sudo -u nanoclaw npm install
+            sudo -u nanoclaw npm run build
+
+            # Rebuild agent container
+            sudo -u nanoclaw ./container/build.sh
+
+            # Restart service
+            systemctl restart nanoclaw
+
+            # Verify
+            sleep 3
+            systemctl is-active nanoclaw
+            echo "Deploy complete"

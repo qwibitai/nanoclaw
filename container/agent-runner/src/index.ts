@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  mcpServers?: string[];
 }
 
 interface ContainerOutput {
@@ -323,6 +324,63 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+type McpServerConfig = Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+
+function getAllMcpServers(containerInput: ContainerInput, mcpServerPath: string): McpServerConfig {
+  return {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+    easybits: {
+      command: 'npx',
+      args: ['-y', '@easybits.cloud/mcp'],
+      env: {
+        EASYBITS_API_KEY: process.env.EASYBITS_API_KEY || '',
+      },
+    },
+    panel: {
+      command: 'npx',
+      args: ['-y', 'panel-mcp'],
+      env: {
+        PANEL_API_KEY: process.env.PANEL_API_KEY || '',
+        PANEL_URL: process.env.PANEL_URL || '',
+      },
+    },
+  };
+}
+
+function buildMcpServers(containerInput: ContainerInput, mcpServerPath: string): McpServerConfig {
+  const all = getAllMcpServers(containerInput, mcpServerPath);
+  if (!containerInput.mcpServers) return all;
+
+  const enabled = new Set(['nanoclaw', ...containerInput.mcpServers]);
+  const result: McpServerConfig = {};
+  for (const name of enabled) {
+    if (all[name]) result[name] = all[name];
+  }
+  return result;
+}
+
+function buildAllowedTools(containerInput: ContainerInput, mcpServerPath: string): string[] {
+  const mcpServers = buildMcpServers(containerInput, mcpServerPath);
+  return [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    ...Object.keys(mcpServers).map(n => `mcp__${n}__*`),
+  ];
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -399,48 +457,12 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-        'mcp__easybits__*',
-        'mcp__panel__*'
-      ],
+      allowedTools: buildAllowedTools(containerInput, mcpServerPath),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-        easybits: {
-          command: 'npx',
-          args: ['-y', '@easybits.cloud/mcp'],
-          env: {
-            EASYBITS_API_KEY: process.env.EASYBITS_API_KEY || '',
-          },
-        },
-        panel: {
-          command: 'npx',
-          args: ['-y', 'panel-mcp'],
-          env: {
-            PANEL_API_KEY: process.env.PANEL_API_KEY || '',
-            PANEL_URL: process.env.PANEL_URL || '',
-          },
-        },
-      },
+      mcpServers: buildMcpServers(containerInput, mcpServerPath),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },

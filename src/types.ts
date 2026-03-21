@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  mcpServers?: string[]; // Which extra MCP servers to enable (e.g. ['easybits', 'panel']). 'nanoclaw' always included. undefined = all.
 }
 
 export interface RegisteredGroup {
