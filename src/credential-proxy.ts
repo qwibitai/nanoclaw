@@ -76,7 +76,9 @@ export function startCredentialProxy(
           // via /api/oauth/claude_cli/create_api_key. We inject the real Bearer
           // token only on that exchange request; subsequent requests carry the
           // temp key the CLI received, which is valid as-is.
-          const isExchange = req.url?.includes('/api/oauth/claude_cli/create_api_key');
+          const isExchange = req.url?.includes(
+            '/api/oauth/claude_cli/create_api_key',
+          );
           if (isExchange || headers['authorization']) {
             delete headers['x-api-key'];
             delete headers['authorization'];
