@@ -3,19 +3,27 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+  WORKER_MAX_DEPTH,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
   createTask,
   deleteTask,
   getActiveSkills,
   getTaskById,
+  insertWallEntry,
+  insertWorkerTask,
+  getRootTaskId,
   recordSkillSelections,
   updateTask,
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, WallEntry, WorkerTask } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -40,6 +48,7 @@ export interface IpcDeps {
     chatJid: string,
     skills: string[],
   ) => void;
+  onWorkerTaskCreated?: (task: WorkerTask) => void;
   statusHeartbeat?: () => void;
   recoverPendingMessages?: () => void;
 }
@@ -313,6 +322,14 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For create_worker_task
+    description?: string;
+    parentTaskId?: string;
+    parentDepth?: number;
+    // For post_wall
+    content?: string;
+    author?: string;
+    wallType?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -593,6 +610,65 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'create_worker_task':
+      if (data.description && data.chatJid) {
+        const parentId = data.parentTaskId as string | undefined;
+        const depth = parentId
+          ? ((data.parentDepth as number | undefined) ?? 0) + 1
+          : 0;
+        if (depth > WORKER_MAX_DEPTH) {
+          logger.warn(
+            { sourceGroup, depth, parentId },
+            'Worker task depth limit exceeded, rejecting',
+          );
+          break;
+        }
+        const taskId = `wt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const task: WorkerTask = {
+          id: taskId,
+          group_folder: sourceGroup,
+          chat_jid: data.chatJid,
+          parent_task_id: parentId ?? null,
+          depth,
+          description: data.description,
+          assigned_worker: null,
+          status: 'pending',
+          result: null,
+          error: null,
+          created_at: new Date().toISOString(),
+          started_at: null,
+          completed_at: null,
+        };
+        insertWorkerTask(task);
+        logger.info(
+          { taskId, sourceGroup, depth, parentId },
+          'Worker task created via IPC',
+        );
+        deps.onWorkerTaskCreated?.(task);
+      }
+      break;
+
+    case 'post_wall': {
+      if (data.content && data.taskId) {
+        const rootId = getRootTaskId(data.taskId as string);
+        const entry: WallEntry = {
+          id: `wall-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          root_task_id: rootId,
+          group_folder: sourceGroup,
+          author: (data.author as string | undefined) ?? sourceGroup,
+          type: (data.wallType as WallEntry['type'] | undefined) ?? 'note',
+          content: data.content,
+          created_at: new Date().toISOString(),
+        };
+        insertWallEntry(entry);
+        logger.info(
+          { entryId: entry.id, rootId, sourceGroup },
+          'Wall entry posted via IPC',
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

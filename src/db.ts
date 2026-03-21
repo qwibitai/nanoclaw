@@ -15,6 +15,8 @@ import {
   SkillPerformance,
   SkillTaskRun,
   TaskRunLog,
+  WallEntry,
+  WorkerTask,
 } from './types.js';
 
 let db: Database.Database;
@@ -196,6 +198,37 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
     CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
     CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
+
+    CREATE TABLE IF NOT EXISTS worker_tasks (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      parent_task_id TEXT,
+      depth INTEGER NOT NULL DEFAULT 0,
+      description TEXT NOT NULL,
+      assigned_worker TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      result TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (parent_task_id) REFERENCES worker_tasks(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_status ON worker_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_parent ON worker_tasks(parent_task_id);
+    CREATE INDEX IF NOT EXISTS idx_worker_tasks_group ON worker_tasks(group_folder, chat_jid);
+
+    CREATE TABLE IF NOT EXISTS wall (
+      id TEXT PRIMARY KEY,
+      root_task_id TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      author TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'note',
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_wall_root ON wall(root_task_id);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -1287,6 +1320,103 @@ export function getTotalEvaluatedRuns(): number {
     .prepare('SELECT COUNT(*) as cnt FROM skill_evaluations')
     .get() as { cnt: number };
   return row.cnt;
+}
+
+// --- Worker tasks ---
+
+export function insertWorkerTask(task: WorkerTask): void {
+  db.prepare(
+    `INSERT INTO worker_tasks (id, group_folder, chat_jid, parent_task_id, depth, description, assigned_worker, status, result, error, created_at, started_at, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    task.id,
+    task.group_folder,
+    task.chat_jid,
+    task.parent_task_id,
+    task.depth,
+    task.description,
+    task.assigned_worker,
+    task.status,
+    task.result,
+    task.error,
+    task.created_at,
+    task.started_at,
+    task.completed_at,
+  );
+}
+
+export function getWorkerTask(id: string): WorkerTask | undefined {
+  return db.prepare('SELECT * FROM worker_tasks WHERE id = ?').get(id) as
+    | WorkerTask
+    | undefined;
+}
+
+export function getPendingWorkerTasks(limit: number = 5): WorkerTask[] {
+  return db
+    .prepare(
+      `SELECT * FROM worker_tasks WHERE status = 'pending' ORDER BY depth ASC, created_at ASC LIMIT ?`,
+    )
+    .all(limit) as WorkerTask[];
+}
+
+export function updateWorkerTask(
+  id: string,
+  updates: Partial<
+    Pick<
+      WorkerTask,
+      | 'status'
+      | 'assigned_worker'
+      | 'result'
+      | 'error'
+      | 'started_at'
+      | 'completed_at'
+    >
+  >,
+): void {
+  const fields = Object.keys(updates)
+    .map((k) => `${k} = ?`)
+    .join(', ');
+  const values = [...Object.values(updates), id];
+  db.prepare(`UPDATE worker_tasks SET ${fields} WHERE id = ?`).run(...values);
+}
+
+export function getChildTasks(parentId: string): WorkerTask[] {
+  return db
+    .prepare('SELECT * FROM worker_tasks WHERE parent_task_id = ?')
+    .all(parentId) as WorkerTask[];
+}
+
+export function getRootTaskId(taskId: string): string {
+  let current = getWorkerTask(taskId);
+  while (current?.parent_task_id) {
+    current = getWorkerTask(current.parent_task_id);
+  }
+  return current?.id ?? taskId;
+}
+
+// --- Wall ---
+
+export function insertWallEntry(entry: WallEntry): void {
+  db.prepare(
+    `INSERT INTO wall (id, root_task_id, group_folder, author, type, content, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entry.id,
+    entry.root_task_id,
+    entry.group_folder,
+    entry.author,
+    entry.type,
+    entry.content,
+    entry.created_at,
+  );
+}
+
+export function getWallEntries(rootTaskId: string): WallEntry[] {
+  return db
+    .prepare(
+      'SELECT * FROM wall WHERE root_task_id = ? ORDER BY created_at ASC',
+    )
+    .all(rootTaskId) as WallEntry[];
 }
 
 // --- JSON migration ---

@@ -88,3 +88,7 @@ export const EVOLUTION_SCORE_THRESHOLD = 0.6; // Score below which evolution tri
 // --- Rollouts ---
 export const ROLLOUT_SIZE = 6; // Number of turns per evaluation rollout
 export const ROLLOUT_INACTIVITY_MS = 30 * 60 * 1000; // Close rollout after 30min inactivity
+
+// --- Worker tasks (Gas Town) ---
+export const WORKER_MAX_DEPTH = 3; // Max task decomposition depth
+export const WORKER_TASK_POLL_INTERVAL = 5000; // Poll for pending tasks every 5s

@@ -141,6 +141,34 @@ export interface SkillPerformance {
   last_updated: string;
 }
 
+// --- Gas Town worker tasks ---
+
+export interface WorkerTask {
+  id: string;
+  group_folder: string;
+  chat_jid: string;
+  parent_task_id: string | null;
+  depth: number;
+  description: string;
+  assigned_worker: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  result: string | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface WallEntry {
+  id: string;
+  root_task_id: string;
+  group_folder: string;
+  author: string;
+  type: 'note' | 'finding' | 'blocker' | 'plan' | 'result';
+  content: string;
+  created_at: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {

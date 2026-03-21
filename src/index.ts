@@ -66,7 +66,8 @@ import { startEvaluationLoop } from './skills/evaluator.js';
 import { startEvolutionLoop } from './skills/evolution.js';
 import { handleReactionFeedback } from './skills/reaction-scorer.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { startWorkerTaskLoop } from './worker-manager.js';
+import { Channel, NewMessage, RegisteredGroup, WorkerTask } from './types.js';
 import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
 
@@ -847,6 +848,12 @@ async function main(): Promise<void> {
     },
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
     recoverPendingMessages,
+    onWorkerTaskCreated: (task) => {
+      logger.info(
+        { taskId: task.id, depth: task.depth },
+        'Worker task queued via IPC',
+      );
+    },
   });
   // Recover status tracker AFTER channels connect, so recovery reactions
   // can actually be sent via the WhatsApp channel.
@@ -855,6 +862,49 @@ async function main(): Promise<void> {
   recoverPendingMessages();
   startEvaluationLoop();
   startEvolutionLoop();
+  startWorkerTaskLoop({
+    registeredGroups: () => registeredGroups,
+    onRootTaskComplete: async (
+      task: WorkerTask,
+      result: string,
+      groupFolder: string,
+      chatJid: string,
+    ) => {
+      const group = registeredGroups[chatJid];
+      const channel = findChannel(channels, chatJid);
+      if (!group || !channel) {
+        logger.warn(
+          { chatJid, groupFolder },
+          'Root task complete but group/channel not found for synthesis',
+        );
+        return;
+      }
+      logger.info(
+        { taskId: task.id, chatJid },
+        'Root worker task complete, running synthesis',
+      );
+      const synthesisPrompt = [
+        '[TASK COMPLETE]',
+        `A delegated task has finished. Summarize the result for the user.`,
+        '',
+        `Task: ${task.description}`,
+        '',
+        `Result:\n${result}`,
+      ].join('\n');
+      await runAgent(group, synthesisPrompt, chatJid, async (out) => {
+        if (out.result) {
+          const raw =
+            typeof out.result === 'string'
+              ? out.result
+              : JSON.stringify(out.result);
+          const text = raw
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+          if (text) await channel.sendMessage(chatJid, text);
+        }
+      });
+    },
+  });
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
