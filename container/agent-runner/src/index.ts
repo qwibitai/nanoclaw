@@ -550,6 +550,24 @@ async function main(): Promise<void> {
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
+  // Merge non-credential secrets from stdin into sdkEnv so the SDK can use them.
+  // Auth secrets (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_CODE_OAUTH_TOKEN)
+  // are already set via container -e flags; skip those to avoid overriding the
+  // credential proxy setup.
+  const secretsSkipList = new Set([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'GITHUB_TOKEN',
+  ]);
+  if (containerInput.secrets) {
+    for (const [key, value] of Object.entries(containerInput.secrets)) {
+      if (value && !secretsSkipList.has(key)) {
+        sdkEnv[key] = value;
+      }
+    }
+  }
+
   // Configure git with GitHub token for HTTPS authentication.
   // Uses a credential helper script that outputs the token on demand.
   // The token itself is not stored in any file or env var visible to Bash.
