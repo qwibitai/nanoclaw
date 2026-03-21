@@ -49,7 +49,40 @@ export function startCredentialProxy(
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        const body = Buffer.concat(chunks);
+        let body = Buffer.concat(chunks);
+
+        // Inject prompt caching on /v1/messages requests.
+        // Adds cache_control breakpoint to the last system prompt block so the
+        // system prompt (CLAUDE.md / agent instructions) is cached across all
+        // API calls in a session — saves ~90% on those tokens after the first call.
+        if (
+          req.url === '/v1/messages' &&
+          req.headers['content-type']?.includes('application/json')
+        ) {
+          try {
+            const parsed = JSON.parse(body.toString());
+            if (parsed.system) {
+              if (typeof parsed.system === 'string') {
+                parsed.system = [
+                  {
+                    type: 'text',
+                    text: parsed.system,
+                    cache_control: { type: 'ephemeral' },
+                  },
+                ];
+              } else if (Array.isArray(parsed.system) && parsed.system.length > 0) {
+                const last = parsed.system[parsed.system.length - 1];
+                if (!last.cache_control) {
+                  last.cache_control = { type: 'ephemeral' };
+                }
+              }
+              body = Buffer.from(JSON.stringify(parsed));
+            }
+          } catch {
+            // Non-JSON or unexpected shape — forward as-is
+          }
+        }
+
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
