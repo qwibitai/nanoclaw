@@ -144,6 +144,164 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 }
 
 /**
+ * Extract structured knowledge from parsed conversation messages.
+ */
+function extractKnowledge(messages: ParsedMessage[]): {
+  topics: string[];
+  people: string[];
+  decisions: string[];
+  actionItems: string[];
+  briefSummary: string;
+  keyPoints: string[];
+} {
+  const allText = messages.map(m => m.content).join('\n');
+
+  // Extract people: @mentions and capitalized names (2+ words like "John Smith")
+  const peopleSet = new Set<string>();
+  const mentionMatches = allText.match(/@[\w]+/g);
+  if (mentionMatches) {
+    for (const m of mentionMatches) peopleSet.add(m);
+  }
+  const nameMatches = allText.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g);
+  if (nameMatches) {
+    // Filter out common non-name phrases
+    const ignore = new Set(['Key Points', 'Action Items', 'Summary', 'TODO', 'Let Us', 'Read Only']);
+    for (const n of nameMatches) {
+      if (!ignore.has(n) && n.length < 40) peopleSet.add(n);
+    }
+  }
+
+  // Extract decisions
+  const decisions: string[] = [];
+  const decisionPatterns = [
+    /(?:decided|agreed|let'?s go with|will use|going with|chose|chosen|we'll use|settled on)\s+(.{5,80}?)(?:\.|$)/gi,
+  ];
+  for (const pattern of decisionPatterns) {
+    let match;
+    while ((match = pattern.exec(allText)) !== null) {
+      const decision = match[0].trim().replace(/\.$/, '');
+      if (decision.length > 10) decisions.push(decision);
+    }
+  }
+
+  // Extract action items
+  const actionItems: string[] = [];
+  const actionPatterns = [
+    /(?:TODO|FIXME|HACK)[\s:]+(.{5,100}?)(?:\n|$)/gi,
+    /(?:need to|should|will do|action item[\s:]*|must)\s+(.{5,100}?)(?:\.|$)/gi,
+  ];
+  for (const pattern of actionPatterns) {
+    let match;
+    while ((match = pattern.exec(allText)) !== null) {
+      const item = match[1]?.trim() || match[0].trim();
+      if (item.length > 5) actionItems.push(item.replace(/\.$/, ''));
+    }
+  }
+
+  // Extract topics from first user message keywords + summary context
+  const firstUserMsg = messages.find(m => m.role === 'user')?.content || '';
+  const topicWords = firstUserMsg
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3)
+    .filter(w => !['this', 'that', 'with', 'from', 'have', 'been', 'will', 'what', 'when', 'where', 'your', 'about', 'please', 'could', 'would', 'should', 'there', 'their', 'which', 'these', 'those', 'them', 'they', 'some', 'into', 'just', 'also', 'than', 'then', 'here', 'very', 'after', 'before', 'other', 'more', 'much', 'each', 'make', 'like', 'know', 'take', 'come', 'want', 'does', 'help'].includes(w));
+  // Deduplicate and take top 5
+  const topics = [...new Set(topicWords)].slice(0, 5);
+
+  // Brief summary: first user message, truncated
+  const briefSummary = firstUserMsg.length > 200
+    ? firstUserMsg.slice(0, 200).trim() + '...'
+    : firstUserMsg;
+
+  // Key points: extract from assistant messages (first sentence of each, up to 5)
+  const keyPoints = messages
+    .filter(m => m.role === 'assistant')
+    .map(m => {
+      const firstSentence = m.content.match(/^[^.!?\n]{10,150}[.!?]?/);
+      return firstSentence ? firstSentence[0].trim() : '';
+    })
+    .filter(s => s.length > 10)
+    .slice(0, 5);
+
+  return {
+    topics,
+    people: [...peopleSet],
+    decisions: [...new Set(decisions)].slice(0, 10),
+    actionItems: [...new Set(actionItems)].slice(0, 10),
+    briefSummary,
+    keyPoints,
+  };
+}
+
+function escapeYamlString(s: string): string {
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"';
+}
+
+function formatYamlArray(arr: string[]): string {
+  if (arr.length === 0) return '[]';
+  return '[' + arr.map(escapeYamlString).join(', ') + ']';
+}
+
+/**
+ * Generate a structured summary markdown file with YAML frontmatter.
+ */
+function generateStructuredSummary(
+  messages: ParsedMessage[],
+  title: string | null,
+  date: string,
+  transcriptFilename: string,
+): string {
+  const knowledge = extractKnowledge(messages);
+
+  const lines: string[] = [];
+  lines.push('---');
+  lines.push(`title: ${escapeYamlString(title || 'Conversation')}`);
+  lines.push(`date: ${date}`);
+  lines.push(`topics: ${formatYamlArray(knowledge.topics)}`);
+  lines.push(`people: ${formatYamlArray(knowledge.people)}`);
+  lines.push(`decisions: ${formatYamlArray(knowledge.decisions)}`);
+  lines.push(`action_items: ${formatYamlArray(knowledge.actionItems)}`);
+  lines.push('related_knowledge: []');
+  lines.push(`transcript: "[[../${transcriptFilename}]]"`);
+  lines.push('---');
+  lines.push('');
+  lines.push('# Summary');
+  lines.push('');
+  lines.push(knowledge.briefSummary || 'No summary available.');
+  lines.push('');
+
+  if (knowledge.keyPoints.length > 0) {
+    lines.push('## Key Points');
+    lines.push('');
+    for (const point of knowledge.keyPoints) {
+      lines.push(`- ${point}`);
+    }
+    lines.push('');
+  }
+
+  if (knowledge.decisions.length > 0) {
+    lines.push('## Decisions Made');
+    lines.push('');
+    for (const decision of knowledge.decisions) {
+      lines.push(`- ${decision}`);
+    }
+    lines.push('');
+  }
+
+  if (knowledge.actionItems.length > 0) {
+    lines.push('## Action Items');
+    lines.push('');
+    for (const item of knowledge.actionItems) {
+      lines.push(`- [ ] ${item}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Archive the full transcript to conversations/ before compaction.
  */
 function createPreCompactHook(assistantName?: string): HookCallback {
@@ -180,6 +338,19 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // Generate structured summary
+      try {
+        const summariesDir = path.join(conversationsDir, '_summaries');
+        fs.mkdirSync(summariesDir, { recursive: true });
+
+        const summaryContent = generateStructuredSummary(messages, summary, date, filename);
+        const summaryPath = path.join(summariesDir, filename);
+        fs.writeFileSync(summaryPath, summaryContent);
+        log(`Wrote structured summary to ${summaryPath}`);
+      } catch (summaryErr) {
+        log(`Failed to write structured summary: ${summaryErr instanceof Error ? summaryErr.message : String(summaryErr)}`);
+      }
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
     }
