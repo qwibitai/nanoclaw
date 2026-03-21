@@ -148,6 +148,37 @@ BODY
 
 This keeps the epic as a living dashboard. `/pick-work` reads the epic's "Next Step" to boost scoring for the recommended follow-up work.
 
+## Reuse Check — BEFORE writing utility code
+
+Before writing any code that parses, transforms, validates, or wraps a format/protocol/API, stop and check what already exists. See [verification.md § Pre-Implementation Check](../../kaizen/verification.md) for the full discipline.
+
+**Quick check:**
+1. `grep` package.json for relevant libraries (yaml, zod, ajv, marked, etc.)
+2. `grep -r` the codebase for similar patterns
+3. If a library exists: use it. If codebase has a pattern: follow it.
+
+**This is not optional.** Hand-rolling solved problems creates fragile code, wastes time, and the self-review rationalization ("keeping deps minimal") is a known anti-pattern (kaizen #334).
+
+## Hypothesis Formation — BEFORE fixing bugs
+
+When the work involves fixing a bug or investigating a system behavior, form an explicit hypothesis before writing code. See [experiments/README.md](../../kaizen/experiments/README.md) for the full methodology.
+
+**Before implementing a fix, state:**
+```
+HYPOTHESIS: [what you think is happening and why]
+FALSIFICATION: [what evidence would prove this wrong]
+EXPERIMENT: [fastest way to test — minutes, not hours]
+```
+
+**Why:** Jumping from "I see a bug" to "here's my fix" skips the diagnostic step. You may fix a symptom while the root cause persists, or fix the wrong thing entirely. A hypothesis forces you to think about what you're assuming.
+
+**When to use the experiment CLI:**
+- For bugs with unclear root causes: create a formal experiment (`npx tsx src/cli-experiment.ts create`)
+- For A/B comparisons of approaches: use the a-b-compare pattern
+- For quick diagnostics: state the hypothesis inline (in a commit message or PR body) — not everything needs formal tracking
+
+**When to skip:** One-line fixes where the root cause is obvious from the stack trace. State "root cause is obvious: [reason]" in the PR.
+
 ## Testability Pre-Flight — BEFORE writing code
 
 Before adding logic to an existing file, assess the testability cost. *"Avoiding overengineering is not a license to underengineer."*
@@ -264,6 +295,17 @@ This is not duplicating the issue — it's transforming planning artifacts into 
 **When to skip:** Pure library code, internal refactors, bug fixes, test additions — these don't need operational docs. The test is: does this change introduce a new **operational process** that someone needs to know about?
 
 **Anti-pattern: "The code is self-documenting."** Shell scripts with `--help` flags are not documentation. They tell you what flags exist, not when to run the command, what the policy is, or what happens if you don't.
+
+### 4c. Adjacent discovery check — what did this work reveal?
+
+After implementation but before moving on, pause and ask:
+
+- **What did I learn about the system that the spec didn't know?** New coupling, unexpected behavior, fragile assumptions — these are findings, not noise.
+- **What almost went wrong?** Near-misses (caught by tests, review, or luck) are as valuable as actual incidents. If a test caught a bug you introduced, that's a near-miss — the test worked, but you almost shipped a bug.
+- **What tools/patterns did I reach for that didn't exist?** Missing tools are a signal. If you needed a YAML parser and almost hand-rolled one, that's a gap worth noting.
+- **What hypothesis did I hold that turned out wrong?** Falsified assumptions are data. Record them — they prevent the next agent from making the same assumption.
+
+**If you discover something:** File it. Don't save it for the kaizen reflection — by then it may be lost in the noise of session wrap-up. The reflection task (created at session start per H6) is the right place to accumulate these throughout the session.
 
 ### 5. Re-enter the loop
 

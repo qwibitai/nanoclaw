@@ -2,6 +2,23 @@
 
 Learned from kaizen #11, #15, #17. These are mandatory practices for all dev work.
 
+## Pre-Implementation Check — MANDATORY before writing utility code
+
+Before writing ANY code that parses, transforms, or wraps a format/protocol/API, check if the problem is already solved:
+
+```
+1. CHECK package.json — is there already a dep for this? (`yaml`, `zod`, `ajv`, etc.)
+2. GREP the codebase — does similar code exist? (`grep -r "YAML\|parse\|serialize" src/`)
+3. SEARCH npm — is this a well-tested package with widespread adoption?
+4. ASK: "What would a senior engineer reach for?" — not "what can I bang out fastest?"
+```
+
+**If a library exists in deps or on npm: use it.** Writing a hand-rolled parser, validator, or formatter when a tested library exists is not "keeping deps minimal" — it's creating MORE failure points. Policy #10 ("prefer simpler dependency stacks") means fewer ways to break, not fewer `package.json` entries.
+
+**The anti-pattern:** You need to parse YAML. You think "it's a simple format, I'll use regex." You write 80 lines of fragile parsing. Self-review catches it. You rationalize "keeping deps minimal." You file it as a kaizen impediment instead of fixing it. The hand-rolled parser silently corrupts edge cases. *(This actually happened — kaizen #334.)*
+
+**The fix:** Pause for 30 seconds before writing any utility code. Check what exists. Use it.
+
 ## Path Tracing — MANDATORY before any fix
 
 Before writing ANY fix, map the full execution path from trigger to user-visible outcome:

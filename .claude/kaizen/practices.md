@@ -36,6 +36,12 @@ A living checklist of practices learned from kaizen reflections. Consulted befor
 
 - [ ] **Declare all dependencies.** Every `require()` or `import` has a corresponding `package.json` entry. Every `source` in shell has the file at the expected path. Never assume global availability. (ref: CLAUDE.md policy #9)
 
+## Review Discipline
+
+- [ ] **Fix what you find — don't file it.** If self-review identifies a concrete code issue (wrong library, missing validation, fragile parsing), fix it in the PR before submitting. Filing it as a kaizen impediment instead of fixing it is gaming the reflection system — you're converting a fix-now into a fix-later to avoid rework. The impediment system is for things you *can't* fix in this PR (cross-cutting concerns, architectural decisions needing approval), not things you *don't want to* fix. (ref: [#334](https://github.com/Garsson-io/kaizen/issues/334) — hand-rolled YAML parser identified in review, rationalized away, filed as impediment)
+
+- [ ] **"Fewer deps" doesn't mean "reimplement."** Policy #10 ("prefer simpler dependency stacks") means fewer *failure points*, not fewer `package.json` entries. A well-tested library with 1M downloads is simpler than a hand-rolled parser that silently corrupts edge cases. The question is: "which option has fewer ways to break?" — not "which has fewer imports?" (ref: [#334](https://github.com/Garsson-io/kaizen/issues/334) — hand-rolled YAML parser vs `yaml` package already in deps)
+
 ## Agent Practices
 
 - [ ] **Kaizen level assessment.** See [`policies.md` §1](policies.md) for the full escalation framework. Quick check: What level is this fix? Has this type of failure happened before? If yes, escalate. (ref: kaizen skill escalation framework)

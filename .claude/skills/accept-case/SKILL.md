@@ -130,6 +130,28 @@ Often the best low-hanging fruit isn't in the spec at all. It emerges from looki
 
 **Diagnostic tests as low-hanging fruit:** A failing test that reproduces the reported problem is often the strongest evidence AND the clearest definition of done. If you can express the expected behavior as a test during evaluation, do so — it proves the problem exists, defines when it's fixed, and may reveal the actual bug surface is different than reported (see kaizen #120 where TDD revealed a second bug invisible during code reading).
 
+### Phase 3.5: Form hypotheses — what are you assuming without testing?
+
+Before recommending a solution, make your assumptions explicit. Most kaizen work follows: observe problem → spec solution → implement → hope it works. This misses the scientific method step: **form a hypothesis, design an experiment, test it.**
+
+**For the root cause, state:**
+```
+HYPOTHESIS: [what you think causes the problem — a falsifiable claim]
+WHY IT MIGHT BE WRONG: [what would disprove this]
+FASTEST TEST: [experiment that takes minutes, not hours]
+```
+
+**For the proposed solution, ask:**
+- "What am I assuming about the system that I haven't verified?"
+- "If I'm wrong about the root cause, what would I see instead?"
+- "Is there a 15-minute experiment that would confirm or falsify this?"
+
+**When the problem has multiple plausible causes**, consider running a quick experiment before committing to implementation. The experiment framework (`npx tsx src/cli-experiment.ts create`) supports structured hypothesis tracking — use it for non-trivial investigations.
+
+**Why this matters:** Kaizen #388 found that agents routinely skip diagnosis and jump to implementation. Hypotheses that are never tested lead to fixes for the wrong problem. A falsified hypothesis is more valuable than an untested assumption — it narrows the search space.
+
+See [experiments/README.md](../../kaizen/experiments/README.md) for experiment patterns (A/B compare, probe-and-observe, toggle-and-measure).
+
 ### Scope Reduction Discipline — MANDATORY gate
 
 When your evaluation proposes doing less than the full solution — "start with L1, escalate later", "implement the simple version first", "defer the hook to a follow-up" — you are making a promise about future work. **Promises without mechanisms are just scope cuts.**

@@ -90,6 +90,19 @@ These are registered in `.claude/settings.json` and fire on Claude Code tool-use
 | `hook-portability-matrix.md` | Maps each hook to its best portable alternative |
 | `hook-migration-plan.md` | Phase plan for moving enforcement to strongest layers |
 
+### Experiments (`experiments/`)
+
+Hypothesis-driven experimentation framework. See [`experiments/README.md`](experiments/README.md).
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Framework docs, patterns, principles |
+| `TEMPLATE.md` | Copy to start a new experiment |
+| `EXP-NNN-*.md` | Individual experiment records |
+| `results/` | Raw data and artifacts |
+
+CLI: `npx tsx src/cli-experiment.ts {create|list|view|start|record}`
+
 ### Skills (`skills/`)
 
 | Skill | Purpose |
