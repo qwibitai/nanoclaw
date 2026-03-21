@@ -151,8 +151,3 @@ The agent is trying to run `ollama` CLI inside the container instead of using th
 ### Agent doesn't use Ollama tools
 
 The agent may not know about the tools. Try being explicit: "use the ollama_generate tool with gemma3:1b to answer: ..."
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

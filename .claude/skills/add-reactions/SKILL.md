@@ -115,8 +115,3 @@ Ask the agent to react to a message via the `react_to_message` MCP tool. Check y
 
 - Check IPC logs for `Unauthorized IPC reaction attempt blocked` — the agent can only react in its own group's chat
 - Verify WhatsApp is connected: check logs for connection status
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

@@ -108,8 +108,3 @@ User: "Add Telegram as an input channel"
 3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/whatsapp.ts`)
 4. Add the channel to `main()` in `src/index.ts`
 5. Tell user how to authenticate and test
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

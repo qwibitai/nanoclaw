@@ -92,8 +92,3 @@ All tests must pass and build must be clean before proceeding.
 - **"Image - download failed"**: Check WhatsApp connection stability. The download may timeout on slow connections.
 - **"Image - processing failed"**: Sharp may not be installed correctly. Run `npm ls sharp` to verify.
 - **Agent doesn't mention image content**: Check container logs for "Loaded image" messages. If missing, ensure agent-runner source was synced to group caches.
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
