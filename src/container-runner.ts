@@ -254,6 +254,13 @@ function buildContainerArgs(
     args.push('-e', `PANEL_URL=${panelUrl || ''}`);
   }
 
+  // Smatch MCP: pass credentials to container
+  const smatchEnv = readEnvFile(['SMATCH_MONGODB_URI', 'SMATCH_CLUB_ID']);
+  if (smatchEnv.SMATCH_MONGODB_URI) {
+    args.push('-e', `SMATCH_MONGODB_URI=${smatchEnv.SMATCH_MONGODB_URI}`);
+    args.push('-e', `SMATCH_CLUB_ID=${smatchEnv.SMATCH_CLUB_ID || ''}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 

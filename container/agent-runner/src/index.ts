@@ -352,6 +352,14 @@ function getAllMcpServers(containerInput: ContainerInput, mcpServerPath: string)
         PANEL_URL: process.env.PANEL_URL || '',
       },
     },
+    smatch: {
+      command: 'npx',
+      args: ['-y', 'smatch-mcp'],
+      env: {
+        SMATCH_MONGODB_URI: process.env.SMATCH_MONGODB_URI || '',
+        SMATCH_CLUB_ID: process.env.SMATCH_CLUB_ID || '',
+      },
+    },
   };
 }
 
