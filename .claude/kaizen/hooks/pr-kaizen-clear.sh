@@ -1,4 +1,8 @@
 #!/bin/bash
+# DEACTIVATED — Migrated to TypeScript: src/hooks/pr-kaizen-clear.ts
+# Wrapper: .claude/kaizen/hooks/pr-kaizen-clear-ts.sh
+# Migration: Garsson-io/kaizen#320, docs/hook-language-boundaries.md Phase 3
+#
 # Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # pr-kaizen-clear.sh — Level 3 kaizen enforcement (Issue #57, #113, #140, #162, #205, #213, #198)
 # PostToolUse hook: clears the PR creation kaizen gate when the agent

@@ -23,6 +23,12 @@ Select the highest-value next issue from the kaizen backlog, avoiding collisions
 
 Run these in parallel to understand the current state:
 
+**High-priority issues (check FIRST — these override normal scoring):**
+```bash
+gh issue list --repo Garsson-io/kaizen --state open --label "priority:critical" --json number,title,labels
+gh issue list --repo Garsson-io/kaizen --state open --label "priority:high" --json number,title,labels
+```
+
 **Open issues:**
 ```bash
 gh issue list --repo Garsson-io/kaizen --state open --limit 50 --json number,title,labels,body,createdAt,updatedAt
@@ -107,7 +113,9 @@ For each remaining issue, consider these factors. **Use your judgment — this i
 - If a cluster has been overworked recently, depress it. If a cluster has been neglected, boost it.
 - The goal is not equal distribution — it's avoiding blind spots.
 
-**Priority signals:**
+**Priority signals (check these FIRST — they override other scoring):**
+- **`priority:critical` label** — Always pick these first. Blocks humans, blocks multiple PRs, or 3+ incidents.
+- **`priority:high` label** — Strong boost. Has incidents, unblocks downstream work, or fixes human-visible problems.
 - **L3 > L2 > L1** — Mechanistic fixes are more durable than instructions
 - **Blocks humans > blocks agents > pure ergonomics** — Human-visible problems are higher priority
 - **Has incidents > theoretical** — Issues with concrete past incidents are more valuable than speculative improvements

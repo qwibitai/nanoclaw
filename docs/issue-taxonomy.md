@@ -17,6 +17,12 @@ Every issue MUST have at minimum three labels:
 | **Status** | Auto-synced | `status:active`, `status:done`, `status:has-pr`, `status:backlog`, `status:blocked`, `status:suggested` | Lifecycle state (managed by case backend) |
 | **Structure** | When applicable | `epic`, `prd` | Multi-phase initiatives or specs |
 | **Case type** | Auto-synced | `type:dev`, `type:work` | Set by case backend |
+| **Priority** | When applicable | `priority:critical`, `priority:high` | Urgency signal for `/pick-work` and `/make-a-dent` |
+
+**Priority labels** — Use when urgency matters beyond the standard level/area scoring:
+- `priority:critical` — Blocks humans, blocks multiple PRs, or 3+ incidents. `/pick-work` surfaces these first.
+- `priority:high` — Has 1-2 incidents, unblocks downstream work, or fixes human-visible problems.
+- Issues without a priority label default to normal priority. No `priority:medium` or `priority:low` label needed.
 
 **Filing rule:** If you create an issue without `kaizen` + level + area, you're making it invisible to `/pick-work` and `/gap-analysis`.
 

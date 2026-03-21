@@ -39,6 +39,7 @@ Structured self-review for every PR before it can merge. The `pr-review-loop.sh`
 - Reuse and extend existing test harnesses rather than building from scratch
 - Does it have clear INVARIANTS and SUT?
 - Did you smoke test it (actually ran it)?
+- **Policy #18: Smoke tests ship WITH the feature.** If this PR introduces a new execution path (hook wrapper, script, CLI command, IPC handler), does it include smoke tests that exercise the real deployment path? "Tests later" = no tests. Check `.claude/kaizen/policies.md` #18.
 
 ### Code Quality & Refactoring
 

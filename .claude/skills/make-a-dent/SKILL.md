@@ -40,6 +40,13 @@ AVAILABLE: CI quality, kaizen skills, testing infra, case routing, security, obs
 
 **Choose your target from AVAILABLE domains only.** The compound impact of a make-a-dent session is highest when it's orthogonal to all other active work — no merge conflicts, no invalidated assumptions, no scope overlap.
 
+**Priority override:** Before choosing a domain, check for `priority:critical` and `priority:high` issues:
+```bash
+gh issue list --repo Garsson-io/kaizen --state open --label "priority:critical" --json number,title,labels
+gh issue list --repo Garsson-io/kaizen --state open --label "priority:high" --json number,title,labels
+```
+If critical/high-priority issues exist in an AVAILABLE domain, prefer that domain — the priority labels represent concrete urgency from human or system needs.
+
 ### Phase 1: Map the Territory (Research, no code changes)
 
 Launch **parallel research agents** to build a complete picture of the target domain:

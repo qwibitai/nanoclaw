@@ -1,4 +1,8 @@
 #!/bin/bash
+# DEACTIVATED — Migrated to TypeScript: src/hooks/pr-review-loop.ts
+# Wrapper: .claude/kaizen/hooks/pr-review-loop-ts.sh
+# Migration: Garsson-io/kaizen#320, docs/hook-language-boundaries.md Phase 3
+#
 # Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # pr-review-loop.sh — Level 2 kaizen enforcement (Issue #29)
 # Multi-round PR self-review with state tracking.
