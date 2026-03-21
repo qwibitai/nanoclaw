@@ -70,7 +70,10 @@ export function startCredentialProxy(
                     cache_control: { type: 'ephemeral' },
                   },
                 ];
-              } else if (Array.isArray(parsed.system) && parsed.system.length > 0) {
+              } else if (
+                Array.isArray(parsed.system) &&
+                parsed.system.length > 0
+              ) {
                 const last = parsed.system[parsed.system.length - 1];
                 if (!last.cache_control) {
                   last.cache_control = { type: 'ephemeral' };

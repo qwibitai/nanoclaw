@@ -147,67 +147,116 @@ export const reportCommand = {
 
       // Create the scheduled task
       const taskId = crypto.randomUUID();
-      const isJobTopic = /\b(job|jobs|hiring|openings?|positions?|roles?|careers?|salary|salaries|recruit)\b/i.test(topic);
+      const isJobTopic =
+        /\b(job|jobs|hiring|openings?|positions?|roles?|careers?|salary|salaries|recruit)\b/i.test(
+          topic,
+        );
 
       const prompt = isJobTopic
         ? `You are writing a recurring job market briefing. Topic: "${topic}"
 
-Research and write a concise briefing on current job openings. Write directly as your response — do not write to a file.
+Research current job openings and write the briefing directly as your response — do not write to a file.
 
-Use this exact Discord-optimized format:
+Use this exact format:
 
-## 🏔️ [Topic] — [Month Day]
+# 💼 Job Radar — {{DATE}}
 
-> **[N] new roles found** · [notable stat] · [notable stat]
+---
 
-Then for each notable opening, one entry per role:
-**[Job Title] — [Company]** · [City] ([Remote/Hybrid/On-site])
-\`[$min–$max]\` · [1-2 key requirements] · [[Apply →](url)]
+> **⭐ Top Pick**
+> **{{TITLE}}** @ {{COMPANY}}
+> 📍 {{LOCATION or REMOTE}} · 💰 {{SALARY RANGE if available}}
+> {{2-3 sentences on why this role stands out and what makes it a strong fit}}
 
-Then a short section:
-**What's in demand**
-- [bullet: skill or trend]
-- [bullet: skill or trend]
+---
 
-End with:
-*Sources: [source1] · [source2] · Next update [schedule]*
+### Fresh Listings
+
+▸ **{{TITLE}}** @ {{COMPANY}} — {{REMOTE or LOCATION}}
+  \`{{KEY_SKILL_1}}\` \`{{KEY_SKILL_2}}\` \`{{KEY_SKILL_3}}\`
+
+▸ **{{TITLE}}** @ {{COMPANY}} — {{REMOTE or LOCATION}}
+  \`{{KEY_SKILL_1}}\` \`{{KEY_SKILL_2}}\` \`{{KEY_SKILL_3}}\`
+
+▸ **{{TITLE}}** @ {{COMPANY}} — {{REMOTE or LOCATION}}
+  \`{{KEY_SKILL_1}}\` \`{{KEY_SKILL_2}}\` \`{{KEY_SKILL_3}}\`
+
+▸ **{{TITLE}}** @ {{COMPANY}} — {{REMOTE or LOCATION}}
+  \`{{KEY_SKILL_1}}\` \`{{KEY_SKILL_2}}\` \`{{KEY_SKILL_3}}\`
+
+▸ **{{TITLE}}** @ {{COMPANY}} — {{REMOTE or LOCATION}}
+  \`{{KEY_SKILL_1}}\` \`{{KEY_SKILL_2}}\` \`{{KEY_SKILL_3}}\`
+
+---
+
+### Market Pulse
+
+\`📊\` {{1-2 sentences on hiring trends — which sectors are active, what skills keep appearing}}
+
+---
+
+### 🎯 Move Today
+
+> {{One specific action — apply to X, reach out to Y, update Z on your resume}}
+
+---
+*Atlas · Titan · {{TIMESTAMP}}*
 
 Rules:
-- No tables — Discord doesn't render them
-- Use inline code backticks for salary ranges
-- Link directly to job postings where possible, otherwise to the company careers page
+- Replace every {{placeholder}} with real data — never output literal braces
 - Skip roles older than 2 weeks
-- Keep it under 800 words`
+- Omit the 💰 line entirely if salary is not publicly listed — do not guess
+- Key skills: pull from the actual job description
+- Top Pick: the single strongest match for an AI/ML engineer in Colorado`
         : `You are writing a recurring research briefing. Topic: "${topic}"
 
-Research and write a concise briefing on the latest developments. Write directly as your response — do not write to a file.
+Research the latest developments and write the briefing directly as your response — do not write to a file.
 
-Use this exact Discord-optimized format:
+Use this exact format:
 
-## 📋 [Topic] — [Month Day]
+# 🤖 AI Intel — {{DATE}}
 
-> **Top takeaways:** [2-3 sentence summary of biggest items]
+---
 
-**What's New**
+> **🔥 Lead Story**
+> {{HEADLINE}}
+> {{2-3 sentence summary with why it matters}}
 
-For each notable item, one short paragraph with a bolded lead:
-**[Entity/Product/Event]** — [[brief description with key facts](url)]. 1-3 sentences max.
+---
 
-**Why It Matters**
-1-2 sentences on the broader significance or trend.
+### Developments
 
-**On the Horizon**
-- [upcoming thing to watch]
-- [upcoming thing to watch]
+▸ **{{HEADLINE_2}}**
+{{1-2 sentence summary}}
 
-End with:
-*[N] sources · Next briefing [schedule]*
+▸ **{{HEADLINE_3}}**
+{{1-2 sentence summary}}
+
+▸ **{{HEADLINE_4}}**
+{{1-2 sentence summary}}
+
+▸ **{{HEADLINE_5}}**
+{{1-2 sentence summary}}
+
+---
+
+### Open Source & Tools
+▸ {{REPO or TOOL 1}} — {{what it does, why it matters}}
+▸ {{REPO or TOOL 2}} — {{what it does, why it matters}}
+
+---
+
+\`🧭 So What:\` {{2-3 sentences connecting the dots — what pattern or shift to pay attention to this week}}
+
+---
+*Atlas · Titan · {{TIMESTAMP}}*
 
 Rules:
-- No tables — Discord doesn't render them
-- Bold the most important word or phrase in each item
-- Inline citations as hyperlinks on the relevant text, not footnotes
-- Keep it under 800 words`;
+- Replace every {{placeholder}} with real data — never output literal braces
+- Lead Story: the single most impactful development this cycle
+- Developments: 4 items, varied sources, no overlap with Lead Story
+- Open Source & Tools: real repos or released tools only, skip vaporware
+- So What: synthesis not summary — connect the trends, name the shift`;
 
       const group = registeredGroups()[channelId]!;
       const taskBase = {
