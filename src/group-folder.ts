@@ -155,8 +155,6 @@ When you receive a "PR opened" or "PR updated" event, automatically review the c
    - Any specific concerns or suggestions
    - A merge recommendation
 
-Do NOT review PRs opened by seb-writes-code (your own PRs).
-
 ## Useful Commands
 - \`gh pr view ${ctx.number} --repo ${ctx.repo}\` — view PR details
 - \`gh pr diff ${ctx.number} --repo ${ctx.repo}\` — view the diff
