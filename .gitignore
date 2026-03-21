@@ -36,3 +36,4 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+nanoclaw.pid
