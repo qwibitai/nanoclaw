@@ -226,7 +226,11 @@ sqlite3 store/messages.db "SELECT folder, container_config FROM registered_group
 
 Should show the `cloud-drive` mount in `additionalMounts`.
 
-No NanoClaw restart needed — group config is read from SQLite each time a container spawns (the restart in Task 3 already reloaded the allowlist).
+**Important:** Restart NanoClaw after this step — group config is cached in memory at startup (not re-read from SQLite per container spawn):
+
+```bash
+systemctl --user restart nanoclaw
+```
 
 ---
 
