@@ -98,6 +98,15 @@ Confirm: "✅ Approved — task will now run using Anthropic Claude."
 
 Departments: `tech` (code/bugs), `government` (tenders), `grants` (IRAP/SR&ED), `sales`, `marketing`, `hr`, `auto`.
 
+**Canada Buys full scan** (all pages, overnight or on-demand):
+```bash
+# Trigger immediate full scan (runs in background, delivers report via WhatsApp as document):
+curl -s -X POST http://host.docker.internal:8080/api/canada-buys/scan \
+  -H "Content-Type: application/json" \
+  -d '{"keywords": "software"}' --max-time 10
+```
+The nightly scan also runs automatically between 1am–4am every day and delivers a .txt document to WhatsApp. Truncated results are always sent as a full document attachment automatically.
+
 ## Communication
 
 Your output is sent to Joseph in WhatsApp.

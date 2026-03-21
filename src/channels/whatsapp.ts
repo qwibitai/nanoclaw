@@ -286,11 +286,32 @@ export class WhatsAppChannel implements Channel {
       return;
     }
     try {
-      const imageBuffer = fs.readFileSync(filePath);
-      await this.sock.sendMessage(jid, {
-        image: imageBuffer,
-        caption: caption ?? '',
-      });
+      const fileBuffer = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+      if (imageExts.includes(ext)) {
+        await this.sock.sendMessage(jid, {
+          image: fileBuffer,
+          caption: caption ?? '',
+        });
+      } else {
+        // Send as document (txt, md, pdf, csv, json, etc.)
+        const mimeTypes: Record<string, string> = {
+          '.txt': 'text/plain',
+          '.md': 'text/markdown',
+          '.pdf': 'application/pdf',
+          '.csv': 'text/csv',
+          '.json': 'application/json',
+        };
+        const mimetype = mimeTypes[ext] ?? 'application/octet-stream';
+        const fileName = path.basename(filePath);
+        await this.sock.sendMessage(jid, {
+          document: fileBuffer,
+          mimetype,
+          fileName,
+          caption: caption ?? '',
+        });
+      }
       logger.info({ jid, filePath }, 'Media sent');
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send media');

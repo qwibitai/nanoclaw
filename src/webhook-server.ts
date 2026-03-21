@@ -41,12 +41,14 @@ export function startWebhookServer(
           channel?: string;
           jid?: string;
           message?: string;
+          file_path?: string;
+          caption?: string;
         };
 
-        const { message } = payload;
-        if (!message) {
+        const { message, file_path, caption } = payload;
+        if (!message && !file_path) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'message is required' }));
+          res.end(JSON.stringify({ error: 'message or file_path is required' }));
           return;
         }
 
@@ -77,11 +79,22 @@ export function startWebhookServer(
           return;
         }
 
-        await channel.sendMessage(targetJid, message);
-        logger.info(
-          { targetJid, length: message.length },
-          'Webhook message sent',
-        );
+        if (file_path) {
+          if (!channel.sendMedia) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Channel does not support sendMedia' }));
+            return;
+          }
+          await channel.sendMedia(targetJid, file_path, caption);
+          if (message) await channel.sendMessage(targetJid, message);
+          logger.info({ targetJid, file_path }, 'Webhook document sent');
+        } else {
+          await channel.sendMessage(targetJid, message!);
+          logger.info(
+            { targetJid, length: message!.length },
+            'Webhook message sent',
+          );
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, jid: targetJid }));
       } catch (err) {
