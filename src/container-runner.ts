@@ -190,7 +190,10 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  // Always re-sync so upstream agent-runner changes (new IPC tools, fixes)
+  // propagate to per-group copies. Groups can still customize files —
+  // but upstream changes take precedence on each container spawn.
+  if (fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
