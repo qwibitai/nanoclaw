@@ -213,8 +213,8 @@ You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to
 - Use `[[wiki-links]]` to connect related notes
 - Commit after changes
 
-### At conversation start
-**Read your project briefs.** Run `ls knowledge/projects/` and read any active project files. This is your memory — without it you're starting blind. If the user mentions a project by name, check for a matching brief before asking them to explain it again.
+### Before working on a project
+When someone mentions a project or asks you to work on something, check `knowledge/projects/` for a matching brief before asking them to explain it. Run `ls knowledge/projects/` to see what you know about, then read the relevant file. Don't read everything upfront — only load what's relevant to the current conversation.
 
 ### At conversation end
 Did you work on a project? **Update its file with current status and next steps.** Did you learn something new about a person, decision, or preference? Save it. If nothing stands out, skip it.
