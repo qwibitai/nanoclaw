@@ -457,6 +457,31 @@ export function getLatestMessage(
   return { id: row.id, fromMe: row.is_from_me === 1 };
 }
 
+export function isBotMessage(messageId: string, chatJid: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT is_bot_message, is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(messageId, chatJid) as
+    | { is_bot_message: number | null; is_from_me: number | null }
+    | undefined;
+  // Bot messages are flagged, or are from_me (sent by the assistant)
+  return row?.is_bot_message === 1 || row?.is_from_me === 1;
+}
+
+export function getRecentUnevaluatedRun(
+  chatJid: string,
+): SkillTaskRun | undefined {
+  return db
+    .prepare(
+      `SELECT r.* FROM skill_task_runs r
+       LEFT JOIN skill_evaluations e ON e.run_id = r.id
+       WHERE r.chat_jid = ? AND r.status = 'success' AND e.id IS NULL
+       ORDER BY r.created_at DESC LIMIT 1`,
+    )
+    .get(chatJid) as SkillTaskRun | undefined;
+}
+
 export function storeReaction(reaction: Reaction): void {
   if (!reaction.emoji) {
     db.prepare(

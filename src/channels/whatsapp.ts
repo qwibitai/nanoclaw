@@ -30,6 +30,7 @@ import {
   OnChatMetadata,
   RegisteredGroup,
 } from '../types.js';
+import { ChannelOpts, registerChannel } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -37,6 +38,7 @@ export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onReaction?: (messageId: string, chatJid: string, emoji: string) => void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -271,6 +273,9 @@ export class WhatsAppChannel implements Channel {
             },
             emoji ? 'Reaction added' : 'Reaction removed',
           );
+          if (emoji && this.opts.onReaction) {
+            this.opts.onReaction(messageId, chatJid, emoji);
+          }
         } catch (err) {
           logger.error({ err }, 'Failed to process reaction');
         }
@@ -467,3 +472,5 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));

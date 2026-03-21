@@ -62,6 +62,7 @@ import {
 } from './sender-allowlist.js';
 import { startEvaluationLoop } from './skills/evaluator.js';
 import { startEvolutionLoop } from './skills/evolution.js';
+import { handleReactionFeedback } from './skills/reaction-scorer.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
@@ -706,6 +707,13 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    onReaction: (messageId: string, chatJid: string, emoji: string) => {
+      try {
+        handleReactionFeedback(messageId, chatJid, emoji);
+      } catch (err) {
+        logger.warn({ err, chatJid, emoji }, 'Failed to process reaction feedback');
+      }
+    },
   };
 
   // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
