@@ -373,10 +373,15 @@ export class GitHubChannel implements Channel {
     // Determine the JID: per-issue/PR if possible, otherwise repo-level.
     // For check_suite from forks, pull_requests is often empty — look up via API.
     let issueNumber = extractIssueNumber(event, payload);
+    let prAuthorFromApi: string | null = null;
     if (!issueNumber && event === 'check_suite' && this.token) {
       const headSha = payload.check_suite?.head_sha;
       if (headSha) {
-        issueNumber = await this.findPrByHeadSha(repo, headSha);
+        const prInfo = await this.findPrByHeadSha(repo, headSha);
+        if (prInfo) {
+          issueNumber = prInfo.number;
+          prAuthorFromApi = prInfo.author;
+        }
       }
     }
     const chatJid = issueNumber ? `gh:${repo}#${issueNumber}` : `gh:${repo}`;
@@ -400,8 +405,9 @@ export class GitHubChannel implements Channel {
         const metadata: Record<string, string> = { type: groupType };
         if (title) metadata.title = title;
 
-        // Skip trigger for PRs/issues opened by the bot itself
-        const author = extractAuthor(event, payload);
+        // Skip trigger for PRs/issues opened by the bot itself.
+        // For check_suite events, extractAuthor returns null — use the API result.
+        const author = extractAuthor(event, payload) || prAuthorFromApi;
         const isBotAuthor = !!this.botUsername && author === this.botUsername;
         this.opts.registerGroup(chatJid, {
           name: chatName,
@@ -411,7 +417,28 @@ export class GitHubChannel implements Channel {
           requiresTrigger: !isBotAuthor,
           metadata,
         });
-        logger.info({ chatJid, folder }, 'Auto-registered GitHub group');
+        logger.info(
+          { chatJid, folder, author, isBotAuthor },
+          'Auto-registered GitHub group',
+        );
+      } else if (
+        event === 'check_suite' &&
+        registered[chatJid].requiresTrigger !== false
+      ) {
+        // Group already exists but might have been registered before we knew
+        // it was the bot's own PR. Update requiresTrigger if needed.
+        const author = extractAuthor(event, payload) || prAuthorFromApi;
+        const isBotAuthor = !!this.botUsername && author === this.botUsername;
+        if (isBotAuthor) {
+          this.opts.registerGroup(chatJid, {
+            ...registered[chatJid],
+            requiresTrigger: false,
+          });
+          logger.info(
+            { chatJid, author },
+            'Updated GitHub group to skip trigger (bot PR)',
+          );
+        }
       }
     }
 
@@ -444,7 +471,7 @@ export class GitHubChannel implements Channel {
   private async findPrByHeadSha(
     repo: string,
     headSha: string,
-  ): Promise<number | null> {
+  ): Promise<{ number: number; author: string } | null> {
     try {
       const url = `https://api.github.com/repos/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=30`;
       const res = await fetch(url, {
@@ -458,10 +485,10 @@ export class GitHubChannel implements Channel {
       const match = pulls.find((pr: any) => pr.head.sha === headSha);
       if (match) {
         logger.debug(
-          { repo, headSha, prNumber: match.number },
+          { repo, headSha, prNumber: match.number, author: match.user?.login },
           'Resolved check_suite head SHA to PR',
         );
-        return match.number;
+        return { number: match.number, author: match.user?.login ?? '' };
       }
       return null;
     } catch (err) {
