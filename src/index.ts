@@ -541,8 +541,14 @@ async function main(): Promise<void> {
 
     deleteSession(targetFolder);
     delete sessions[targetFolder];
+
+    // If a container is currently running for this group, send it a reset
+    // control message so it clears its in-memory sessionId/resumeAt before
+    // the next query. Without this the container would continue the old
+    // Claude session even though the host has already discarded it.
+    const resetSent = queue.sendResetByFolder(targetFolder);
     logger.info(
-      { targetFolder, sender: msg.sender },
+      { targetFolder, sender: msg.sender, containerReset: resetSent },
       'Session cleared via /new-session command',
     );
     await channel.sendMessage(chatJid, 'Session cleared. Starting fresh.');
