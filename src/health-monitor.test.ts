@@ -113,7 +113,10 @@ describe('HealthMonitor Ollama tracking', () => {
   });
 
   it('only considers latency within time window', () => {
-    monitor['ollamaLatencyLog'].push({ latencyMs: 15000, timestamp: Date.now() - 7200_000 });
+    monitor['ollamaLatencyLog'].push({
+      latencyMs: 15000,
+      timestamp: Date.now() - 7200_000,
+    });
     for (let i = 0; i < 10; i++) monitor.recordOllamaLatency(100);
     expect(monitor.isOllamaDegraded()).toBe(false);
   });

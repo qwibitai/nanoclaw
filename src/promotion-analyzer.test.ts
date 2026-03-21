@@ -38,7 +38,15 @@ rules:
     routing: notify
 `.trim();
 
-function makeTracker(stats: Array<{ trustRuleId: string; eventType: string; total: number; approved: number; rate: number }>) {
+function makeTracker(
+  stats: Array<{
+    trustRuleId: string;
+    eventType: string;
+    total: number;
+    approved: number;
+    rate: number;
+  }>,
+) {
   return {
     getApprovalStats: vi.fn().mockReturnValue(stats),
     recordDecision: vi.fn().mockReturnValue(100),
@@ -67,7 +75,13 @@ describe('PromotionAnalyzer.analyze()', () => {
 
   it('proposes promotion when approval rate > threshold and total > minimum', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'rule-calendar-new', eventType: 'calendar', total: 35, approved: 34, rate: 0.971 },
+      {
+        trustRuleId: 'rule-calendar-new',
+        eventType: 'calendar',
+        total: 35,
+        approved: 34,
+        rate: 0.971,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -103,10 +117,18 @@ rules:
     max_promotion: notify
 `.trim();
 
-    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(yamlWithNotifyAtFloor);
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
+      yamlWithNotifyAtFloor,
+    );
 
     const tracker = makeTracker([
-      { trustRuleId: 'rule-at-floor', eventType: 'email', total: 40, approved: 39, rate: 0.975 },
+      {
+        trustRuleId: 'rule-at-floor',
+        eventType: 'email',
+        total: 40,
+        approved: 39,
+        rate: 0.975,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -129,7 +151,13 @@ rules:
 
   it('skips rules with insufficient data (< 30 decisions)', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'rule-calendar-new', eventType: 'calendar', total: 29, approved: 28, rate: 0.966 },
+      {
+        trustRuleId: 'rule-calendar-new',
+        eventType: 'calendar',
+        total: 29,
+        approved: 28,
+        rate: 0.966,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -150,7 +178,13 @@ rules:
 
   it('skips rules with rate below threshold', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'rule-calendar-new', eventType: 'calendar', total: 50, approved: 40, rate: 0.8 },
+      {
+        trustRuleId: 'rule-calendar-new',
+        eventType: 'calendar',
+        total: 50,
+        approved: 40,
+        rate: 0.8,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -170,7 +204,13 @@ rules:
 
   it('skips stats where trustRuleId does not match any rule in YAML', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'nonexistent-rule', eventType: 'email', total: 50, approved: 50, rate: 1.0 },
+      {
+        trustRuleId: 'nonexistent-rule',
+        eventType: 'email',
+        total: 50,
+        approved: 50,
+        rate: 1.0,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -190,7 +230,13 @@ rules:
 
   it('sends proposals to Telegram via sendToMainGroup', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'rule-calendar-new', eventType: 'calendar', total: 35, approved: 34, rate: 0.971 },
+      {
+        trustRuleId: 'rule-calendar-new',
+        eventType: 'calendar',
+        total: 35,
+        approved: 34,
+        rate: 0.971,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -212,7 +258,13 @@ rules:
 
   it('records proposals as draft decisions in the approval tracker', async () => {
     const tracker = makeTracker([
-      { trustRuleId: 'rule-calendar-new', eventType: 'calendar', total: 35, approved: 34, rate: 0.971 },
+      {
+        trustRuleId: 'rule-calendar-new',
+        eventType: 'calendar',
+        total: 35,
+        approved: 34,
+        rate: 0.971,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -242,10 +294,18 @@ rules:
     max_promotion: notify
 `.trim();
 
-    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(yamlWithNotifyAtFloor);
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
+      yamlWithNotifyAtFloor,
+    );
 
     const tracker = makeTracker([
-      { trustRuleId: 'rule-blocked', eventType: 'email', total: 40, approved: 39, rate: 0.975 },
+      {
+        trustRuleId: 'rule-blocked',
+        eventType: 'email',
+        total: 40,
+        approved: 39,
+        rate: 0.975,
+      },
     ]);
     const eventRouter = makeEventRouter();
 
@@ -337,7 +397,8 @@ describe('PromotionAnalyzer.applyPromotion()', () => {
 
     analyzer.applyPromotion(proposal);
 
-    const writtenContent = (fs.writeFileSync as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    const writtenContent = (fs.writeFileSync as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
     // The written YAML should have the updated routing for the matched rule
     expect(writtenContent).toContain('notify');
     // The rule ID should still be present

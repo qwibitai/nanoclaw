@@ -40,7 +40,8 @@ export class HealthMonitor {
   private config: HealthMonitorConfig;
   private pausedGroups: Set<string> = new Set();
   private recentAlerts: Map<string, number> = new Map(); // dedup: key → timestamp
-  private ollamaLatencyLog: Array<{ latencyMs: number; timestamp: number }> = [];
+  private ollamaLatencyLog: Array<{ latencyMs: number; timestamp: number }> =
+    [];
 
   constructor(config: HealthMonitorConfig) {
     this.config = config;
@@ -144,7 +145,9 @@ export class HealthMonitor {
   recordOllamaLatency(latencyMs: number): void {
     this.ollamaLatencyLog.push({ latencyMs, timestamp: Date.now() });
     const cutoff = Date.now() - 2 * 3600_000;
-    this.ollamaLatencyLog = this.ollamaLatencyLog.filter((e) => e.timestamp > cutoff);
+    this.ollamaLatencyLog = this.ollamaLatencyLog.filter(
+      (e) => e.timestamp > cutoff,
+    );
   }
 
   getOllamaP95Latency(windowMs: number): number {

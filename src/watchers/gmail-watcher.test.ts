@@ -206,7 +206,11 @@ describe('GmailWatcher.parseMessage', () => {
       payload: {
         headers: [{ name: 'From', value: 'x@x.com' }],
         parts: [
-          { mimeType: 'image/png', filename: 'photo.png', body: { attachmentId: 'att-002', size: 200 } },
+          {
+            mimeType: 'image/png',
+            filename: 'photo.png',
+            body: { attachmentId: 'att-002', size: 200 },
+          },
         ],
       },
     };

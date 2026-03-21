@@ -109,10 +109,8 @@ export const MAX_CONTAINER_SPAWNS_PER_HOUR = 30;
 export const MAX_ERRORS_PER_HOUR = 20;
 
 // Ollama classification
-export const OLLAMA_HOST =
-  process.env.OLLAMA_HOST || 'http://localhost:11434';
-export const OLLAMA_MODEL =
-  process.env.OLLAMA_MODEL || 'qwen3:8b';
+export const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:8b';
 export const OLLAMA_TIMEOUT = parseInt(
   process.env.OLLAMA_TIMEOUT || '30000',
   10,
@@ -130,8 +128,7 @@ export const GMAIL_POLL_INTERVAL = parseInt(
 export const GMAIL_CREDENTIALS_PATH =
   process.env.GMAIL_CREDENTIALS_PATH ||
   path.join(HOME_DIR, '.gmail-mcp', 'credentials.json');
-export const GMAIL_ACCOUNT =
-  process.env.GMAIL_ACCOUNT || 'mgandal@gmail.com';
+export const GMAIL_ACCOUNT = process.env.GMAIL_ACCOUNT || 'mgandal@gmail.com';
 
 // Calendar watcher
 export const CALENDAR_POLL_INTERVAL = parseInt(

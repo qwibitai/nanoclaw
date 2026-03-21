@@ -110,9 +110,18 @@ describe('getPendingApprovals', () => {
 
 describe('getApprovalStats', () => {
   it('groups by trust_rule_id and computes rate', () => {
-    const idA1 = tracker.recordDecision({ ...sampleDecision, trustRuleId: 'rule-a' });
-    const idA2 = tracker.recordDecision({ ...sampleDecision, trustRuleId: 'rule-a' });
-    const idB1 = tracker.recordDecision({ ...sampleDecision, trustRuleId: 'rule-b' });
+    const idA1 = tracker.recordDecision({
+      ...sampleDecision,
+      trustRuleId: 'rule-a',
+    });
+    const idA2 = tracker.recordDecision({
+      ...sampleDecision,
+      trustRuleId: 'rule-a',
+    });
+    const idB1 = tracker.recordDecision({
+      ...sampleDecision,
+      trustRuleId: 'rule-b',
+    });
 
     tracker.recordResponse(idA1, 'approved');
     tracker.recordResponse(idA2, 'rejected');
@@ -134,8 +143,14 @@ describe('getApprovalStats', () => {
   });
 
   it('excludes expired decisions from denominator', () => {
-    const idA = tracker.recordDecision({ ...sampleDecision, trustRuleId: 'rule-c' });
-    const idB = tracker.recordDecision({ ...sampleDecision, trustRuleId: 'rule-c' });
+    const idA = tracker.recordDecision({
+      ...sampleDecision,
+      trustRuleId: 'rule-c',
+    });
+    const idB = tracker.recordDecision({
+      ...sampleDecision,
+      trustRuleId: 'rule-c',
+    });
 
     tracker.recordResponse(idA, 'approved');
     tracker.recordResponse(idB, 'expired');
@@ -182,7 +197,10 @@ describe('expireStaleApprovals', () => {
 
     // Manually back-date the timestamp to 25 hours ago
     const staleTime = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
-    db.prepare('UPDATE trust_decisions SET timestamp = ? WHERE id = ?').run(staleTime, id);
+    db.prepare('UPDATE trust_decisions SET timestamp = ? WHERE id = ?').run(
+      staleTime,
+      id,
+    );
 
     const expired = tracker.expireStaleApprovals(24);
     expect(expired).toBe(1);
@@ -209,7 +227,10 @@ describe('expireStaleApprovals', () => {
     tracker.recordResponse(id, 'approved');
 
     const staleTime = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
-    db.prepare('UPDATE trust_decisions SET timestamp = ? WHERE id = ?').run(staleTime, id);
+    db.prepare('UPDATE trust_decisions SET timestamp = ? WHERE id = ?').run(
+      staleTime,
+      id,
+    );
 
     const expired = tracker.expireStaleApprovals(24);
     expect(expired).toBe(0);

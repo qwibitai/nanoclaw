@@ -129,13 +129,17 @@ export function assembleContextPacket(
         const formatted = classified
           .slice(0, 10)
           .map(
-            (e: { payload?: { classification?: { urgency?: string; summary?: string } }; from?: string; finding?: string }) =>
+            (e: {
+              payload?: {
+                classification?: { urgency?: string; summary?: string };
+              };
+              from?: string;
+              finding?: string;
+            }) =>
               `[${e.payload?.classification?.urgency || 'medium'}] ${e.payload?.classification?.summary || e.finding || 'No summary'} (from: ${e.from || 'unknown'})`,
           )
           .join('\n');
-        sections.push(
-          `\n--- Recent Events (classified) ---\n${formatted}`,
-        );
+        sections.push(`\n--- Recent Events (classified) ---\n${formatted}`);
       }
     } catch {
       // Already read above or malformed, skip
