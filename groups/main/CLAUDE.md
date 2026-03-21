@@ -238,6 +238,18 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Knowledge Base
+
+You have a personal knowledge base at `/workspace/group/kb/`. See the `/knowledge-base` skill for full instructions.
+
+Quick reference:
+- Category files: `kb/agents.md`, `kb/reflections.md`, `kb/connections.md`, `kb/resources.md`, `kb/todos.md`
+- Full entries: `kb/entries/`
+- Search: `rg -i "query" /workspace/group/kb/`
+- When conversation topics match KB entries, briefly mention them if helpful.
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
