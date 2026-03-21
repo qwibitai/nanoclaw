@@ -518,17 +518,6 @@ export function getUnprocessedMessages(
     .all(chatJid, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
-/** @deprecated Use getUnprocessedMessages instead */
-export function getMessagesSince(
-  chatJid: string,
-  sinceTimestamp: string,
-  botPrefix: string,
-  limit: number = 200,
-): NewMessage[] {
-  // Ignore sinceTimestamp — now uses processed flag
-  return getUnprocessedMessages(chatJid, botPrefix, limit);
-}
-
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
