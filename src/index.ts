@@ -544,7 +544,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Handle /remote-control and /remote-control-end commands
+  // Handle /rc (and legacy /remote-control) commands
   async function handleRemoteControl(
     command: string,
     chatJid: string,
@@ -562,7 +562,7 @@ async function main(): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
-    if (command === '/remote-control') {
+    if (command === '/rc' || command === '/remote-control') {
       const result = await startRemoteControl(
         msg.sender,
         chatJid,
@@ -591,7 +591,13 @@ async function main(): Promise<void> {
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+      if (
+        trimmed === '/rc' ||
+        trimmed === '/rc-end' ||
+        trimmed === '/rcend' ||
+        trimmed === '/remote-control' ||
+        trimmed === '/remote-control-end'
+      ) {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
