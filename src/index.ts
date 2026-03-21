@@ -3,17 +3,28 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CALENDAR_LOOKAHEAD_DAYS,
+  CALENDAR_NAMES,
+  CALENDAR_POLL_INTERVAL,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
+  EVENT_ROUTER_ENABLED,
+  GMAIL_ACCOUNT,
+  GMAIL_CREDENTIALS_PATH,
+  GMAIL_POLL_INTERVAL,
   HEALTH_MONITOR_INTERVAL,
   IDLE_TIMEOUT,
   MAX_CONTAINER_SPAWNS_PER_HOUR,
   MAX_ERRORS_PER_HOUR,
+  OLLAMA_HOST,
+  OLLAMA_MODEL,
   POLL_INTERVAL,
   SESSION_IDLE_MS,
   SESSION_MAX_AGE_MS,
   TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
+  TRUST_MATRIX_PATH,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
@@ -77,6 +88,10 @@ import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { HealthMonitor } from './health-monitor.js';
 import { MessageBus } from './message-bus.js';
+import { EventRouter, TrustConfig } from './event-router.js';
+import { GmailWatcher } from './watchers/gmail-watcher.js';
+import { CalendarWatcher } from './watchers/calendar-watcher.js';
+import YAML from 'yaml';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -752,6 +767,79 @@ async function main(): Promise<void> {
 
   // Inter-agent message bus
   const messageBus = new MessageBus(path.join(process.cwd(), 'data', 'bus'));
+
+  // Event router and watchers (Phase 2)
+  if (EVENT_ROUTER_ENABLED) {
+    // Load trust matrix
+    let trustRules: TrustConfig = { default_routing: 'notify', rules: [] };
+    if (fs.existsSync(TRUST_MATRIX_PATH)) {
+      try {
+        trustRules = YAML.parse(
+          fs.readFileSync(TRUST_MATRIX_PATH, 'utf-8'),
+        ) as TrustConfig;
+        logger.info('Trust matrix loaded');
+      } catch (err) {
+        logger.warn({ err }, 'Failed to parse trust matrix, using defaults');
+      }
+    } else {
+      logger.info('No trust matrix found, using default routing (notify)');
+    }
+
+    const eventRouter = new EventRouter({
+      ollamaHost: OLLAMA_HOST,
+      ollamaModel: OLLAMA_MODEL,
+      trustRules: trustRules.rules,
+      defaultRouting: trustRules.default_routing,
+      messageBus,
+      healthMonitor,
+      onEscalate: async (event) => {
+        const mainJid = Object.keys(registeredGroups).find(
+          (jid) => registeredGroups[jid]?.isMain,
+        );
+        if (mainJid) {
+          const channel = findChannel(channels, mainJid);
+          await channel?.sendMessage(
+            mainJid,
+            `Escalated event: ${event.classification.summary}`,
+          );
+        }
+      },
+    });
+
+    const watcherStateDir = path.join(DATA_DIR, 'watchers');
+
+    // Gmail watcher
+    if (fs.existsSync(GMAIL_CREDENTIALS_PATH)) {
+      const gmailWatcher = new GmailWatcher({
+        credentialsPath: GMAIL_CREDENTIALS_PATH,
+        account: GMAIL_ACCOUNT,
+        eventRouter,
+        pollIntervalMs: GMAIL_POLL_INTERVAL,
+        stateDir: watcherStateDir,
+      });
+      gmailWatcher
+        .start()
+        .catch((err) => logger.error({ err }, 'Gmail watcher failed to start'));
+    } else {
+      logger.info('Gmail credentials not found, Gmail watcher disabled');
+    }
+
+    // Calendar watcher
+    const calendarWatcher = new CalendarWatcher({
+      calendars: CALENDAR_NAMES,
+      eventRouter,
+      pollIntervalMs: CALENDAR_POLL_INTERVAL,
+      lookAheadDays: CALENDAR_LOOKAHEAD_DAYS,
+      stateDir: watcherStateDir,
+    });
+    calendarWatcher
+      .start()
+      .catch((err) =>
+        logger.error({ err }, 'Calendar watcher failed to start'),
+      );
+
+    logger.info('Event router and watchers initialized');
+  }
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(

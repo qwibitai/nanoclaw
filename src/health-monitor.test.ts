@@ -83,3 +83,38 @@ describe('HealthMonitor', () => {
     });
   });
 });
+
+describe('HealthMonitor Ollama tracking', () => {
+  let monitor: HealthMonitor;
+
+  beforeEach(() => {
+    monitor = new HealthMonitor({
+      maxSpawnsPerHour: 30,
+      maxErrorsPerHour: 20,
+      onAlert: vi.fn(),
+    });
+  });
+
+  it('records Ollama latency', () => {
+    monitor.recordOllamaLatency(500);
+    monitor.recordOllamaLatency(1000);
+    expect(monitor.getOllamaP95Latency(3600_000)).toBeGreaterThan(0);
+  });
+
+  it('reports not degraded when latency is low', () => {
+    for (let i = 0; i < 10; i++) monitor.recordOllamaLatency(200);
+    expect(monitor.isOllamaDegraded()).toBe(false);
+  });
+
+  it('reports degraded when p95 exceeds threshold', () => {
+    for (let i = 0; i < 19; i++) monitor.recordOllamaLatency(100);
+    monitor.recordOllamaLatency(15000);
+    expect(monitor.isOllamaDegraded()).toBe(true);
+  });
+
+  it('only considers latency within time window', () => {
+    monitor['ollamaLatencyLog'].push({ latencyMs: 15000, timestamp: Date.now() - 7200_000 });
+    for (let i = 0; i < 10; i++) monitor.recordOllamaLatency(100);
+    expect(monitor.isOllamaDegraded()).toBe(false);
+  });
+});

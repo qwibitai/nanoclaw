@@ -23,6 +23,8 @@
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "dotenv-cli": "^11.0.0",
+    "google-auth-library": "^10.6.2",
+    "googleapis": "^171.4.0",
     "grammy": "^1.39.3",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",

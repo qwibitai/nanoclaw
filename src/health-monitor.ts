@@ -40,6 +40,7 @@ export class HealthMonitor {
   private config: HealthMonitorConfig;
   private pausedGroups: Set<string> = new Set();
   private recentAlerts: Map<string, number> = new Map(); // dedup: key → timestamp
+  private ollamaLatencyLog: Array<{ latencyMs: number; timestamp: number }> = [];
 
   constructor(config: HealthMonitorConfig) {
     this.config = config;
@@ -138,6 +139,27 @@ export class HealthMonitor {
     const cutoff = Date.now() - 2 * 3600_000;
     this.spawnLog = this.spawnLog.filter((e) => e.timestamp > cutoff);
     this.errorLog = this.errorLog.filter((e) => e.timestamp > cutoff);
+  }
+
+  recordOllamaLatency(latencyMs: number): void {
+    this.ollamaLatencyLog.push({ latencyMs, timestamp: Date.now() });
+    const cutoff = Date.now() - 2 * 3600_000;
+    this.ollamaLatencyLog = this.ollamaLatencyLog.filter((e) => e.timestamp > cutoff);
+  }
+
+  getOllamaP95Latency(windowMs: number): number {
+    const cutoff = Date.now() - windowMs;
+    const recent = this.ollamaLatencyLog
+      .filter((e) => e.timestamp > cutoff)
+      .map((e) => e.latencyMs)
+      .sort((a, b) => a - b);
+    if (recent.length === 0) return 0;
+    const idx = Math.floor(recent.length * 0.95);
+    return recent[Math.min(idx, recent.length - 1)];
+  }
+
+  isOllamaDegraded(): boolean {
+    return this.getOllamaP95Latency(3600_000) > 10_000;
   }
 
   getStatus(): Record<string, unknown> {
