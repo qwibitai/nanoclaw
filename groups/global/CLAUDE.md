@@ -32,6 +32,13 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 ### Sub-agents and teammates
 
+You can use the Agent tool to launch sub-agents for parallel research or tasks. When you do, ALWAYS send a progress message first so the user knows you're working:
+
+```
+mcp__nanoclaw__send_message("Investigando... dame un momento 🔍")
+// then launch Agent tools
+```
+
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
 ## Your Workspace
