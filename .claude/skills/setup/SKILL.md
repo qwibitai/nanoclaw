@@ -218,6 +218,6 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
 
 
-## Diagnostics (Optional)
+## Diagnostics
 
-After completing all steps above, read and follow [diagnostics.md](diagnostics.md).
+Read and follow [diagnostics.md](diagnostics.md).

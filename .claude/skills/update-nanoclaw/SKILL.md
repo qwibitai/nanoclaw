@@ -235,6 +235,6 @@ Tell the user:
   - If running manually: restart `npm run dev`
 
 
-## Diagnostics (Optional)
+## Diagnostics
 
-After completing all steps above, read and follow [diagnostics.md](diagnostics.md).
+Read and follow [diagnostics.md](diagnostics.md).
