@@ -150,3 +150,16 @@ export const CALENDAR_LOOKAHEAD_DAYS = parseInt(
 
 // Trust matrix
 export const TRUST_MATRIX_PATH = path.join(DATA_DIR, 'trust.yaml');
+
+// Promotion analyzer
+export const PROMOTION_MIN_DECISIONS = parseInt(
+  process.env.PROMOTION_MIN_DECISIONS || '30',
+  10,
+);
+export const PROMOTION_THRESHOLD = parseFloat(
+  process.env.PROMOTION_THRESHOLD || '0.95',
+);
+export const APPROVAL_EXPIRY_HOURS = parseInt(
+  process.env.APPROVAL_EXPIRY_HOURS || '24',
+  10,
+);
