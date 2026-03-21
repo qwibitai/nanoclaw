@@ -20,14 +20,25 @@ allowed-tools: Bash(gh:*), Bash(git:*)
 gh repo create REPO_NAME --public --description "DESC" --add-readme
 ```
 
+### Check push access before starting work
+
+Always check permissions first — if you have push access, work directly without forking.
+
+```bash
+gh api repos/OWNER/REPO --jq '.permissions'
+# push=true → clone and push branches directly (no fork needed)
+# push=false → fork first (see below)
+```
+
 ### Clone a repo to /home/node/work/
 
 ```bash
 mkdir -p /home/node/work
-cd /home/node/work && git clone https://github.com/OWNER/REPO.git
+USERNAME=$(gh api user --jq .login)
+cd /home/node/work && git clone https://${USERNAME}:${GH_TOKEN}@github.com/OWNER/REPO.git
 ```
 
-### Create a branch, commit, push
+### Create a branch, commit, push (with push access)
 
 ```bash
 cd /home/node/work/REPO
@@ -35,24 +46,29 @@ git checkout -b feat/branch-name
 # make changes
 git add -A
 git commit -m "feat: description"
-USERNAME=$(gh api user --jq .login)
-git remote set-url origin https://${USERNAME}:${GH_TOKEN}@github.com/${USERNAME}/REPO.git
 git push origin feat/branch-name
 ```
 
-### Fork a repo
+### Open a PR (direct contributor)
+
+```bash
+gh pr create --repo OWNER/REPO --head BRANCH --base main \
+  --title "Title" --body "Body"
+```
+
+### Fork a repo (only when you do NOT have push access)
 
 ```bash
 gh repo fork OWNER/REPO --clone=false
-# then clone your fork:
 USERNAME=$(gh api user --jq .login)
 cd /home/node/work && git clone https://${USERNAME}:${GH_TOKEN}@github.com/${USERNAME}/REPO.git
 ```
 
-### Open a PR
+### Open a PR from a fork
 
 ```bash
-gh pr create --repo OWNER/REPO --head USERNAME:BRANCH --base main \
+USERNAME=$(gh api user --jq .login)
+gh pr create --repo OWNER/REPO --head ${USERNAME}:BRANCH --base main \
   --title "Title" --body "Body"
 ```
 
