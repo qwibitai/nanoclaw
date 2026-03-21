@@ -845,6 +845,15 @@
       "path": "/skills-catalog/plugins/superpowers/test-driven-development"
     },
     {
+      "name": "tilesheet-sprites",
+      "source": "local",
+      "description": "Generate sprite tilesheets with Gemini AI and extract individual sprites using pixel-projection bounding box detection. Use when asked to generate game sprites, create sprite sheets, or extract sprites from tilesheets. Requires GEMINI_API_KEY.",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/tilesheet-sprites"
+    },
+    {
       "name": "time-stepping",
       "source": "local",
       "description": "Plan and control time-step policies for simulations. Use when coupling CFL/physics limits with adaptive stepping, ramping initial transients, scheduling outputs/checkpoints, or planning restart strategies for long runs.",

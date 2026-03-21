@@ -63,8 +63,18 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
-# Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/files
+# Build memory-mcp-server
+WORKDIR /home/node/memory-mcp-server
+COPY memory-mcp-server/package*.json ./
+RUN npm install
+COPY memory-mcp-server/ ./
+RUN npm run build
+
+# Back to agent-runner workdir
+WORKDIR /app
+
+# Create workspace directories (including knowledge vault)
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/files /workspace/group/knowledge
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.
