@@ -15,9 +15,10 @@
  *   GH_TOKEN or gh CLI auth — for data gathering and posting
  */
 
-import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { execSync, spawnSync } from 'child_process';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { resolve, dirname, join } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 
 // ── Config ──────────────────────────────────────────────────────────────
@@ -185,19 +186,54 @@ Write a progress report that combines hard data with narrative storytelling. Inc
 ${spirit}`;
 
   try {
+    // Write prompt to temp file to avoid shell quoting issues with special chars.
+    // The prompt contains backticks, quotes, newlines — breaks as a CLI arg.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'progress-report-'));
+    const promptFile = join(tmpDir, 'prompt.txt');
+    writeFileSync(promptFile, prompt);
+
     // Use claude CLI with Sonnet for quality narrative.
-    // Auth: subscription token via CLAUDE_ACCESS_TOKEN (CI) or local OAuth.
+    // Auth: subscription token via CLAUDE_CODE_OAUTH_TOKEN (CI) or local OAuth.
     // --dangerously-skip-permissions: non-interactive (CI context)
     // --max-turns 1: single response, no tool use needed
-    const result = execSync(
-      `claude -p ${JSON.stringify(prompt)} --model claude-sonnet-4-6 --output-format text --max-turns 1 --dangerously-skip-permissions`,
-      { encoding: 'utf8', timeout: 120_000, maxBuffer: 1024 * 1024 },
+    // Pipe prompt via stdin to avoid arg length limits and quoting issues
+    const result = spawnSync(
+      'claude',
+      [
+        '-p',
+        '--model',
+        'claude-sonnet-4-6',
+        '--output-format',
+        'text',
+        '--max-turns',
+        '1',
+        '--dangerously-skip-permissions',
+      ],
+      {
+        input: prompt,
+        encoding: 'utf8',
+        timeout: 300_000, // 5 min — large prompt with 100+ PRs needs time
+        maxBuffer: 2 * 1024 * 1024,
+      },
     );
-    if (!result.trim()) {
+
+    rmSync(tmpDir, { recursive: true, force: true });
+
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      console.error(
+        `claude CLI exited ${result.status}: ${result.stderr?.slice(0, 200)}`,
+      );
+      return generateTemplateReport(data);
+    }
+    const output = result.stdout?.trim();
+    if (!output) {
       console.error('Empty claude CLI response');
       return generateTemplateReport(data);
     }
-    return result.trim();
+    return output;
   } catch (e: any) {
     console.error(
       `claude CLI failed: ${e.message?.split('\n')[0] || 'unknown error'}`,
