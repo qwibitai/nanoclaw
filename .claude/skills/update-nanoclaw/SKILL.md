@@ -237,4 +237,4 @@ Tell the user:
 
 ## Diagnostics (Optional)
 
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
+After completing all steps above, read and follow [diagnostics.md](diagnostics.md).
