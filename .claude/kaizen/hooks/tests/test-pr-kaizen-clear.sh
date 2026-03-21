@@ -1006,5 +1006,80 @@ else
 fi
 assert_contains "output mentions 3 findings" "3" "$OUTPUT"
 
+echo ""
+echo "=== STDOUT without prefix: raw JSON array in stdout (kaizen #313) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT (kaizen #313): When STDOUT contains just the JSON array without
+# the KAIZEN_IMPEDIMENTS: prefix, the hook should still extract and validate it.
+# This happens when echo output and cat heredoc output are captured separately.
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+[{\"impediment\": \"Test issue\", \"disposition\": \"fixed-in-pr\"}]
+IMPEDIMENTS" \
+  '[{"impediment": "Test issue", "disposition": "fixed-in-pr"}]')
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: raw JSON array in stdout cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: raw JSON array in stdout did NOT clear gate (kaizen #313 regression)"
+  ((FAIL++))
+fi
+assert_contains "output mentions gate cleared" "gate cleared" "$OUTPUT"
+
+echo ""
+echo "=== STDOUT without prefix: multiline JSON array (kaizen #313) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: Multiline JSON without prefix also works
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+[
+  {\"impediment\": \"Issue A\", \"disposition\": \"fixed-in-pr\"},
+  {\"impediment\": \"Issue B\", \"disposition\": \"filed\", \"ref\": \"#100\"}
+]
+IMPEDIMENTS" \
+  '[
+  {"impediment": "Issue A", "disposition": "fixed-in-pr"},
+  {"impediment": "Issue B", "disposition": "filed", "ref": "#100"}
+]')
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: multiline JSON without prefix cleared gate"
+  ((PASS++))
+else
+  echo "  FAIL: multiline JSON without prefix did NOT clear gate (kaizen #313 regression)"
+  ((FAIL++))
+fi
+assert_contains "output mentions 2 findings" "2 finding" "$OUTPUT"
+
+echo ""
+echo "=== Empty STDOUT: JSON extracted from COMMAND heredoc body (kaizen #313) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT: When STDOUT is empty but COMMAND contains heredoc with JSON,
+# extraction from the full COMMAND (not stripped CMD_LINE) should work
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
+[{\"impediment\": \"Fallback test\", \"disposition\": \"fixed-in-pr\"}]
+IMPEDIMENTS" \
+  "")
+
+if ! has_pr_kaizen_state; then
+  echo "  PASS: empty stdout, extracted from COMMAND heredoc"
+  ((PASS++))
+else
+  echo "  FAIL: empty stdout, COMMAND heredoc fallback failed (kaizen #313 regression)"
+  ((FAIL++))
+fi
+
+
 teardown
 print_results

@@ -162,7 +162,28 @@ if echo "$CMD_LINE" | grep -qE 'KAIZEN_IMPEDIMENTS:'; then
     RAW_AFTER_PREFIX=$(echo "$STDOUT" | sed -n '/KAIZEN_IMPEDIMENTS:/,$ p' | sed '1s/.*KAIZEN_IMPEDIMENTS:[[:space:]]*//' | tr '\n' ' ')
   fi
 
-  # Fallback: extract from command itself (inline echo)
+  # Fallback 1: STDOUT may contain just the JSON without the prefix (kaizen #313)
+  # This happens when echo and cat outputs are captured separately or prefix is missing
+  if [ -z "$RAW_AFTER_PREFIX" ] && [ -n "$STDOUT" ]; then
+    # Try parsing STDOUT directly as JSON array
+    TRIMMED_STDOUT=$(echo "$STDOUT" | tr '\n' ' ' | sed 's/^[[:space:]]*//')
+    if echo "$TRIMMED_STDOUT" | jq 'type == "array"' 2>/dev/null | grep -q true; then
+      RAW_AFTER_PREFIX="$TRIMMED_STDOUT"
+    fi
+  fi
+
+  # Fallback 2: extract heredoc body from the FULL command (kaizen #313)
+  # CMD_LINE has heredoc stripped; COMMAND still has it. Extract the heredoc body
+  # (everything between the delimiter lines) and try to parse as JSON.
+  if [ -z "$RAW_AFTER_PREFIX" ]; then
+    # Extract text between heredoc delimiters, collapse to one line, try as JSON
+    HEREDOC_BODY=$(echo "$COMMAND" | sed -n '/<<.*IMPEDIMENTS/,/^IMPEDIMENTS/{ /<<.*IMPEDIMENTS/d; /^IMPEDIMENTS/d; p; }' | tr '\n' ' ')
+    if [ -n "$HEREDOC_BODY" ] && echo "$HEREDOC_BODY" | jq 'type == "array"' 2>/dev/null | grep -q true; then
+      RAW_AFTER_PREFIX="$HEREDOC_BODY"
+    fi
+  fi
+
+  # Fallback 3: extract from CMD_LINE (inline echo, no heredoc)
   if [ -z "$RAW_AFTER_PREFIX" ]; then
     RAW_AFTER_PREFIX=$(echo "$CMD_LINE" | sed -n 's/.*KAIZEN_IMPEDIMENTS:[[:space:]]*//p' | tr '\n' ' ')
   fi
