@@ -2,7 +2,20 @@
 
 ## Overview
 
-NanoClaw skills are distributed as git branches on the upstream repository. Applying a skill is a `git merge`. Updating core is a `git merge`. Everything is standard git.
+This document covers **feature skills** — skills that add capabilities via git branch merges. This is the most complex skill type and the primary way NanoClaw is extended.
+
+NanoClaw has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full taxonomy:
+
+| Type | Location | How it works |
+|------|----------|-------------|
+| **Feature** (this doc) | `.claude/skills/` + `skill/*` branch | SKILL.md has instructions; code lives on a branch, applied via `git merge` |
+| **Utility** | `.claude/skills/<name>/` with code files | Self-contained tools; code in skill directory, copied into place on install |
+| **Operational** | `.claude/skills/` on `main` | Instruction-only workflows (setup, debug, update) |
+| **Container** | `container/skills/` | Loaded inside agent containers at runtime |
+
+---
+
+Feature skills are distributed as git branches on the upstream repository. Applying a skill is a `git merge`. Updating core is a `git merge`. Everything is standard git.
 
 This replaces the previous `skills-engine/` system (three-way file merging, `.nanoclaw/` state, manifest files, replay, backup/restore) with plain git operations and Claude for conflict resolution.
 
@@ -310,7 +323,9 @@ Standard fork contribution workflow. Their custom changes stay on their main and
 
 ## Contributing a Skill
 
-### Contributor flow
+The flow below is for **feature skills** (branch-based). For utility skills (self-contained tools) and container skills, the contributor opens a PR that adds files directly to `.claude/skills/<name>/` or `container/skills/<name>/` — no branch extraction needed. See [CONTRIBUTING.md](../CONTRIBUTING.md) for all skill types.
+
+### Contributor flow (feature skills)
 
 1. Fork `qwibitai/nanoclaw`
 2. Branch from `main`
