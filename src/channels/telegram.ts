@@ -326,6 +326,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        replyToMessageId: ctx.message.reply_to_message?.message_id?.toString(),
       });
 
       logger.info(
