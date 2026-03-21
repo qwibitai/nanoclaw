@@ -178,7 +178,7 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
+        assistantName: group.trigger.replace(/^@/, '') || ASSISTANT_NAME,
         mcpServers: group.containerConfig?.mcpServers,
       },
       (proc, containerName) =>

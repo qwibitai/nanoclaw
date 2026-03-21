@@ -71,7 +71,10 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 function groupTriggerPattern(trigger: string): RegExp {
-  return new RegExp(`^${trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  return new RegExp(
+    `^${trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+    'i',
+  );
 }
 
 const channels: Channel[] = [];
@@ -324,7 +327,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: ASSISTANT_NAME,
+        assistantName: group.trigger.replace(/^@/, '') || ASSISTANT_NAME,
         mcpServers: group.containerConfig?.mcpServers,
       },
       (proc, containerName) =>
