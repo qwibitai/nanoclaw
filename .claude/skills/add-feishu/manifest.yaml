@@ -1,0 +1,19 @@
+skill: feishu
+version: 1.0.0
+description: "Feishu (Lark) channel integration via WebSocket long-connection mode. No public URL needed."
+core_version: 1.2.1
+adds:
+  - src/channels/feishu.ts
+  - src/feishu-auth.ts
+modifies:
+  - src/channels/index.ts
+structured:
+  npm_dependencies:
+    "@larksuiteoapi/node-sdk": "^1.58.0"
+  package_json_scripts:
+    auth:feishu: "tsx src/feishu-auth.ts"
+  env_additions:
+    - FEISHU_APP_ID
+    - FEISHU_APP_SECRET
+conflicts: []
+depends: []
