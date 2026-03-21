@@ -27,6 +27,7 @@
     "discord.js": "^14.18.0",
     "googleapis": "^144.0.0",
     "grammy": "^1.39.3",
+    "nanoclaw-ui": "file:../nanoclaw-ui",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "qrcode": "^1.5.4",
