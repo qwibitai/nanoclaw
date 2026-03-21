@@ -321,10 +321,6 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Resource limits — prevent runaway containers from exhausting host memory
-  const memLimit = process.env.CONTAINER_MEMORY_LIMIT || '1g';
-  args.push('--memory', memLimit);
-
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
