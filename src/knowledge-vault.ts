@@ -75,5 +75,23 @@ export function initKnowledgeVault(groupFolder: string): string {
     );
   }
 
+  // Ensure the container's node user (uid 1000) can write to the vault
+  try {
+    chownRecursive(vaultPath, 1000, 1000);
+  } catch {
+    // Best-effort
+  }
+
   return vaultPath;
+}
+
+function chownRecursive(dir: string, uid: number, gid: number): void {
+  fs.chownSync(dir, uid, gid);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    fs.chownSync(full, uid, gid);
+    if (entry.isDirectory()) {
+      chownRecursive(full, uid, gid);
+    }
+  }
 }
