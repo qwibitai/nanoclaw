@@ -121,7 +121,8 @@ function extractTitle(event: string, payload: any): string | undefined {
 
 /**
  * Extract the author (opener) of the issue or PR from a webhook payload.
- * Returns null when the author cannot be determined (e.g. check_suite).
+ * For check_suite events, uses the head_commit author as a best-effort
+ * approximation (the actual PR author isn't in the webhook payload).
  */
 export function extractAuthor(event: string, payload: any): string | null {
   switch (event) {
@@ -132,6 +133,15 @@ export function extractAuthor(event: string, payload: any): string | null {
     case 'issues':
     case 'issue_comment':
       return payload.issue?.user?.login ?? null;
+    case 'check_suite':
+      // The check_suite payload doesn't include the PR author directly.
+      // Use the head_commit author as a proxy — for bot PRs, the bot is
+      // typically the committer.
+      return (
+        payload.check_suite?.head_commit?.author?.login ??
+        payload.check_suite?.head_commit?.committer?.login ??
+        null
+      );
     default:
       return null;
   }
@@ -312,8 +322,14 @@ export class GitHubChannel implements Channel {
       const senderName =
         payload.sender?.login || payload.sender?.id?.toString() || 'github';
 
-      // Filter by allowed senders if configured
-      if (this.allowedSenders && !this.allowedSenders.has(senderName)) {
+      // Filter by allowed senders if configured.
+      // Skip filtering for check_suite events — the sender is always GitHub/Actions,
+      // not the PR author, so the allowlist would incorrectly block all CI events.
+      if (
+        event !== 'check_suite' &&
+        this.allowedSenders &&
+        !this.allowedSenders.has(senderName)
+      ) {
         logger.debug(
           { sender: senderName, event },
           'GitHub event from non-allowed sender, skipping',

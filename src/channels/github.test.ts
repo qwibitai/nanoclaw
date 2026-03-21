@@ -812,7 +812,27 @@ describe('extractAuthor', () => {
     ).toBe('bob');
   });
 
-  it('returns null for check_suite events', () => {
+  it('returns head_commit author for check_suite events', () => {
+    expect(
+      extractAuthor('check_suite', {
+        check_suite: {
+          head_commit: { author: { login: 'seb-writes-code' } },
+        },
+      }),
+    ).toBe('seb-writes-code');
+  });
+
+  it('falls back to committer for check_suite events', () => {
+    expect(
+      extractAuthor('check_suite', {
+        check_suite: {
+          head_commit: { committer: { login: 'seb-writes-code' } },
+        },
+      }),
+    ).toBe('seb-writes-code');
+  });
+
+  it('returns null for check_suite without head_commit', () => {
     expect(extractAuthor('check_suite', { check_suite: {} })).toBeNull();
   });
 
@@ -1062,6 +1082,31 @@ describe('GitHubChannel sender allowlist', () => {
           html_url: 'https://github.com/cmraible/seb/issues/1',
         },
         sender: { login: 'anyone' },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalled();
+  });
+
+  it('delivers check_suite events even from non-allowed senders', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(SECRET, 0, 'test-token', ['alice'], opts);
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'check_suite',
+      secret: SECRET,
+      payload: {
+        action: 'completed',
+        repository: { full_name: 'cmraible/seb' },
+        check_suite: {
+          conclusion: 'failure',
+          head_branch: 'feat/test',
+          url: 'https://api.github.com/repos/cmraible/seb/check-suites/1',
+          pull_requests: [{ number: 10 }],
+        },
+        sender: { login: 'github-actions[bot]' },
       },
     });
 
