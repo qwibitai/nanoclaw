@@ -85,7 +85,7 @@ mcpServer.tool(
     domain: z.string().describe('Service domain, e.g. "light", "switch", "climate", "script"'),
     service: z.string().describe('Service name, e.g. "turn_on", "turn_off", "set_temperature"'),
     entity_id: z.string().optional().describe('Target entity ID, e.g. "light.living_room". Omit if the service does not target a specific entity.'),
-    data: z.record(z.unknown()).optional().describe('Additional service data as a JSON object, e.g. {"brightness": 128} or {"temperature": 21.5}'),
+    data: z.record(z.string(), z.unknown()).optional().describe('Additional service data as a JSON object, e.g. {"brightness": 128} or {"temperature": 21.5}'),
   },
   async (args) => {
     try {
