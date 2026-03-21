@@ -12,9 +12,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 const IPC_DIR = '/workspace/ipc';
-const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
-const FILES_DIR = path.join(IPC_DIR, 'files');
+const QUEUE_DIR = path.join(IPC_DIR, 'queue');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -58,7 +56,7 @@ server.tool(
       isScheduled: process.env.NANOCLAW_SCHEDULED_TASK === '1' ? 'true' : undefined,
     };
 
-    writeIpcFile(MESSAGES_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
   },
@@ -146,7 +144,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return {
       content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
@@ -205,7 +203,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
   },
@@ -224,7 +222,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
   },
@@ -243,7 +241,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
   },
@@ -293,7 +291,7 @@ server.tool(
     if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
   },
@@ -327,7 +325,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
@@ -388,12 +386,12 @@ Use this after generating output files (renders, archives, exports) to share the
       };
     }
 
-    // Copy files that aren't on a mounted path into /workspace/ipc/files/
+    // Copy files that aren't on a mounted path into /workspace/ipc/queue/
     // so the host can access them. Only /workspace/* paths are mounted.
     const resolvedFiles = args.files.map((f) => {
       if (f.path.startsWith('/workspace/')) return f;
-      const dest = path.join(FILES_DIR, `${Date.now()}-${path.basename(f.path)}`);
-      fs.mkdirSync(FILES_DIR, { recursive: true });
+      const dest = path.join(QUEUE_DIR, `${Date.now()}-${path.basename(f.path)}`);
+      fs.mkdirSync(QUEUE_DIR, { recursive: true });
       fs.copyFileSync(f.path, dest);
       return { ...f, path: dest };
     });
@@ -407,7 +405,7 @@ Use this after generating output files (renders, archives, exports) to share the
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(FILES_DIR, data);
+    writeIpcFile(QUEUE_DIR, data);
 
     return {
       content: [
