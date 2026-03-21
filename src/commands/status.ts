@@ -104,10 +104,13 @@ export const statusCommand = {
       if (detailed && activeTasks.length > 0) {
         const taskList = activeTasks
           .slice(0, 5)
-          .map(
-            (t) =>
-              `• **${t.schedule_type}**: ${t.prompt.slice(0, 50)}${t.prompt.length > 50 ? '...' : ''}`,
-          )
+          .map((t) => {
+            const nextRun = t.next_run
+              ? new Date(t.next_run).toLocaleString('en-US', { timeZone: process.env.TZ ?? 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+              : 'unknown';
+            const label = t.prompt.slice(0, 40) + (t.prompt.length > 40 ? '…' : '');
+            return `• \`${t.id.slice(0, 8)}\` **${t.schedule_value}** — ${label}\n  ⏭ ${nextRun}`;
+          })
           .join('\n');
 
         embed.addFields({
