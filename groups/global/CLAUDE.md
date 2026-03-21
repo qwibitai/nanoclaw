@@ -70,14 +70,63 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
-## Memory
+## Memory & Knowledge
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+### Automatic Memory Capture
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+After EVERY conversation, before your session ends, run through this checklist:
+
+1. **People** — Did you learn about anyone new? Update `knowledge/people/{name}.md`
+2. **Projects** — Any new projects, goals, or status updates? Update `knowledge/projects/{name}.md`
+3. **Decisions** — Were any decisions made? Record in `knowledge/decisions/{topic}.md`
+4. **Preferences** — Did the user express preferences? Update `knowledge/preferences/{topic}.md`
+5. **Reference** — Any useful links, facts, or resources? Save to `knowledge/reference/{topic}.md`
+
+Don't skip this. Even small facts compound into valuable context over time.
+
+### Using Memory Tools
+
+If semantic memory tools are available via MCP, use them:
+
+- `mcp__memory__memory_search` — **Always search before starting work.** Query with the user's topic to pull relevant context.
+- `mcp__memory__memory_store` — Save important information with proper category and tags
+- `mcp__memory__memory_list` — Browse memories by category or tag
+- `mcp__memory__memory_link` — Create [[wiki-links]] between related notes
+
+If these tools are not available, fall back to reading/writing files in `knowledge/` directly.
+
+**Start of conversation routine:**
+1. Search memory for the user's name/topic (via `memory_search` or by reading relevant `knowledge/` files)
+2. Read the `_dashboard.md` for an overview of what you know
+3. Check `conversations/` for recent relevant transcripts
+
+### Knowledge Note Format
+
+Every note should have YAML frontmatter:
+
+```yaml
+---
+title: Alex Chen
+created: 2025-01-15
+updated: 2025-01-20
+tags: [engineering, backend, team-lead]
+related: [[projects/api-rewrite]], [[decisions/go-migration]]
+status: active
+---
+```
+
+### Linking and Cross-References
+
+- Use `[[wiki-links]]` actively to connect related notes
+- When creating a note about a person, link to their projects
+- When recording a decision, link to the people involved
+- Prefer specific links (`[[people/alex-chen]]`) over vague ones
+- One concept per file with descriptive filenames (e.g., `people/alex-backend-lead.md`)
+- Never delete notes — mark outdated ones with `deprecated: true` in frontmatter
+
+### Conversation History
+
+The `conversations/` folder contains searchable history. The `conversations/_summaries/` folder has structured summaries with metadata. Search these when you need context from past sessions.
 
 ## Skills Catalog
 
@@ -108,27 +157,6 @@ When working on code:
 - You can manage issues, review PRs, and create repos with `gh`
 
 When asked to work on someone else's repo, fork it first if you don't have push access, then open a PR from your fork.
-
-## Knowledge Base
-
-You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to store and retrieve information that should persist across conversations.
-
-### Structure
-- `people/` — people you learn about (one file per person)
-- `projects/` — ongoing work, goals, status
-- `preferences/` — user preferences, communication style
-- `decisions/` — key decisions and their rationale
-- `reference/` — facts, links, resources
-
-### How to Use
-- Read relevant notes at the start of each conversation for context
-- Create/update notes when you learn something worth remembering
-- Use `[[wiki-links]]` between related notes
-- Add YAML frontmatter with metadata (tags, dates, related people)
-- One concept per file with descriptive filenames (e.g., `people/alex-backend-lead.md`)
-- Never delete notes — mark outdated ones with `deprecated: true` in frontmatter
-- After creating or updating notes, commit changes with a descriptive message
-- If a git remote is configured, push after committing
 
 ## Use Subagents for Complex Tasks
 
