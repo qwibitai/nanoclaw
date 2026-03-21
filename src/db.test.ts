@@ -3,13 +3,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteSession,
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -450,6 +453,27 @@ describe('message query LIMIT', () => {
 });
 
 // --- RegisteredGroup isMain round-trip ---
+
+describe('deleteSession', () => {
+  it('removes a stored session', () => {
+    setSession('main', 'abc-123');
+    expect(getSession('main')).toBe('abc-123');
+    deleteSession('main');
+    expect(getSession('main')).toBeUndefined();
+  });
+
+  it('does not throw when deleting a non-existent session', () => {
+    expect(() => deleteSession('no-such-folder')).not.toThrow();
+  });
+
+  it('only removes the targeted group session', () => {
+    setSession('group-a', 'session-a');
+    setSession('group-b', 'session-b');
+    deleteSession('group-a');
+    expect(getSession('group-a')).toBeUndefined();
+    expect(getSession('group-b')).toBe('session-b');
+  });
+});
 
 describe('registered group isMain', () => {
   it('persists isMain=true through set/get round-trip', () => {
