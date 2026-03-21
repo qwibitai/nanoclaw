@@ -1,81 +1,42 @@
-# Diagnostics (end-of-setup instructions)
+# Diagnostics (Optional)
 
-Follow these steps **after all other setup steps are complete**.
+After setup is complete, offer to send anonymous diagnostics.
 
-## 1. Collect events
-
-Build the list of events to send:
-
-1. If channel skills were invoked during setup (e.g., `/add-telegram`), add a `skill_applied` event for each.
-2. Add a `setup_complete` event for setup itself.
-
-A `/setup` with no channels produces just `setup_complete`.
-
-## 2. Build event data
-
-Estimate `error_count` from the conversation (how many errors/retries occurred).
-
-**For `setup_complete`:**
-```json
-{
-  "channels_selected": ["whatsapp", "telegram"],
-  "error_count": 0,
-  "failed_step": null,
-  "exit_code": null
-}
-```
-- `channels_selected`: which channels the user chose to install
-- `failed_step`: if setup failed, which step (environment / container / groups / register / mounts / service / verify)
-- `exit_code`: if a step failed, its exit code
-
-**For each `skill_applied`:**
-```json
-{
-  "skill_name": "add-telegram",
-  "is_upstream_skill": true,
-  "conflict_files": ["package.json", "src/index.ts"],
-  "error_count": 0
-}
-```
-- `skill_name`: upstream skill name, or `"custom"` for non-upstream skills
-- `conflict_files`: filenames with merge conflicts (the script gates these against upstream)
-
-## 3. Dry run all events
-
-For **each** event, run with `--dry-run` to get the payload:
+## 1. Check opt-out
 
 ```bash
-npx tsx scripts/send-diagnostics.ts --event <event_type> --success --data '<json>' --dry-run
+npx tsx scripts/send-diagnostics.ts --event setup_complete --success --data '{}' --dry-run
 ```
 
-Use `--failure` instead of `--success` if that particular skill/step failed.
+If no output, the user opted out permanently — stop here.
 
-If **any** dry-run produces no output, the user has opted out permanently — skip the rest.
+## 2. Prepare events
 
-## 4. Show the user and ask once
+For each channel skill invoked during setup (e.g. `/add-telegram`), prepare a `skill_applied` event. Then prepare a `setup_complete` event for setup itself.
 
-Show **all** payloads together and ask **once** (not per-event):
+Run `--dry-run` for each to get the final payload:
+
+```bash
+npx tsx scripts/send-diagnostics.ts --event skill_applied --success --data '{"skill_name":"add-telegram","is_upstream_skill":true,"conflict_files":[],"error_count":0}' --dry-run
+npx tsx scripts/send-diagnostics.ts --event setup_complete --success --data '{"channels_selected":["telegram"],"error_count":0,"failed_step":null,"exit_code":null}' --dry-run
+```
+
+Use `--failure` instead of `--success` if that step failed. Fill in the values based on what actually happened during the session.
+
+## 3. Ask the user
+
+Show all payloads and ask once:
 
 > "Would you like to send anonymous diagnostics to help improve NanoClaw? Here's exactly what would be sent:"
 >
-> (show all JSON payloads)
+> (show JSON payloads)
 >
 > **Yes** / **No** / **Never ask again**
 
 Use AskUserQuestion.
 
-## 5. Handle response
+## 4. Handle response
 
-- **Yes**: Send **all** events (run each command without `--dry-run`):
-  ```bash
-  npx tsx scripts/send-diagnostics.ts --event <event_type> --success --data '<json>'
-  ```
-  Confirm: "Diagnostics sent (N events)." or "Diagnostics sent." if only one.
-
-- **No**: Do nothing. User will be asked again next time.
-
-- **Never ask again**: Run:
-  ```bash
-  npx tsx -e "import { setNeverAsk } from './scripts/send-diagnostics.ts'; setNeverAsk();"
-  ```
-  Confirm: "Got it — you won't be asked again."
+- **Yes**: Run each command again without `--dry-run`. Confirm: "Diagnostics sent."
+- **No**: Do nothing.
+- **Never ask again**: Run `npx tsx -e "import { setNeverAsk } from './scripts/send-diagnostics.ts'; setNeverAsk();"` — confirm: "Got it — you won't be asked again."
