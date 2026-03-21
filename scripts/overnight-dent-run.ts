@@ -44,6 +44,7 @@ export interface BatchState {
   last_case: string;
   last_branch: string;
   last_worktree: string;
+  progress_issue?: string;
 }
 
 export interface RunResult {
@@ -106,6 +107,13 @@ Run to completion. Do not ask for confirmation — make autonomous decisions.`;
   }
 
   prompt += `
+
+## Merge & Labeling Policy
+
+After creating a PR, you MUST queue it for auto-merge:
+  gh pr merge <url> --repo Garsson-io/nanoclaw --squash --delete-branch --auto
+Do NOT leave PRs open for manual review — this is an unattended batch.
+The harness will also attempt auto-merge as a safety net, but do it yourself first.
 
 ## Stopping the Loop
 
@@ -243,6 +251,172 @@ export function processStreamMessage(
       );
       break;
   }
+}
+
+// ── Post-run hygiene ──────────────────────────────────────────────────────
+
+function ghExec(cmd: string): string {
+  try {
+    return execSync(cmd, { encoding: 'utf8', timeout: 30_000 }).trim();
+  } catch (e: any) {
+    console.log(
+      `  [hygiene] warning: ${cmd.slice(0, 80)}… → ${e.message?.split('\n')[0] || 'failed'}`,
+    );
+    return '';
+  }
+}
+
+export function labelArtifacts(result: RunResult): void {
+  for (const pr of result.prs) {
+    const m = pr.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+    if (m) {
+      ghExec(`gh pr edit ${m[2]} --repo ${m[1]} --add-label overnight-dent`);
+      console.log(`  [hygiene] labeled PR ${pr}`);
+    }
+  }
+  for (const issue of result.issuesFiled) {
+    const m = issue.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
+    if (m) {
+      ghExec(`gh issue edit ${m[2]} --repo ${m[1]} --add-label overnight-dent`);
+      console.log(`  [hygiene] labeled issue ${issue}`);
+    }
+  }
+}
+
+export function queueAutoMerge(result: RunResult): void {
+  for (const pr of result.prs) {
+    const m = pr.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+    if (m) {
+      const out = ghExec(
+        `gh pr merge ${m[2]} --repo ${m[1]} --squash --delete-branch --auto`,
+      );
+      if (out) {
+        console.log(`  [hygiene] queued auto-merge for PR ${pr}`);
+      }
+    }
+  }
+}
+
+export function ensureBatchProgressIssue(
+  state: BatchState,
+  stateFile: string,
+): string {
+  if (state.progress_issue) return state.progress_issue;
+
+  const title = `[Batch] ${state.batch_id}: ${state.guidance.slice(0, 60)}`;
+  const body = [
+    `## Overnight-Dent Batch Progress`,
+    '',
+    `| Field | Value |`,
+    `|-------|-------|`,
+    `| **Batch ID** | \`${state.batch_id}\` |`,
+    `| **Guidance** | ${state.guidance} |`,
+    `| **Max runs** | ${state.max_runs || 'unlimited'} |`,
+    `| **Budget/run** | ${state.budget ? '$' + state.budget : 'none'} |`,
+    `| **Started** | ${new Date(state.batch_start * 1000).toISOString()} |`,
+    '',
+    'Run-by-run updates will be posted as comments below.',
+    '',
+    '_This issue is auto-managed by the overnight-dent harness._',
+  ].join('\n');
+
+  const url = ghExec(
+    `gh issue create --repo Garsson-io/kaizen --title ${JSON.stringify(title)} --label overnight-dent,kaizen --body ${JSON.stringify(body)}`,
+  );
+
+  if (url) {
+    console.log(`  [hygiene] created batch progress issue: ${url}`);
+    // Persist to state so subsequent runs find it
+    const freshState = readState(stateFile);
+    freshState.progress_issue = url;
+    writeState(stateFile, freshState);
+    return url;
+  }
+  return '';
+}
+
+export function updateBatchProgressIssue(
+  progressIssue: string,
+  runNum: number,
+  exitCode: number,
+  duration: number,
+  result: RunResult,
+): void {
+  if (!progressIssue) return;
+
+  const m = progressIssue.match(/issues\/(\d+)/);
+  if (!m) return;
+  const issueNum = m[1];
+
+  const status = exitCode === 0 ? 'success' : `failed (exit ${exitCode})`;
+  const mins = Math.floor(duration / 60);
+  const secs = duration % 60;
+
+  const lines = [
+    `### Run #${runNum} — ${status}`,
+    '',
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| **Duration** | ${mins}m ${secs}s |`,
+    `| **Cost** | $${result.cost.toFixed(2)} |`,
+    `| **Tool calls** | ${result.toolCalls} |`,
+  ];
+
+  if (result.prs.length > 0) {
+    lines.push(`| **PRs** | ${result.prs.join(', ')} |`);
+  }
+  if (result.issuesFiled.length > 0) {
+    lines.push(`| **Issues filed** | ${result.issuesFiled.join(', ')} |`);
+  }
+  if (result.issuesClosed.length > 0) {
+    lines.push(`| **Issues closed** | ${result.issuesClosed.join(' ')} |`);
+  }
+  if (result.cases.length > 0) {
+    lines.push(
+      `| **Cases** | ${result.cases.map((c) => '`' + c + '`').join(', ')} |`,
+    );
+  }
+  if (result.stopRequested) {
+    lines.push('', `**STOP requested:** ${result.stopReason}`);
+  }
+
+  const comment = lines.join('\n');
+  ghExec(
+    `gh issue comment ${issueNum} --repo Garsson-io/kaizen --body ${JSON.stringify(comment)}`,
+  );
+  console.log(`  [hygiene] updated progress issue with run #${runNum}`);
+}
+
+export function closeBatchProgressIssue(
+  progressIssue: string,
+  state: BatchState,
+): void {
+  if (!progressIssue) return;
+  const m = progressIssue.match(/issues\/(\d+)/);
+  if (!m) return;
+
+  const elapsed = Math.floor(Date.now() / 1000) - state.batch_start;
+  const hours = Math.floor(elapsed / 3600);
+  const mins = Math.floor((elapsed % 3600) / 60);
+
+  const summary = [
+    `### Batch Complete`,
+    '',
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| **Runs** | ${state.run} |`,
+    `| **Duration** | ${hours}h ${mins}m |`,
+    `| **Stop reason** | ${state.stop_reason || 'completed'} |`,
+    `| **PRs** | ${state.prs.length > 0 ? state.prs.join(', ') : 'none'} |`,
+    `| **Issues filed** | ${state.issues_filed.length > 0 ? state.issues_filed.join(', ') : 'none'} |`,
+    `| **Issues closed** | ${state.issues_closed.length > 0 ? state.issues_closed.join(' ') : 'none'} |`,
+  ].join('\n');
+
+  ghExec(
+    `gh issue comment ${m[1]} --repo Garsson-io/kaizen --body ${JSON.stringify(summary)}`,
+  );
+  ghExec(`gh issue close ${m[1]} --repo Garsson-io/kaizen --reason completed`);
+  console.log(`  [hygiene] closed batch progress issue`);
 }
 
 // ── Execute Claude ───────────────────────────────────────────────────────────
@@ -435,6 +609,13 @@ async function main(): Promise<void> {
 
   printRunSummary(runNum, exitCode, duration, result);
 
+  // ── Post-run hygiene: label, auto-merge, progress tracking ──────────────
+
+  const progressIssue = ensureBatchProgressIssue(state, stateFile);
+  labelArtifacts(result);
+  queueAutoMerge(result);
+  updateBatchProgressIssue(progressIssue, runNum, exitCode, duration, result);
+
   // ── Update state ─────────────────────────────────────────────────────────
 
   const freshState = readState(stateFile);
@@ -507,14 +688,32 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
+// ── Close batch subcommand ────────────────────────────────────────────────
+
+function closeBatch(): void {
+  const stateFile = process.argv[3];
+  if (!stateFile || !existsSync(stateFile)) {
+    console.error('Usage: overnight-dent-run.ts --close-batch <state-file>');
+    process.exit(1);
+  }
+  const state = readState(stateFile);
+  if (state.progress_issue) {
+    closeBatchProgressIssue(state.progress_issue, state);
+  }
+}
+
 // Guard: don't run main() when imported for testing
 const isDirectRun =
   process.argv[1]?.endsWith('overnight-dent-run.ts') ||
   process.argv[1]?.endsWith('overnight-dent-run.js');
 
 if (isDirectRun) {
-  main().catch((err) => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-  });
+  if (process.argv[2] === '--close-batch') {
+    closeBatch();
+  } else {
+    main().catch((err) => {
+      console.error('Fatal error:', err);
+      process.exit(1);
+    });
+  }
 }

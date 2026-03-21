@@ -142,7 +142,8 @@ cat > "$STATE_FILE" << STATEOF
   "last_pr": "",
   "last_case": "",
   "last_branch": "",
-  "last_worktree": ""
+  "last_worktree": "",
+  "progress_issue": ""
 }
 STATEOF
 
@@ -320,6 +321,9 @@ while true; do
     check_halt_file && break 2
   done
 done
+
+# ── Close batch progress issue ────────────────────────────────────────────────
+npx tsx "$SCRIPT_DIR/overnight-dent-run.ts" --close-batch "$STATE_FILE" 2>/dev/null || true
 
 # ── Batch summary ─────────────────────────────────────────────────────────────
 node -e "

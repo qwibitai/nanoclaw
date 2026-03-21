@@ -1,16 +1,25 @@
 /**
- * Tests for overnight-dent-run stream-json parsing and stop signal detection.
+ * Tests for overnight-dent-run stream-json parsing, stop signal detection,
+ * and post-run hygiene (labeling, auto-merge, batch progress issue).
  *
  * INVARIANT: extractArtifacts must find all PR URLs, issue URLs, closed issues,
  * and case names in text without false positives. checkStopSignal must detect
  * the OVERNIGHT_STOP marker and extract the reason.
+ *
+ * INVARIANT: Post-run hygiene functions must call gh CLI with correct repo/number
+ * arguments, and must not throw on failure (advisory-only).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   extractArtifacts,
   checkStopSignal,
   formatToolUse,
   processStreamMessage,
+  labelArtifacts,
+  queueAutoMerge,
+  ensureBatchProgressIssue,
+  updateBatchProgressIssue,
+  closeBatchProgressIssue,
   type RunResult,
   type BatchState,
 } from './overnight-dent-run.js';
@@ -201,5 +210,211 @@ describe('processStreamMessage', () => {
       Date.now(),
     );
     expect(r.prs).toEqual(['https://github.com/Garsson-io/nanoclaw/pull/99']);
+  });
+});
+
+// ── Post-run hygiene tests ────────────────────────────────────────────────
+
+// Mock child_process.execSync for hygiene functions
+vi.mock('child_process', async () => {
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    execSync: vi.fn().mockReturnValue(''),
+  };
+});
+
+import { execSync } from 'child_process';
+const mockExecSync = vi.mocked(execSync);
+
+function resultWithPRs(...prs: string[]): RunResult {
+  return {
+    ...emptyResult(),
+    prs,
+  };
+}
+
+function resultWithIssues(...issues: string[]): RunResult {
+  return {
+    ...emptyResult(),
+    issuesFiled: issues,
+  };
+}
+
+function sampleState(overrides: Partial<BatchState> = {}): BatchState {
+  return {
+    batch_id: 'batch-260321-0210-4b50',
+    batch_start: Math.floor(Date.now() / 1000) - 3600,
+    guidance: 'focus on hooks reliability',
+    max_runs: 5,
+    cooldown: 30,
+    budget: '5.00',
+    max_failures: 3,
+    run: 2,
+    prs: [],
+    issues_filed: [],
+    issues_closed: [],
+    cases: [],
+    consecutive_failures: 0,
+    current_cooldown: 30,
+    stop_reason: '',
+    last_issue: '',
+    last_pr: '',
+    last_case: '',
+    last_branch: '',
+    last_worktree: '',
+    ...overrides,
+  };
+}
+
+describe('labelArtifacts', () => {
+  beforeEach(() => {
+    mockExecSync.mockReset();
+    mockExecSync.mockReturnValue(Buffer.from(''));
+  });
+
+  it('labels PRs with overnight-dent in the correct repo', () => {
+    const r = resultWithPRs('https://github.com/Garsson-io/nanoclaw/pull/234');
+    labelArtifacts(r);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'gh pr edit 234 --repo Garsson-io/nanoclaw --add-label overnight-dent',
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+  });
+
+  it('labels issues with overnight-dent in the correct repo', () => {
+    const r = resultWithIssues(
+      'https://github.com/Garsson-io/kaizen/issues/267',
+    );
+    labelArtifacts(r);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'gh issue edit 267 --repo Garsson-io/kaizen --add-label overnight-dent',
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+  });
+
+  it('handles multiple PRs and issues', () => {
+    const r: RunResult = {
+      ...emptyResult(),
+      prs: [
+        'https://github.com/Garsson-io/nanoclaw/pull/1',
+        'https://github.com/Garsson-io/nanoclaw/pull/2',
+      ],
+      issuesFiled: ['https://github.com/Garsson-io/kaizen/issues/10'],
+    };
+    labelArtifacts(r);
+
+    // 2 PR labels + 1 issue label = 3 calls
+    expect(mockExecSync).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not throw on gh CLI failure', () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error('gh: not found');
+    });
+
+    const r = resultWithPRs('https://github.com/Garsson-io/nanoclaw/pull/234');
+    expect(() => labelArtifacts(r)).not.toThrow();
+  });
+
+  it('skips labeling when no artifacts', () => {
+    labelArtifacts(emptyResult());
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('queueAutoMerge', () => {
+  beforeEach(() => {
+    mockExecSync.mockReset();
+    mockExecSync.mockReturnValue(Buffer.from(''));
+  });
+
+  it('queues auto-merge with correct flags', () => {
+    const r = resultWithPRs('https://github.com/Garsson-io/nanoclaw/pull/99');
+    queueAutoMerge(r);
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'gh pr merge 99 --repo Garsson-io/nanoclaw --squash --delete-branch --auto',
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+  });
+
+  it('does not throw on failure', () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error('already queued');
+    });
+
+    const r = resultWithPRs('https://github.com/Garsson-io/nanoclaw/pull/99');
+    expect(() => queueAutoMerge(r)).not.toThrow();
+  });
+});
+
+describe('updateBatchProgressIssue', () => {
+  beforeEach(() => {
+    mockExecSync.mockReset();
+    mockExecSync.mockReturnValue(Buffer.from(''));
+  });
+
+  it('posts a comment with run details', () => {
+    const r: RunResult = {
+      ...emptyResult(),
+      prs: ['https://github.com/Garsson-io/nanoclaw/pull/55'],
+      cost: 3.42,
+      toolCalls: 87,
+    };
+    updateBatchProgressIssue(
+      'https://github.com/Garsson-io/kaizen/issues/500',
+      3,
+      0,
+      420,
+      r,
+    );
+
+    expect(mockExecSync).toHaveBeenCalledTimes(1);
+    const call = mockExecSync.mock.calls[0]![0] as string;
+    expect(call).toContain('gh issue comment 500 --repo Garsson-io/kaizen');
+    expect(call).toContain('Run #3');
+    expect(call).toContain('$3.42');
+  });
+
+  it('does nothing when no progress issue', () => {
+    updateBatchProgressIssue('', 1, 0, 100, emptyResult());
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('closeBatchProgressIssue', () => {
+  beforeEach(() => {
+    mockExecSync.mockReset();
+    mockExecSync.mockReturnValue(Buffer.from(''));
+  });
+
+  it('posts summary comment and closes the issue', () => {
+    const state = sampleState({
+      run: 5,
+      prs: ['https://github.com/Garsson-io/nanoclaw/pull/1'],
+      stop_reason: 'max runs reached',
+    });
+
+    closeBatchProgressIssue(
+      'https://github.com/Garsson-io/kaizen/issues/500',
+      state,
+    );
+
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    const commentCall = mockExecSync.mock.calls[0]![0] as string;
+    expect(commentCall).toContain('gh issue comment 500');
+    expect(commentCall).toContain('Batch Complete');
+
+    const closeCall = mockExecSync.mock.calls[1]![0] as string;
+    expect(closeCall).toContain('gh issue close 500');
+  });
+
+  it('does nothing when no progress issue', () => {
+    closeBatchProgressIssue('', sampleState());
+    expect(mockExecSync).not.toHaveBeenCalled();
   });
 });
