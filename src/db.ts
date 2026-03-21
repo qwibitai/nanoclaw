@@ -451,38 +451,25 @@ export function markMessagesUnprocessed(
 
 export function getNewMessages(
   jids: string[],
-  lastTimestamp: string,
   botPrefix: string,
   limit: number = 200,
-): { messages: NewMessage[]; newTimestamp: string } {
-  if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
+): { messages: NewMessage[] } {
+  if (jids.length === 0) return { messages: [] };
 
-  const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-
+  const placeholders = jids.map(() => '?').join(', ');
   const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+       FROM messages
+       WHERE processed = 0 AND chat_jid IN (${placeholders})
+         AND is_bot_message = 0 AND content NOT LIKE ?
+         AND content != '' AND content IS NOT NULL
+       ORDER BY timestamp
+       LIMIT ?`,
+    )
+    .all(...jids, `${botPrefix}:%`, limit) as NewMessage[];
 
-  let newTimestamp = lastTimestamp;
-  for (const row of rows) {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-  }
-
-  return { messages: rows, newTimestamp };
+  return { messages: rows };
 }
 
 /**
@@ -506,29 +493,33 @@ export function getConversationContext(
   return db.prepare(sql).all(chatJid, limit) as NewMessage[];
 }
 
+export function getUnprocessedMessages(
+  chatJid: string,
+  botPrefix: string,
+  limit: number = 200,
+): NewMessage[] {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+       FROM messages
+       WHERE processed = 0 AND chat_jid = ?
+         AND is_bot_message = 0 AND content NOT LIKE ?
+         AND content != '' AND content IS NOT NULL
+       ORDER BY timestamp
+       LIMIT ?`,
+    )
+    .all(chatJid, `${botPrefix}:%`, limit) as NewMessage[];
+}
+
+/** @deprecated Use getUnprocessedMessages instead */
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  // Ignore sinceTimestamp — now uses processed flag
+  return getUnprocessedMessages(chatJid, botPrefix, limit);
 }
 
 export function createTask(
