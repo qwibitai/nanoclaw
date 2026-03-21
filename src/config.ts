@@ -107,3 +107,46 @@ export const CONTEXT_PACKET_MAX_SIZE = parseInt(
 export const HEALTH_MONITOR_INTERVAL = 60_000;
 export const MAX_CONTAINER_SPAWNS_PER_HOUR = 30;
 export const MAX_ERRORS_PER_HOUR = 20;
+
+// Ollama classification
+export const OLLAMA_HOST =
+  process.env.OLLAMA_HOST || 'http://localhost:11434';
+export const OLLAMA_MODEL =
+  process.env.OLLAMA_MODEL || 'qwen3:8b';
+export const OLLAMA_TIMEOUT = parseInt(
+  process.env.OLLAMA_TIMEOUT || '30000',
+  10,
+);
+
+// Event router
+export const EVENT_ROUTER_ENABLED =
+  (process.env.EVENT_ROUTER_ENABLED || 'true') === 'true';
+
+// Gmail watcher
+export const GMAIL_POLL_INTERVAL = parseInt(
+  process.env.GMAIL_POLL_INTERVAL || '60000',
+  10,
+);
+export const GMAIL_CREDENTIALS_PATH =
+  process.env.GMAIL_CREDENTIALS_PATH ||
+  path.join(HOME_DIR, '.gmail-mcp', 'credentials.json');
+export const GMAIL_ACCOUNT =
+  process.env.GMAIL_ACCOUNT || 'mgandal@gmail.com';
+
+// Calendar watcher
+export const CALENDAR_POLL_INTERVAL = parseInt(
+  process.env.CALENDAR_POLL_INTERVAL || '60000',
+  10,
+);
+export const CALENDAR_NAMES = (
+  process.env.CALENDAR_NAMES || 'MJG,Outlook,Gandal_Lab_Meetings'
+)
+  .split(',')
+  .map((s) => s.trim());
+export const CALENDAR_LOOKAHEAD_DAYS = parseInt(
+  process.env.CALENDAR_LOOKAHEAD_DAYS || '7',
+  10,
+);
+
+// Trust matrix
+export const TRUST_MATRIX_PATH = path.join(DATA_DIR, 'trust.yaml');
