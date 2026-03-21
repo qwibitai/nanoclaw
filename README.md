@@ -44,6 +44,26 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
 
+### Direct Setup Without Claude Skills
+
+If you are using the OpenAI backend, or you want to avoid Claude Code skill/login requirements during setup, you can run the setup steps directly from your terminal:
+
+```bash
+./setup.sh
+node --import tsx ./setup/index.ts --step environment
+node --import tsx ./setup/index.ts --step container --runtime docker
+node --import tsx ./setup/index.ts --step service
+node --import tsx ./setup/index.ts --step verify
+```
+
+This produces the same host-side setup outcome without using `/setup`.
+
+If you override `CONTAINER_IMAGE` in `.env`, make sure the image tag you build matches that value. For example, if `.env` contains `CONTAINER_IMAGE=nanoclaw-agent-v3:latest`, build that exact tag:
+
+```bash
+docker build -t nanoclaw-agent-v3:latest container/
+```
+
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
@@ -167,19 +187,38 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw now has a pluggable agent backend.
+
+**Claude backend (default)**
 
 ```bash
+AGENT_BACKEND=claude
+ANTHROPIC_API_KEY=your-key-here
+```
+
+You can also point Claude at any Claude API-compatible endpoint:
+
+```bash
+AGENT_BACKEND=claude
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+**OpenAI-compatible backend**
 
-Note: The model must support the Anthropic API format for best compatibility.
+```bash
+AGENT_BACKEND=openai
+AGENT_MODEL=gpt-5
+OPENAI_API_KEY=your-openai-key-here
+# Optional:
+# OPENAI_BASE_URL=https://your-openai-compatible-endpoint.com/v1
+```
+
+This OpenAI backend is useful when your Claude Code quota is constrained or when you want to switch models quickly, but it is not yet feature-parity with the Claude backend:
+- Claude remains the full NanoClaw agent path with Claude Code tools, MCP integration, agent teams, and native session resumption.
+- The OpenAI backend currently provides text-only turns with per-group conversation persistence, which is enough to prove the backend abstraction and support model switching.
+
+You can extend the backend interface to add more CLIs or model providers later without rewriting the host orchestrator.
 
 **How do I debug issues?**
 

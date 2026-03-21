@@ -35,6 +35,26 @@ claude
 
 > **注意：** 以 `/` 开头的命令（如 `/setup`、`/add-whatsapp`）是 [Claude Code 技能](https://code.claude.com/docs/en/skills)。请在 `claude` CLI 提示符中输入，而非在普通终端中。
 
+### 不使用 Claude Skills 的直接安装方式
+
+如果您使用的是 OpenAI 后端，或者希望在安装过程中避免依赖 Claude Code 的技能/登录流程，也可以直接在终端运行以下步骤：
+
+```bash
+./setup.sh
+node --import tsx ./setup/index.ts --step environment
+node --import tsx ./setup/index.ts --step container --runtime docker
+node --import tsx ./setup/index.ts --step service
+node --import tsx ./setup/index.ts --step verify
+```
+
+这样可以在不使用 `/setup` 的情况下完成相同的宿主机侧安装流程。
+
+如果您在 `.env` 中覆盖了 `CONTAINER_IMAGE`，请确保实际构建的镜像标签与该值一致。例如，如果 `.env` 中包含 `CONTAINER_IMAGE=nanoclaw-agent-v3:latest`，则应构建相同标签：
+
+```bash
+docker build -t nanoclaw-agent-v3:latest container/
+```
+
 ## 设计哲学
 
 **小巧易懂：** 单一进程，少量源文件。无微服务、无消息队列、无复杂抽象层。让 Claude Code 引导您轻松上手。

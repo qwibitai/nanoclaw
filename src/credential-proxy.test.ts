@@ -4,7 +4,13 @@ import type { AddressInfo } from 'net';
 
 const mockEnv: Record<string, string> = {};
 vi.mock('./env.js', () => ({
-  readEnvFile: vi.fn(() => ({ ...mockEnv })),
+  readEnvFile: vi.fn((keys: string[]) => {
+    const result: Record<string, string> = {};
+    for (const key of keys) {
+      if (mockEnv[key]) result[key] = mockEnv[key];
+    }
+    return result;
+  }),
 }));
 
 vi.mock('./logger.js', () => ({
@@ -24,7 +30,7 @@ function makeRequest(
 }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { ...options, hostname: '127.0.0.1', port },
+      { ...options, hostname: '127.0.0.1', port, agent: false },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
@@ -71,9 +77,10 @@ describe('credential-proxy', () => {
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
-    Object.assign(mockEnv, env, {
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
-    });
+    Object.assign(mockEnv, env);
+    if (!mockEnv.ANTHROPIC_BASE_URL && !mockEnv.OPENAI_BASE_URL) {
+      mockEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
+    }
     proxyServer = await startCredentialProxy(0);
     return (proxyServer.address() as AddressInfo).port;
   }
@@ -188,5 +195,30 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('openai mode injects bearer auth', async () => {
+    proxyPort = await startProxy({
+      AGENT_BACKEND: 'openai',
+      OPENAI_API_KEY: 'sk-openai-real-key',
+      OPENAI_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/responses',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer sk-openai-real-key',
+    );
   });
 });
