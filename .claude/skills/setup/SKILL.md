@@ -122,6 +122,16 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
+### 4b. Validate Credentials
+
+Run `npx tsx setup/index.ts --step validate-credentials` and parse the status block.
+
+- If STATUS=success → Credentials are valid. Continue.
+- If STATUS=failed → The token or API key is invalid. 
+  - Use `AskUserQuestion: The Claude token you provided is invalid. Would you like to enter a new one?`
+  - If they want to enter a new one, repeat step 4 to collect it and update `.env`, then re-run this validation step.
+  - If they want to skip for now, warn them that the agents will not be able to function.
+
 ## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
@@ -198,7 +208,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 4
+- CREDENTIALS=missing or STATUS=failed → re-run step 4 and 4b
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
