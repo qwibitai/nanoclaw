@@ -115,6 +115,36 @@ src/ipc-github-issues.test.ts" ""
 OUTPUT=$(run_hook_stderr "$HOOK" "gh pr merge 42")
 assert_contains "unrelated prefixed test → warning" "Test coverage policy" "$OUTPUT"
 
+
+echo ""
+echo "=== Uncovered files → ready-to-paste test-exceptions block ==="
+
+setup_gh_git_mocks "src/index.ts\nsrc/config.ts" ""
+
+OUTPUT=$(run_hook_stderr "$HOOK" "gh pr merge 42")
+assert_contains "shows test-exceptions fence" 'test-exceptions' "$OUTPUT"
+assert_contains "lists first uncovered file in block" "src/index.ts -- reason" "$OUTPUT"
+assert_contains "lists second uncovered file in block" "src/config.ts -- reason" "$OUTPUT"
+
+echo ""
+echo "=== Multi-line mock with escape sequences (regression #214) ==="
+
+# This tests the fix for kaizen #214: setup_gh_git_mocks should handle \n escape sequences
+setup_gh_git_mocks "src/cases.ts\nsrc/router.ts" ""
+
+OUTPUT=$(run_hook_stderr "$HOOK" "gh pr merge 42")
+# Both files should appear as separate uncovered entries
+assert_contains "escape \\n: first file listed" "src/cases.ts" "$OUTPUT"
+assert_contains "escape \\n: second file listed" "src/router.ts" "$OUTPUT"
+
+echo ""
+echo "=== All covered → no test-exceptions block shown ==="
+
+setup_gh_git_mocks "src/index.ts\nsrc/index.test.ts" ""
+
+OUTPUT=$(run_hook_stderr "$HOOK" "gh pr merge 42")
+assert_not_contains "covered files → no exceptions block" "test-exceptions" "$OUTPUT"
+
 print_results
 
 echo ""

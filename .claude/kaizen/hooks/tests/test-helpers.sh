@@ -117,7 +117,7 @@ setup_gh_git_mocks() {
   cat > "$MOCK_DIR/gh" << MOCK
 #!/bin/bash
 if echo "\$@" | grep -q "pr diff"; then
-  echo "$gh_files"
+  printf '%b\n' "$gh_files"
   exit 0
 fi
 if echo "\$@" | grep -q "pr view"; then
@@ -136,7 +136,7 @@ if echo "\$@" | grep -q "remote get-url"; then
   exit 0
 fi
 if echo "\$@" | grep -q "diff --name-only"; then
-  echo "$git_files"
+  printf '%b\n' "$git_files"
   exit 0
 fi
 if echo "\$@" | grep -q "status --porcelain"; then
