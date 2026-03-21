@@ -94,15 +94,13 @@ To clear this gate, submit a KAIZEN_IMPEDIMENTS JSON declaration:
     {\"impediment\": \"description\", \"disposition\": \"filed\", \"ref\": \"#NNN\"},
     {\"impediment\": \"description\", \"disposition\": \"incident\", \"ref\": \"#NNN\"},
     {\"impediment\": \"description\", \"disposition\": \"fixed-in-pr\"},
-    {\"impediment\": \"description\", \"disposition\": \"waived\", \"reason\": \"why\"},
     {\"finding\": \"observation\", \"type\": \"meta\", \"disposition\": \"filed\", \"ref\": \"#NNN\"},
-    {\"finding\": \"observation\", \"type\": \"meta\", \"disposition\": \"waived\", \"reason\": \"why\"},
     {\"finding\": \"what worked\", \"type\": \"positive\", \"disposition\": \"no-action\", \"reason\": \"why\"}
   ]
   IMPEDIMENTS
 
 Types: impediment (default), meta (process observations), positive (validated patterns)
-  - Meta-findings MUST be filed or waived (no-action not allowed)
+  - Meta-findings MUST be filed or fixed-in-pr (waived is not allowed — kaizen #198)
   - Positive findings accept no-action with a reason
 
 If no impediments found: echo 'KAIZEN_IMPEDIMENTS: [] brief reason here'

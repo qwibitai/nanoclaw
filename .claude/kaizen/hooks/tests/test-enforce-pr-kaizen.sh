@@ -211,7 +211,7 @@ OUTPUT=$(run_pretool_hook "echo 'KAIZEN_IMPEDIMENTS: []'")
 assert_eq "KAIZEN_IMPEDIMENTS allowed" "" "$OUTPUT"
 
 OUTPUT=$(run_pretool_hook "echo 'KAIZEN_IMPEDIMENTS:' && cat <<'IMPEDIMENTS'
-[{\"impediment\": \"test\", \"disposition\": \"waived\", \"reason\": \"test\"}]
+[{\"impediment\": \"test\", \"disposition\": \"filed\", \"ref\": \"#198\"}]
 IMPEDIMENTS")
 assert_eq "KAIZEN_IMPEDIMENTS with heredoc allowed" "" "$OUTPUT"
 

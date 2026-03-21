@@ -1,6 +1,6 @@
 #!/bin/bash
 # Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
-# pr-kaizen-clear.sh — Level 3 kaizen enforcement (Issue #57, #113, #140, #162, #205, #213)
+# pr-kaizen-clear.sh — Level 3 kaizen enforcement (Issue #57, #113, #140, #162, #205, #213, #198)
 # PostToolUse hook: clears the PR creation kaizen gate when the agent
 # submits a valid KAIZEN_IMPEDIMENTS JSON declaration covering all
 # identified impediments with proper dispositions.
@@ -9,24 +9,25 @@
 #   1. Bash: echo "KAIZEN_IMPEDIMENTS: [...]" (structured impediment declaration)
 #   2. Bash: echo "KAIZEN_NO_ACTION [category]: <reason>" (restricted — kaizen #140)
 #
-# Validation (kaizen #113, #162, #213, #280):
+# Validation (kaizen #113, #162, #213, #280, #198):
 #   - JSON must be a valid array
 #   - Each entry must have "impediment" or "finding" (non-empty string) and "disposition"
 #   - disposition "filed" or "incident" requires "ref" field
-#   - disposition "waived" or "no-action" requires "reason" field
-#   - type "meta" findings: disposition must be "filed" or "waived" (not "no-action")
-#   - type "positive" findings: also allows "no-action" (with reason)
-#   - no type / other: standard dispositions (filed|incident|fixed-in-pr|waived)
+#   - disposition "no-action" requires "reason" field (only valid for type "positive")
+#   - type "meta" findings: disposition must be "filed" or "fixed-in-pr" (no waiving)
+#   - type "positive" findings: allows "no-action" (with reason)
+#   - impediments (no type / other): filed|incident|fixed-in-pr only (no waiving)
+#   - "waived" disposition is REJECTED for all types (kaizen #198)
 #   - Empty array [] requires a "reason" string after it (kaizen #140)
 #
-# Waiver quality enforcement (kaizen #280, #258, #198):
-#   - Waiver reasons are checked against a blocklist of known-bad rationalizations
-#   - Meta-findings (type "meta") waived must include "impact_minutes" estimate
-#   - Meta-findings with impact_minutes >= 5 cannot be waived (must file instead)
-#   - All waivers are logged to audit/waiver.log
+# Waiver elimination (kaizen #198):
+#   - "waived" is no longer a valid disposition for any finding type
+#   - If something is real friction -> file it (2 minutes)
+#   - If it's not real friction -> reclassify as type "positive" with "no-action"
+#   - Legacy waivers are rejected with guidance to reclassify
 #
 # Advisory nudge (kaizen #205):
-#   - When ALL findings are waived/no-action, prints advisory before clearing
+#   - When ALL findings are no-action, prints advisory before clearing
 #
 # KAIZEN_NO_ACTION validation (kaizen #140):
 #   - Must include a category: docs-only|formatting|typo|config-only|test-only|trivial-refactor
@@ -57,62 +58,6 @@ log_no_action() {
   # Append to audit log
   printf '%s | branch=%s | category=%s | pr=%s | reason=%s\n' \
     "$timestamp" "$branch" "$category" "$pr_url" "$reason" >> "$AUDIT_LOG" 2>/dev/null || true
-}
-
-# Waiver audit log (kaizen #280)
-WAIVER_LOG="${HOOK_DIR}/../audit/waiver.log"
-
-log_waiver() {
-  local desc="$1"
-  local reason="$2"
-  local finding_type="${3:-impediment}"
-  local pr_url="${4:-unknown}"
-  local branch
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-  local timestamp
-  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-  mkdir -p "$(dirname "$WAIVER_LOG")" 2>/dev/null
-  printf '%s | branch=%s | type=%s | pr=%s | desc=%s | reason=%s\n' \
-    "$timestamp" "$branch" "$finding_type" "$pr_url" "$desc" "$reason" >> "$WAIVER_LOG" 2>/dev/null || true
-}
-
-# Waiver reason blocklist (kaizen #280, #258)
-# These rationalizations sound reasonable but are category errors:
-# - "Low frequency" ignores impact-per-occurrence
-# - "Overengineering" confuses filing with implementing
-# - "Self-correcting" assumes future agents will do better without evidence
-WAIVER_BLOCKLIST_PATTERNS=(
-  "low frequency"
-  "rare enough"
-  "rarely happens"
-  "infrequent"
-  "overengineering"
-  "over-engineering"
-  "not worth"
-  "too much work"
-  "too much effort"
-  "self-correct"
-  "self correct"
-  "acceptable tradeoff"
-  "acceptable trade-off"
-  "minor enough"
-  "not important enough"
-  "won.t happen again"
-  "unlikely to recur"
-  "edge case"
-)
-
-check_waiver_blocklist() {
-  local reason_lower
-  reason_lower=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-  for pattern in "${WAIVER_BLOCKLIST_PATTERNS[@]}"; do
-    if echo "$reason_lower" | grep -qi "$pattern"; then
-      echo "$pattern"
-      return 0
-    fi
-  done
-  return 1
 }
 
 INPUT=$(cat)
@@ -260,11 +205,12 @@ EOF
     SHOULD_CLEAR=true
     CLEAR_REASON="no impediments identified ($EMPTY_REASON)"
   else
-    # Validate each entry (type-aware validation — kaizen #162, #205, #213)
+    # Validate each entry (type-aware validation — kaizen #162, #205, #213, #198)
     # - "finding" accepted as alias for "impediment" (kaizen #162)
-    # - type "meta": only filed (with ref) or waived (with reason)
+    # - type "meta": only filed or fixed-in-pr (kaizen #198: no waiving)
     # - type "positive": also allows no-action (with reason)
-    # - no type / other: standard dispositions (filed|incident|fixed-in-pr|waived)
+    # - no type / other: filed|incident|fixed-in-pr only (kaizen #198: no waiving)
+    # - "waived" is REJECTED for all types (kaizen #198)
     VALIDATION=$(echo "$JSON" | jq -r '
       [.[] | {
         desc: ((.impediment // .finding) // ""),
@@ -277,16 +223,18 @@ EOF
         "missing \"impediment\" or \"finding\" field"
       elif .disposition == "" then
         "missing \"disposition\" for: \(.desc)"
-      elif .type == "meta" and (.disposition | IN("filed", "fixed-in-pr", "waived") | not) then
-        "meta-finding \"\(.desc)\" has disposition \"\(.disposition)\" — meta-findings must be \"filed\" (with ref), \"fixed-in-pr\", or \"waived\" (with reason). If it is truly not actionable, use \"waived\" and explain why."
-      elif .type == "positive" and (.disposition | IN("filed", "incident", "fixed-in-pr", "waived", "no-action") | not) then
-        "invalid disposition \"\(.disposition)\" for: \(.desc) (must be filed|incident|fixed-in-pr|waived|no-action)"
-      elif (.type != "meta" and .type != "positive") and (.disposition | IN("filed", "incident", "fixed-in-pr", "waived") | not) then
-        "invalid disposition \"\(.disposition)\" for: \(.desc) (must be filed|incident|fixed-in-pr|waived)"
+      elif .disposition == "waived" then
+        "disposition \"waived\" is no longer accepted (kaizen #198). If \"\(.desc)\" is real friction, file it: `gh issue create --repo Garsson-io/kaizen ...`. If it is not real friction, reclassify as {\"type\": \"positive\", \"disposition\": \"no-action\", \"reason\": \"...\"}."
+      elif .type == "meta" and (.disposition | IN("filed", "fixed-in-pr") | not) then
+        "meta-finding \"\(.desc)\" has disposition \"\(.disposition)\" — meta-findings must be \"filed\" (with ref) or \"fixed-in-pr\". If it is truly not actionable, reclassify as type \"positive\" with disposition \"no-action\"."
+      elif .type == "positive" and (.disposition | IN("filed", "incident", "fixed-in-pr", "no-action") | not) then
+        "invalid disposition \"\(.disposition)\" for: \(.desc) (must be filed|incident|fixed-in-pr|no-action)"
+      elif (.type != "meta" and .type != "positive") and (.disposition | IN("filed", "incident", "fixed-in-pr") | not) then
+        "invalid disposition \"\(.disposition)\" for impediment: \(.desc) (must be filed|incident|fixed-in-pr). Impediments cannot be waived (kaizen #198). File it or reclassify as type \"positive\" if not real friction."
       elif (.disposition == "filed" or .disposition == "incident") and .ref == "" then
         "disposition \"\(.disposition)\" requires \"ref\" field for: \(.desc)"
-      elif (.disposition == "waived" or .disposition == "no-action") and .reason == "" then
-        "disposition \"\(.disposition)\" requires \"reason\" field for: \(.desc)"
+      elif .disposition == "no-action" and .reason == "" then
+        "disposition \"no-action\" requires \"reason\" field for: \(.desc)"
       else
         empty
       end
@@ -298,48 +246,8 @@ EOF
       exit 0
     fi
 
-    # Waiver quality enforcement (kaizen #280, #258, #198)
-    # Check each waived finding for blocklisted reasons and meta-finding impact
-    WAIVER_ERRORS=""
-    WAIVER_COUNT=0
-    while IFS='|' read -r w_desc w_type w_reason w_impact; do
-      [ -z "$w_desc" ] && continue
-      WAIVER_COUNT=$((WAIVER_COUNT + 1))
-
-      # Check blocklist
-      MATCHED_PATTERN=$(check_waiver_blocklist "$w_reason")
-      if [ $? -eq 0 ]; then
-        WAIVER_ERRORS="${WAIVER_ERRORS}waiver for \"${w_desc}\" uses blocklisted rationalization \"${MATCHED_PATTERN}\". Filing an issue is not implementing a fix — if the observation is true, file it. Reconsider: is this actually not worth a 2-minute issue?\n"
-      fi
-
-      # Meta-findings require impact_minutes (kaizen #280)
-      if [ "$w_type" = "meta" ]; then
-        if [ -z "$w_impact" ] || [ "$w_impact" = "null" ]; then
-          WAIVER_ERRORS="${WAIVER_ERRORS}meta-finding \"${w_desc}\" waived without impact_minutes. Add \"impact_minutes\": N (estimated minutes of agent/human time wasted per occurrence). If impact >= 5, file instead of waiving.\n"
-        elif [ "$w_impact" -ge 5 ] 2>/dev/null; then
-          WAIVER_ERRORS="${WAIVER_ERRORS}meta-finding \"${w_desc}\" has impact_minutes=${w_impact} (>= 5 min/occurrence) — too high to waive. File it: \`gh issue create --repo Garsson-io/kaizen ...\`\n"
-        fi
-      fi
-
-      # Log all waivers to audit trail
-      log_waiver "$w_desc" "$w_reason" "$w_type" "$GATE_PR_URL"
-    done < <(echo "$JSON" | jq -r '
-      [.[] | select(.disposition == "waived")] |
-      .[] | [
-        ((.impediment // .finding) // ""),
-        (.type // ""),
-        (.reason // ""),
-        (.impact_minutes // "null" | tostring)
-      ] | join("|")
-    ' 2>/dev/null)
-
-    if [ -n "$WAIVER_ERRORS" ]; then
-      printf '\nKAIZEN_IMPEDIMENTS: Waiver quality check failed (kaizen #280):\n%b\nKnown anti-patterns:\n- "Low frequency" ignores impact-per-occurrence. A 15-min blocker that happens once a week is worth filing.\n- "Overengineering" confuses filing with implementing. Filing takes 2 min; implementation is a separate decision.\n- "Self-correcting" assumes future agents improve without evidence. They don'"'"'t — that'"'"'s why this check exists.\n\nFix the issues and resubmit. To file: \`gh issue create --repo Garsson-io/kaizen --title "[LN] description" --label kaizen,level-N,area/...\`\n' "$WAIVER_ERRORS"
-      exit 0
-    fi
-
-    # All-passive advisory (kaizen #205): nudge when every disposition is waived/no-action
-    ALL_PASSIVE=$(echo "$JSON" | jq '[.[] | .disposition] | all(. == "waived" or . == "no-action")' 2>/dev/null)
+    # All-passive advisory (kaizen #205): nudge when every disposition is no-action
+    ALL_PASSIVE=$(echo "$JSON" | jq '[.[] | .disposition] | all(. == "no-action")' 2>/dev/null)
 
     SHOULD_CLEAR=true
     CLEAR_REASON="$ITEM_COUNT finding(s) addressed"
@@ -430,9 +338,9 @@ if [ "$SHOULD_CLEAR" = true ]; then
   if [ "$ALL_PASSIVE" = "true" ]; then
     cat <<'ADVISORY'
 
-All findings waived — none filed or fixed-in-pr.
+All findings classified as positive/no-action — none filed or fixed-in-pr.
 "Every failure is a gift — if you file the issue."
-Are any of these actionable at L2+? If so, file them before proceeding.
+Are any of these actually friction that should be filed? If so, reclassify and file before proceeding.
 ADVISORY
   fi
 

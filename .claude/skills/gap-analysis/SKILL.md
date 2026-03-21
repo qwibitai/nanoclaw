@@ -127,7 +127,7 @@ gh pr list --repo Garsson-io/nanoclaw --state merged --limit 20 --json number,ti
 **Extract and classify findings from each PR body:**
 - Parse the `KAIZEN_IMPEDIMENTS` JSON block from each PR
 - Separate by `type`: `"meta"` (system improvements), `"positive"` (what worked), standard (work impediments)
-- Group by `disposition`: `"filed"` (with issue ref), `"waived"` (with reason), `"fixed-in-pr"`, `"incident"`
+- Group by `disposition`: `"filed"` (with issue ref), `"fixed-in-pr"`, `"incident"`, `"no-action"` (positive findings)
 
 **Aggregate and report:**
 
@@ -136,7 +136,7 @@ gh pr list --repo Garsson-io/nanoclaw --state merged --limit 20 --json number,ti
 | Which skills were praised? | `type: "positive"` findings — what's working well |
 | Which skills were criticized? | `type: "meta"` findings with `disposition: "filed"` — what needs fixing |
 | What friction keeps recurring? | Same impediment appearing across 2+ PRs despite fixes |
-| Are waivers masking real issues? | `disposition: "waived"` on the same category across multiple PRs |
+| Are positive-reclassifications masking real issues? | `type: "positive"` with `"no-action"` on the same category across multiple PRs |
 
 **Output format:**
 ```

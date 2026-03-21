@@ -103,6 +103,14 @@ Every deferred scope, every "later," every "if needed" must have a concrete trig
 
 This applies recursively. The mechanism itself can fail — so the mechanism needs a mechanism. But at some point you hit a human review cycle (the admin checking the backlog), and that's the foundation. The stack is: mechanistic signals → filed issues → human review. Each layer catches what the layer above misses.
 
+### A mechanism you can't reach is a mechanism you don't have
+
+Existence is not availability. Availability is not accessibility. A tool that exists behind a precondition that isn't met at the point of need is not a tool — it's a promise.
+
+This aphorism was born from a specific failure: an agent waived an impediment because "the mechanism exists, I just didn't build first." The mechanism existed in the repo. But it wasn't accessible in the agent's context. A mechanism behind a failed precondition is indistinguishable from a mechanism that doesn't exist.
+
+The generalization: don't confuse "exists somewhere" with "works here." Test accessibility, not just existence. And when evaluating whether something is real friction: if the mechanism requires steps that weren't available when the friction occurred, the friction is real — file it.
+
 ### Map the territory — horizons
 
 Some problems are infinite games — you never "solve" testing, or security, or developer ergonomics. You just get better at them. We call these **horizons**: domains where you endlessly want to improve, where you can define a rough taxonomy of what good looks like and where you are, but you can't see more than a few steps ahead.

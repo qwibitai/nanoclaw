@@ -211,7 +211,7 @@ Starting concrete and zooming out produces actionable output. Starting abstract 
 - **Were all accept-case preventions dispositioned?** If `/accept-case` identified preventions or root causes, list each one and its status: implemented in this PR, filed as issue #N, or not addressed. If any are "not addressed," file them now — a prevention identified but not tracked is a prevention lost.
 - **What prompt change would have made this session better?** Look at your mistakes, wrong turns, and suboptimal outputs. For each one, name the specific skill, the current wording gap, and the proposed improvement. The goal is self-improving prompts — every session should make the next one better.
 
-**Actionability rule:** Every meta-reflection finding MUST have a disposition — either a filed issue (with `ref: "#NNN"`) or an explicit waiver (with reason). An observation without a disposition is decoration, not kaizen. Include meta-reflection findings in your `KAIZEN_IMPEDIMENTS` declaration with `"type": "meta"`:
+**Actionability rule:** Every meta-reflection finding MUST have a disposition — either a filed issue (with `ref: "#NNN"`) or fixed in this PR. An observation without a disposition is decoration, not kaizen. If something is truly not friction, reclassify as `type: "positive"` with `disposition: "no-action"`. Include meta-reflection findings in your `KAIZEN_IMPEDIMENTS` declaration with `"type": "meta"`:
 
 ```json
 {"finding": "accept-case was heavyweight for spec'd issues", "type": "meta", "disposition": "filed", "ref": "#161"}
@@ -220,31 +220,24 @@ Starting concrete and zooming out produces actionable output. Starting abstract 
 
 Positive findings (`type: "positive"`) may use `disposition: "no-action"` when the pattern is already working and needs no reinforcement. But if a positive finding is surprising or non-obvious, consider filing it as a reference for future agents.
 
-### Waiver quality enforcement (kaizen #280, #258, #198)
+### No-waiver policy (kaizen #198)
 
-**Known anti-pattern: the "overengineering" waiver.** "This would require code changes, which is overengineering" is a category error. Filing an issue is not implementing the fix. The issue records the insight; implementation priority is a separate decision. If the observation is true, file it. Period.
+**"Waived" is not a valid disposition.** The agent doing the waiving is the same agent evaluating the waiver — adding guardrails doesn't fix motivated reasoning. A checkbox doesn't prevent rationalization.
 
-**The `pr-kaizen-clear.sh` hook enforces waiver quality at L2.** Waivers with these rationalization patterns are BLOCKED:
-- "low frequency" / "rarely happens" / "infrequent" — ignores impact-per-occurrence
-- "overengineering" / "over-engineering" — confuses filing with implementing
-- "self-correcting" / "self-correct" — assumes future agents improve without evidence
-- "not worth" / "too much work" / "too much effort" — filing takes 2 minutes
-- "acceptable tradeoff" — sounds like judgment but is usually avoidance
-- "unlikely to recur" / "won't happen again" — optimism without mechanism
-- "edge case" — edge cases compound; if it happened once, it's real
+Instead, every impediment gets one of three dispositions:
+- `"filed"` — real friction, filed as an issue (with `ref: "#NNN"`)
+- `"incident"` — recorded as an incident on an existing issue (with `ref: "#NNN"`)
+- `"fixed-in-pr"` — addressed in this PR
 
-**Meta-findings require impact assessment.** When waiving a meta-finding (`type: "meta"`), you MUST include `"impact_minutes": N` estimating agent/human time wasted per occurrence. If impact >= 5 minutes, the waiver is blocked — you must file instead.
+If something is not actually friction, it's a positive finding:
+- `{"type": "positive", "disposition": "no-action", "reason": "why this is not friction"}`
 
-**Correct waiver example:**
-```json
-{"finding": "test output was noisy", "type": "meta", "disposition": "waived", "reason": "cosmetic — no time lost, just visual clutter during test runs", "impact_minutes": 1}
-```
+**The `pr-kaizen-clear.sh` hook enforces this at L2.** Any `disposition: "waived"` is rejected with guidance to file or reclassify.
 
-**Incorrect waiver (will be blocked):**
-```json
-{"finding": "hook state files accumulate", "type": "meta", "disposition": "waived", "reason": "low frequency, only happens in long sessions"}
-```
-This is blocked because "low frequency" is on the blocklist AND meta-findings need `impact_minutes`.
+**Filing takes 2 minutes.** Filing an issue is not implementing the fix. The issue records the insight; implementation priority is a separate decision. If the observation is true, file it. Period.
+
+> A mechanism you can't reach is a mechanism you don't have.
+> Existence is not availability. Availability is not accessibility.
 
 ### Post-cycle ultrathink — escalating structural questions (kaizen #260)
 

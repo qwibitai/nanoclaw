@@ -74,9 +74,9 @@ When done, output a structured summary that the main agent can use to clear the 
 ```
 KAIZEN_BG_RESULTS:
 - impediment: "description"
-  disposition: filed | incident | fixed-in-pr | waived
+  disposition: filed | incident | fixed-in-pr
   ref: "#NNN" (if filed or incident)
-  reason: "why" (if waived)
+  reason: "why" (if type is positive with no-action)
 ```
 
 The main agent will use this to construct the KAIZEN_IMPEDIMENTS declaration and clear the gate.
