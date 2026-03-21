@@ -45,6 +45,8 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { getOrCreateRollout } from './skills/rollout-manager.js';
+import { extractToolCallsForRun } from './skills/session-reader.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { consumePendingSkills, startIpcWatcher } from './ipc.js';
@@ -247,6 +249,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   const runStartTime = Date.now();
   let firstOutputSeen = false;
+  const responseChunks: string[] = [];
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -267,6 +270,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        responseChunks.push(text);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -287,22 +291,36 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Record this interaction as a skill task run for evaluation
   const runDuration = Date.now() - runStartTime;
+  const runEndTime = Date.now();
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const runStatus = output === 'error' || hadError ? 'error' : 'success';
   try {
+    // Assign this run to a rollout window
+    const rollout = getOrCreateRollout(chatJid, group.folder);
+
+    // Extract tool calls from session transcript
+    const sessionId = sessions[group.folder];
+    const toolCalls = sessionId
+      ? extractToolCallsForRun(
+          group.folder,
+          sessionId,
+          runStartTime,
+          runEndTime,
+        )
+      : [];
+
     recordSkillTaskRun({
       id: runId,
       group_folder: group.folder,
       chat_jid: chatJid,
+      rollout_id: rollout.id,
       prompt_summary: prompt.slice(0, 500),
-      response_summary: null, // Streamed output, not easily captured
+      response_summary: responseChunks.join(' ') || null,
+      tool_calls: toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
       duration_ms: runDuration,
       status: runStatus,
       created_at: new Date().toISOString(),
-      evaluation_deadline:
-        runStatus === 'success'
-          ? new Date(Date.now() + EVALUATION_DELAY_MS).toISOString()
-          : null,
+      evaluation_deadline: null, // Evaluation is triggered by rollout closure, not per-run deadline
     });
 
     // Link any skills the agent reported using
@@ -711,7 +729,10 @@ async function main(): Promise<void> {
       try {
         handleReactionFeedback(messageId, chatJid, emoji);
       } catch (err) {
-        logger.warn({ err, chatJid, emoji }, 'Failed to process reaction feedback');
+        logger.warn(
+          { err, chatJid, emoji },
+          'Failed to process reaction feedback',
+        );
       }
     },
   };

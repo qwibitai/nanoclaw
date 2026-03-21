@@ -18,7 +18,7 @@ import {
   getActiveSkills,
   getAllSkillPerformance,
   getLastEvolutionTimestamp,
-  getLowScoringRuns,
+  getLowScoringRollouts,
   getRecentEvaluationCount,
   getSkillById,
   getSkillPerformance,
@@ -132,7 +132,7 @@ function shouldRunEvolution(): boolean {
 function buildEvolutionContext(): string {
   const skills = getActiveSkills(null); // Global skills
   const performances = getAllSkillPerformance();
-  const lowRuns = getLowScoringRuns(1, EVOLUTION_SCORE_THRESHOLD, 20);
+  const lowRollouts = getLowScoringRollouts(EVOLUTION_SCORE_THRESHOLD, 10);
 
   const sections: string[] = [];
 
@@ -154,40 +154,79 @@ function buildEvolutionContext(): string {
     sections.push('```\n');
   }
 
-  // Low-scoring interactions
-  sections.push('## Low-Scoring Interactions\n');
-  if (lowRuns.length === 0) {
-    sections.push('(No low-scoring interactions found)\n');
+  // Low-scoring rollouts with full multi-turn context
+  sections.push('## Low-Scoring Rollouts\n');
+  if (lowRollouts.length === 0) {
+    sections.push('(No low-scoring rollouts found)\n');
   }
-  for (const run of lowRuns) {
-    const selectedIds = getSkillSelectionsForRun(run.id);
-    const selectedNames = selectedIds
-      .map((id) => {
-        const skill = skills.find((s) => s.id === id);
-        return skill?.name;
-      })
-      .filter(Boolean);
-    const availableNames = skills.map((s) => s.name);
-    const notSelected = availableNames.filter(
-      (n) => !selectedNames.includes(n),
+  for (const rollout of lowRollouts) {
+    sections.push(
+      `### Rollout ${rollout.rollout_id} (avg score: ${rollout.avg_score.toFixed(2)})`,
     );
 
-    sections.push(`### Run ${run.id} (score: ${run.score.toFixed(2)})`);
-    sections.push(`User: ${run.prompt_summary || '(no summary)'}`);
-    sections.push(`Response: ${run.response_summary || '(no summary)'}`);
-    sections.push(`Skills used: ${selectedNames.join(', ') || 'none'}`);
-    sections.push(
-      `Skills available but not used: ${notSelected.join(', ') || 'none'}`,
-    );
-    if (run.dimensions) {
-      try {
-        const dims = JSON.parse(run.dimensions);
-        sections.push(
-          `Dimensions: helpfulness=${dims.helpfulness}, accuracy=${dims.accuracy}, efficiency=${dims.efficiency}, tone=${dims.tone}`,
-        );
-      } catch {
-        // ignore parse errors
+    for (let i = 0; i < rollout.runs.length; i++) {
+      const run = rollout.runs[i];
+      const selectedIds = getSkillSelectionsForRun(run.id);
+      const selectedNames = selectedIds
+        .map((id) => skills.find((s) => s.id === id)?.name)
+        .filter(Boolean);
+
+      sections.push(`#### Turn ${i + 1}`);
+      sections.push(`User: ${run.prompt_summary || '(no summary)'}`);
+      sections.push(`Response: ${run.response_summary || '(no summary)'}`);
+
+      if (run.tool_calls) {
+        try {
+          const tools = JSON.parse(run.tool_calls) as Array<{
+            name: string;
+            input: Record<string, unknown>;
+            output: string;
+          }>;
+          if (tools.length > 0) {
+            sections.push('Tools:');
+            for (const t of tools) {
+              sections.push(`  - ${t.name}: ${t.output.slice(0, 100)}`);
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
       }
+
+      if (selectedNames.length > 0) {
+        sections.push(`Skills used: ${selectedNames.join(', ')}`);
+      }
+
+      if (run.dimensions) {
+        try {
+          const dims = JSON.parse(run.dimensions);
+          sections.push(
+            `Scores: helpfulness=${dims.helpfulness}, accuracy=${dims.accuracy}, efficiency=${dims.efficiency}, tone=${dims.tone}, tool_selection=${dims.tool_selection ?? 'n/a'}`,
+          );
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (run.evaluator_reasoning) {
+        sections.push(`Evaluator reasoning: ${run.evaluator_reasoning}`);
+      }
+      sections.push('');
+    }
+
+    const availableNames = skills.map((s) => s.name);
+    const usedInRollout = new Set(
+      rollout.runs.flatMap((r) =>
+        getSkillSelectionsForRun(r.id)
+          .map((id) => skills.find((s) => s.id === id)?.name)
+          .filter(Boolean),
+      ),
+    );
+    const notUsed = availableNames.filter((n) => !usedInRollout.has(n));
+    if (notUsed.length > 0) {
+      sections.push(
+        `Skills available but never used in rollout: ${notUsed.join(', ')}`,
+      );
     }
     sections.push('');
   }
