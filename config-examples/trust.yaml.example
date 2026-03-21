@@ -1,0 +1,29 @@
+# NanoClaw Event Router Trust Matrix
+# Rules evaluated top-to-bottom, first match wins.
+default_routing: notify
+
+rules:
+  - event_type: email
+    conditions:
+      sender_domain: [ucla.edu, nih.gov, sfari.org]
+      importance_gte: 0.7
+    routing: notify
+
+  - event_type: email
+    conditions:
+      importance_lt: 0.3
+    routing: autonomous
+    action: log_only
+
+  - event_type: calendar
+    conditions:
+      change_type: conflict
+    routing: escalate
+
+  - event_type: calendar
+    conditions:
+      change_type: new_event
+    routing: notify
+
+  - event_type: calendar
+    routing: notify
