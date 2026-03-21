@@ -1,0 +1,107 @@
+#!/bin/bash
+# perplexity — CLI for Perplexity API research inside agent containers.
+# Usage: perplexity <command> <query>
+
+set -euo pipefail
+
+if [[ -z "${PERPLEXITY_API_KEY:-}" ]]; then
+  echo "Error: PERPLEXITY_API_KEY not set" >&2
+  exit 1
+fi
+
+API_URL="https://api.perplexity.ai/chat/completions"
+
+perplexity:_call() {
+  local model="$1" system_prompt="$2" query="$3"
+  local body
+  body=$(python3 -c "
+import json, sys
+print(json.dumps({
+  'model': sys.argv[1],
+  'messages': [
+    {'role': 'system', 'content': sys.argv[2]},
+    {'role': 'user', 'content': sys.argv[3]}
+  ]
+}))
+" "$model" "$system_prompt" "$query")
+
+  curl -s "$API_URL" \
+    -H "Authorization: Bearer $PERPLEXITY_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$body"
+}
+
+perplexity:_format() {
+  python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+if 'error' in r:
+    print('Error: ' + r['error'].get('message', str(r['error'])), file=sys.stderr)
+    sys.exit(1)
+content = r['choices'][0]['message']['content']
+citations = r.get('citations', [])
+print(content)
+if citations:
+    print('\n---\nSources:')
+    for i, c in enumerate(citations, 1):
+        print(f'  [{i}] {c}')
+"
+}
+
+perplexity:search() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: perplexity search <query>" >&2
+    exit 1
+  fi
+  perplexity:_call "sonar" "Be thorough and cite sources." "$*" | perplexity:_format
+}
+
+perplexity:pro() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: perplexity pro <query>" >&2
+    exit 1
+  fi
+  perplexity:_call "sonar-pro" "Be thorough and cite sources." "$*" | perplexity:_format
+}
+
+perplexity:deep() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: perplexity deep <query>" >&2
+    exit 1
+  fi
+  echo "Deep research in progress (may take up to 3 minutes)..." >&2
+  perplexity:_call "sonar-deep-research" "Produce a comprehensive research report with citations." "$*" | perplexity:_format
+}
+
+# --- Dispatcher ---
+
+if [[ $# -eq 0 || "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
+  cat <<'USAGE'
+perplexity — Web research via Perplexity API
+
+Usage: perplexity <command> <query>
+
+Commands:
+  search    Quick research using sonar model
+  pro       Better accuracy using sonar-pro model
+  deep      Comprehensive report using sonar-deep-research (slow, ~3 min)
+  help      Show this help message
+
+Examples:
+  perplexity search "What are the latest developments in AI safety?"
+  perplexity pro "Compare React vs Vue for enterprise apps in 2026"
+  perplexity deep "Comprehensive analysis of quantum computing progress"
+USAGE
+  exit 0
+fi
+
+cmd="perplexity:$1"
+shift
+
+if declare -f "$cmd" > /dev/null 2>&1; then
+  "$cmd" "$@"
+else
+  echo "Error: unknown command '$cmd'" >&2
+  echo "Run 'perplexity help' for available commands." >&2
+  exit 1
+fi
