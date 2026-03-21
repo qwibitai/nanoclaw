@@ -62,13 +62,15 @@ jobs:
 
       - name: Post-deploy summary
         if: github.event_name == 'push'
+        continue-on-error: true
         run: |
+          set +e
           cd "$PROJECT_ROOT"
 
           # Build deploy summary
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           COMMIT_MSG=$(git log -1 --format="%s" "${{ github.sha }}")
-          PR_NUMBER=$(echo "$COMMIT_MSG" | grep -oP '#\K\d+' | head -1)
+          PR_NUMBER=$(echo "$COMMIT_MSG" | grep -oP '#\K\d+' | head -1 || true)
 
           SUMMARY="Deploy complete: ${SHORT_SHA} ${COMMIT_MSG}"
           if [ -n "$PR_NUMBER" ]; then
@@ -77,8 +79,8 @@ jobs:
           fi
 
           # Read bot token from .env and main group chat ID from the database
-          BOT_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2-)
-          MAIN_JID=$(sqlite3 data/nanoclaw.db "SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1" 2>/dev/null)
+          BOT_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2- || true)
+          MAIN_JID=$(sqlite3 data/nanoclaw.db "SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1" 2>/dev/null || true)
           # Extract numeric Telegram chat ID from JID (format: tg:-1001234567890)
           CHAT_ID=$(echo "$MAIN_JID" | sed -n 's/^tg://p')
 
@@ -91,4 +93,7 @@ jobs:
             echo "Deploy summary sent to Telegram"
           else
             echo "Telegram not configured or no main group, skipping notification"
+            echo "BOT_TOKEN set: $([ -n "$BOT_TOKEN" ] && echo yes || echo no)"
+            echo "MAIN_JID: $MAIN_JID"
+            echo "CHAT_ID: $CHAT_ID"
           fi
