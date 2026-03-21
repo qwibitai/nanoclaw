@@ -548,10 +548,13 @@ describe('DiscordChannel', () => {
     it('downloads PDF attachment to group workspace', async () => {
       const mockBuffer = Buffer.from('%PDF-1.4 test content');
       const mockFetch = vi.fn().mockResolvedValue({
-        arrayBuffer: () => Promise.resolve(mockBuffer.buffer.slice(
-          mockBuffer.byteOffset,
-          mockBuffer.byteOffset + mockBuffer.byteLength,
-        )),
+        arrayBuffer: () =>
+          Promise.resolve(
+            mockBuffer.buffer.slice(
+              mockBuffer.byteOffset,
+              mockBuffer.byteOffset + mockBuffer.byteLength,
+            ),
+          ),
       });
       vi.stubGlobal('fetch', mockFetch);
 
@@ -560,7 +563,14 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+        [
+          'att1',
+          {
+            name: 'report.pdf',
+            contentType: 'application/pdf',
+            url: 'https://cdn.discord.com/report.pdf',
+          },
+        ],
       ]);
       const msg = createMessage({
         content: '',
@@ -569,7 +579,9 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      expect(mockFetch).toHaveBeenCalledWith('https://cdn.discord.com/report.pdf');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://cdn.discord.com/report.pdf',
+      );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
@@ -579,7 +591,9 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: expect.stringContaining('pdf-reader extract attachments/report.pdf'),
+          content: expect.stringContaining(
+            'pdf-reader extract attachments/report.pdf',
+          ),
         }),
       );
 
@@ -587,14 +601,24 @@ describe('DiscordChannel', () => {
     });
 
     it('falls back to placeholder when PDF download fails', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockRejectedValue(new Error('Network error')),
+      );
 
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+        [
+          'att1',
+          {
+            name: 'report.pdf',
+            contentType: 'application/pdf',
+            url: 'https://cdn.discord.com/report.pdf',
+          },
+        ],
       ]);
       const msg = createMessage({
         content: '',
@@ -621,7 +645,14 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+        [
+          'att1',
+          {
+            name: 'report.pdf',
+            contentType: 'application/pdf',
+            url: 'https://cdn.discord.com/report.pdf',
+          },
+        ],
       ]);
       const msg = createMessage({
         channelId: '9999999999999999',
