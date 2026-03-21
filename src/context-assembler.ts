@@ -118,6 +118,30 @@ export function assembleContextPacket(
     }
   }
 
+  // 7. Classified events (from message bus)
+  if (fs.existsSync(busQueuePath)) {
+    try {
+      const queue = JSON.parse(fs.readFileSync(busQueuePath, 'utf-8'));
+      const classified = queue.filter(
+        (m: { topic: string }) => m.topic === 'classified_event',
+      );
+      if (classified.length > 0) {
+        const formatted = classified
+          .slice(0, 10)
+          .map(
+            (e: { payload?: { classification?: { urgency?: string; summary?: string } }; from?: string; finding?: string }) =>
+              `[${e.payload?.classification?.urgency || 'medium'}] ${e.payload?.classification?.summary || e.finding || 'No summary'} (from: ${e.from || 'unknown'})`,
+          )
+          .join('\n');
+        sections.push(
+          `\n--- Recent Events (classified) ---\n${formatted}`,
+        );
+      }
+    } catch {
+      // Already read above or malformed, skip
+    }
+  }
+
   // Assemble and truncate
   let packet = sections.join('\n');
   if (packet.length > CONTEXT_PACKET_MAX_SIZE) {
