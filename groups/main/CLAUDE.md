@@ -75,11 +75,13 @@ Main has read-only access to the project and read-write access to its group fold
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/extra/Documents` | `~/Documents` | read-only |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
+- `/workspace/extra/Documents/` - Simon's personal documents (Finance, Health, Home, etc.)
 
 ---
 
@@ -252,3 +254,67 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Wine Society Access
+
+Credentials for The Wine Society are available as environment variables:
+- `WINE_SOCIETY_EMAIL` — login email
+- `WINE_SOCIETY_PASSWORD` — login password
+
+### How to use
+
+Use a **persistent browser profile** so you only need to log in once per session expiry:
+
+```bash
+AGENT_BROWSER_PROFILE=/workspace/group/.wine-society-profile agent-browser open https://www.thewinesociety.com/log-in
+```
+
+**If already logged in** (profile has valid cookies): just browse — don't re-read credentials.
+
+**If session expired** (redirected to login page): read env vars, fill the login form, and submit. The profile auto-saves cookies — no manual `state save` needed.
+
+**Never store the password** in conversation files, notes, CLAUDE.md, or any file on disk.
+
+---
+
+## Paperless-ngx (Document Management)
+
+Simon has Paperless-ngx running locally. Use it to search and retrieve documents when he asks about bills, letters, contracts, or any stored paperwork.
+
+**Base URL**: `http://host.docker.internal:8000/api/`
+**Auth**: `Authorization: Token $PAPERLESS_TOKEN` (env var — never log or store the token)
+
+### Key endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/documents/?query=<search>` | Full-text search (content, titles, correspondents, tags) |
+| `GET /api/documents/` | List all documents (paginated) |
+| `GET /api/documents/<id>/` | Get document metadata |
+| `GET /api/correspondents/` | List correspondents |
+| `GET /api/document_types/` | List document types |
+| `GET /api/tags/` | List tags |
+| `GET /api/documents/<id>/download/` | Download original file |
+| `GET /api/documents/<id>/preview/` | Preview (thumbnail) |
+
+### Usage examples
+
+```bash
+# Search for documents
+curl -s -H "Authorization: Token $PAPERLESS_TOKEN" \
+  "http://host.docker.internal:8000/api/documents/?query=council+tax" | jq .
+
+# Get all tags
+curl -s -H "Authorization: Token $PAPERLESS_TOKEN" \
+  "http://host.docker.internal:8000/api/tags/" | jq .
+
+# Get a specific document's details
+curl -s -H "Authorization: Token $PAPERLESS_TOKEN" \
+  "http://host.docker.internal:8000/api/documents/42/" | jq .
+```
+
+### How to respond
+
+When the user asks about documents, search Paperless first. Summarize what you find — title, correspondent, date, tags, and a brief content snippet if available. If multiple matches, list them concisely.

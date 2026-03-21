@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -26,7 +27,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
-import { readEnvFile } from './env.js';
+import { readEnvFile, readEnvFileFromPath } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -223,6 +224,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  groupFolder?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -249,6 +251,23 @@ function buildContainerArgs(
   // Forward non-secret env vars (e.g. GH_TOKEN for gh CLI)
   for (const [key, value] of Object.entries(containerEnv)) {
     args.push('-e', `${key}=${value}`);
+  }
+
+  // Forward per-group env vars (web credentials, service tokens, etc.)
+  // Stored in ~/.config/nanoclaw/env/{group}.env — outside container access.
+  if (groupFolder) {
+    const safeFolderName = groupFolder.replace(/[^a-zA-Z0-9-]/g, '-');
+    const groupEnvFile = path.join(
+      os.homedir(),
+      '.config',
+      'nanoclaw',
+      'env',
+      `${safeFolderName}.env`,
+    );
+    const groupEnv = readEnvFileFromPath(groupEnvFile);
+    for (const [key, value] of Object.entries(groupEnv)) {
+      args.push('-e', `${key}=${value}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -291,7 +310,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group.folder);
 
   logger.debug(
     {
