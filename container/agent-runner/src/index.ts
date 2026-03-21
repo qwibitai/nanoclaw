@@ -407,23 +407,49 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__parallel-search__*',
+        'mcp__parallel-task__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      mcpServers: (() => {
+        const servers: Record<string, any> = {
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            },
           },
-        },
-      },
+        };
+
+        // Add Parallel AI MCP servers if API key is available
+        const parallelApiKey = process.env.PARALLEL_API_KEY;
+        if (parallelApiKey) {
+          servers['parallel-search'] = {
+            type: 'http',
+            url: 'https://search-mcp.parallel.ai/mcp',
+            headers: {
+              'Authorization': `Bearer ${parallelApiKey}`,
+            },
+          };
+          servers['parallel-task'] = {
+            type: 'http',
+            url: 'https://task-mcp.parallel.ai/mcp',
+            headers: {
+              'Authorization': `Bearer ${parallelApiKey}`,
+            },
+          };
+          log('Parallel AI MCP servers configured');
+        }
+
+        return servers;
+      })(),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },

@@ -12,6 +12,17 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  GROUPS_DIR: '/tmp/test-groups',
+}));
+
+// Mock fs
+vi.mock('fs', () => ({
+  default: {
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
 }));
 
 // Mock logger
@@ -161,9 +172,7 @@ function createMessage(overrides: {
     member: overrides.memberDisplayName
       ? { displayName: overrides.memberDisplayName }
       : null,
-    guild: overrides.guildName
-      ? { name: overrides.guildName }
-      : null,
+    guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
       messages: {
@@ -536,13 +545,56 @@ describe('DiscordChannel', () => {
       );
     });
 
-    it('stores file attachment with placeholder', async () => {
+    it('downloads PDF attachment to group workspace', async () => {
+      const mockBuffer = Buffer.from('%PDF-1.4 test content');
+      const mockFetch = vi.fn().mockResolvedValue({
+        arrayBuffer: () => Promise.resolve(mockBuffer.buffer.slice(
+          mockBuffer.byteOffset,
+          mockBuffer.byteOffset + mockBuffer.byteLength,
+        )),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'report.pdf', contentType: 'application/pdf' }],
+        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(mockFetch).toHaveBeenCalledWith('https://cdn.discord.com/report.pdf');
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: expect.stringContaining('[PDF: attachments/report.pdf'),
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: expect.stringContaining('pdf-reader extract attachments/report.pdf'),
+        }),
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('falls back to placeholder when PDF download fails', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
       ]);
       const msg = createMessage({
         content: '',
@@ -554,9 +606,33 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[File: report.pdf]',
+          content: '[File: report.pdf (download failed)]',
         }),
       );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('treats PDF as regular file for unregistered channels', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({})),
+      });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+      ]);
+      const msg = createMessage({
+        channelId: '9999999999999999',
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      // Unregistered channel — message not delivered, no download attempted
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
     it('includes text content with attachments', async () => {
@@ -641,8 +717,11 @@ describe('DiscordChannel', () => {
 
       await channel.sendMessage('dc:1234567890123456', 'Hello');
 
-      const fetchedChannel = await currentClient().channels.fetch('1234567890123456');
-      expect(currentClient().channels.fetch).toHaveBeenCalledWith('1234567890123456');
+      const fetchedChannel =
+        await currentClient().channels.fetch('1234567890123456');
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith(
+        '1234567890123456',
+      );
     });
 
     it('strips dc: prefix from JID', async () => {

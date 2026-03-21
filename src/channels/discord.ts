@@ -1,6 +1,14 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  TextChannel,
+} from 'discord.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN, GROUPS_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -86,20 +94,54 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
+      // Handle attachments — download PDFs, store placeholders for others
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
+        const group = this.opts.registeredGroups()[chatJid];
+        const attachmentDescriptions: string[] = [];
+
+        for (const att of message.attachments.values()) {
           const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
+
+          if (contentType === 'application/pdf' && group) {
+            // Download PDF to group workspace
+            try {
+              const groupDir = path.join(GROUPS_DIR, group.folder);
+              const attachDir = path.join(groupDir, 'attachments');
+              fs.mkdirSync(attachDir, { recursive: true });
+              const filename = att.name || `doc-${Date.now()}.pdf`;
+              const filePath = path.join(attachDir, filename);
+
+              const response = await fetch(att.url);
+              const buffer = Buffer.from(await response.arrayBuffer());
+              fs.writeFileSync(filePath, buffer);
+              const sizeKB = Math.round(buffer.length / 1024);
+              attachmentDescriptions.push(
+                `[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`,
+              );
+              logger.info(
+                { jid: chatJid, filename },
+                'Downloaded PDF attachment',
+              );
+            } catch (err) {
+              logger.warn(
+                { err, jid: chatJid },
+                'Failed to download PDF attachment',
+              );
+              attachmentDescriptions.push(
+                `[File: ${att.name || 'file'} (download failed)]`,
+              );
+            }
+          } else if (contentType.startsWith('image/')) {
+            attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
           } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
+            attachmentDescriptions.push(`[Video: ${att.name || 'video'}]`);
           } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
+            attachmentDescriptions.push(`[Audio: ${att.name || 'audio'}]`);
           } else {
-            return `[File: ${att.name || 'file'}]`;
+            attachmentDescriptions.push(`[File: ${att.name || 'file'}]`);
           }
-        });
+        }
+
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
         } else {
@@ -125,7 +167,13 @@ export class DiscordChannel implements Channel {
 
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'discord', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'discord',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
