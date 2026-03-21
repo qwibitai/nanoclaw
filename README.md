@@ -29,7 +29,12 @@ curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
 curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
 ```
 
-> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
+**Linux (x86_64 / ARM64)**
+```bash
+curl -fsSL https://raw.githubusercontent.com/heyjawrsh/shpshft/main/install-linux.sh | bash
+```
+
+> The macOS and Windows installers use Docker Sandboxes. The Linux installer uses an equivalent Docker-based session container with iptables network isolation. All three drop you into a Claude Code session — type `/setup` to finish.
 
 <p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
 
@@ -140,6 +145,68 @@ Skills we'd like to see:
 
 **Session Management**
 - `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+
+## Linux / VPS
+
+NanoClaw runs on any Linux VPS (Ubuntu 22.04 / 24.04 LTS recommended) — DigitalOcean, Hetzner, Vultr, Linode, AWS EC2, GCP Compute Engine, and others. All channels work, including WhatsApp via pairing code (no browser needed on headless servers).
+
+**No firewall changes needed.** NanoClaw connects outbound to messaging platform servers (WhatsApp, Telegram, Discord, Slack). It does not listen on any ports.
+
+### Minimum droplet / VM size
+
+1 vCPU, 1 GB RAM. 2 GB RAM recommended if running multiple channels.
+
+### Prerequisites
+
+Works on x86-64 and ARM64 (e.g. Oracle Cloud Free Tier Ampere instances). The container image builds for the host architecture automatically.
+
+```bash
+# 1. Docker CE
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker   # or log out and back in
+
+# 2. Node.js 22
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 3. Build tools (needed for native modules)
+sudo apt-get install -y build-essential
+```
+
+### Setup
+
+The quickest path is the one-liner installer at the top of this README — it handles Docker CE, pulls the session container, clones nanoclaw, and launches Claude Code in one command.
+
+Alternatively, if you prefer to set up manually:
+
+```bash
+gh repo fork qwibitai/nanoclaw --clone
+cd nanoclaw
+claude   # then run /setup inside claude
+```
+
+`/setup` auto-detects Linux, installs dependencies, builds the container image, and creates a systemd user service.
+
+### Channel notes
+
+- **Telegram / Discord / Slack** — work exactly as on macOS; bot tokens, no display required
+- **WhatsApp** — headless servers have no display, so the skill auto-recommends **pairing code** auth. The 8-digit code is printed to your terminal; type it in WhatsApp > Settings > Linked Devices > Link with phone number
+
+### Service management
+
+```bash
+systemctl --user enable --now nanoclaw   # start on login
+systemctl --user status nanoclaw
+systemctl --user restart nanoclaw
+journalctl --user -u nanoclaw -f         # live logs
+```
+
+If your droplet doesn't have a lingering session, enable it so the service starts on boot without login:
+
+```bash
+sudo loginctl enable-linger $USER
+```
 
 ## Requirements
 
