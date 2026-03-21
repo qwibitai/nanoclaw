@@ -9,30 +9,34 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DROPLET_IP }} >> ~/.ssh/known_hosts
+
       - name: Deploy to DigitalOcean
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DROPLET_IP }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            cd /home/nanoclaw/app
+        run: |
+          ssh root@${{ secrets.DROPLET_IP }} 'bash -s' << 'SCRIPT'
+          set -e
+          cd /home/nanoclaw/app
 
-            # Pull latest
-            sudo -u nanoclaw git pull origin skill/easybits
+          # Pull latest
+          sudo -u nanoclaw git pull origin skill/easybits
 
-            # Install & build
-            sudo -u nanoclaw npm install
-            sudo -u nanoclaw npm run build
+          # Install & build
+          sudo -u nanoclaw npm install
+          sudo -u nanoclaw npm run build
 
-            # Rebuild agent container
-            sudo -u nanoclaw ./container/build.sh
+          # Rebuild agent container
+          sudo -u nanoclaw ./container/build.sh
 
-            # Restart service
-            systemctl restart nanoclaw
+          # Restart service
+          systemctl restart nanoclaw
 
-            # Verify
-            sleep 3
-            systemctl is-active nanoclaw
-            echo "Deploy complete"
+          # Verify
+          sleep 3
+          systemctl is-active nanoclaw
+          echo "Deploy complete"
+          SCRIPT
