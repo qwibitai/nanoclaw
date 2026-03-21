@@ -139,6 +139,52 @@ function getIpcDirsForGroup(
   return dirs;
 }
 
+function archiveIpcFile(
+  filePath: string,
+  ipcBaseDir: string,
+  sourceGroup: string,
+): void {
+  const auditDir = path.join(ipcBaseDir, sourceGroup, 'audit');
+  fs.mkdirSync(auditDir, { recursive: true });
+  const dest = path.join(auditDir, `${Date.now()}-${path.basename(filePath)}`);
+  try {
+    fs.renameSync(filePath, dest);
+  } catch {
+    // Cross-device move fallback
+    fs.copyFileSync(filePath, dest);
+    fs.unlinkSync(filePath);
+  }
+}
+
+function cleanupAuditFiles(ipcBaseDir: string): void {
+  const maxAge = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  try {
+    for (const group of fs.readdirSync(ipcBaseDir)) {
+      const auditDir = path.join(ipcBaseDir, group, 'audit');
+      let files: string[];
+      try {
+        files = fs.readdirSync(auditDir);
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        const filePath = path.join(auditDir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (now - stat.mtimeMs > maxAge) {
+            fs.unlinkSync(filePath);
+          }
+        } catch {
+          /* file may have been removed concurrently */
+        }
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -151,7 +197,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
+  let auditCleanupCounter = 0;
+
   const processIpcFiles = async () => {
+    // Clean up old audit files every ~100 cycles
+    if (++auditCleanupCounter >= 100) {
+      auditCleanupCounter = 0;
+      cleanupAuditFiles(ipcBaseDir);
+    }
+
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -386,7 +440,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     );
                   }
                 }
-                fs.unlinkSync(filePath);
+                archiveIpcFile(filePath, ipcBaseDir, sourceGroup);
               } catch (err) {
                 logger.error(
                   { file, sourceGroup, threadId, err },
