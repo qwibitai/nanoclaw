@@ -9,6 +9,7 @@ import './discord.js';
 // slack
 
 // telegram
+import './telegram.js';
 
 // whatsapp
 import './whatsapp.js';
