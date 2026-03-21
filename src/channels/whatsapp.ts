@@ -33,10 +33,24 @@ export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Session name for multi-connection support. Auth dir = store/auth-{sessionName}/. Omit for default store/auth/. */
+  sessionName?: string;
+  /**
+   * Group folder that owns this session (e.g. 'whatsapp_main').
+   * When set, incoming DMs from unknown senders are auto-registered as
+   * individual groups and routed to the bot without a trigger word.
+   * The tenant CLAUDE.md is copied from groups/{sessionFolder}/CLAUDE.md.
+   */
+  sessionFolder?: string;
+  /** When true, bot messages are sent without the "AssistantName:" prefix. */
+  hasOwnNumber?: boolean;
+  /** Called when a new DM is auto-registered. Receives the customer JID. */
+  onAutoRegisterDM?: (jid: string) => void;
 }
 
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
+  readonly sessionName: string | undefined;
 
   private sock!: WASocket;
   private connected = false;
@@ -44,11 +58,13 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private ownedJids: Set<string> = new Set();
 
   private opts: WhatsAppChannelOpts;
 
   constructor(opts: WhatsAppChannelOpts) {
     this.opts = opts;
+    this.sessionName = opts.sessionName;
   }
 
   async connect(): Promise<void> {
@@ -58,7 +74,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
-    const authDir = path.join(STORE_DIR, 'auth');
+    const authDirName = this.opts.sessionName
+      ? `auth-${this.opts.sessionName}`
+      : 'auth';
+    const authDir = path.join(STORE_DIR, authDirName);
     fs.mkdirSync(authDir, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -102,6 +121,7 @@ export class WhatsAppChannel implements Channel {
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info(
           {
+            session: this.opts.sessionName ?? 'default',
             reason,
             shouldReconnect,
             queuedMessages: this.outgoingQueue.length,
@@ -110,7 +130,10 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
+          logger.info(
+            { session: this.opts.sessionName ?? 'default' },
+            'Reconnecting...',
+          );
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
@@ -125,7 +148,10 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
-        logger.info('Connected to WhatsApp');
+        logger.info(
+          { session: this.opts.sessionName ?? 'default' },
+          'Connected to WhatsApp',
+        );
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
         this.sock.sendPresenceUpdate('available').catch((err) => {
@@ -200,8 +226,22 @@ export class WhatsAppChannel implements Channel {
             isGroup,
           );
 
-          // Only deliver full message for registered groups
+          // Auto-register unknown DMs for dedicated business sessions
           const groups = this.opts.registeredGroups();
+          if (
+            this.opts.sessionFolder &&
+            !chatJid.endsWith('@g.us') &&
+            !groups[chatJid]
+          ) {
+            this.opts.onAutoRegisterDM?.(chatJid);
+          }
+
+          // Track which JIDs this session owns (for correct reply routing)
+          if (this.opts.sessionFolder && !chatJid.endsWith('@g.us')) {
+            this.ownedJids.add(chatJid);
+          }
+
+          // Only deliver full message for registered groups
           if (groups[chatJid]) {
             const content =
               normalized.conversation ||
@@ -221,7 +261,9 @@ export class WhatsAppChannel implements Channel {
             // since only the bot sends from that number.
             // With shared number, bot messages carry the assistant name prefix
             // (even in DMs/self-chat) so we check for that.
-            const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
+            const hasOwnNum =
+              this.opts.hasOwnNumber ?? ASSISTANT_HAS_OWN_NUMBER;
+            const isBotMessage = hasOwnNum
               ? fromMe
               : content.startsWith(`${ASSISTANT_NAME}:`);
 
@@ -251,9 +293,8 @@ export class WhatsAppChannel implements Channel {
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+    const hasOwnNum = this.opts.hasOwnNumber ?? ASSISTANT_HAS_OWN_NUMBER;
+    const prefixed = hasOwnNum ? text : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
@@ -281,7 +322,18 @@ export class WhatsAppChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+    // Dedicated business sessions only claim JIDs they've actually received messages from
+    if (this.opts.sessionFolder) {
+      return this.ownedJids.has(jid);
+    }
+    // Groups are always owned by the main session
+    if (jid.endsWith('@g.us')) return true;
+    // For DMs, main session only claims JIDs that belong to it (not auto-registered customer DMs for dedicated sessions)
+    if (jid.endsWith('@s.whatsapp.net')) {
+      const group = this.opts.registeredGroups()[jid];
+      return !!group && !group.containerConfig?.tenantFolder;
+    }
+    return false;
   }
 
   async disconnect(): Promise<void> {
@@ -310,7 +362,7 @@ export class WhatsAppChannel implements Channel {
    */
   async syncGroupMetadata(force = false): Promise<void> {
     if (!force) {
-      const lastSync = getLastGroupSync();
+      const lastSync = await getLastGroupSync();
       if (lastSync) {
         const lastSyncTime = new Date(lastSync).getTime();
         if (Date.now() - lastSyncTime < GROUP_SYNC_INTERVAL_MS) {
@@ -327,12 +379,12 @@ export class WhatsAppChannel implements Channel {
       let count = 0;
       for (const [jid, metadata] of Object.entries(groups)) {
         if (metadata.subject) {
-          updateChatName(jid, metadata.subject);
+          await updateChatName(jid, metadata.subject);
           count++;
         }
       }
 
-      setLastGroupSync();
+      await setLastGroupSync();
       logger.info({ count }, 'Group metadata synced');
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');

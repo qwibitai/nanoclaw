@@ -57,10 +57,8 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
-import { initPgSync } from './pg-sync.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { readEnvFile } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -74,17 +72,17 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
+async function loadState(): Promise<void> {
+  lastTimestamp = (await getRouterState('last_timestamp')) || '';
+  const agentTs = await getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
+  sessions = await getAllSessions();
+  registeredGroups = await getAllRegisteredGroups();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -92,8 +90,14 @@ function loadState(): void {
 }
 
 function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
-  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  // Fire-and-forget — non-critical path, failures logged but don't block
+  setRouterState('last_timestamp', lastTimestamp).catch((err) =>
+    logger.warn({ err }, 'Failed to persist last_timestamp'),
+  );
+  setRouterState(
+    'last_agent_timestamp',
+    JSON.stringify(lastAgentTimestamp),
+  ).catch((err) => logger.warn({ err }, 'Failed to persist last_agent_timestamp'));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -109,7 +113,10 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   }
 
   registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  // Fire-and-forget — in-memory state is already updated above
+  setRegisteredGroup(jid, group).catch((err) =>
+    logger.warn({ jid, err }, 'Failed to persist registered group'),
+  );
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
@@ -124,12 +131,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
-  const chats = getAllChats();
+export async function getAvailableGroups(): Promise<
+  import('./container-runner.js').AvailableGroup[]
+> {
+  const chats = await getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .filter((c) => c.is_group)
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -162,7 +171,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
+  const missedMessages = await getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
@@ -276,7 +285,7 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
+  const tasks = await getAllTasks();
   writeTasksSnapshot(
     group.folder,
     isMain,
@@ -292,7 +301,7 @@ async function runAgent(
   );
 
   // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
+  const availableGroups = await getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
     isMain,
@@ -305,7 +314,9 @@ async function runAgent(
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          setSession(group.folder, output.newSessionId).catch((err) =>
+            logger.warn({ err }, 'Failed to persist session'),
+          );
         }
         await onOutput(output);
       }
@@ -329,7 +340,9 @@ async function runAgent(
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      setSession(group.folder, output.newSessionId).catch((err) =>
+        logger.warn({ err }, 'Failed to persist session'),
+      );
     }
 
     if (output.status === 'error') {
@@ -359,7 +372,7 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
+      const { messages, newTimestamp } = await getNewMessages(
         jids,
         lastTimestamp,
         ASSISTANT_NAME,
@@ -412,7 +425,7 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
+          const allPending = await getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
@@ -452,10 +465,14 @@ async function startMessageLoop(): Promise<void> {
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
  */
-function recoverPendingMessages(): void {
+async function recoverPendingMessages(): Promise<void> {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    const pending = await getMessagesSince(
+      chatJid,
+      sinceTimestamp,
+      ASSISTANT_NAME,
+    );
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
@@ -483,7 +500,10 @@ function ensureContainerSystemRunning(): void {
 function autoRegisterCustomerDM(jid: string, sessionFolder: string): void {
   const phone = jid.split('@')[0].split(':')[0];
   if (!isValidGroupFolder(phone)) {
-    logger.warn({ jid, phone }, 'Cannot auto-register: phone is not a valid folder name');
+    logger.warn(
+      { jid, phone },
+      'Cannot auto-register: phone is not a valid folder name',
+    );
     return;
   }
   if (registeredGroups[jid]) return; // already registered (race guard)
@@ -512,12 +532,7 @@ function autoRegisterCustomerDM(jid: string, sessionFolder: string): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
-  logger.info('Database initialized');
-  const _pgEnv = readEnvFile(['DATABASE_URL']);
-  const dbUrl = process.env.DATABASE_URL || _pgEnv.DATABASE_URL;
-  if (dbUrl) initPgSync(dbUrl);
-  else logger.warn('DATABASE_URL not set — PostgreSQL sync disabled');
-  loadState();
+  await loadState();
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -589,8 +604,7 @@ async function main(): Promise<void> {
     const storeDirEntries = fs.readdirSync(STORE_DIR);
     const sessionDirs = storeDirEntries.filter(
       (d) =>
-        /^auth-/.test(d) &&
-        fs.statSync(path.join(STORE_DIR, d)).isDirectory(),
+        /^auth-/.test(d) && fs.statSync(path.join(STORE_DIR, d)).isDirectory(),
     );
     for (const dir of sessionDirs) {
       const sessionName = dir.slice('auth-'.length);
@@ -654,7 +668,7 @@ async function main(): Promise<void> {
   });
   startReminderLoop(() => channels);
   queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
+  await recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

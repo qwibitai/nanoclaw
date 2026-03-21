@@ -1,20 +1,16 @@
-import Database from 'better-sqlite3';
-import fs from 'fs';
-import path from 'path';
+/**
+ * db.ts — PostgreSQL data layer for nanoclaw
+ *
+ * Single pg.Pool, all functions async.
+ * Schema is managed by Prisma (platform/api/prisma/schema.prisma).
+ * nanoclaw reads/writes directly via SQL — no Prisma dependency here.
+ */
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import pg from 'pg';
+
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  pgSyncCreateTask,
-  pgSyncDeleteTask,
-  pgSyncLogTaskRun,
-  pgSyncSetRegisteredGroup,
-  pgSyncSetRouterState,
-  pgSyncSetSession,
-  pgSyncUpdateTask,
-  pgSyncUpdateTaskAfterRun,
-} from './pg-sync.js';
+import { readEnvFile } from './env.js';
 import {
   NewMessage,
   RegisteredGroup,
@@ -22,268 +18,88 @@ import {
   TaskRunLog,
 } from './types.js';
 
-let db: Database.Database;
-
-function createSchema(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS chats (
-      jid TEXT PRIMARY KEY,
-      name TEXT,
-      last_message_time TEXT,
-      channel TEXT,
-      is_group INTEGER DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT,
-      chat_jid TEXT,
-      sender TEXT,
-      sender_name TEXT,
-      content TEXT,
-      timestamp TEXT,
-      is_from_me INTEGER,
-      is_bot_message INTEGER DEFAULT 0,
-      PRIMARY KEY (id, chat_jid),
-      FOREIGN KEY (chat_jid) REFERENCES chats(jid)
-    );
-    CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
-
-    CREATE TABLE IF NOT EXISTS scheduled_tasks (
-      id TEXT PRIMARY KEY,
-      group_folder TEXT NOT NULL,
-      chat_jid TEXT NOT NULL,
-      prompt TEXT NOT NULL,
-      schedule_type TEXT NOT NULL,
-      schedule_value TEXT NOT NULL,
-      next_run TEXT,
-      last_run TEXT,
-      last_result TEXT,
-      status TEXT DEFAULT 'active',
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_next_run ON scheduled_tasks(next_run);
-    CREATE INDEX IF NOT EXISTS idx_status ON scheduled_tasks(status);
-
-    CREATE TABLE IF NOT EXISTS task_run_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      run_at TEXT NOT NULL,
-      duration_ms INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      result TEXT,
-      error TEXT,
-      FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
-
-    CREATE TABLE IF NOT EXISTS router_state (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL,
-      added_at TEXT NOT NULL,
-      container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS tenants (
-      id TEXT PRIMARY KEY,
-      whatsapp_jid TEXT NOT NULL UNIQUE,
-      business_name TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'other',
-      config_json TEXT NOT NULL DEFAULT '{}',
-      active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_tenants_jid ON tenants(whatsapp_jid);
-
-    CREATE TABLE IF NOT EXISTS staff (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      services_json TEXT NOT NULL DEFAULT '[]',
-      working_hours_json TEXT NOT NULL DEFAULT '[]',
-      active INTEGER NOT NULL DEFAULT 1,
-      FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_staff_tenant ON staff(tenant_id);
-
-    CREATE TABLE IF NOT EXISTS bookings (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      staff_id TEXT NOT NULL,
-      customer_phone TEXT NOT NULL,
-      customer_name TEXT NOT NULL,
-      service_name TEXT NOT NULL,
-      service_duration_min INTEGER NOT NULL,
-      start_time TEXT NOT NULL,
-      end_time TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'confirmed',
-      notes TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-      FOREIGN KEY (staff_id) REFERENCES staff(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_bookings_tenant ON bookings(tenant_id);
-    CREATE INDEX IF NOT EXISTS idx_bookings_staff_time ON bookings(staff_id, start_time);
-    CREATE INDEX IF NOT EXISTS idx_bookings_customer ON bookings(customer_phone, tenant_id);
-
-    CREATE TABLE IF NOT EXISTS customers (
-      id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      name TEXT NOT NULL,
-      last_booking_at TEXT,
-      UNIQUE(tenant_id, phone),
-      FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(tenant_id, phone);
-  `);
-
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
-    );
-    // Backfill: mark existing bot messages that used the content prefix pattern
-    database
-      .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
-      .run(`${ASSISTANT_NAME}:%`);
-  } catch {
-    /* column already exists */
-  }
-
-  // Add is_main column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
-    );
-    // Backfill: existing rows with folder = 'main' are the main group
-    database.exec(
-      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add channel and is_group columns if they don't exist (migration for existing DBs)
-  try {
-    database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
-    database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // Backfill from JID patterns
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
-    );
-  } catch {
-    /* columns already exist */
-  }
-
-  try {
-    database.exec(
-      `ALTER TABLE tenants ADD COLUMN group_folder TEXT NOT NULL DEFAULT ''`,
-    );
-    database.exec(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_folder ON tenants(group_folder) WHERE group_folder != ''`,
-    );
-  } catch {
-    /* columns already exist */
-  }
-}
+let pool: pg.Pool;
 
 export function initDatabase(): void {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  db = new Database(dbPath);
-  createSchema(db);
-
-  // Migrate from JSON files if they exist
-  migrateJsonState();
+  const env = readEnvFile(['DATABASE_URL']);
+  const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      'DATABASE_URL is required — set it in .env or environment',
+    );
+  }
+  pool = new pg.Pool({ connectionString: databaseUrl, max: 10 });
+  pool.on('error', (err) => logger.warn({ err }, 'pg: pool error'));
+  logger.info('Database pool initialized (PostgreSQL)');
 }
 
-/** @internal - for tests only. Creates a fresh in-memory database. */
-export function _initTestDatabase(): void {
-  db = new Database(':memory:');
-  createSchema(db);
+/** @internal - for tests only. Accepts a PostgreSQL connection string. */
+export function _initTestDatabase(databaseUrl: string): void {
+  pool = new pg.Pool({ connectionString: databaseUrl, max: 2 });
 }
 
-/**
- * Store chat metadata only (no message content).
- * Used for all chats to enable group discovery without storing sensitive content.
- */
-export function storeChatMetadata(
+// ─── Query helpers ─────────────────────────────────────────────────────────────
+
+async function q<T = Record<string, unknown>>(
+  sql: string,
+  params?: unknown[],
+): Promise<T[]> {
+  const result = await pool.query(sql, params);
+  return result.rows as T[];
+}
+
+async function qOne<T = Record<string, unknown>>(
+  sql: string,
+  params?: unknown[],
+): Promise<T | undefined> {
+  const result = await pool.query(sql, params);
+  return result.rows[0] as T | undefined;
+}
+
+// ─── Chats ────────────────────────────────────────────────────────────────────
+
+export async function storeChatMetadata(
   chatJid: string,
   timestamp: string,
   name?: string,
   channel?: string,
   isGroup?: boolean,
-): void {
-  const ch = channel ?? null;
-  const group = isGroup === undefined ? null : isGroup ? 1 : 0;
-
+): Promise<void> {
+  const ts = new Date(timestamp);
   if (name) {
-    // Update with name, preserving existing timestamp if newer
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, name, timestamp, ch, group);
+    await q(
+      `INSERT INTO chats (jid, name, last_message_time, channel, is_group)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (jid) DO UPDATE SET
+         name = EXCLUDED.name,
+         last_message_time = GREATEST(chats.last_message_time, EXCLUDED.last_message_time),
+         channel = COALESCE(EXCLUDED.channel, chats.channel),
+         is_group = COALESCE(EXCLUDED.is_group, chats.is_group)`,
+      [chatJid, name, ts, channel ?? null, isGroup ?? null],
+    );
   } else {
-    // Update timestamp only, preserve existing name if any
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, chatJid, timestamp, ch, group);
+    await q(
+      `INSERT INTO chats (jid, name, last_message_time, channel, is_group)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (jid) DO UPDATE SET
+         last_message_time = GREATEST(chats.last_message_time, EXCLUDED.last_message_time),
+         channel = COALESCE(EXCLUDED.channel, chats.channel),
+         is_group = COALESCE(EXCLUDED.is_group, chats.is_group)`,
+      [chatJid, chatJid, ts, channel ?? null, isGroup ?? null],
+    );
   }
 }
 
-/**
- * Update chat name without changing timestamp for existing chats.
- * New chats get the current time as their initial timestamp.
- * Used during group metadata sync.
- */
-export function updateChatName(chatJid: string, name: string): void {
-  db.prepare(
-    `
-    INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
-    ON CONFLICT(jid) DO UPDATE SET name = excluded.name
-  `,
-  ).run(chatJid, name, new Date().toISOString());
+export async function updateChatName(
+  chatJid: string,
+  name: string,
+): Promise<void> {
+  await q(
+    `INSERT INTO chats (jid, name, last_message_time)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (jid) DO UPDATE SET name = EXCLUDED.name`,
+    [chatJid, name, new Date()],
+  );
 }
 
 export interface ChatInfo {
@@ -291,68 +107,75 @@ export interface ChatInfo {
   name: string;
   last_message_time: string;
   channel: string;
-  is_group: number;
+  is_group: number; // kept as 0/1 for compatibility with existing callers
 }
 
-/**
- * Get all known chats, ordered by most recent activity.
- */
-export function getAllChats(): ChatInfo[] {
-  return db
-    .prepare(
-      `
-    SELECT jid, name, last_message_time, channel, is_group
-    FROM chats
-    ORDER BY last_message_time DESC
-  `,
-    )
-    .all() as ChatInfo[];
+export async function getAllChats(): Promise<ChatInfo[]> {
+  const rows = await q<{
+    jid: string;
+    name: string;
+    last_message_time: Date | null;
+    channel: string | null;
+    is_group: boolean;
+  }>(
+    `SELECT jid, name, last_message_time, channel, is_group
+     FROM chats
+     WHERE jid != '__group_sync__'
+     ORDER BY last_message_time DESC NULLS LAST`,
+  );
+  return rows.map((r) => ({
+    jid: r.jid,
+    name: r.name,
+    last_message_time: r.last_message_time
+      ? new Date(r.last_message_time).toISOString()
+      : '',
+    channel: r.channel ?? '',
+    is_group: r.is_group ? 1 : 0,
+  }));
 }
 
-/**
- * Get timestamp of last group metadata sync.
- */
-export function getLastGroupSync(): string | null {
-  // Store sync time in a special chat entry
-  const row = db
-    .prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
-    .get() as { last_message_time: string } | undefined;
-  return row?.last_message_time || null;
+export async function getLastGroupSync(): Promise<string | null> {
+  const row = await qOne<{ last_message_time: Date | null }>(
+    `SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`,
+  );
+  return row?.last_message_time
+    ? new Date(row.last_message_time).toISOString()
+    : null;
 }
 
-/**
- * Record that group metadata was synced.
- */
-export function setLastGroupSync(): void {
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', ?)`,
-  ).run(now);
-}
-
-/**
- * Store a message with full content.
- * Only call this for registered groups where message history is needed.
- */
-export function storeMessage(msg: NewMessage): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
+export async function setLastGroupSync(): Promise<void> {
+  await q(
+    `INSERT INTO chats (jid, name, last_message_time)
+     VALUES ('__group_sync__','__group_sync__',$1)
+     ON CONFLICT (jid) DO UPDATE SET last_message_time = EXCLUDED.last_message_time`,
+    [new Date()],
   );
 }
 
-/**
- * Store a message directly.
- */
-export function storeMessageDirect(msg: {
+// ─── Messages ─────────────────────────────────────────────────────────────────
+
+export async function storeMessage(msg: NewMessage): Promise<void> {
+  await q(
+    `INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (id, chat_jid) DO UPDATE SET
+       content = EXCLUDED.content,
+       is_from_me = EXCLUDED.is_from_me,
+       is_bot_message = EXCLUDED.is_bot_message`,
+    [
+      msg.id,
+      msg.chat_jid,
+      msg.sender ?? null,
+      msg.sender_name ?? null,
+      msg.content ?? null,
+      new Date(msg.timestamp),
+      msg.is_from_me ?? false,
+      msg.is_bot_message ?? false,
+    ],
+  );
+}
+
+export async function storeMessageDirect(msg: {
   id: string;
   chat_jid: string;
   sender: string;
@@ -361,137 +184,174 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
-}): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
-  );
+}): Promise<void> {
+  await storeMessage(msg);
 }
 
-export function getNewMessages(
+type MessageRow = {
+  id: string;
+  chat_jid: string;
+  sender: string | null;
+  sender_name: string | null;
+  content: string | null;
+  timestamp: Date;
+  is_from_me: boolean;
+};
+
+function mapMessage(row: MessageRow): NewMessage {
+  return {
+    id: row.id,
+    chat_jid: row.chat_jid,
+    sender: row.sender ?? '',
+    sender_name: row.sender_name ?? '',
+    content: row.content ?? '',
+    timestamp: new Date(row.timestamp).toISOString(),
+    is_from_me: row.is_from_me,
+  };
+}
+
+export async function getNewMessages(
   jids: string[],
   lastTimestamp: string,
   botPrefix: string,
   limit: number = 200,
-): { messages: NewMessage[]; newTimestamp: string } {
+): Promise<{ messages: NewMessage[]; newTimestamp: string }> {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
-  const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  const jidPlaceholders = jids.map((_, i) => `$${i + 3}`).join(',');
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
+      WHERE timestamp > $1 AND chat_jid IN (${jidPlaceholders})
+        AND is_bot_message = false
+        AND content NOT LIKE $2
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
+      LIMIT ${limit}
+    ) sub ORDER BY timestamp
   `;
 
-  const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+  const cutoff = lastTimestamp ? new Date(lastTimestamp) : new Date(0);
+  const rows = await q<MessageRow>(sql, [cutoff, `${botPrefix}:%`, ...jids]);
+  const messages = rows.map(mapMessage);
 
   let newTimestamp = lastTimestamp;
-  for (const row of rows) {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
+  for (const m of messages) {
+    if (m.timestamp > newTimestamp) newTimestamp = m.timestamp;
   }
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
-export function getMessagesSince(
+export async function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
-): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
+): Promise<NewMessage[]> {
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
+      WHERE chat_jid = $1 AND timestamp > $2
+        AND is_bot_message = false
+        AND content NOT LIKE $3
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
+      LIMIT ${limit}
+    ) sub ORDER BY timestamp
   `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  const cutoff = sinceTimestamp ? new Date(sinceTimestamp) : new Date(0);
+  const rows = await q<MessageRow>(sql, [chatJid, cutoff, `${botPrefix}:%`]);
+  return rows.map(mapMessage);
 }
 
-export function createTask(
+// ─── Scheduled tasks ──────────────────────────────────────────────────────────
+
+type TaskRow = {
+  id: string;
+  group_folder: string;
+  chat_jid: string;
+  prompt: string;
+  schedule_type: string;
+  schedule_value: string;
+  context_mode: string | null;
+  next_run: Date | null;
+  last_run: Date | null;
+  last_result: string | null;
+  status: string;
+  created_at: Date;
+};
+
+function mapTask(row: TaskRow): ScheduledTask {
+  return {
+    id: row.id,
+    group_folder: row.group_folder,
+    chat_jid: row.chat_jid,
+    prompt: row.prompt,
+    schedule_type: row.schedule_type as ScheduledTask['schedule_type'],
+    schedule_value: row.schedule_value,
+    context_mode: (row.context_mode ?? 'isolated') as ScheduledTask['context_mode'],
+    next_run: row.next_run ? new Date(row.next_run).toISOString() : null,
+    last_run: row.last_run ? new Date(row.last_run).toISOString() : null,
+    last_result: row.last_result ?? null,
+    status: (row.status ?? 'active') as ScheduledTask['status'],
+    created_at: new Date(row.created_at).toISOString(),
+  };
+}
+
+export async function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
-): void {
-  db.prepare(
-    `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `,
-  ).run(
-    task.id,
-    task.group_folder,
-    task.chat_jid,
-    task.prompt,
-    task.schedule_type,
-    task.schedule_value,
-    task.context_mode || 'isolated',
-    task.next_run,
-    task.status,
-    task.created_at,
+): Promise<void> {
+  await q(
+    `INSERT INTO scheduled_tasks
+       (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      task.id,
+      task.group_folder,
+      task.chat_jid,
+      task.prompt,
+      task.schedule_type,
+      task.schedule_value,
+      task.context_mode ?? 'isolated',
+      task.next_run ? new Date(task.next_run) : null,
+      task.status,
+      new Date(task.created_at),
+    ],
   );
-  pgSyncCreateTask({
-    id: task.id,
-    group_folder: task.group_folder,
-    chat_jid: task.chat_jid,
-    prompt: task.prompt,
-    schedule_type: task.schedule_type,
-    schedule_value: task.schedule_value,
-    context_mode: task.context_mode || 'isolated',
-    next_run: task.next_run ?? null,
-    status: task.status,
-    created_at: task.created_at,
-  });
 }
 
-export function getTaskById(id: string): ScheduledTask | undefined {
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
-    | ScheduledTask
-    | undefined;
+export async function getTaskById(
+  id: string,
+): Promise<ScheduledTask | undefined> {
+  const row = await qOne<TaskRow>(
+    'SELECT * FROM scheduled_tasks WHERE id = $1',
+    [id],
+  );
+  return row ? mapTask(row) : undefined;
 }
 
-export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
-  return db
-    .prepare(
-      'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
-    )
-    .all(groupFolder) as ScheduledTask[];
+export async function getTasksForGroup(
+  groupFolder: string,
+): Promise<ScheduledTask[]> {
+  const rows = await q<TaskRow>(
+    'SELECT * FROM scheduled_tasks WHERE group_folder = $1 ORDER BY created_at DESC',
+    [groupFolder],
+  );
+  return rows.map(mapTask);
 }
 
-export function getAllTasks(): ScheduledTask[] {
-  return db
-    .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
-    .all() as ScheduledTask[];
+export async function getAllTasks(): Promise<ScheduledTask[]> {
+  const rows = await q<TaskRow>(
+    'SELECT * FROM scheduled_tasks ORDER BY created_at DESC',
+  );
+  return rows.map(mapTask);
 }
 
-export function updateTask(
+export async function updateTask(
   id: string,
   updates: Partial<
     Pick<
@@ -499,129 +359,132 @@ export function updateTask(
       'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
     >
   >,
-): void {
+): Promise<void> {
   const fields: string[] = [];
   const values: unknown[] = [];
+  let i = 1;
 
   if (updates.prompt !== undefined) {
-    fields.push('prompt = ?');
+    fields.push(`prompt = $${i++}`);
     values.push(updates.prompt);
   }
   if (updates.schedule_type !== undefined) {
-    fields.push('schedule_type = ?');
+    fields.push(`schedule_type = $${i++}`);
     values.push(updates.schedule_type);
   }
   if (updates.schedule_value !== undefined) {
-    fields.push('schedule_value = ?');
+    fields.push(`schedule_value = $${i++}`);
     values.push(updates.schedule_value);
   }
   if (updates.next_run !== undefined) {
-    fields.push('next_run = ?');
-    values.push(updates.next_run);
+    fields.push(`next_run = $${i++}`);
+    values.push(updates.next_run ? new Date(updates.next_run) : null);
   }
   if (updates.status !== undefined) {
-    fields.push('status = ?');
+    fields.push(`status = $${i++}`);
     values.push(updates.status);
   }
 
   if (fields.length === 0) return;
 
   values.push(id);
-  db.prepare(
-    `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
-  ).run(...values);
-  pgSyncUpdateTask(id, updates);
+  await q(
+    `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = $${i}`,
+    values,
+  );
 }
 
-export function deleteTask(id: string): void {
-  // Delete child records first (FK constraint)
-  db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
-  db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
-  pgSyncDeleteTask(id);
+export async function deleteTask(id: string): Promise<void> {
+  await q('DELETE FROM task_run_logs WHERE task_id = $1', [id]);
+  await q('DELETE FROM scheduled_tasks WHERE id = $1', [id]);
 }
 
-export function getDueTasks(): ScheduledTask[] {
-  const now = new Date().toISOString();
-  return db
-    .prepare(
-      `
-    SELECT * FROM scheduled_tasks
-    WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= ?
-    ORDER BY next_run
-  `,
-    )
-    .all(now) as ScheduledTask[];
+export async function getDueTasks(): Promise<ScheduledTask[]> {
+  const rows = await q<TaskRow>(
+    `SELECT * FROM scheduled_tasks
+     WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= NOW()
+     ORDER BY next_run`,
+  );
+  return rows.map(mapTask);
 }
 
-export function updateTaskAfterRun(
+export async function updateTaskAfterRun(
   id: string,
   nextRun: string | null,
   lastResult: string,
-): void {
-  const now = new Date().toISOString();
-  db.prepare(
-    `
-    UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
-    WHERE id = ?
-  `,
-  ).run(nextRun, now, lastResult, nextRun, id);
-  pgSyncUpdateTaskAfterRun(id, nextRun, lastResult);
-}
-
-export function logTaskRun(log: TaskRunLog): void {
-  db.prepare(
-    `
-    INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `,
-  ).run(
-    log.task_id,
-    log.run_at,
-    log.duration_ms,
-    log.status,
-    log.result,
-    log.error,
+): Promise<void> {
+  await q(
+    `UPDATE scheduled_tasks
+     SET next_run = $1, last_run = NOW(), last_result = $2,
+         status = CASE WHEN $1 IS NULL THEN 'completed' ELSE status END
+     WHERE id = $3`,
+    [nextRun ? new Date(nextRun) : null, lastResult, id],
   );
-  pgSyncLogTaskRun(log);
 }
 
-// --- Router state accessors ---
+export async function logTaskRun(log: TaskRunLog): Promise<void> {
+  await q(
+    `INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [
+      log.task_id,
+      new Date(log.run_at),
+      log.duration_ms,
+      log.status,
+      log.result,
+      log.error,
+    ],
+  );
+}
 
-export function getRouterState(key: string): string | undefined {
-  const row = db
-    .prepare('SELECT value FROM router_state WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+// ─── Router state ─────────────────────────────────────────────────────────────
+
+export async function getRouterState(key: string): Promise<string | undefined> {
+  const row = await qOne<{ value: string }>(
+    'SELECT value FROM router_state WHERE key = $1',
+    [key],
+  );
   return row?.value;
 }
 
-export function setRouterState(key: string, value: string): void {
-  db.prepare(
-    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
-  ).run(key, value);
-  pgSyncSetRouterState(key, value);
+export async function setRouterState(
+  key: string,
+  value: string,
+): Promise<void> {
+  await q(
+    `INSERT INTO router_state (key, value) VALUES ($1,$2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value],
+  );
 }
 
-// --- Session accessors ---
+// ─── Sessions ─────────────────────────────────────────────────────────────────
 
-export function getSession(groupFolder: string): string | undefined {
-  const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
+export async function getSession(
+  groupFolder: string,
+): Promise<string | undefined> {
+  const row = await qOne<{ session_id: string }>(
+    'SELECT session_id FROM conversation_sessions WHERE group_folder = $1',
+    [groupFolder],
+  );
   return row?.session_id;
 }
 
-export function setSession(groupFolder: string, sessionId: string): void {
-  db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
-  pgSyncSetSession(groupFolder, sessionId);
+export async function setSession(
+  groupFolder: string,
+  sessionId: string,
+): Promise<void> {
+  await q(
+    `INSERT INTO conversation_sessions (group_folder, session_id) VALUES ($1,$2)
+     ON CONFLICT (group_folder) DO UPDATE SET session_id = EXCLUDED.session_id`,
+    [groupFolder, sessionId],
+  );
 }
 
-export function getAllSessions(): Record<string, string> {
-  const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+export async function getAllSessions(): Promise<Record<string, string>> {
+  const rows = await q<{ group_folder: string; session_id: string }>(
+    'SELECT group_folder, session_id FROM conversation_sessions',
+  );
   const result: Record<string, string> = {};
   for (const row of rows) {
     result[row.group_folder] = row.session_id;
@@ -629,26 +492,22 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
-// --- Registered group accessors ---
+// ─── Registered groups ────────────────────────────────────────────────────────
 
-export function getRegisteredGroup(
-  jid: string,
+type GroupRow = {
+  jid: string;
+  name: string;
+  folder: string;
+  trigger_pattern: string;
+  added_at: Date;
+  container_config: object | null;
+  requires_trigger: boolean | null;
+  is_main: boolean | null;
+};
+
+function mapGroup(
+  row: GroupRow,
 ): (RegisteredGroup & { jid: string }) | undefined {
-  const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-        is_main: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
   if (!isValidGroupFolder(row.folder)) {
     logger.warn(
       { jid: row.jid, folder: row.folder },
@@ -661,135 +520,67 @@ export function getRegisteredGroup(
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
-    added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    added_at: new Date(row.added_at).toISOString(),
+    containerConfig: (row.container_config as any) ?? undefined,
     requiresTrigger:
-      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    isMain: row.is_main === 1 ? true : undefined,
+      row.requires_trigger === null ? undefined : row.requires_trigger,
+    isMain: row.is_main === true ? true : undefined,
   };
 }
 
-export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
+export async function getRegisteredGroup(
+  jid: string,
+): Promise<(RegisteredGroup & { jid: string }) | undefined> {
+  const row = await qOne<GroupRow>(
+    'SELECT * FROM registered_groups WHERE jid = $1',
+    [jid],
+  );
+  if (!row) return undefined;
+  return mapGroup(row);
+}
+
+export async function setRegisteredGroup(
+  jid: string,
+  group: RegisteredGroup,
+): Promise<void> {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
-  db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    jid,
-    group.name,
-    group.folder,
-    group.trigger,
-    group.added_at,
-    group.containerConfig ? JSON.stringify(group.containerConfig) : null,
-    group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.isMain ? 1 : 0,
-  );
-  pgSyncSetRegisteredGroup(
-    jid, group.name, group.folder, group.trigger, group.added_at,
-    group.containerConfig ?? null,
-    group.requiresTrigger !== false,
-    group.isMain === true,
+  await q(
+    `INSERT INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (jid) DO UPDATE SET
+       name = EXCLUDED.name,
+       folder = EXCLUDED.folder,
+       trigger_pattern = EXCLUDED.trigger_pattern,
+       container_config = EXCLUDED.container_config,
+       requires_trigger = EXCLUDED.requires_trigger,
+       is_main = EXCLUDED.is_main`,
+    [
+      jid,
+      group.name,
+      group.folder,
+      group.trigger,
+      new Date(group.added_at),
+      group.containerConfig ? JSON.stringify(group.containerConfig) : null,
+      group.requiresTrigger !== false,
+      group.isMain === true,
+    ],
   );
 }
 
-export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    is_main: number | null;
-  }>;
+export async function getAllRegisteredGroups(): Promise<
+  Record<string, RegisteredGroup>
+> {
+  const rows = await q<GroupRow>('SELECT * FROM registered_groups');
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
-    if (!isValidGroupFolder(row.folder)) {
-      logger.warn(
-        { jid: row.jid, folder: row.folder },
-        'Skipping registered group with invalid folder',
-      );
-      continue;
+    const g = mapGroup(row);
+    if (g) {
+      const { jid, ...group } = g;
+      result[jid] = group;
     }
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger:
-        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      isMain: row.is_main === 1 ? true : undefined,
-    };
   }
   return result;
-}
-
-// --- JSON migration ---
-
-function migrateJsonState(): void {
-  const migrateFile = (filename: string) => {
-    const filePath = path.join(DATA_DIR, filename);
-    if (!fs.existsSync(filePath)) return null;
-    try {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      fs.renameSync(filePath, `${filePath}.migrated`);
-      return data;
-    } catch {
-      return null;
-    }
-  };
-
-  // Migrate router_state.json
-  const routerState = migrateFile('router_state.json') as {
-    last_timestamp?: string;
-    last_agent_timestamp?: Record<string, string>;
-  } | null;
-  if (routerState) {
-    if (routerState.last_timestamp) {
-      setRouterState('last_timestamp', routerState.last_timestamp);
-    }
-    if (routerState.last_agent_timestamp) {
-      setRouterState(
-        'last_agent_timestamp',
-        JSON.stringify(routerState.last_agent_timestamp),
-      );
-    }
-  }
-
-  // Migrate sessions.json
-  const sessions = migrateFile('sessions.json') as Record<
-    string,
-    string
-  > | null;
-  if (sessions) {
-    for (const [folder, sessionId] of Object.entries(sessions)) {
-      setSession(folder, sessionId);
-    }
-  }
-
-  // Migrate registered_groups.json
-  const groups = migrateFile('registered_groups.json') as Record<
-    string,
-    RegisteredGroup
-  > | null;
-  if (groups) {
-    for (const [jid, group] of Object.entries(groups)) {
-      try {
-        setRegisteredGroup(jid, group);
-      } catch (err) {
-        logger.warn(
-          { jid, folder: group.folder, err },
-          'Skipping migrated registered group with invalid folder',
-        );
-      }
-    }
-  }
 }
