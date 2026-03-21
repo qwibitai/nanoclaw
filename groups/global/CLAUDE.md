@@ -47,6 +47,10 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Shared Cloud Storage
+
+A shared cloud storage directory is available at `/workspace/extra/cloud-drive/`. Use it to read input files and write output files that the user can access from other devices. Use standard file tools (Read, Write, Edit, Bash) — no special commands needed.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:

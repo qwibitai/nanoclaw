@@ -55,6 +55,12 @@ Keep messages clean and readable for WhatsApp.
 
 ---
 
+## Shared Cloud Storage
+
+A shared cloud storage directory is available at `/workspace/extra/cloud-drive/`. Use it to read input files and write output files that the user can access from other devices. Use standard file tools (Read, Write, Edit, Bash) — no special commands needed.
+
+---
+
 ## Admin Context
 
 This is the **main channel**, which has elevated privileges.
