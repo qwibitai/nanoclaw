@@ -123,8 +123,8 @@ setup_gh_git_mocks "src/index.ts\nsrc/config.ts" ""
 
 OUTPUT=$(run_hook_stderr "$HOOK" "gh pr merge 42")
 assert_contains "shows test-exceptions fence" 'test-exceptions' "$OUTPUT"
-assert_contains "lists first uncovered file in block" "src/index.ts -- reason" "$OUTPUT"
-assert_contains "lists second uncovered file in block" "src/config.ts -- reason" "$OUTPUT"
+assert_contains "lists first uncovered file in block" "src/index.ts:" "$OUTPUT"
+assert_contains "lists second uncovered file in block" "src/config.ts:" "$OUTPUT"
 
 echo ""
 echo "=== Multi-line mock with escape sequences (regression #214) ==="

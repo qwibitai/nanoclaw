@@ -116,15 +116,7 @@ EXCEPTION_LINES=$(echo -e "$UNCOVERED" | sed 's/^  - //' | grep -v '^$' |   sed 
 echo "$MSG" >&2
 echo "" >&2
 if [ -n "$EXCEPTION_LINES" ]; then
-  cat >&2 <<EXCEPTION_BLOCK
-If these files genuinely don't need test changes, add this to the PR body:
-
-```test-exceptions
-$EXCEPTION_LINES
-```
-
-Replace <reason> with a specific justification (e.g., "constant change", "covered by existing X tests").
-EXCEPTION_BLOCK
+  printf '%s\n'     "If these files genuinely don't need test changes, add this to the PR body:"     ""     '```test-exceptions'     "$EXCEPTION_LINES"     '```'     ""     'Replace <reason> with a specific justification (e.g., "constant change", "covered by existing X tests").' >&2
   echo "" >&2
 fi
 if [ "$IS_MERGE" = true ]; then
