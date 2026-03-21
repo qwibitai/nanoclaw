@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -47,6 +49,12 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install csrankings-query CLI via uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+ENV UV_TOOL_DIR=/usr/local/share/uv-tools
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install --from 'git+https://github.com/vzaliva/CSRankings-query' csrankings-query
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
