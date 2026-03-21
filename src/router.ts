@@ -19,9 +19,25 @@ export function formatMessages(
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+  // Plain-text date header with a reason to override stale history.
+  // In resumed sessions the model's own prior date statements create
+  // self-consistency bias — "outdated" gives it a reason to self-correct.
+  const now = new Date();
+  const currentDateTime = now.toLocaleString('en-US', {
+    timeZone: timezone,
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const header =
+    `Current date and time: ${currentDateTime} (${timezone}). ` +
+    `If prior messages mention a different date, they are outdated.`;
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  return `${header}\n\n<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
