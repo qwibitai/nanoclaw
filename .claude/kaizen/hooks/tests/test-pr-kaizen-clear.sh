@@ -1081,5 +1081,86 @@ else
 fi
 
 
+
+echo ""
+echo "=== Multi-PR: clears the most recent gate, not a stale one (kaizen #327) ==="
+
+setup
+
+# INVARIANT: When multiple needs_pr_kaizen state files exist (from different PRs),
+# the clear operation targets the most recently created one — the one the agent
+# is responding to.
+
+# Create state for PR #42 (older — created first)
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42" "main"
+sleep 1
+# Create state for PR #43 (newer — the one the agent is responding to)
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/43" "main"
+
+# Submit KAIZEN_IMPEDIMENTS — should clear the newest gate (PR #43)
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS: [] straightforward fix, no issues'" \
+  "KAIZEN_IMPEDIMENTS: [] straightforward fix, no issues")
+
+# Check that gate was cleared
+assert_contains "multi-PR: gate cleared message shown" "gate cleared" "$OUTPUT"
+
+# Check which state files remain — PR #42 should still exist, PR #43 should be cleared
+PR42_KEY=$(pr_url_to_state_key "https://github.com/Garsson-io/nanoclaw/pull/42")
+PR43_KEY=$(pr_url_to_state_key "https://github.com/Garsson-io/nanoclaw/pull/43")
+
+if [ -f "$STATE_DIR/pr-kaizen-$PR42_KEY" ]; then
+  echo "  PASS: multi-PR: older PR #42 gate still exists"
+  ((PASS++))
+else
+  echo "  FAIL: multi-PR: older PR #42 gate was incorrectly cleared"
+  ((FAIL++))
+fi
+
+if [ ! -f "$STATE_DIR/pr-kaizen-$PR43_KEY" ]; then
+  echo "  PASS: multi-PR: newer PR #43 gate was cleared"
+  ((PASS++))
+else
+  echo "  FAIL: multi-PR: newer PR #43 gate was NOT cleared"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Multi-PR: clear reports failure if no matching state found (kaizen #327) ==="
+
+setup
+
+# INVARIANT: If the clear operation cannot find a matching state file,
+# the output should NOT say "gate cleared" — it should report an error.
+
+# Create NO state files
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS: [] no issues'" \
+  "KAIZEN_IMPEDIMENTS: [] no issues")
+
+# Should exit silently (no gate to clear = early exit at line 140)
+assert_not_contains "no-gate: does not say gate cleared" "gate cleared" "$OUTPUT"
+
+echo ""
+echo "=== Multi-PR: clearing newest gate when only one exists works (kaizen #327) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/99" "main"
+
+OUTPUT=$(run_posttool_bash \
+  "echo 'KAIZEN_IMPEDIMENTS: [] simple change'" \
+  "KAIZEN_IMPEDIMENTS: [] simple change")
+
+assert_contains "single-gate: cleared message shown" "gate cleared" "$OUTPUT"
+
+PR99_KEY=$(pr_url_to_state_key "https://github.com/Garsson-io/nanoclaw/pull/99")
+if [ ! -f "$STATE_DIR/pr-kaizen-$PR99_KEY" ]; then
+  echo "  PASS: single-gate: PR #99 gate was cleared"
+  ((PASS++))
+else
+  echo "  FAIL: single-gate: PR #99 gate was NOT cleared"
+  ((FAIL++))
+fi
+
 teardown
 print_results

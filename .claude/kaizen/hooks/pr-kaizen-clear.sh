@@ -133,10 +133,12 @@ fi
 
 CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
-# Check if there's an active PR kaizen gate to clear (kaizen #239)
+# Check if there's an active PR kaizen gate to clear (kaizen #239, #327)
 # Use cross-branch lookup — the agent may submit the declaration from a
 # different worktree than where the PR was created.
-STATE_INFO=$(find_state_with_status_any_branch "needs_pr_kaizen")
+# Use newest-first lookup — when multiple PRs are in flight, the agent
+# is responding to the most recently triggered gate (kaizen #327).
+STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
 if [ $? -ne 0 ] || [ -z "$STATE_INFO" ]; then
   exit 0
 fi

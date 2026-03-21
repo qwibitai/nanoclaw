@@ -391,3 +391,35 @@ is_reflection_done() {
   fi
   return 0
 }
+
+# Find the NEWEST state file with a given STATUS across all branches (kaizen #327).
+# When multiple state files match (e.g., gates for different PRs), returns the
+# most recently modified one — the one the agent is most likely responding to.
+# Outputs "PR_URL|STATUS" on success, returns 1 if none found.
+#
+# Usage:
+#   STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
+find_newest_state_with_status_any_branch() {
+  local wanted_status="$1"
+  local newest_file=""
+  local newest_mtime=0
+  local newest_pr_url=""
+  while IFS= read -r f; do
+    local status
+    status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ "$status" = "$wanted_status" ]; then
+      local mtime
+      mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "0")
+      if [ "$mtime" -gt "$newest_mtime" ]; then
+        newest_mtime="$mtime"
+        newest_file="$f"
+        newest_pr_url=$(grep -E '^PR_URL=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      fi
+    fi
+  done < <(list_state_files_any_branch)
+  if [ -n "$newest_file" ]; then
+    echo "$newest_pr_url|$wanted_status"
+    return 0
+  fi
+  return 1
+}

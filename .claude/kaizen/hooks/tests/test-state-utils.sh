@@ -620,3 +620,76 @@ else
   echo "  FAIL: other branch's state was deleted"
   ((FAIL++))
 fi
+
+echo ""
+echo "=== find_newest_state_with_status_any_branch: returns newest when multiple match (kaizen #327) ==="
+
+reset_state
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
+# Create two state files with different timestamps
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/50\nSTATUS=needs_pr_kaizen\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_50"
+sleep 1
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/51\nSTATUS=needs_pr_kaizen\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_51"
+
+# INVARIANT: find_newest returns the most recently modified state file
+STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -eq 0 ]; then
+  echo "  PASS: find_newest found a state"
+  ((PASS++))
+else
+  echo "  FAIL: find_newest returned failure"
+  ((FAIL++))
+fi
+assert_contains "find_newest returns newer PR (51)" "pull/51" "$STATE_INFO"
+assert_not_contains "find_newest does NOT return older PR (50)" "pull/50" "$STATE_INFO"
+
+echo ""
+echo "=== find_newest_state_with_status_any_branch: works with single match ==="
+
+reset_state
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/60\nSTATUS=needs_pr_kaizen\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/pr-kaizen-single"
+
+STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -eq 0 ]; then
+  echo "  PASS: find_newest works with single state"
+  ((PASS++))
+else
+  echo "  FAIL: find_newest failed with single state"
+  ((FAIL++))
+fi
+assert_contains "find_newest returns single PR" "pull/60" "$STATE_INFO"
+
+echo ""
+echo "=== find_newest_state_with_status_any_branch: returns failure when none ==="
+
+reset_state
+STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -ne 0 ]; then
+  echo "  PASS: find_newest returns failure when no match"
+  ((PASS++))
+else
+  echo "  FAIL: find_newest returned success with no states"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== find_newest_state_with_status_any_branch: crosses branches ==="
+
+reset_state
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/70\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other-branch\n' > "$STATE_DIR/pr-kaizen-cross"
+sleep 1
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/71\nSTATUS=needs_pr_kaizen\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/pr-kaizen-current"
+
+STATE_INFO=$(find_newest_state_with_status_any_branch "needs_pr_kaizen")
+assert_contains "find_newest crosses branches, returns newest" "pull/71" "$STATE_INFO"
+
+cleanup_test_env
+
+echo ""
+echo "================================"
+echo "Extended results: $PASS passed, $FAIL failed"
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+echo "All extended tests passed."
