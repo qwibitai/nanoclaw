@@ -14,3 +14,8 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'Unhandled rejection');
 });
+
+/** Get the current log level */
+export function getLogLevel(): string {
+  return logger.level;
+}
