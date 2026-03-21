@@ -21,6 +21,9 @@ import {
 import { initBotPool, sendPoolMessage } from './channels/telegram.js';
 import { activateDevSession } from './dev-session-orchestrator.js';
 import { classifyError } from './error-classify.js';
+import { classifyCaseMutation } from './case-sync-routing.js';
+import { handleCookieMessage } from './cookie-handler.js';
+import { recordUsage, RecordUsageDeps } from './record-usage.js';
 import { detectDevSafeWord } from './dev-safe-word.js';
 import { resolveDispatch } from './message-dispatch.js';
 import { tryRouteToDevSession } from './dev-session-router.js';
@@ -105,168 +108,30 @@ import { onCaseEscalationEvent } from './escalation-hook.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
-/**
- * L3 mechanistic cookie auto-handler.
- * Detects cookie JSON for backoffice systems in incoming messages,
- * converts to Playwright storageState format, saves to the right path,
- * and confirms to the user. No agent involvement needed.
- */
-function handleCookieMessage(chatJid: string, msg: NewMessage): void {
-  if (msg.is_from_me || msg.is_bot_message) return;
-  const content = msg.content.trim();
+function findInsuranceMountPath(chatJid: string): string | null {
+  const group = registeredGroups[chatJid];
+  if (!group?.containerConfig?.additionalMounts) return null;
 
-  // Quick check: does this look like cookie JSON for a known domain?
-  if (
-    !content.includes('app.roeto.co.il') ||
-    !content.includes('connect.roeto')
-  )
-    return;
-
-  // Try to parse as cookie JSON (browser plugin export format)
-  try {
-    const parsed = JSON.parse(content);
-    const cookies = Array.isArray(parsed) ? parsed : [parsed];
-    const roetoCookie = cookies.find(
-      (c: Record<string, unknown>) =>
-        c.name === 'connect.roeto' &&
-        c.domain === 'app.roeto.co.il' &&
-        typeof c.value === 'string',
-    );
-
-    if (!roetoCookie) return;
-
-    // Convert to Playwright storageState format
-    const storageState = {
-      cookies: [
-        {
-          name: roetoCookie.name,
-          value: roetoCookie.value,
-          domain: roetoCookie.domain,
-          path: roetoCookie.path || '/',
-          expires: roetoCookie.expirationDate || roetoCookie.expires || -1,
-          httpOnly: roetoCookie.httpOnly ?? true,
-          secure: roetoCookie.secure ?? true,
-          sameSite: roetoCookie.sameSite || 'Lax',
-        },
-      ],
-      origins: [],
-    };
-
-    // Find the garsson-insurance mount path from group config
-    const group = registeredGroups[chatJid];
-    if (!group?.containerConfig?.additionalMounts) return;
-
-    const insuranceMount = (
-      group.containerConfig.additionalMounts as Array<{
-        hostPath: string;
-        containerPath: string;
-      }>
-    ).find(
-      (m) =>
-        m.hostPath.includes('garsson-insurance') ||
-        m.containerPath === 'insurance',
-    );
-    if (!insuranceMount) return;
-
-    const sessionFile = path.join(
-      insuranceMount.hostPath,
-      'tools',
-      '.roeto-session.json',
-    );
-    fs.writeFileSync(sessionFile, JSON.stringify(storageState, null, 2));
-
-    logger.info(
-      { chatJid, sessionFile, sender: msg.sender_name },
-      'Cookie auto-saved for Roeto',
-    );
-
-    // Confirm to user mechanistically
-    const channel = findChannel(channels, chatJid);
-    if (channel) {
-      channel
-        .sendMessage(chatJid, '✅ Roeto cookie saved automatically. Testing...')
-        .then(() => {
-          // We can't test from the host (no chromium), but the cookie format is validated
-          channel
-            .sendMessage(
-              chatJid,
-              `✅ Cookie saved to ${path.basename(sessionFile)}. Next Roeto request will use the new session.`,
-            )
-            .catch(() => {});
-        })
-        .catch(() => {});
-    }
-  } catch {
-    // Not valid JSON or not a cookie — ignore silently
-  }
+  const insuranceMount = (
+    group.containerConfig.additionalMounts as Array<{
+      hostPath: string;
+      containerPath: string;
+    }>
+  ).find(
+    (m) =>
+      m.hostPath.includes('garsson-insurance') ||
+      m.containerPath === 'insurance',
+  );
+  return insuranceMount?.hostPath ?? null;
 }
 
-/**
- * Record API usage from a container result.
- * Stores one row per model used, or a single aggregate row if no model breakdown.
- */
-function recordUsage(
-  usage: UsageData,
-  groupFolder: string,
-  source: string,
-  sessionId?: string,
-  caseId?: string,
-): void {
-  const category = getGroupUsageCategory(groupFolder);
-  const authMode = detectAuthMode();
-
-  const models = Object.keys(usage.modelUsage);
-  if (models.length === 1) {
-    const model = models[0];
-    const mu = usage.modelUsage[model];
-    insertUsageRecord({
-      group_folder: groupFolder,
-      category,
-      source,
-      auth_mode: authMode,
-      model,
-      input_tokens: mu.inputTokens,
-      output_tokens: mu.outputTokens,
-      cache_read_tokens: mu.cacheReadInputTokens,
-      cache_create_tokens: mu.cacheCreationInputTokens,
-      cost_usd: usage.totalCostUsd,
-      duration_ms: usage.durationMs ?? null,
-      duration_api_ms: usage.durationApiMs ?? null,
-      num_turns: usage.numTurns ?? null,
-      session_id: sessionId ?? null,
-      case_id: caseId ?? null,
-    });
-  } else {
-    // Aggregate row (zero or multiple models)
-    insertUsageRecord({
-      group_folder: groupFolder,
-      category,
-      source,
-      auth_mode: authMode,
-      model: models.length > 0 ? models.join(',') : null,
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_read_tokens: usage.cacheReadTokens,
-      cache_create_tokens: usage.cacheCreateTokens,
-      cost_usd: usage.totalCostUsd,
-      duration_ms: usage.durationMs ?? null,
-      duration_api_ms: usage.durationApiMs ?? null,
-      num_turns: usage.numTurns ?? null,
-      session_id: sessionId ?? null,
-      case_id: caseId ?? null,
-    });
-  }
-
-  // Update case cost/time when running in case context
-  if (caseId) {
-    if (usage.totalCostUsd > 0) {
-      addCaseCost(caseId, usage.totalCostUsd);
-    }
-    if (usage.durationMs) {
-      addCaseTime(caseId, usage.durationMs);
-    }
-  }
-}
+const usageDeps: RecordUsageDeps = {
+  getGroupUsageCategory,
+  detectAuthMode,
+  insertUsageRecord,
+  addCaseCost,
+  addCaseTime,
+};
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -677,6 +542,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (result.usage) {
         try {
           recordUsage(
+            usageDeps,
             result.usage,
             group.folder,
             channel.name,
@@ -1025,30 +891,10 @@ async function main(): Promise<void> {
     const adapter = new GitHubCaseSyncAdapter(owner, repo);
     const syncService = new CaseSyncService(adapter);
     registerCaseMutationHook((event, c, changes) => {
-      if (event === 'inserted') {
-        syncService.onCaseMutated({ type: 'created', case: c }).catch(() => {});
-      } else if (changes?.status === 'done') {
-        syncService.onCaseMutated({ type: 'done', case: c }).catch(() => {});
-      } else if (changes?.status) {
+      const syncType = classifyCaseMutation(event, c, changes);
+      if (syncType) {
         syncService
-          .onCaseMutated({ type: 'status_changed', case: c, changes })
-          .catch(() => {});
-      } else if (
-        changes &&
-        Object.keys(changes).some(
-          (k) =>
-            ![
-              'last_message',
-              'last_activity_at',
-              'total_cost_usd',
-              'time_spent_ms',
-              'github_issue',
-              'github_issue_url',
-            ].includes(k),
-        )
-      ) {
-        syncService
-          .onCaseMutated({ type: 'updated', case: c, changes })
+          .onCaseMutated({ type: syncType, case: c, changes })
           .catch(() => {});
       }
     });
@@ -1157,7 +1003,21 @@ async function main(): Promise<void> {
       }
       // L3 mechanistic: auto-detect cookie JSON for backoffice systems.
       // When a lead sends exported cookies, save them automatically.
-      handleCookieMessage(chatJid, msg);
+      const channel = findChannel(channels, chatJid);
+      if (channel) {
+        const cookieDeps = {
+          writeFile: (p: string, c: string) => fs.writeFileSync(p, c),
+          findInsuranceMountPath: (jid: string) => findInsuranceMountPath(jid),
+          sendMessage: (jid: string, text: string) =>
+            channel.sendMessage(jid, text),
+        };
+        if (handleCookieMessage(cookieDeps, chatJid, msg)) {
+          logger.info(
+            { chatJid, sender: msg.sender_name },
+            'Cookie auto-saved for Roeto',
+          );
+        }
+      }
 
       storeMessage(msg);
     },

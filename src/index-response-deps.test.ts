@@ -14,6 +14,15 @@ vi.mock('./db.js', () => ({
   deleteTask: vi.fn(),
   getSession: vi.fn(),
   setSession: vi.fn(),
+  getGroupUsageCategory: vi.fn(() => 'default'),
+  insertUsageRecord: vi.fn(),
+  getRouterState: vi.fn(),
+  setRouterState: vi.fn(),
+  getAllSessions: vi.fn(() => ({})),
+  getAllRegisteredGroups: vi.fn(() => ({})),
+  getAllChats: vi.fn(() => []),
+  getRegisteredGroup: vi.fn(),
+  setRegisteredGroup: vi.fn(),
 }));
 vi.mock('./channels/index.js', () => ({}));
 vi.mock('./channels/registry.js', () => ({
@@ -38,6 +47,7 @@ vi.mock('./container-runtime.js', () => ({
 }));
 vi.mock('./credential-proxy.js', () => ({
   startCredentialProxy: vi.fn(),
+  detectAuthMode: vi.fn(() => 'api-key'),
 }));
 vi.mock('./cases.js', () => ({
   getActiveCases: vi.fn(() => []),
@@ -46,8 +56,11 @@ vi.mock('./cases.js', () => ({
   getCaseById: vi.fn(),
   insertCase: vi.fn(),
   updateCase: vi.fn(),
+  addCaseCost: vi.fn(),
   addCaseTime: vi.fn(),
   generateCaseId: vi.fn(),
+  registerCaseMutationHook: vi.fn(),
+  writeCasesSnapshot: vi.fn(),
   generateCaseName: vi.fn(),
   createCaseWorkspace: vi.fn(),
   pruneCaseWorkspace: vi.fn(),
