@@ -1,4 +1,10 @@
 #!/bin/bash
+# DEACTIVATED: Migrated to TypeScript — see src/hooks/kaizen-reflect.ts
+# Thin wrapper kaizen-reflect-ts.sh now delegates to the TS implementation.
+# This file is kept for reference during the migration period.
+# Migration: kaizen #320 (Phase 3 of #223)
+#
+# To use the old bash version, change settings.json to point back to this file.
 # Part of kAIzen Agent Control Flow — see .claude/kaizen/README.md
 # kaizen-reflect.sh — Level 2 kaizen enforcement (Issue #9)
 # Triggers after `gh pr create` or `gh pr merge` to prompt structured

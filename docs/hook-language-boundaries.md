@@ -53,11 +53,16 @@ TypeScript wins: already the primary language, established test framework, ~200m
 | `check-wip.sh`               | 126   | L2    | Multi-source check                   |
 | `enforce-case-exists.sh`     | 138   | L2    | DB query + guard                     |
 
+### TypeScript — Migrated (L3-L4)
+
+| Hook                       | Lines (TS) | Level | Migration                                                  |
+| -------------------------- | ---------- | ----- | ---------------------------------------------------------- |
+| `kaizen-reflect.ts`        | ~250       | L3    | Migrated in kaizen #320. Wrapper: `kaizen-reflect-ts.sh`   |
+
 ### Bash — Candidates for TypeScript Migration (L3-L4)
 
 | Hook/Script                | Lines | Level | Migration Signal                                           |
 | -------------------------- | ----- | ----- | ---------------------------------------------------------- |
-| `kaizen-reflect.sh`        | 197   | L3    | Multi-step pipeline, structured output generation          |
 | `pr-kaizen-clear.sh`       | 290   | L3    | State machine, multi-line parsing, validation              |
 | `pr-review-loop.sh`        | 452   | L4    | Complex state machine, round tracking, multi-format output |
 | `scripts/worktree-du.sh`   | ~300  | L3    | Arithmetic, data aggregation, caused the incident          |
@@ -72,6 +77,14 @@ TypeScript wins: already the primary language, established test framework, ~200m
 | `hooks/lib/allowlist.sh`             | 73    | L2 — pattern matching, appropriate         |
 | `hooks/lib/send-telegram-ipc.sh`     | 45    | L1 — simple file write                     |
 | `hooks/lib/resolve-main-checkout.sh` | 10    | L1 — one-liner                             |
+
+### TypeScript Shared Libraries (new)
+
+| Library                   | Lines | Purpose                                         |
+| ------------------------- | ----- | ----------------------------------------------- |
+| `src/hooks/hook-io.ts`    | ~35   | Read stdin JSON, write stdout — hook I/O layer  |
+| `src/hooks/parse-command.ts` | ~100 | TS port of parse-command.sh — proper string ops |
+| `src/hooks/state-utils.ts`  | ~130 | TS port of state-utils.sh — typed state files  |
 
 ## Migration Strategy
 

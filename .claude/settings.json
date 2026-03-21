@@ -109,7 +109,7 @@
           },
           {
             "type": "command",
-            "command": "./.claude/kaizen/hooks/kaizen-reflect.sh",
+            "command": "./.claude/kaizen/hooks/kaizen-reflect-ts.sh",
             "timeout": 10
           },
           {
