@@ -39,7 +39,7 @@ Show the contents of the file to the user and ask:
 
 > "Would you like to send anonymous diagnostics to help improve NanoClaw? Here's exactly what would be sent:"
 >
-> (show the properties object only — not the api_key or distinct_id)
+> (show the entire JSON file)
 >
 > **Yes** / **No** / **Never ask again**
 
