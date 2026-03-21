@@ -13,6 +13,8 @@ function generatePlist(
   nodePath: string,
   projectRoot: string,
   homeDir: string,
+  servicePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`,
+  extraEnv: Record<string, string> = {},
 ): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -34,9 +36,15 @@ function generatePlist(
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
+        <string>${servicePath}</string>
         <key>HOME</key>
         <string>${homeDir}</string>
+${Object.entries(extraEnv)
+  .map(
+    ([key, value]) =>
+      `        <key>${key}</key>\n        <string>${value}</string>`,
+  )
+  .join('\n')}
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -51,6 +59,8 @@ function generateSystemdUnit(
   projectRoot: string,
   homeDir: string,
   isSystem: boolean,
+  servicePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`,
+  extraEnv: Record<string, string> = {},
 ): string {
   return `[Unit]
 Description=NanoClaw Personal Assistant
@@ -64,7 +74,10 @@ Restart=always
 RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${servicePath}
+${Object.entries(extraEnv)
+  .map(([key, value]) => `Environment=${key}=${value}`)
+  .join('\n')}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -164,6 +177,28 @@ describe('systemd unit generation', () => {
       'ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js',
     );
   });
+
+  it('preserves extra service env when configured', () => {
+    const unit = generateSystemdUnit(
+      '/usr/bin/node',
+      '/srv/nanoclaw',
+      '/home/user',
+      false,
+      '/custom/bin:/usr/bin',
+      {
+        NODE_OPTIONS: '--require=/workspace/nanoclaw/dns-bootstrap.cjs',
+        CREDENTIAL_PROXY_HOST: '127.0.0.1',
+        ANTHROPIC_API_KEY: 'sk-ant-test',
+      },
+    );
+
+    expect(unit).toContain('Environment=PATH=/custom/bin:/usr/bin');
+    expect(unit).toContain(
+      'Environment=NODE_OPTIONS=--require=/workspace/nanoclaw/dns-bootstrap.cjs',
+    );
+    expect(unit).toContain('Environment=CREDENTIAL_PROXY_HOST=127.0.0.1');
+    expect(unit).toContain('Environment=ANTHROPIC_API_KEY=sk-ant-test');
+  });
 });
 
 describe('WSL nohup fallback', () => {
@@ -171,16 +206,21 @@ describe('WSL nohup fallback', () => {
     const projectRoot = '/home/user/nanoclaw';
     const nodePath = '/usr/bin/node';
     const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+    const servicePath = '/custom/bin:/usr/bin';
 
     // Simulate what service.ts generates
     const wrapper = `#!/bin/bash
 set -euo pipefail
+export PATH=${JSON.stringify(servicePath)}
+export NODE_OPTIONS="--dns-result-order=ipv4first"
 cd ${JSON.stringify(projectRoot)}
 nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot)}/dist/index.js >> ${JSON.stringify(projectRoot)}/logs/nanoclaw.log 2>> ${JSON.stringify(projectRoot)}/logs/nanoclaw.error.log &
 echo $! > ${JSON.stringify(pidFile)}`;
 
     expect(wrapper).toContain('#!/bin/bash');
     expect(wrapper).toContain('nohup');
+    expect(wrapper).toContain('export PATH=');
+    expect(wrapper).toContain('export NODE_OPTIONS="--dns-result-order=ipv4first"');
     expect(wrapper).toContain(nodePath);
     expect(wrapper).toContain('nanoclaw.pid');
   });
