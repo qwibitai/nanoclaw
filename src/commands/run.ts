@@ -23,10 +23,7 @@ export const runCommand = {
         .setRequired(true),
     ),
 
-  async execute(
-    interaction: ChatInputCommandInteraction,
-    runTask: RunTaskFn,
-  ) {
+  async execute(interaction: ChatInputCommandInteraction, runTask: RunTaskFn) {
     const prefix = interaction.options.getString('task_id', true).trim();
 
     await interaction.deferReply({ ephemeral: true });

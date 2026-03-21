@@ -62,7 +62,12 @@ import {
   runTask,
   SchedulerDependencies,
 } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup, ScheduledTask } from './types.js';
+import {
+  Channel,
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor

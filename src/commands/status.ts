@@ -106,9 +106,16 @@ export const statusCommand = {
           .slice(0, 5)
           .map((t) => {
             const nextRun = t.next_run
-              ? new Date(t.next_run).toLocaleString('en-US', { timeZone: process.env.TZ ?? 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+              ? new Date(t.next_run).toLocaleString('en-US', {
+                  timeZone: process.env.TZ ?? 'UTC',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })
               : 'unknown';
-            const label = t.prompt.slice(0, 40) + (t.prompt.length > 40 ? '…' : '');
+            const label =
+              t.prompt.slice(0, 40) + (t.prompt.length > 40 ? '…' : '');
             return `• \`${t.id.slice(0, 8)}\` **${t.schedule_value}** — ${label}\n  ⏭ ${nextRun}`;
           })
           .join('\n');
