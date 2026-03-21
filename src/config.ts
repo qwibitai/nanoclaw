@@ -84,3 +84,7 @@ export const COLD_START_THRESHOLD = 15; // Interactions before first evolution
 export const EVOLUTION_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 export const EVOLUTION_EVAL_TRIGGER = 10; // New evaluations before evolution triggers
 export const EVOLUTION_SCORE_THRESHOLD = 0.6; // Score below which evolution triggers
+
+// --- Rollouts ---
+export const ROLLOUT_SIZE = 6; // Number of turns per evaluation rollout
+export const ROLLOUT_INACTIVITY_MS = 30 * 60 * 1000; // Close rollout after 30min inactivity

@@ -102,6 +102,7 @@ export function handleReactionFeedback(
     score,
     dimensions: null,
     evaluation_source: 'user_reaction',
+    evaluator_reasoning: null,
     raw_feedback: JSON.stringify({ emoji, messageId }),
     evaluated_at: new Date().toISOString(),
   });

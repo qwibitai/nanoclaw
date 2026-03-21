@@ -1,7 +1,8 @@
 /**
  * Skill Evaluator
- * Runs a background loop that evaluates agent interactions after the evaluation
- * deadline passes. Uses a direct Anthropic API call with a cheap model.
+ * Runs a background loop that evaluates closed rollouts (multi-turn windows).
+ * Each rollout contains up to ROLLOUT_SIZE consecutive turns, with tool calls
+ * extracted from session transcripts. Uses a direct Anthropic API call.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
@@ -10,13 +11,15 @@ import path from 'path';
 import { EVALUATION_POLL_INTERVAL } from '../config.js';
 import {
   getActiveSkills,
-  getRunsNeedingEvaluation,
+  getClosedRolloutsNeedingEvaluation,
+  getRunsForRollout,
   getSkillSelectionsForRun,
   recordEvaluation,
   updateSkillPerformance,
 } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { closeStaleRollouts } from './rollout-manager.js';
 
 let evaluatorRunning = false;
 
@@ -41,113 +44,148 @@ interface EvaluatorResponse {
     accuracy: number;
     efficiency: number;
     tone: number;
+    tool_selection: number;
   };
   reasoning: string;
   skill_assessment: string;
 }
 
-async function evaluateRun(
+function buildRolloutMessage(
+  runs: ReturnType<typeof getRunsForRollout>,
+  allSkills: ReturnType<typeof getActiveSkills>,
+): string {
+  const sections: string[] = [];
+
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    const selectedIds = getSkillSelectionsForRun(run.id);
+    const selectedNames = allSkills
+      .filter((s) => selectedIds.includes(s.id))
+      .map((s) => s.name);
+
+    sections.push(`## Turn ${i + 1} of ${runs.length}`);
+    sections.push(`**User:** ${run.prompt_summary ?? '(no prompt recorded)'}`);
+    sections.push(`**Assistant:** ${run.response_summary ?? '(no response recorded)'}`);
+
+    if (run.tool_calls) {
+      try {
+        const tools = JSON.parse(run.tool_calls) as Array<{
+          name: string;
+          input: Record<string, unknown>;
+          output: string;
+        }>;
+        if (tools.length > 0) {
+          sections.push('**Tools used:**');
+          for (const t of tools) {
+            const inputSummary = JSON.stringify(t.input).slice(0, 100);
+            sections.push(`- ${t.name}(${inputSummary}) → ${t.output.slice(0, 150)}`);
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    if (selectedNames.length > 0) {
+      sections.push(`**Skills selected:** ${selectedNames.join(', ')}`);
+    }
+    sections.push('');
+  }
+
+  // Available skills
+  const availableNames = allSkills.map((s) => s.name);
+  sections.push('## Available Skills');
+  sections.push(
+    availableNames.length > 0 ? availableNames.join(', ') : '(none — cold start)',
+  );
+
+  return sections.join('\n');
+}
+
+async function evaluateRollout(
   client: Anthropic,
-  run: {
-    id: string;
-    group_folder: string;
-    prompt_summary: string | null;
-    response_summary: string | null;
-  },
-  selectedSkillNames: string[],
-  availableSkillNames: string[],
+  rolloutId: string,
+  groupFolder: string,
 ): Promise<EvaluatorResponse | null> {
-  const userMessage = [
-    '## User Message',
-    run.prompt_summary || '(no summary available)',
-    '',
-    '## Assistant Response',
-    run.response_summary || '(streamed output — summary not available)',
-    '',
-    '## Skills Used',
-    selectedSkillNames.length > 0
-      ? selectedSkillNames.map((n) => `- ${n}`).join('\n')
-      : '(none)',
-    '',
-    '## Available Skills',
-    availableSkillNames.length > 0
-      ? availableSkillNames.map((n) => `- ${n}`).join('\n')
-      : '(none — system is in cold start)',
-  ].join('\n');
+  const runs = getRunsForRollout(rolloutId);
+  if (runs.length === 0) return null;
+
+  const allSkills = getActiveSkills(groupFolder);
+  const userMessage = buildRolloutMessage(runs, allSkills);
 
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 500,
+      max_tokens: 600,
       system: evaluatorPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
 
     const text =
       response.content[0].type === 'text' ? response.content[0].text : '';
-    // Parse JSON from response, stripping any markdown fencing
     const cleaned = text
       .replace(/^```json?\s*/m, '')
       .replace(/```\s*$/m, '')
       .trim();
     return JSON.parse(cleaned) as EvaluatorResponse;
   } catch (err) {
-    logger.error({ err, runId: run.id }, 'Evaluator API call failed');
+    logger.error({ err, rolloutId }, 'Evaluator API call failed');
     return null;
   }
 }
 
 async function processEvaluations(): Promise<void> {
+  // Close any stale open rollouts first
+  closeStaleRollouts();
+
   const client = getAnthropicClient();
   if (!client) return;
 
-  const runs = getRunsNeedingEvaluation();
-  if (runs.length === 0) return;
+  const rollouts = getClosedRolloutsNeedingEvaluation();
+  if (rollouts.length === 0) return;
 
-  logger.info({ count: runs.length }, 'Processing pending evaluations');
+  logger.info({ count: rollouts.length }, 'Processing pending rollout evaluations');
 
-  for (const run of runs) {
+  for (const rollout of rollouts) {
     try {
-      const selectedSkillIds = getSkillSelectionsForRun(run.id);
-      const allSkills = getActiveSkills(run.group_folder);
-      const selectedSkillNames = allSkills
-        .filter((s) => selectedSkillIds.includes(s.id))
-        .map((s) => s.name);
-      const availableSkillNames = allSkills.map((s) => s.name);
-
-      const result = await evaluateRun(
-        client,
-        run,
-        selectedSkillNames,
-        availableSkillNames,
-      );
+      const result = await evaluateRollout(client, rollout.id, rollout.group_folder);
       if (!result) continue;
 
-      const evalId = `eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      recordEvaluation({
-        id: evalId,
-        run_id: run.id,
-        score: result.overall,
-        dimensions: JSON.stringify(result.dimensions),
-        evaluation_source: 'evaluator_agent',
-        raw_feedback: JSON.stringify({
-          reasoning: result.reasoning,
-          skill_assessment: result.skill_assessment,
-        }),
-        evaluated_at: new Date().toISOString(),
-      });
+      const runs = getRunsForRollout(rollout.id);
+      const now = new Date().toISOString();
 
-      // Update performance for each skill used in this run
-      for (const skillId of selectedSkillIds) {
+      // Record evaluation against each run in the rollout with the same score
+      const skillIds = new Set<string>();
+      for (const run of runs) {
+        const evalId = `eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        recordEvaluation({
+          id: evalId,
+          run_id: run.id,
+          score: result.overall,
+          dimensions: JSON.stringify(result.dimensions),
+          evaluation_source: 'evaluator_agent',
+          evaluator_reasoning: result.reasoning,
+          raw_feedback: JSON.stringify({ skill_assessment: result.skill_assessment }),
+          evaluated_at: now,
+        });
+
+        // Collect all skill IDs used across the rollout
+        for (const sid of getSkillSelectionsForRun(run.id)) {
+          skillIds.add(sid);
+        }
+      }
+
+      // Update performance for all skills that participated in this rollout
+      for (const skillId of skillIds) {
         updateSkillPerformance(skillId);
       }
 
       logger.info(
-        { runId: run.id, score: result.overall, evalId },
-        'Evaluation recorded',
+        { rolloutId: rollout.id, turns: runs.length, score: result.overall },
+        'Rollout evaluation recorded',
       );
     } catch (err) {
-      logger.error({ err, runId: run.id }, 'Error evaluating run');
+      logger.error({ err, rolloutId: rollout.id }, 'Error evaluating rollout');
     }
   }
 }
@@ -168,7 +206,6 @@ export function startEvaluationLoop(): void {
     setTimeout(poll, EVALUATION_POLL_INTERVAL);
   };
 
-  // Delay first run to let startup settle
   setTimeout(poll, 30_000);
   logger.info('Evaluation loop started');
 }

@@ -95,22 +95,42 @@ export interface SkillTaskRun {
   id: string;
   group_folder: string;
   chat_jid: string;
+  rollout_id: string | null;
   prompt_summary: string | null;
   response_summary: string | null;
+  tool_calls: string | null; // JSON: ToolCall[]
   duration_ms: number | null;
   status: string;
   created_at: string;
   evaluation_deadline: string | null;
 }
 
+export interface ToolCall {
+  name: string;
+  input: Record<string, unknown>;
+  output: string;
+}
+
 export interface SkillEvaluation {
   id: string;
   run_id: string;
   score: number;
-  dimensions: string | null; // JSON: {helpfulness, accuracy, efficiency, tone}
+  dimensions: string | null; // JSON: {helpfulness, accuracy, efficiency, tone, tool_selection}
   evaluation_source: 'user_reaction' | 'evaluator_agent';
+  evaluator_reasoning: string | null;
   raw_feedback: string | null;
   evaluated_at: string;
+}
+
+export interface Rollout {
+  id: string;
+  group_folder: string;
+  chat_jid: string;
+  status: 'open' | 'closed';
+  turn_count: number;
+  created_at: string;
+  closed_at: string | null;
+  last_activity_at: string;
 }
 
 export interface SkillPerformance {

@@ -9,6 +9,7 @@ import {
   BehavioralSkill,
   NewMessage,
   RegisteredGroup,
+  Rollout,
   ScheduledTask,
   SkillEvaluation,
   SkillPerformance,
@@ -113,18 +114,34 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_skills_name ON behavioral_skills(name, status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_version ON behavioral_skills(name, group_folder, version);
 
+    CREATE TABLE IF NOT EXISTS rollouts (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      turn_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      closed_at TEXT,
+      last_activity_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rollouts_status ON rollouts(status);
+    CREATE INDEX IF NOT EXISTS idx_rollouts_chat ON rollouts(chat_jid, status);
+
     CREATE TABLE IF NOT EXISTS skill_task_runs (
       id TEXT PRIMARY KEY,
       group_folder TEXT NOT NULL,
       chat_jid TEXT NOT NULL,
+      rollout_id TEXT REFERENCES rollouts(id),
       prompt_summary TEXT,
       response_summary TEXT,
+      tool_calls TEXT,
       duration_ms INTEGER,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       evaluation_deadline TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_skill_runs_deadline ON skill_task_runs(evaluation_deadline);
+    CREATE INDEX IF NOT EXISTS idx_skill_runs_rollout ON skill_task_runs(rollout_id);
 
     CREATE TABLE IF NOT EXISTS skill_run_selections (
       run_id TEXT NOT NULL,
@@ -140,6 +157,7 @@ function createSchema(database: Database.Database): void {
       score REAL NOT NULL,
       dimensions TEXT,
       evaluation_source TEXT NOT NULL,
+      evaluator_reasoning TEXT,
       raw_feedback TEXT,
       evaluated_at TEXT NOT NULL,
       FOREIGN KEY (run_id) REFERENCES skill_task_runs(id)
@@ -221,6 +239,27 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Rollout columns migration
+  try {
+    database.exec(
+      `ALTER TABLE skill_task_runs ADD COLUMN rollout_id TEXT REFERENCES rollouts(id)`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE skill_task_runs ADD COLUMN tool_calls TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE skill_evaluations ADD COLUMN evaluator_reasoning TEXT`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -912,14 +951,16 @@ export function updateSkillStatus(
 
 export function recordSkillTaskRun(run: SkillTaskRun): void {
   db.prepare(
-    `INSERT INTO skill_task_runs (id, group_folder, chat_jid, prompt_summary, response_summary, duration_ms, status, created_at, evaluation_deadline)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO skill_task_runs (id, group_folder, chat_jid, rollout_id, prompt_summary, response_summary, tool_calls, duration_ms, status, created_at, evaluation_deadline)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     run.id,
     run.group_folder,
     run.chat_jid,
+    run.rollout_id,
     run.prompt_summary,
     run.response_summary,
+    run.tool_calls,
     run.duration_ms,
     run.status,
     run.created_at,
@@ -958,17 +999,90 @@ export function getRunsNeedingEvaluation(): SkillTaskRun[] {
 
 export function recordEvaluation(evaluation: SkillEvaluation): void {
   db.prepare(
-    `INSERT INTO skill_evaluations (id, run_id, score, dimensions, evaluation_source, raw_feedback, evaluated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO skill_evaluations (id, run_id, score, dimensions, evaluation_source, evaluator_reasoning, raw_feedback, evaluated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     evaluation.id,
     evaluation.run_id,
     evaluation.score,
     evaluation.dimensions,
     evaluation.evaluation_source,
+    evaluation.evaluator_reasoning,
     evaluation.raw_feedback,
     evaluation.evaluated_at,
   );
+}
+
+// --- Rollout accessors ---
+
+export function insertRollout(rollout: Rollout): void {
+  db.prepare(
+    `INSERT INTO rollouts (id, group_folder, chat_jid, status, turn_count, created_at, closed_at, last_activity_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    rollout.id,
+    rollout.group_folder,
+    rollout.chat_jid,
+    rollout.status,
+    rollout.turn_count,
+    rollout.created_at,
+    rollout.closed_at,
+    rollout.last_activity_at,
+  );
+}
+
+export function getOpenRollout(chatJid: string): Rollout | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM rollouts WHERE chat_jid = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(chatJid) as Rollout | undefined;
+}
+
+export function updateRollout(
+  id: string,
+  updates: Partial<Pick<Rollout, 'status' | 'turn_count' | 'closed_at' | 'last_activity_at'>>,
+): void {
+  const fields = Object.keys(updates)
+    .map((k) => `${k} = ?`)
+    .join(', ');
+  const values = [...Object.values(updates), id];
+  db.prepare(`UPDATE rollouts SET ${fields} WHERE id = ?`).run(...values);
+}
+
+export function getClosedRolloutsNeedingEvaluation(): Rollout[] {
+  return db
+    .prepare(
+      `SELECT r.* FROM rollouts r
+       WHERE r.status = 'closed'
+         AND NOT EXISTS (
+           SELECT 1 FROM skill_task_runs t
+           JOIN skill_evaluations e ON e.run_id = t.id
+           WHERE t.rollout_id = r.id
+         )
+         AND EXISTS (
+           SELECT 1 FROM skill_task_runs t
+           WHERE t.rollout_id = r.id AND t.status = 'success'
+         )
+       ORDER BY r.closed_at`,
+    )
+    .all() as Rollout[];
+}
+
+export function getRunsForRollout(rolloutId: string): SkillTaskRun[] {
+  return db
+    .prepare(
+      `SELECT * FROM skill_task_runs WHERE rollout_id = ? ORDER BY created_at`,
+    )
+    .all(rolloutId) as SkillTaskRun[];
+}
+
+export function getStaleOpenRollouts(inactivityCutoff: string): Rollout[] {
+  return db
+    .prepare(
+      `SELECT * FROM rollouts WHERE status = 'open' AND last_activity_at < ?`,
+    )
+    .all(inactivityCutoff) as Rollout[];
 }
 
 export function getEvaluationForRun(
@@ -1069,6 +1183,57 @@ export function getLowScoringRuns(
     .all(maxScore, limit) as Array<
     SkillTaskRun & { score: number; dimensions: string | null }
   >;
+}
+
+export interface LowScoringRollout {
+  rollout_id: string;
+  avg_score: number;
+  runs: Array<
+    SkillTaskRun & {
+      score: number;
+      dimensions: string | null;
+      evaluator_reasoning: string | null;
+    }
+  >;
+}
+
+export function getLowScoringRollouts(
+  maxScore: number,
+  limit: number = 10,
+): LowScoringRollout[] {
+  // Get rollouts whose average evaluation score is below the threshold
+  const rolloutRows = db
+    .prepare(
+      `SELECT r.id as rollout_id, AVG(e.score) as avg_score
+       FROM rollouts r
+       JOIN skill_task_runs t ON t.rollout_id = r.id
+       JOIN skill_evaluations e ON e.run_id = t.id
+       WHERE r.status = 'closed'
+       GROUP BY r.id
+       HAVING avg_score < ?
+       ORDER BY avg_score ASC
+       LIMIT ?`,
+    )
+    .all(maxScore, limit) as Array<{ rollout_id: string; avg_score: number }>;
+
+  return rolloutRows.map((row) => {
+    const runs = db
+      .prepare(
+        `SELECT t.*, e.score, e.dimensions, e.evaluator_reasoning
+         FROM skill_task_runs t
+         LEFT JOIN skill_evaluations e ON e.run_id = t.id
+         WHERE t.rollout_id = ?
+         ORDER BY t.created_at`,
+      )
+      .all(row.rollout_id) as Array<
+      SkillTaskRun & {
+        score: number;
+        dimensions: string | null;
+        evaluator_reasoning: string | null;
+      }
+    >;
+    return { rollout_id: row.rollout_id, avg_score: row.avg_score, runs };
+  });
 }
 
 export function insertEvolutionLog(log: {
