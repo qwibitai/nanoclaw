@@ -59,3 +59,36 @@ jobs:
           sleep 5
           systemctl --user is-active nanoclaw
           echo "nanoclaw is active"
+
+      - name: Post-deploy summary
+        if: github.event_name == 'push'
+        run: |
+          cd "$PROJECT_ROOT"
+
+          # Build deploy summary
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          COMMIT_MSG=$(git log -1 --format="%s" "${{ github.sha }}")
+          PR_NUMBER=$(echo "$COMMIT_MSG" | grep -oP '#\K\d+' | head -1)
+
+          SUMMARY="Deploy complete: ${SHORT_SHA} ${COMMIT_MSG}"
+          if [ -n "$PR_NUMBER" ]; then
+            SUMMARY="${SUMMARY}
+          https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          fi
+
+          # Read bot token from .env and main group chat ID from the database
+          BOT_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2-)
+          MAIN_JID=$(sqlite3 data/nanoclaw.db "SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1" 2>/dev/null)
+          # Extract numeric Telegram chat ID from JID (format: tg:-1001234567890)
+          CHAT_ID=$(echo "$MAIN_JID" | sed -n 's/^tg://p')
+
+          if [ -n "$BOT_TOKEN" ] && [ -n "$CHAT_ID" ]; then
+            curl -sf "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              -d chat_id="$CHAT_ID" \
+              -d text="$SUMMARY" \
+              -d disable_web_page_preview=true \
+              > /dev/null
+            echo "Deploy summary sent to Telegram"
+          else
+            echo "Telegram not configured or no main group, skipping notification"
+          fi
