@@ -145,24 +145,33 @@ You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to
 - `decisions/` — key decisions and their rationale
 - `reference/` — facts, links, resources
 
-### When to save
-Only save things that would be **hard to re-derive** and **useful next time**:
-- A person's name, role, or preferences (not every message they send)
-- A decision tied to a specific project/context ("NanoClaw: chose Postgres over Mongo because of X", not just "use Postgres")
-- A project's status or goal when it changes meaningfully
-- A useful link or reference someone shares
+### What to save
+
+**Projects and work-in-progress (most important):**
+- When you work on a repo, deployment, or multi-session task, create/update `projects/{name}.md` with: what it is, repo URL, current status, what was done, what's next
+- Update the project file each session you touch it — this is how you remember where you left off
+- Example: `projects/stoke-dashboard.md` — "Vercel deployment, repo: github.com/..., last deployed Mar 20, pending: add auth"
+
+**People** — name, role, preferences. One file per person, update when you learn more.
+
+**Decisions** — tied to a specific project with the *why* ("NanoClaw: chose Postgres over Mongo because of X")
+
+**Preferences** — communication style, tools they like, things they've told you to do/avoid
 
 **Don't save:** routine chit-chat, obvious facts, anything already in chat history.
 
 ### How to save
-- One concept per file, descriptive filename (e.g., `people/alex.md`, `decisions/nanoclaw-postgres-over-mongo.md`)
+- One concept per file, descriptive filename (e.g., `people/alex.md`, `projects/stoke-dashboard.md`)
 - Keep notes short — a few lines, not essays
 - Use simple YAML frontmatter: `title`, `updated`, `tags`
 - Use `[[wiki-links]]` to connect related notes
 - Commit after changes
 
+### At conversation start
+Scan `knowledge/projects/` for active work — this is your memory of what's going on.
+
 ### At conversation end
-Quick mental check — did you learn anything new about a **person**, **project**, **decision**, or **preference** that you'd want to remember next time? If yes, save it. If nothing stands out, skip it. Don't force it.
+Did you work on a project? **Update its file with current status and next steps.** Did you learn something new about a person, decision, or preference? Save it. If nothing stands out, skip it.
 
 ## Use Subagents for Complex Tasks
 
