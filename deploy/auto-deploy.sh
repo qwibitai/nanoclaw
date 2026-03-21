@@ -145,18 +145,5 @@ if [ $waited -ge $MAX_WAIT ]; then
 fi
 
 log "Restarting nanoclaw service"
-
-# Try pidfile-based restart first (works without systemd user session)
-PID_FILE="${PROJECT_ROOT}/data/nanoclaw.pid"
-if [ -f "$PID_FILE" ]; then
-  old_pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid" 2>/dev/null || true
-    sleep 2
-  fi
-fi
-
-# Start new process
-cd "$PROJECT_ROOT"
-nohup node dist/index.js >> logs/nanoclaw.log 2>> logs/nanoclaw.error.log &
-log "Deploy complete: now at $(git rev-parse --short HEAD) (pid $!)"
+systemctl restart nanoclaw
+log "Deploy complete: now at $(git rev-parse --short HEAD)"
