@@ -9,6 +9,8 @@
  *   RawEvent → classify (Ollama) → applyTrustRules → publish → (onEscalate?)
  */
 
+import fs from 'fs';
+import YAML from 'yaml';
 import { logger } from './logger.js';
 import {
   getEmailClassificationPrompt,
@@ -16,6 +18,10 @@ import {
   type EmailPayload,
   type CalendarPayload,
 } from './classification-prompts.js';
+
+// ─── Public Types ─────────────────────────────────────────────────────────────
+
+export type RoutingLevel = 'autonomous' | 'notify' | 'draft' | 'escalate';
 
 // ─── Public Interfaces ────────────────────────────────────────────────────────
 
@@ -31,7 +37,7 @@ export interface Classification {
   urgency: number;
   topic: string;
   summary: string;
-  suggestedRouting: 'notify' | 'autonomous' | 'escalate';
+  suggestedRouting: RoutingLevel;
   requiresClaude: boolean;
   confidence: number;
 }
@@ -39,9 +45,10 @@ export interface Classification {
 export interface ClassifiedEvent {
   event: RawEvent;
   classification: Classification;
-  routing: 'notify' | 'autonomous' | 'escalate';
+  routing: RoutingLevel;
   classifiedAt: string;
   latencyMs: number;
+  trustRuleId?: string | null;
 }
 
 export interface TrustRuleConditions {
@@ -52,14 +59,16 @@ export interface TrustRuleConditions {
 }
 
 export interface TrustRule {
+  id?: string;
   event_type?: 'email' | 'calendar';
   conditions?: TrustRuleConditions;
-  routing: 'notify' | 'autonomous' | 'escalate';
+  routing: RoutingLevel;
+  max_promotion?: RoutingLevel;
   action?: string;
 }
 
 export interface TrustConfig {
-  default_routing: 'notify' | 'autonomous' | 'escalate';
+  default_routing: RoutingLevel;
   rules: TrustRule[];
 }
 
@@ -76,11 +85,16 @@ export interface EventRouterConfig {
   ollamaHost: string;
   ollamaModel: string;
   trustRules: TrustRule[];
-  defaultRouting?: 'notify' | 'autonomous' | 'escalate';
+  defaultRouting?: RoutingLevel;
   messageBus: MessageBusLike;
   healthMonitor: HealthMonitorLike;
   onEscalate?: (event: ClassifiedEvent) => void;
   ollamaTimeoutMs?: number;
+  approvalTracker?: {
+    recordDecision: (d: any) => number;
+    setTelegramMsgId: (id: number, msgId: string) => void;
+  };
+  sendToMainGroup?: (text: string) => Promise<string | undefined>;
 }
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -106,6 +120,7 @@ export class EventRouter {
   private routingCounts: Record<string, number> = {
     notify: 0,
     autonomous: 0,
+    draft: 0,
     escalate: 0,
   };
 
@@ -128,7 +143,7 @@ export class EventRouter {
     }
 
     const latencyMs = Date.now() - start;
-    const routing = this.applyTrustRules(event, classification);
+    const { routing, ruleId } = this.applyTrustRules(event, classification);
 
     const classified: ClassifiedEvent = {
       event,
@@ -136,20 +151,40 @@ export class EventRouter {
       routing,
       classifiedAt: new Date().toISOString(),
       latencyMs,
+      trustRuleId: ruleId,
     };
 
-    this.config.messageBus.publish({
-      from: 'event-router',
-      topic: 'classified_event',
-      eventId: event.id,
-      eventType: event.type,
-      routing,
-      classification,
-      classifiedAt: classified.classifiedAt,
-    });
+    // Record decision if approval tracker is configured
+    let decisionId: number | undefined;
+    if (this.config.approvalTracker) {
+      decisionId = this.config.approvalTracker.recordDecision(classified);
+    }
 
-    if (routing === 'escalate' && this.config.onEscalate) {
-      this.config.onEscalate(classified);
+    if (routing === 'draft') {
+      // Draft events are withheld from the bus — they need approval first
+      if (decisionId !== undefined) {
+        await this.sendApprovalRequest(classified, decisionId);
+      } else {
+        logger.warn(
+          { eventId: event.id },
+          'Draft routing without approvalTracker — event silently withheld',
+        );
+      }
+    } else {
+      // autonomous, notify, escalate — publish to bus
+      this.config.messageBus.publish({
+        from: 'event-router',
+        topic: 'classified_event',
+        eventId: event.id,
+        eventType: event.type,
+        routing,
+        classification,
+        classifiedAt: classified.classifiedAt,
+      });
+
+      if (routing === 'escalate' && this.config.onEscalate) {
+        this.config.onEscalate(classified);
+      }
     }
 
     this.processed++;
@@ -178,6 +213,17 @@ export class EventRouter {
       byRouting: { ...this.routingCounts },
       avgLatencyMs: avg,
     };
+  }
+
+  reloadFromPath(yamlPath: string): void {
+    const raw = fs.readFileSync(yamlPath, 'utf-8');
+    const parsed = YAML.parse(raw);
+    this.config.trustRules = parsed.rules || [];
+    this.config.defaultRouting = parsed.default_routing || 'notify';
+    logger.info(
+      { ruleCount: this.config.trustRules.length },
+      'Trust rules reloaded',
+    );
   }
 
   // ─── Private Methods ─────────────────────────────────────────────────────
@@ -284,23 +330,26 @@ export class EventRouter {
     }
   }
 
-  private isValidRouting(
-    value: unknown,
-  ): value is 'notify' | 'autonomous' | 'escalate' {
-    return value === 'notify' || value === 'autonomous' || value === 'escalate';
+  private isValidRouting(value: unknown): value is RoutingLevel {
+    return (
+      value === 'notify' ||
+      value === 'autonomous' ||
+      value === 'draft' ||
+      value === 'escalate'
+    );
   }
 
   private applyTrustRules(
     event: RawEvent,
     classification: Classification,
-  ): 'notify' | 'autonomous' | 'escalate' {
+  ): { routing: RoutingLevel; ruleId: string | null } {
     for (const rule of this.config.trustRules) {
       if (!this.ruleMatchesEvent(rule, event, classification)) continue;
-      return rule.routing;
+      return { routing: rule.routing, ruleId: rule.id ?? null };
     }
 
     // No rule matched — use default
-    return this.config.defaultRouting ?? 'notify';
+    return { routing: this.config.defaultRouting ?? 'notify', ruleId: null };
   }
 
   private ruleMatchesEvent(
@@ -341,5 +390,22 @@ export class EventRouter {
     }
 
     return true;
+  }
+
+  private async sendApprovalRequest(
+    classified: ClassifiedEvent,
+    decisionId: number,
+  ): Promise<void> {
+    if (!this.config.sendToMainGroup) return;
+    const text =
+      `[Draft #${decisionId}] ${classified.event.type} from ${(classified.event.payload['from'] as string) ?? classified.event.id}\n` +
+      `Topic: ${classified.classification.topic}\n` +
+      `Summary: ${classified.classification.summary}\n` +
+      `Importance: ${classified.classification.importance} | Urgency: ${classified.classification.urgency}\n\n` +
+      `Reply to approve or reject.`;
+    const msgId = await this.config.sendToMainGroup(text);
+    if (msgId && this.config.approvalTracker) {
+      this.config.approvalTracker.setTelegramMsgId(decisionId, msgId);
+    }
   }
 }
