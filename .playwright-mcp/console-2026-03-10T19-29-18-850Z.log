@@ -1,0 +1,4 @@
+[    1293ms] TypeError: Cannot read properties of null (reading 'addEventListener')
+    at https://www.mahadiscom.in/en/contact-us/:3522:41
+[    1404ms] Uncaught TypeError: Cannot read properties of null (reading 'appendChild')
+    at <anonymous> (https://translation-plugin.bhashini.co.in/v3/website_translation_utility.js?ver=202603101830:1338:16)

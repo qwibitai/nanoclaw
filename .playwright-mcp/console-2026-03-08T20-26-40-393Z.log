@@ -1,0 +1,4 @@
+[     293ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'pointer-lock'. @ :0
+[    1683ms] [WARNING] react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next {code: NO_I18NEXT_INSTANCE} @ https://grok.com/_next/static/chunks/9e1226612ff492ad.js:2
+[    2411ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://grok.com/rest/suggestions/profile:0
+[    2771ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://grok.com/rest/products?provider=SUBSCRIPTION_PROVIDER_STRIPE:0

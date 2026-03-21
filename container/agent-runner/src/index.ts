@@ -434,6 +434,8 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__composio__*',
+        'mcp__gmail__*',
+        'mcp__gdrive__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -455,6 +457,20 @@ async function runQuery(
             url: process.env.COMPOSIO_MCP_URL,
             headers: {
               'x-api-key': process.env.COMPOSIO_API_KEY || '',
+            },
+          },
+        } : {}),
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        ...(fs.existsSync('/home/node/.gdrive-mcp/gcp-oauth.keys.json') ? {
+          gdrive: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-gdrive'],
+            env: {
+              GDRIVE_OAUTH_PATH: '/home/node/.gdrive-mcp/gcp-oauth.keys.json',
+              GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-mcp/credentials.json',
             },
           },
         } : {}),

@@ -58,3 +58,26 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## VPS Reboot Procedures
+
+**BEFORE any VPS reboot/rescale:** Use the automation scripts (recommended) or `/home/psg/REBOOT_CHECKLIST.md`.
+
+### Quick Start (Automation)
+```bash
+# Pre-reboot: gracefully stop all services
+bash /home/psg/reboot-prepare.sh
+
+# After reboot: start all services
+bash /home/psg/reboot-start.sh
+```
+
+### Why This Matters
+
+NanoClaw's systemd service requires graceful shutdown to preserve WhatsApp session state. The scripts/checklist handle:
+- Pre-reboot verification (backup status, service health)
+- Graceful service shutdown (rclone → ai-chat → nanoclaw → Docker)
+- Post-reboot startup (Docker → ai-chat → nanoclaw → rclone)
+- Reboot history tracking
+
+**Never:** Kill NanoClaw with `SIGKILL` or `docker kill`—use the scripts' graceful shutdown sequence.

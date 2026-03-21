@@ -35,13 +35,6 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
-  usage?: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    cost_usd?: number;
-  };
 }
 
 interface SessionEntry {
@@ -440,6 +433,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__composio__*',
+        'mcp__gmail__*',
         'mcp__gdrive__*',
       ],
       env: sdkEnv,
@@ -456,14 +451,29 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        gdrive: {
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-gdrive'],
-          env: {
-            GDRIVE_OAUTH_PATH: '/home/node/.gdrive-mcp/gcp-oauth.keys.json',
-            GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-mcp/credentials.json',
+        ...(process.env.COMPOSIO_MCP_URL ? {
+          composio: {
+            type: 'http' as const,
+            url: process.env.COMPOSIO_MCP_URL,
+            headers: {
+              'x-api-key': process.env.COMPOSIO_API_KEY || '',
+            },
           },
+        } : {}),
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
+        ...(fs.existsSync('/home/node/.gdrive-mcp/gcp-oauth.keys.json') ? {
+          gdrive: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-gdrive'],
+            env: {
+              GDRIVE_OAUTH_PATH: '/home/node/.gdrive-mcp/gcp-oauth.keys.json',
+              GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-mcp/credentials.json',
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -492,20 +502,11 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      const usageData = (message as { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }).usage;
-      const costUsd = (message as { total_cost_usd?: number }).total_cost_usd;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId,
-        usage: usageData ? {
-          input_tokens: usageData.input_tokens ?? 0,
-          output_tokens: usageData.output_tokens ?? 0,
-          cache_creation_input_tokens: usageData.cache_creation_input_tokens,
-          cache_read_input_tokens: usageData.cache_read_input_tokens,
-          cost_usd: costUsd,
-        } : undefined,
+        newSessionId
       });
     }
   }
