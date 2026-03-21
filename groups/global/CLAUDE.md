@@ -128,6 +128,18 @@ You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to
 - After creating or updating notes, commit changes with a descriptive message
 - If a git remote is configured, push after committing
 
+## Use Subagents for Complex Tasks
+
+When a task involves multiple independent parts (research + implementation, multiple files, comparing options), **delegate to subagents** using `TeamCreate`/`SendMessage` rather than doing everything sequentially yourself. This is faster, avoids hitting output limits, and produces better results.
+
+Good candidates for subagents:
+- **Research tasks** — have a subagent gather info while you plan
+- **Multi-file changes** — one subagent per file/component
+- **Long reports** — have subagents write sections, then synthesize
+- **Compare options** — one subagent per option, then summarize
+
+Each subagent gets its own context and token budget, so complex tasks that would hit limits as a single response work naturally when split across subagents.
+
 ## Autonomy Model
 
 When a skill asks for user input or approval:
