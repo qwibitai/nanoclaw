@@ -1,6 +1,13 @@
 import { describe, test, expect, vi } from 'vitest';
 
-// Mock all heavy dependencies so index.ts can be imported without side effects
+// Mock all heavy dependencies so index.ts can be imported without side effects.
+//
+// MAINTENANCE NOTE (kaizen #343): When adding new module-scope imports to
+// index.ts, add a corresponding vi.mock() here. For modules that only need
+// stub exports (no specific return values), use the empty-mock pattern:
+//   vi.mock('./new-module.js', () => ({}));
+// Vitest will auto-create undefined for missing exports, which is fine unless
+// index.ts calls the export at module scope.
 vi.mock('./db.js', () => ({
   initDatabase: vi.fn(),
   getMessagesSince: vi.fn(() => []),
@@ -43,7 +50,13 @@ vi.mock('./container-runner.js', () => ({
 vi.mock('./container-runtime.js', () => ({
   ensureContainerRuntimeRunning: vi.fn(),
   cleanupOrphans: vi.fn(),
+  checkImageAdvisory: vi.fn(),
   PROXY_BIND_HOST: '0.0.0.0',
+  CONTAINER_HOST_GATEWAY: 'host-gateway',
+  CONTAINER_RUNTIME_BIN: 'docker',
+  hostGatewayArgs: vi.fn(() => []),
+  readonlyMountArgs: vi.fn(() => []),
+  stopContainer: vi.fn(),
 }));
 vi.mock('./credential-proxy.js', () => ({
   startCredentialProxy: vi.fn(),
@@ -78,6 +91,7 @@ vi.mock('./case-router.js', () => ({
 vi.mock('./router-container.js', () => ({
   startRouterContainer: vi.fn(),
   stopRouterContainer: vi.fn(),
+  routeMessage: vi.fn(),
 }));
 vi.mock('./ipc.js', () => ({
   startIpcWatcher: vi.fn(),
@@ -119,6 +133,8 @@ vi.mock('./config.js', () => ({
   COALESCE_MS: 0,
   MAX_DOWNLOAD_WAIT_MS: 60000,
   DEV_SAFE_WORDS: ['test-dev-word'],
+  CASE_SYNC_ENABLED: false,
+  CASE_SYNC_REPO: '',
 }));
 vi.mock('./download-tracker.js', () => ({
   DownloadTracker: class MockDownloadTracker {
@@ -144,6 +160,9 @@ vi.mock('./router.js', () => ({
   findChannel: vi.fn(),
   formatMessages: vi.fn(() => ''),
   formatOutbound: vi.fn((t: string) => t),
+  routeOutboundImage: vi.fn(),
+  routeOutboundDocument: vi.fn(),
+  escapeXml: vi.fn((t: string) => t),
 }));
 vi.mock('./github-issues.js', () => ({
   createGitHubIssue: vi.fn(),
@@ -155,6 +174,63 @@ vi.mock('./usage.js', () => ({
 vi.mock('./group-folder.js', () => ({
   cleanupStaleUploads: vi.fn(),
   resolveGroupFolderPath: vi.fn((f: string) => `/tmp/groups/${f}`),
+  resolveGroupIpcPath: vi.fn((f: string) => `/tmp/groups/${f}/ipc`),
+  isValidGroupFolder: vi.fn(() => true),
+}));
+// --- Modules added during index.ts refactoring (kaizen #285) ---
+// These are imported at module scope by index.ts. Without mocks, adding new
+// imports to these modules (or new modules to index.ts) would crash this test.
+vi.mock('./case-backend.js', () => ({
+  CaseSyncService: vi.fn(),
+  setActiveSyncService: vi.fn(),
+}));
+vi.mock('./case-backend-github.js', () => ({
+  GitHubCaseSyncAdapter: vi.fn(),
+}));
+vi.mock('./escalation-hook.js', () => ({
+  onCaseEscalationEvent: vi.fn(),
+}));
+vi.mock('./case-sync-routing.js', () => ({
+  classifyCaseMutation: vi.fn(),
+}));
+vi.mock('./cookie-handler.js', () => ({
+  handleCookieMessage: vi.fn(),
+}));
+vi.mock('./record-usage.js', () => ({
+  recordUsage: vi.fn(),
+  RecordUsageDeps: undefined,
+}));
+vi.mock('./dev-safe-word.js', () => ({
+  detectDevSafeWord: vi.fn((content: string, groupWords?: string[]) => {
+    // Provide real-ish behavior so tests pass through the re-export
+    const allWords = [...(groupWords || []), 'test-dev-word'];
+    for (const word of allWords) {
+      if (content.includes(word)) {
+        const stripped = content
+          .replace(new RegExp(`\\s*${word}\\s*`, 'g'), ' ')
+          .trim()
+          .replace(/\s{2,}/g, ' ');
+        return { found: true, strippedContent: stripped };
+      }
+    }
+    return { found: false, strippedContent: content };
+  }),
+}));
+vi.mock('./dev-session-orchestrator.js', () => ({
+  activateDevSession: vi.fn(),
+}));
+vi.mock('./dev-session-router.js', () => ({
+  tryRouteToDevSession: vi.fn(),
+}));
+vi.mock('./error-classify.js', () => ({
+  classifyError: vi.fn(),
+}));
+vi.mock('./message-dispatch.js', () => ({
+  resolveDispatch: vi.fn(),
+}));
+vi.mock('./send-response.js', () => ({
+  sendResponse: vi.fn(),
+  SendResponseDeps: undefined,
 }));
 
 import {
