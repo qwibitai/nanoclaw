@@ -677,6 +677,15 @@ function acquirePidLock(): void {
 
 async function main(): Promise<void> {
   acquirePidLock();
+  logger.info(
+    {
+      logFile: path.join(process.cwd(), 'logs', 'nanoclaw.log'),
+      errorLogFile: path.join(process.cwd(), 'logs', 'nanoclaw.error.log'),
+      containerLogsDir: 'groups/{folder}/logs/',
+      ipcAuditDir: 'data/ipc/{folder}/audit/',
+    },
+    'NanoClaw starting — log locations',
+  );
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
