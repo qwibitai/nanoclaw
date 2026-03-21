@@ -49,12 +49,15 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamUrl: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    lastUpstreamUrl = '';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamUrl = req.url!;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -166,6 +169,54 @@ describe('credential-proxy', () => {
     // custom keep-alive and transfer-encoding must not be forwarded.
     expect(lastUpstreamHeaders['keep-alive']).toBeUndefined();
     expect(lastUpstreamHeaders['transfer-encoding']).toBeUndefined();
+  });
+
+  it('default: proxies to upstream with no path prefix (api.anthropic.com)', async () => {
+    proxyPort = await startProxy({ ANTHROPIC_API_KEY: 'sk-ant-real-key' });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '{}',
+    );
+
+    // Default ANTHROPIC_BASE_URL has pathname "/", so upstream sees just /v1/messages
+    expect(lastUpstreamUrl).toBe('/v1/messages');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
+  });
+
+  it('z.ai: proxies to upstream with /api/anthropic path prefix', async () => {
+    // Override ANTHROPIC_BASE_URL to simulate Z.ai's API endpoint
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api/anthropic`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '{}',
+    );
+
+    // Z.ai base URL has pathname /api/anthropic, so upstream sees /api/anthropic/v1/messages
+    expect(lastUpstreamUrl).toBe('/api/anthropic/v1/messages');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
   it('returns 502 when upstream is unreachable', async () => {
