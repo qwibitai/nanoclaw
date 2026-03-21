@@ -271,7 +271,7 @@ netlify deploy --prod --dir=dist/ --auth=$NETLIFY_AUTH_TOKEN --message="Update b
 which vercel || npm install -g vercel
 
 # Step 3: Detect project type
-cd /home/node/work/my-react-app
+cd /workspace/group/my-react-app
 
 # vite.config.ts exists → type = vite
 # Build command: npm run build, output: dist/

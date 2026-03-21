@@ -7,7 +7,7 @@ description: Generate images from text prompts using Google Gemini AI (Imagen 3 
 
 ## IMPORTANT: File locations and sending
 
-- **Always write files to /home/node/work/** (that directory is writable)
+- **Always write files to /workspace/group/** (that directory is writable)
 - **You MUST use the `mcp__nanoclaw__send_files` tool** to send the image to the user — do NOT just tell them where the file is
 - The `send_files` tool sends the actual image attachment to chat so it appears inline
 
@@ -28,14 +28,14 @@ fi
 1. Extract the image prompt from the user's message
 2. Call the Gemini API with curl
 3. Parse the response and decode the base64 image
-4. Save to /home/node/work/generated_image.png
+4. Save to /workspace/group/generated_image.png
 5. Send to chat via `mcp__nanoclaw__send_files`
 
 ## API Call (gemini-2.5-flash-image)
 
 ```bash
 PROMPT="a red fox sitting in a snowy forest"
-OUTPUT_FILE="/home/node/work/generated_image.png"
+OUTPUT_FILE="/workspace/group/generated_image.png"
 
 # Make the API request and save full response
 RESPONSE=$(curl -s -X POST \
@@ -81,7 +81,7 @@ If the gemini-2.0-flash endpoint fails, try the Imagen 3 endpoint:
 
 ```bash
 PROMPT="a red fox sitting in a snowy forest"
-OUTPUT_FILE="/home/node/work/generated_image.png"
+OUTPUT_FILE="/workspace/group/generated_image.png"
 
 RESPONSE=$(curl -s -X POST \
   "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${GEMINI_API_KEY}" \
@@ -126,7 +126,7 @@ if [ -z "$GEMINI_API_KEY" ]; then
 fi
 
 PROMPT="YOUR_PROMPT_HERE"
-OUTPUT_FILE="/home/node/work/generated_image.png"
+OUTPUT_FILE="/workspace/group/generated_image.png"
 
 echo "Generating image for prompt: $PROMPT"
 
@@ -184,7 +184,7 @@ echo "Image generated successfully: $OUTPUT_FILE"
 ```
 
 Then call `mcp__nanoclaw__send_files` with:
-- files: `[{path: "/home/node/work/generated_image.png", name: "generated_image.png"}]`
+- files: `[{path: "/workspace/group/generated_image.png", name: "generated_image.png"}]`
 - caption: A short description of what was generated (e.g. "Here's your image: a red fox sitting in a snowy forest")
 
 ## Error Handling

@@ -316,7 +316,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     [];
                   let valid = true;
                   for (const f of data.files) {
-                    const hostPath = resolveContainerPath(f.path, sourceGroup);
+                    // For /workspace/ipc/ paths, resolve relative to the
+                    // current basePath (which includes the thread subdirectory).
+                    // resolveContainerPath maps /workspace/ipc/ to the group-
+                    // level IPC dir, but threaded containers mount a thread-
+                    // specific subdirectory as /workspace/ipc/.
+                    let hostPath: string | null;
+                    const normalized = path.normalize(f.path);
+                    if (normalized.startsWith('/workspace/ipc/')) {
+                      const relative = normalized.slice('/workspace/ipc/'.length);
+                      hostPath = path.join(basePath, relative);
+                    } else {
+                      hostPath = resolveContainerPath(f.path, sourceGroup);
+                    }
                     if (!hostPath) {
                       logger.warn(
                         { containerPath: f.path, sourceGroup },

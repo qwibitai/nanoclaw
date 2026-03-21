@@ -412,6 +412,12 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+  // Ensure the container's node user (uid 1000) can write to the group dir
+  try {
+    fs.chownSync(groupDir, 1000, 1000);
+  } catch {
+    // Best-effort — may fail if not running as root
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain, input.threadId);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

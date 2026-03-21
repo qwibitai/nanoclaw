@@ -7,26 +7,26 @@ description: Create 3D models with OpenSCAD. ONLY trigger when the user explicit
 
 ## IMPORTANT: File locations and sending
 
-- **Always write files to `/home/node/work/`** — this is the writable workspace. Do NOT use `/workspace/group/` (root-owned, writes will fail) or `/tmp/` (not persistent)
+- **Always write files to `/workspace/group/`** — this is the writable, mounted workspace. Do NOT use `/tmp/` (not persistent, not mounted to host)
 - **You MUST use the `mcp__nanoclaw__send_files` tool** to send files to the user — do NOT just tell them where files are
 - The `send_files` tool sends actual file attachments to the chat (images appear inline, ZIPs are downloadable)
 
 ## Workflow
 
-1. Ensure the work directory exists: `mkdir -p /home/node/work`
-2. Write `.scad` file(s) to `/home/node/work/`
-3. Render preview: `scad-render /home/node/work/model.scad /home/node/work/render.png`
-4. Package source: `cd /home/node/work && zip model.zip *.scad`
+1. Ensure the work directory exists: `mkdir -p /workspace/group`
+2. Write `.scad` file(s) to `/workspace/group/`
+3. Render preview: `scad-render /workspace/group/model.scad /workspace/group/render.png`
+4. Package source: `cd /workspace/group && zip model.zip *.scad`
 5. Send to chat: call `mcp__nanoclaw__send_files` with the render.png and model.zip
 
 ## Quick Example
 
 ```bash
 # Ensure work directory exists
-mkdir -p /home/node/work
+mkdir -p /workspace/group
 
 # Write the model
-cat > /home/node/work/coke_can.scad << 'SCAD'
+cat > /workspace/group/coke_can.scad << 'SCAD'
 $fn = 64;
 
 module coke_can() {
@@ -48,14 +48,14 @@ coke_can();
 SCAD
 
 # Render to PNG
-scad-render /home/node/work/coke_can.scad /home/node/work/render.png
+scad-render /workspace/group/coke_can.scad /workspace/group/render.png
 
 # Package and send
-cd /home/node/work && zip model.zip *.scad
+cd /workspace/group && zip model.zip *.scad
 ```
 
 Then call `mcp__nanoclaw__send_files` with:
-- files: `[{path: "/home/node/work/render.png", name: "render.png"}, {path: "/home/node/work/model.zip", name: "model.zip"}]`
+- files: `[{path: "/workspace/group/render.png", name: "render.png"}, {path: "/workspace/group/model.zip", name: "model.zip"}]`
 - caption: "Here's your 3D model"
 
 ## OpenSCAD Language Reference

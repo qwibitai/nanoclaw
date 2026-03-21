@@ -21,7 +21,7 @@ fi
 1. Check that `GEMINI_API_KEY` is set (fail clearly if not)
 2. Call the Gemini API with the user's prompt
 3. Extract the base64 image data and decode to PNG
-4. Save to `/home/node/work/generated_image.png`
+4. Save to `/workspace/group/generated_image.png`
 5. Send to chat using `mcp__nanoclaw__send_files`
 
 ## Step 1: Call the API
@@ -42,7 +42,7 @@ curl -s -X POST \
 Always create the output directory first, then extract the image:
 
 ```bash
-mkdir -p /home/node/work
+mkdir -p /workspace/group
 ```
 
 ```python
@@ -57,7 +57,7 @@ parts = r.get('candidates', [{}])[0].get('content', {}).get('parts', [])
 for part in parts:
     if 'inlineData' in part:
         img_data = part['inlineData']['data']
-        with open('/home/node/work/generated_image.png', 'wb') as out:
+        with open('/workspace/group/generated_image.png', 'wb') as out:
             out.write(base64.b64decode(img_data))
         print('Image saved')
         break
@@ -72,7 +72,7 @@ else:
 
 ```python
 mcp__nanoclaw__send_files(
-  files=[{"path": "/home/node/work/generated_image.png", "name": "generated_image.png"}],
+  files=[{"path": "/workspace/group/generated_image.png", "name": "generated_image.png"}],
   caption="Here's your generated image"
 )
 ```

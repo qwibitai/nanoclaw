@@ -8,14 +8,14 @@ allowed-tools: Bash(agent-browser:*)
 
 ## IMPORTANT: File locations and sending
 
-- **Write chart.html to /home/node/work/** (create dir if needed: `mkdir -p /home/node/work`)
+- **Write chart.html to /workspace/group/** (create dir if needed: `mkdir -p /workspace/group`)
 - **You MUST use the `mcp__nanoclaw__send_files` tool** to send the PNG to the user — do NOT just tell them where the file is
 - The `send_files` tool sends actual file attachments to the chat (images appear inline)
 
 ## Workflow
 
-1. Write `/home/node/work/chart.html` with a Chart.js config tailored to the user's data
-2. Open it with agent-browser and screenshot to `/home/node/work/chart.png`
+1. Write `/workspace/group/chart.html` with a Chart.js config tailored to the user's data
+2. Open it with agent-browser and screenshot to `/workspace/group/chart.png`
 3. Send the PNG via `mcp__nanoclaw__send_files`
 
 ## HTML Template
@@ -46,16 +46,16 @@ new Chart(document.getElementById('chart'), {
 ## Rendering Commands
 
 ```bash
-mkdir -p /home/node/work
-# (write chart.html to /home/node/work/chart.html first)
-agent-browser open file:///home/node/work/chart.html
+mkdir -p /workspace/group
+# (write chart.html to /workspace/group/chart.html first)
+agent-browser open file:///workspace/group/chart.html
 agent-browser wait 2000
-agent-browser screenshot /home/node/work/chart.png
+agent-browser screenshot /workspace/group/chart.png
 agent-browser close
 ```
 
 Then call `mcp__nanoclaw__send_files` with:
-- files: `[{path: "/home/node/work/chart.png", name: "chart.png"}]`
+- files: `[{path: "/workspace/group/chart.png", name: "chart.png"}]`
 - caption: describing the chart
 
 ## Dark Theme Style Guide

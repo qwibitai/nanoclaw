@@ -30,18 +30,18 @@ gh api repos/OWNER/REPO --jq '.permissions'
 # push=false → fork first (see below)
 ```
 
-### Clone a repo to /home/node/work/
+### Clone a repo to /workspace/group/
 
 ```bash
-mkdir -p /home/node/work
+mkdir -p /workspace/group
 USERNAME=$(gh api user --jq .login)
-cd /home/node/work && git clone https://${USERNAME}:${GH_TOKEN}@github.com/OWNER/REPO.git
+cd /workspace/group && git clone https://${USERNAME}:${GH_TOKEN}@github.com/OWNER/REPO.git
 ```
 
 ### Create a branch, commit, push (with push access)
 
 ```bash
-cd /home/node/work/REPO
+cd /workspace/group/REPO
 git checkout -b feat/branch-name
 # make changes
 git add -A
@@ -61,7 +61,7 @@ gh pr create --repo OWNER/REPO --head BRANCH --base main \
 ```bash
 gh repo fork OWNER/REPO --clone=false
 USERNAME=$(gh api user --jq .login)
-cd /home/node/work && git clone https://${USERNAME}:${GH_TOKEN}@github.com/${USERNAME}/REPO.git
+cd /workspace/group && git clone https://${USERNAME}:${GH_TOKEN}@github.com/${USERNAME}/REPO.git
 ```
 
 ### Open a PR from a fork
@@ -100,7 +100,7 @@ gh pr comment NUMBER --repo OWNER/REPO --body "Comment"
 
 ## Workflow Notes
 
-- Always clone to /home/node/work/ (writable)
+- Always clone to /workspace/group/ (writable)
 - Never force push without explicit user confirmation
 - Always check git status before committing
 - When opening PRs, write clear body explaining what changed and why
