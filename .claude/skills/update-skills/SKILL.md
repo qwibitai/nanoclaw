@@ -128,8 +128,3 @@ Show:
 - Any conflicts that were resolved (list files)
 
 If the service is running, remind the user to restart it to pick up changes.
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

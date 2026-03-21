@@ -218,8 +218,3 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 6. Rebuild and restart
 7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
 8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.

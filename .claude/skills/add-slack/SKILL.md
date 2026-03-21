@@ -205,8 +205,3 @@ The Slack channel supports:
 - **No file/image handling** — The bot only processes text content. File uploads, images, and rich message blocks are not forwarded to the agent.
 - **Channel metadata sync is unbounded** — `syncChannelMetadata()` paginates through all channels the bot is a member of, but has no upper bound or timeout. Workspaces with thousands of channels may experience slow startup.
 - **Workspace admin policies not detected** — If the Slack workspace restricts bot app installation, the setup will fail at the "Install to Workspace" step with no programmatic detection or guidance. See SLACK_SETUP.md troubleshooting section.
-
-
-## Diagnostics (Optional)
-
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
