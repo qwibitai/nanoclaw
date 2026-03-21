@@ -507,11 +507,7 @@ export async function runContainerAgent(
         // Full input is only included at verbose level to avoid
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
-          logLines.push(
-            `=== Input ===`,
-            JSON.stringify(input, null, 2),
-            ``,
-          );
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
           logLines.push(
             `=== Input Summary ===`,
@@ -698,7 +694,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
+  _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
