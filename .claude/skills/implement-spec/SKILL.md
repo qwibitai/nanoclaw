@@ -41,6 +41,17 @@ For kaizen issues, always pass `--github-issue` to link the case to the existing
 
 **Naming convention for kaizen work:** `YYMMDD-HHMM-kNN-kebab-description` (e.g., `260318-2107-k21-fix-newline-prefix`). The `kNN` segment embeds the kaizen issue number, making it visible in worktree names, branch names, and `git worktree list` output — even if the DB step is somehow skipped.
 
+## Kaizen Reflection Task — Create at Session Start (H6 experiment, kaizen #388)
+
+**Immediately after the case gate passes**, create a reflection task using TaskCreate:
+
+- **Subject:** `Kaizen reflection — identify impediments, patterns, and near-misses`
+- **Description:** `Before declaring done: (1) What impediments did you hit? File each as a kaizen issue. (2) What patterns do these share with past incidents? (3) What almost went wrong but didn't? (4) What did this work reveal about the system? This task cannot be completed with '[] no impediments' unless truly nothing went wrong.`
+
+**Why this exists:** Hypothesis H6 from kaizen #388 — making reflection visible from session start (as a task you own) rather than only firing as an exit gate (imposed on you after the fact). The task primes you to notice impediments *as they happen* rather than trying to recall them at the end. The L2 gate still fires independently as validation.
+
+**When completing this task:** Use the impediments you collected throughout the session. If you noticed friction, patterns, or near-misses, they should already be noted. Format them as structured KAIZEN_IMPEDIMENTS for the gate.
+
 ## Re-examine the Spec
 
 Before touching code, re-examine the spec against current reality. *"Specs are hypotheses. Incidents are data."*

@@ -30,11 +30,15 @@
  * [x] Positive type allows no-action
  * [x] Gate cleared with specific PR URL targeting (kaizen #309)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import {
+  formatReflectionComment,
+  processHookInput,
+} from './pr-kaizen-clear.js';
 
 let testStateDir: string;
 const HOOK_PATH = path.resolve(__dirname, 'pr-kaizen-clear.ts');
@@ -437,5 +441,204 @@ describe('pr-kaizen-clear: edge cases', () => {
       .readdirSync(testStateDir)
       .filter((f) => f.startsWith('kaizen-done-'));
     expect(markerFiles.length).toBeGreaterThan(0);
+  });
+});
+
+// ── Reflection persistence tests (kaizen #388) ─────────────────────
+
+describe('formatReflectionComment', () => {
+  it('formats impediments as markdown table', () => {
+    const items = [
+      {
+        impediment: 'test issue',
+        type: 'standard',
+        disposition: 'filed',
+        ref: '#123',
+      },
+      {
+        finding: 'good pattern',
+        type: 'positive',
+        disposition: 'no-action',
+        reason: 'positive',
+      },
+    ];
+    const comment = formatReflectionComment(
+      items,
+      '2 finding(s) addressed',
+      false,
+    );
+    expect(comment).toContain('## Kaizen Reflection');
+    expect(comment).toContain('**2 finding(s) addressed:**');
+    expect(comment).toContain('| test issue | standard | filed | #123 |');
+    expect(comment).toContain('| good pattern | positive | no-action | — |');
+    expect(comment).toContain('kaizen #388');
+  });
+
+  it('formats empty array with reason', () => {
+    const comment = formatReflectionComment(
+      [],
+      'no impediments identified (straightforward fix)',
+      false,
+    );
+    expect(comment).toContain('**No impediments:**');
+    expect(comment).toContain('straightforward fix');
+  });
+
+  it('formats KAIZEN_NO_ACTION', () => {
+    const comment = formatReflectionComment(
+      [],
+      'no action needed [docs-only]: updated README',
+      true,
+    );
+    expect(comment).toContain('**No action needed:**');
+    expect(comment).toContain('docs-only');
+  });
+
+  it('defaults type to standard when missing', () => {
+    const items = [{ impediment: 'no type', disposition: 'filed', ref: '#1' }];
+    const comment = formatReflectionComment(
+      items,
+      '1 finding(s) addressed',
+      false,
+    );
+    expect(comment).toContain('| no type | standard | filed | #1 |');
+  });
+});
+
+describe('processHookInput: reflection persistence (kaizen #388)', () => {
+  let unitStateDir: string;
+
+  beforeEach(() => {
+    unitStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaizen-clear-unit-'));
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      encoding: 'utf-8',
+    }).trim();
+    fs.writeFileSync(
+      path.join(unitStateDir, 'pr-kaizen-Garsson-io_nanoclaw_99'),
+      `PR_URL=https://github.com/Garsson-io/nanoclaw/pull/99\nSTATUS=needs_pr_kaizen\nBRANCH=${branch}\n`,
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(unitStateDir, { recursive: true, force: true });
+  });
+
+  it('calls postComment with formatted reflection on valid impediments', () => {
+    const postComment = vi.fn();
+    const input = {
+      tool_name: 'Bash',
+      tool_input: {
+        command: `echo 'KAIZEN_IMPEDIMENTS: [{"impediment":"test bug","disposition":"filed","ref":"#50"}]'`,
+      },
+      tool_response: {
+        stdout:
+          'KAIZEN_IMPEDIMENTS: [{"impediment":"test bug","disposition":"filed","ref":"#50"}]',
+        exit_code: 0,
+      },
+    };
+
+    const result = processHookInput(input, {
+      stateDir: unitStateDir,
+      postComment,
+    });
+    expect(result).toContain('PR kaizen gate cleared');
+    expect(postComment).toHaveBeenCalledOnce();
+    expect(postComment.mock.calls[0][0]).toBe(
+      'https://github.com/Garsson-io/nanoclaw/pull/99',
+    );
+    const comment = postComment.mock.calls[0][1];
+    expect(comment).toContain('## Kaizen Reflection');
+    expect(comment).toContain('test bug');
+    expect(comment).toContain('filed');
+  });
+
+  it('calls postComment on KAIZEN_NO_ACTION', () => {
+    const postComment = vi.fn();
+    const input = {
+      tool_name: 'Bash',
+      tool_input: {
+        command: `echo 'KAIZEN_NO_ACTION [docs-only]: updated README'`,
+      },
+      tool_response: {
+        stdout: 'KAIZEN_NO_ACTION [docs-only]: updated README',
+        exit_code: 0,
+      },
+    };
+
+    const result = processHookInput(input, {
+      stateDir: unitStateDir,
+      postComment,
+    });
+    expect(result).toContain('PR kaizen gate cleared');
+    expect(postComment).toHaveBeenCalledOnce();
+    const comment = postComment.mock.calls[0][1];
+    expect(comment).toContain('**No action needed:**');
+  });
+
+  it('calls postComment on empty array with reason', () => {
+    const postComment = vi.fn();
+    const input = {
+      tool_name: 'Bash',
+      tool_input: { command: `echo 'KAIZEN_IMPEDIMENTS: [] simple fix'` },
+      tool_response: {
+        stdout: 'KAIZEN_IMPEDIMENTS: [] simple fix',
+        exit_code: 0,
+      },
+    };
+
+    const result = processHookInput(input, {
+      stateDir: unitStateDir,
+      postComment,
+    });
+    expect(result).toContain('PR kaizen gate cleared');
+    expect(postComment).toHaveBeenCalledOnce();
+    const comment = postComment.mock.calls[0][1];
+    expect(comment).toContain('**No impediments:**');
+  });
+
+  it('does not call postComment on validation failure', () => {
+    const postComment = vi.fn();
+    const input = {
+      tool_name: 'Bash',
+      tool_input: {
+        command: `echo 'KAIZEN_IMPEDIMENTS: [{"impediment":"test","disposition":"waived"}]'`,
+      },
+      tool_response: {
+        stdout:
+          'KAIZEN_IMPEDIMENTS: [{"impediment":"test","disposition":"waived"}]',
+        exit_code: 0,
+      },
+    };
+
+    const result = processHookInput(input, {
+      stateDir: unitStateDir,
+      postComment,
+    });
+    expect(result).toContain('no longer accepted');
+    expect(postComment).not.toHaveBeenCalled();
+  });
+
+  it('still clears gate if postComment throws', () => {
+    const postComment = vi.fn().mockImplementation(() => {
+      throw new Error('gh command failed');
+    });
+    const input = {
+      tool_name: 'Bash',
+      tool_input: {
+        command: `echo 'KAIZEN_IMPEDIMENTS: [{"impediment":"test","disposition":"fixed-in-pr"}]'`,
+      },
+      tool_response: {
+        stdout:
+          'KAIZEN_IMPEDIMENTS: [{"impediment":"test","disposition":"fixed-in-pr"}]',
+        exit_code: 0,
+      },
+    };
+
+    const result = processHookInput(input, {
+      stateDir: unitStateDir,
+      postComment,
+    });
+    expect(result).toContain('PR kaizen gate cleared');
+    expect(postComment).toHaveBeenCalledOnce();
   });
 });

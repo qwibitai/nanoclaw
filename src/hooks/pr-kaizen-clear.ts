@@ -245,11 +245,64 @@ function extractNoAction(
   return null;
 }
 
+// ── Reflection persistence (kaizen #388) ─────────────────────────────
+
+/** Format impediments as a markdown PR comment for audit trail. */
+export function formatReflectionComment(
+  items: Impediment[],
+  clearReason: string,
+  isNoAction: boolean,
+): string {
+  const lines: string[] = ['## Kaizen Reflection', ''];
+
+  if (isNoAction) {
+    lines.push(`**No action needed:** ${clearReason}`, '');
+  } else if (items.length === 0) {
+    lines.push(`**No impediments:** ${clearReason}`, '');
+  } else {
+    lines.push(
+      `**${items.length} finding(s) addressed:**`,
+      '',
+      '| Finding | Type | Disposition | Ref |',
+      '|---------|------|-------------|-----|',
+    );
+    for (const item of items) {
+      const desc = item.impediment || item.finding || '';
+      const type = item.type || 'standard';
+      const disposition = item.disposition || '';
+      const ref = item.ref || '—';
+      lines.push(`| ${desc} | ${type} | ${disposition} | ${ref} |`);
+    }
+    lines.push('');
+  }
+
+  lines.push(
+    '---',
+    '*Posted by pr-kaizen-clear hook for audit trail (kaizen #388)*',
+  );
+  return lines.join('\n');
+}
+
+/** Post reflection as a PR comment (best-effort). */
+function defaultPostComment(prUrl: string, comment: string): void {
+  const prNum = prUrl.match(/(\d+)$/)?.[1];
+  const repo = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull/)?.[1];
+  if (!prNum || !repo) return;
+  execSync(`gh pr comment ${prNum} --repo "${repo}" --body-file -`, {
+    input: comment,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 15000,
+  });
+}
+
 // ── Core logic (extracted for testability) ───────────────────────────
 
 export function processHookInput(
   input: HookInput,
-  options: { stateDir?: string } = {},
+  options: {
+    stateDir?: string;
+    postComment?: (prUrl: string, comment: string) => void;
+  } = {},
 ): string | null {
   if (input.tool_name !== 'Bash') return null;
 
@@ -273,6 +326,8 @@ export function processHookInput(
   let shouldClear = false;
   let clearReason = '';
   let allPassive = false;
+  let isNoAction = false;
+  let validatedItems: Impediment[] = [];
   const output: string[] = [];
 
   // ── Trigger 1: KAIZEN_IMPEDIMENTS ──────────────────────────────
@@ -304,6 +359,7 @@ export function processHookInput(
         return `\nKAIZEN_IMPEDIMENTS: Validation failed:\n${errors.join('\n')}\n\nFix the issues and resubmit.\n`;
       }
 
+      validatedItems = items;
       allPassive = items.every((i) => i.disposition === 'no-action');
       shouldClear = true;
       clearReason = `${items.length} finding(s) addressed`;
@@ -329,6 +385,7 @@ export function processHookInput(
 
     logNoAction(noAction.category, noAction.reason, gatePrUrl);
     shouldClear = true;
+    isNoAction = true;
     clearReason = `no action needed [${noAction.category}]: ${noAction.reason}`;
   }
 
@@ -347,6 +404,17 @@ export function processHookInput(
       gatePrUrl,
     );
     markReflectionDone(gatePrUrl, currentBranch(), stateDir);
+
+    // Post reflection as PR comment for audit trail (kaizen #388, best-effort)
+    const postComment = options.postComment ?? defaultPostComment;
+    try {
+      const comment = formatReflectionComment(
+        validatedItems,
+        clearReason,
+        isNoAction,
+      );
+      postComment(gatePrUrl, comment);
+    } catch {}
 
     // Auto-close kaizen issues (best-effort)
     try {
