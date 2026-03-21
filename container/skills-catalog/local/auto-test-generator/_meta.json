@@ -1,0 +1,11 @@
+{
+  "owner": "autogame-17",
+  "slug": "auto-test-generator",
+  "displayName": "Auto Test Generator",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": 1771333495013,
+    "commit": "https://github.com/openclaw/skills/commit/54d9855888650f71da7c15153719619c9904f648"
+  },
+  "history": []
+}

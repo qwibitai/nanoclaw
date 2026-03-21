@@ -1,0 +1,1475 @@
+{
+  "title": "Cost Intelligence",
+  "description": "Financial analysis for AI agent operations — daily/weekly/monthly cost trends, model attribution, token efficiency, cache savings, and per-session cost breakdown from Loki logs.",
+  "tags": [
+    "openclaw",
+    "grafana-lens",
+    "cost-intelligence"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "links": [
+    {
+      "title": "LLM Command Center",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "command-center"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "Session Explorer",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "session-explorer"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "SRE Operations",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "sre-operations"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "GenAI Observability",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "genai-observability"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "OpenClaw Dashboards",
+      "tags": [
+        "openclaw",
+        "grafana-lens"
+      ],
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prometheus",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$prometheus"
+        },
+        "query": "label_values(openclaw_lens_cost_by_model_total, provider)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$prometheus"
+        },
+        "query": "label_values(openclaw_lens_cost_by_model_total{provider=~\"$provider\"}, model)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cost Overview",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Today",
+      "description": "Today's accumulated cost.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[1d])) or vector(0)",
+          "legendFormat": "today",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Yesterday",
+      "description": "Total cost for the previous 24h period.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[24h] offset 24h)) or vector(0)",
+          "legendFormat": "yesterday",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 4,
+      "title": "7-Day Average",
+      "description": "Average daily cost over the past 7 days.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[7d])) / 7) or vector(0)",
+          "legendFormat": "7d avg",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 5,
+      "title": "30-Day Total",
+      "description": "Total accumulated cost over the past 30 days.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[30d])) or vector(0)",
+          "legendFormat": "30d total",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cache Savings",
+      "description": "Estimated money saved by serving tokens from cache.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "openclaw_lens_cache_savings_usd",
+          "legendFormat": "savings",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Cost per Message",
+      "description": "Average cost per processed message over the selected range.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[$__range])) / sum(increase(openclaw_lens_messages_processed_total[$__range]))",
+          "legendFormat": "$/msg",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "noValue": "No messages yet"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 24,
+      "title": "Burn Rate",
+      "description": "Current spending velocity projected to hourly rate.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[5m])) * 3600",
+          "legendFormat": "$/hr",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "noValue": "$0.000"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 25,
+      "title": "Cost Velocity ($/min)",
+      "description": "Real-time cost rate: total spend per minute (bold line) with per-model breakdown.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 4,
+        "w": 18,
+        "x": 6,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[5m])) * 60",
+          "legendFormat": "total $/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (model) (rate(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[5m])) * 60",
+          "legendFormat": "{{model}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total $/min"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Spending Trends",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "Daily Cost Trend",
+      "description": "Daily cost bars with a 7-day moving average overlay line.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[1d]))",
+          "legendFormat": "daily cost",
+          "refId": "A",
+          "interval": "1d"
+        },
+        {
+          "expr": "avg_over_time(sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[1d]))[7d:1d])",
+          "legendFormat": "7d moving avg",
+          "refId": "B",
+          "interval": "1d"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "daily cost"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "7d moving avg"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Cost by Model (Ranked)",
+      "description": "Which models dominate your spend? Horizontal bar gauge sorted by total cost over the selected range.",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(sum by (model) (increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[$__range])))",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Cost Attribution",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 12,
+      "title": "By Model",
+      "description": "Cost distribution across models.",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[$__range]))",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "By Provider",
+      "description": "Cost distribution across providers.",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (provider) (increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\"}[$__range]))",
+          "legendFormat": "{{provider}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "By Token Type",
+      "description": "Cost distribution by token type (input, output, cache_read, cache_write).",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (token_type) (increase(openclaw_lens_cost_by_token_type_total[$__range]))",
+          "legendFormat": "{{token_type}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Token Efficiency",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Cache vs Fresh Input Tokens",
+      "description": "Stacked area: fresh input vs cache read tokens. Higher cache reads = lower effective cost per token.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_token_type) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=~\"input|cache_read_input\"}[$__rate_interval]))",
+          "legendFormat": "{{gen_ai_token_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 30,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cache_read_input"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Cache Hit Ratio + Savings",
+      "description": "Dual-axis: cache hit ratio (left, area) + cumulative savings USD (right, line).",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "openclaw_lens_cache_token_ratio * 100",
+          "legendFormat": "cache hit %",
+          "refId": "A"
+        },
+        {
+          "expr": "openclaw_lens_cache_savings_usd",
+          "legendFormat": "savings (USD)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cache hit %"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "savings (USD)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Cost per Session",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 19,
+      "title": "Session Cost Breakdown",
+      "description": "Per-session cost breakdown from Loki usage summaries. Sorted by cost descending to identify expensive sessions. Click session_id to investigate in Session Explorer.",
+      "type": "table",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "$loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "labelTypes": true,
+              "flags": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "trace_id": true,
+              "span_id": true,
+              "service_name": true,
+              "severity_number": true,
+              "severity_text": true,
+              "detected_level": true,
+              "body": true,
+              "resources_openclaw_session_key": true,
+              "openclaw_session_key": true,
+              "openclaw_summary_type": true,
+              "openclaw_run_id": true,
+              "openclaw_channel": true,
+              "openclaw_agent_id": true,
+              "openclaw_is_subagent": true,
+              "openclaw_parent_session_id": true,
+              "openclaw_child_count": true,
+              "openclaw_active_duration_ms": true,
+              "openclaw_latency_avg_ms": true,
+              "openclaw_latency_min_ms": true,
+              "openclaw_latency_max_ms": true,
+              "openclaw_latency_p95_ms": true,
+              "openclaw_latency_count": true,
+              "openclaw_messages_errors": true,
+              "openclaw_messages_tool_calls": true,
+              "openclaw_messages_tool_results": true,
+              "openclaw_messages_user": true,
+              "openclaw_messages_assistant": true,
+              "openclaw_messages_total": true,
+              "openclaw_tokens_input": true,
+              "openclaw_tokens_output": true,
+              "openclaw_tokens_cache_read": true,
+              "openclaw_tokens_cache_write": true,
+              "openclaw_tools_unique_count": true,
+              "openclaw_tools_top": true,
+              "openclaw_cost_input": true,
+              "openclaw_cost_output": true,
+              "openclaw_cost_cache_read": true,
+              "openclaw_cost_cache_write": true,
+              "openclaw_cache_savings_usd": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "openclaw_session_id": 1,
+              "gen_ai_request_model": 2,
+              "gen_ai_provider_name": 3,
+              "openclaw_cost_total": 4,
+              "openclaw_tokens_total": 5,
+              "openclaw_cache_hit_ratio": 6,
+              "openclaw_tools_total_calls": 7,
+              "openclaw_duration_ms": 8
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_session_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Session ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Explore session",
+                    "url": "/d/openclaw-session-explorer/session-explorer?var-session=${__value.text}&${__url_time_range}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_duration_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duration"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gen_ai_request_model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Model"
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gen_ai_provider_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Provider"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_cache_hit_ratio"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache %"
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.2
+                    },
+                    {
+                      "color": "green",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_cost_total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cost"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_tokens_total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tokens"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_tools_total_calls"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tool Calls"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Cost",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "title": "GenAI Cost Analytics",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "title": "Projected Monthly Cost",
+      "description": "Forward projection of monthly cost based on the last 24 hours. Green <$50, yellow <$100, red >$100.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[24h])) * 30",
+          "legendFormat": "projected",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 22,
+      "title": "Token Efficiency",
+      "description": "Total tokens consumed per dollar spent over the selected range. Higher = more efficient.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(gen_ai_client_token_usage_sum[$__range])) / clamp_min(sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[$__range])), 0.001)",
+          "legendFormat": "tokens/$",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 23,
+      "title": "Time by Operation",
+      "description": "Total time spent per operation type: chat (LLM calls), execute_tool, invoke_agent. Longer time = proportionally more cost.",
+      "type": "piechart",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_operation_name) (increase(gen_ai_client_operation_duration_seconds_sum[$__range]))",
+          "legendFormat": "{{gen_ai_operation_name}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    }
+  ]
+}

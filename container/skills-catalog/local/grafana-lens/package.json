@@ -1,0 +1,101 @@
+{
+  "name": "openclaw-grafana-lens",
+  "version": "0.3.0",
+  "description": "OpenClaw plugin that gives AI agents full Grafana access \u2014 17 composable tools for PromQL/LogQL/TraceQL queries, dashboard creation, alerting, SRE investigation (multi-signal triage, anomaly detection, alert fatigue analysis), security monitoring (prompt injection detection, tool loop detection), and full OTLP observability (metrics, logs, traces) with gen_ai semantic conventions",
+  "type": "module",
+  "license": "MIT-0",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "grafana",
+    "grafana-plugin",
+    "observability",
+    "monitoring",
+    "dashboards",
+    "alerting",
+    "ai-agent",
+    "ai-observability",
+    "genai",
+    "llm-monitoring",
+    "llm-observability",
+    "opentelemetry",
+    "otlp",
+    "otel",
+    "gen-ai-semantic-conventions",
+    "promql",
+    "logql",
+    "traceql",
+    "prometheus",
+    "loki",
+    "tempo",
+    "mimir",
+    "lgtm-stack",
+    "metrics",
+    "logs",
+    "traces",
+    "distributed-tracing",
+    "prompt-injection-detection",
+    "security-monitoring",
+    "tool-loop-detection",
+    "cost-tracking",
+    "token-usage",
+    "ai-cost-management",
+    "dashboard-templates",
+    "panel-rendering",
+    "custom-metrics",
+    "data-observatory",
+    "agent-tools",
+    "composable-tools",
+    "secret-redaction",
+    "sre",
+    "incident-response",
+    "investigation",
+    "triage",
+    "anomaly-detection",
+    "alert-fatigue",
+    "hypothesis-generation",
+    "root-cause-analysis"
+  ],
+  "scripts": {
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awsome-o/grafana-lens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/awsome-o/grafana-lens/issues"
+  },
+  "homepage": "https://github.com/awsome-o/grafana-lens#readme",
+  "files": [
+    "index.ts",
+    "src/",
+    "skills/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.57.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.57.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-logs": "^0.57.0",
+    "@opentelemetry/sdk-metrics": "^1.30.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0"
+  },
+  "devDependencies": {
+    "ajv": "^8.18.0",
+    "openclaw": "*",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

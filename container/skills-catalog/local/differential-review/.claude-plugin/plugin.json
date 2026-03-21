@@ -1,0 +1,10 @@
+{
+  "name": "differential-review",
+  "version": "1.0.0",
+  "description": "Security-focused differential review of code changes with git history analysis and blast radius estimation",
+  "author": {
+    "name": "Omar Inuwa",
+    "email": "opensource@trailofbits.com",
+    "url": "https://github.com/trailofbits"
+  }
+}

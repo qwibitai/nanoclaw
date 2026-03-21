@@ -1,0 +1,410 @@
+{
+  "title": "Security Overview",
+  "description": "Security monitoring — prompt injection signals, session anomalies, tool error classification, webhook errors, cost spikes, and gateway lifecycle. Part of the OpenClaw Grafana Lens observability suite.",
+  "tags": ["openclaw", "grafana-lens", "security-overview"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "links": [
+    {
+      "title": "SRE Operations",
+      "tags": ["openclaw", "grafana-lens", "sre-operations"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "LLM Command Center",
+      "tags": ["openclaw", "grafana-lens", "command-center"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "OpenClaw Dashboards",
+      "tags": ["openclaw", "grafana-lens"],
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prometheus",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "── Threat Summary ──",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "title": "Prompt Injection Signals (1h)",
+      "description": "Prompt injection patterns detected in user input + tool loop signals in the last hour",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(openclaw_lens_prompt_injection_signals_total[1h])) or vector(0)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 3,
+      "title": "Active Tool Loops",
+      "description": "Sessions currently stuck in tool loops — a strong prompt injection indicator",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(openclaw_lens_tool_loops_active) or vector(0)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "title": "Gateway Restarts (24h)",
+      "description": "Gateway process restarts in the last 24 hours — may indicate unauthorized access or instability",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 10 }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(openclaw_lens_gateway_restarts_total[24h])) or vector(0)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 5,
+      "title": "Stuck Sessions",
+      "description": "Number of currently stuck sessions — sessions not making progress",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(openclaw_lens_sessions_stuck) or vector(0)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 6,
+      "title": "── Access & Behavior ──",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "id": 7,
+      "title": "Webhook Error vs Received Rate",
+      "description": "Webhook error rate overlaid on received rate — high error ratio indicates malformed payloads or signature failures",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Errors" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Received" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(openclaw_lens_webhook_error_total[5m]))",
+          "legendFormat": "Errors",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(openclaw_lens_webhook_received_total[5m]))",
+          "legendFormat": "Received",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Session Completion Rate",
+      "description": "Session completion rate vs 1h average — tracks successful vs errored session endings. High start-with-no-completion is a stronger security signal than raw start rate.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Anomaly threshold (2x avg)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(openclaw_lens_sessions_completed_total[5m]))",
+          "legendFormat": "Session completion rate",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        },
+        {
+          "refId": "B",
+          "expr": "2 * avg_over_time(sum(rate(openclaw_lens_sessions_completed_total[5m]))[1h:5m])",
+          "legendFormat": "Anomaly threshold (2x avg)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Unique Sessions (1h rolling)",
+      "description": "Unique session IDs in a 1h sliding window — sudden spikes indicate session enumeration or token theft",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15 } }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "openclaw_lens_unique_sessions_1h",
+          "legendFormat": "Unique sessions (1h)",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Cost Trajectory",
+      "description": "Daily accumulated cost — sudden spikes may indicate token theft leading to expensive operations",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "gradientMode": "scheme" },
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "openclaw_lens_daily_cost_usd",
+          "legendFormat": "Daily cost",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "── Tool Safety & Logs ──",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+    },
+    {
+      "id": 12,
+      "title": "Tool Error Classification",
+      "description": "Tool errors by type (network, filesystem, timeout, other) — filesystem errors may indicate path traversal, network errors may indicate SSRF",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tool, error_class) (rate(openclaw_lens_tool_error_classes_total[5m]))",
+          "legendFormat": "{{tool}} ({{error_class}})",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Session Resets by Reason",
+      "description": "Session context resets — unusual volume may indicate context manipulation attempts",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${prometheus}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } } }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (increase(openclaw_lens_session_resets_total[1h]))",
+          "legendFormat": "{{reason}}",
+          "datasource": { "type": "prometheus", "uid": "${prometheus}" }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Security Events (Loki)",
+      "description": "Prompt injection detections, tool loops, and gateway lifecycle events from structured logs",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "${loki}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "enableLogDetails": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"openclaw\"} | event_name=~\"prompt_injection.detected|tool.loop|session.reset\"",
+          "datasource": { "type": "loki", "uid": "${loki}" }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Gateway Lifecycle Events (Loki)",
+      "description": "Gateway start/stop events — frequent restarts indicate instability or unauthorized access",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "${loki}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "enableLogDetails": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"openclaw\"} | component=\"lifecycle\" | event_name=~\"gateway.*\"",
+          "datasource": { "type": "loki", "uid": "${loki}" }
+        }
+      ]
+    }
+  ]
+}

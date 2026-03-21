@@ -1,0 +1,588 @@
+{
+  "title": "Tool Performance",
+  "description": "Tier 3b Tool Analytics — tool reliability ranking, latency analysis, error rates, bar gauge leaderboards, per-tool performance over time, and tool traces with Tempo correlation.",
+  "tags": ["openclaw", "grafana-lens", "tool-performance"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "30s",
+  "links": [
+    {
+      "title": "LLM Command Center",
+      "tags": ["openclaw", "grafana-lens", "command-center"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "Session Explorer",
+      "tags": ["openclaw", "grafana-lens", "session-explorer"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "SRE Operations",
+      "tags": ["openclaw", "grafana-lens", "sre-operations"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "GenAI Observability",
+      "tags": ["openclaw", "grafana-lens", "genai-observability"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "OpenClaw Dashboards",
+      "tags": ["openclaw", "grafana-lens"],
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prometheus",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "tempo",
+        "label": "Tempo",
+        "type": "datasource",
+        "query": "tempo",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "tool",
+        "label": "Tool",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$prometheus" },
+        "query": "label_values(openclaw_lens_tool_calls_total, tool)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tool Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Total Tool Calls",
+      "description": "Total tool calls over the selected range.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_tool_calls_total{tool=~\"$tool\"}[$__range])) or vector(0)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Error Rate %",
+      "description": "Tool error rate as a percentage over the selected range.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_tool_calls_total{status=\"error\", tool=~\"$tool\"}[$__range])) / sum(increase(openclaw_lens_tool_calls_total{tool=~\"$tool\"}[$__range])) * 100",
+          "legendFormat": "error %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "noValue": "0%"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 4,
+      "title": "P95 Tool Latency",
+      "description": "95th percentile tool call duration.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(openclaw_lens_tool_duration_ms_bucket{tool=~\"$tool\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 5000 }
+            ]
+          },
+          "noValue": "No tool calls yet"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Active Tool Loops",
+      "description": "Currently active tool loop detections (warning + critical level).",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "sum(openclaw_lens_tool_loops_active) or vector(0)",
+          "legendFormat": "loops",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Tool Leaderboard",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "title": "Most Used Tools",
+      "description": "Top 15 tools by call count over the selected range.",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "topk(15, sum by (tool) (increase(openclaw_lens_tool_calls_total[$__range])))",
+          "legendFormat": "{{tool}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": false,
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Slowest Tools (P95)",
+      "description": "Top 10 tools by P95 latency. Identifies performance bottlenecks.",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, tool) (rate(openclaw_lens_tool_duration_ms_bucket[5m]))))",
+          "legendFormat": "{{tool}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 5000 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": false,
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Performance Over Time",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 10,
+      "title": "Tool Latency by Tool (P95)",
+      "description": "P95 latency per tool over time, filtered by the $tool variable.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(openclaw_lens_tool_duration_ms_bucket{tool=~\"$tool\"}[5m])) by (le, tool))",
+          "legendFormat": "{{tool}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "mean", "max"]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Tool Error Rate by Tool",
+      "description": "Per-tool error rate over time. Red threshold at 0.01/s.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_tool_calls_total{status=\"error\", tool=~\"$tool\"}[5m])) by (tool)",
+          "legendFormat": "{{tool}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "mean", "max"]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Tool Traces & Logs",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "Recent Tool Calls",
+      "description": "Tool call log events with trace correlation. Click a log line to view the full trace in Tempo.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 26 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"tool.call\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": { "queryType": "traceql", "query": "${__data.fields.trace_id}" }
+              }
+            },
+            {
+              "title": "Explore session in Session Explorer",
+              "url": "/dashboards?tag=session-explorer&var-session=${__data.fields.openclaw_session_id}",
+              "targetBlank": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Tool Traces",
+      "description": "execute_tool spans from Tempo. Click to drill into full trace hierarchy showing parent LLM call and session context.\n\nRequires Tempo search. If empty, check Tempo config or click trace_id links in log panels.",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 26 },
+      "datasource": { "type": "tempo", "uid": "$tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{resource.service.name=\"openclaw\" && resource.service.namespace=\"grafana-lens\" && name=~\"execute_tool.*\"}",
+          "limit": 20,
+          "tableType": "traces",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "GenAI Tool Analytics",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Tool Calls by Model",
+      "description": "Which models trigger which tools. Extracted from Loki tool.call events with model context from the parent LLM call.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 37 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"tool.call\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "trace_id": true,
+              "span_id": true,
+              "service_name": true,
+              "detected_level": true,
+              "severity_number": true,
+              "severity_text": true,
+              "openclaw_session_id": true,
+              "openclaw_session_key": true,
+              "gen_ai_operation_name": true,
+              "tool_param_keys": true,
+              "tool_error": true,
+              "tool_duration_ms": true,
+              "labelTypes": true,
+              "flags": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "gen_ai_tool_name": 1,
+              "gen_ai_request_model": 2
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "gen_ai_tool_name" },
+            "properties": [{ "id": "displayName", "value": "Tool" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gen_ai_request_model" },
+            "properties": [{ "id": "displayName", "value": "Model" }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": true }]
+      }
+    },
+    {
+      "id": 17,
+      "title": "Tool Error Traces",
+      "description": "Failed tool executions from Tempo. Click to see error details and trace context.\n\nRequires Tempo search. If empty, check Tempo config or click trace_id links in log panels.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 37 },
+      "datasource": { "type": "tempo", "uid": "$tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{resource.service.name=\"openclaw\" && resource.service.namespace=\"grafana-lens\" && name=~\"execute_tool.*\" && status = error}",
+          "limit": 20,
+          "tableType": "traces",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Tool Duration Heatmap",
+      "description": "Distribution of tool call durations over time. Darker = more tool calls at that latency.",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "$prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_tool_duration_ms_bucket{tool=~\"$tool\"}[$__rate_interval])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "ms"
+        },
+        "color": {
+          "scheme": "Oranges",
+          "mode": "scheme"
+        },
+        "cellGap": 1
+      }
+    }
+  ]
+}

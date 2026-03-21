@@ -1,0 +1,189 @@
+{
+  "title": "Weekly Review",
+  "description": "Weekly overview of 2 external metrics with trends, plus a table of all openclaw_ext_* custom metrics. Ideal for work reviews, fitness tracking, finance summaries.",
+  "tags": ["weekly", "grafana-lens", "external-data"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "5m",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "metric1",
+        "label": "Primary Metric",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "query": "label_values({__name__=~\"openclaw_ext_.*\"}, __name__)",
+        "refresh": 1,
+        "includeAll": false,
+        "current": {},
+        "hide": 0,
+        "sort": 1
+      },
+      {
+        "name": "metric2",
+        "label": "Secondary Metric",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "query": "label_values({__name__=~\"openclaw_ext_.*\"}, __name__)",
+        "refresh": 1,
+        "includeAll": false,
+        "current": {},
+        "hide": 0,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Primary Metric (Current)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "$metric1",
+          "legendFormat": "{{ __name__ }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Secondary Metric (Current)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "$metric2",
+          "legendFormat": "{{ __name__ }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Custom Metrics Count",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "count({__name__=~\"openclaw_ext_.*\"})",
+          "legendFormat": "metrics",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "blue" },
+              { "value": 5, "color": "green" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Primary Metric — Weekly Trend",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "$metric1",
+          "legendFormat": "{{ __name__ }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Secondary Metric — Weekly Trend",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "$metric2",
+          "legendFormat": "{{ __name__ }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "All Custom Metrics (openclaw_ext_*)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "{__name__=~\"openclaw_ext_.*\"}",
+          "legendFormat": "{{ __name__ }}",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": false },
+            "renameByName": { "__name__": "Metric", "Value": "Current Value" }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "align": "auto"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -19,6 +19,27 @@
     "verification-before-completion": ["coding"],
     "writing-plans": ["coding"],
     "writing-skills": ["coding"],
-    "github-ops": ["coding", "general"]
+    "github-ops": ["coding", "general"],
+    "docx": ["general", "creative"],
+    "pdf": ["general", "creative"],
+    "xlsx": ["general", "creative"],
+    "pptx": ["general", "creative"],
+    "gh-fix-ci": ["coding"],
+    "sentry": ["coding", "general"],
+    "firecrawl-agent": ["coding", "general"],
+    "wrangler": ["coding"],
+    "differential-review": ["coding"],
+    "static-analysis": ["coding"],
+    "agents-md": ["coding"],
+    "grafana-lens": ["coding", "general"],
+    "webapp-testing": ["coding"],
+    "internal-comms": ["general", "creative"],
+    "neon-postgres": ["coding"],
+    "create-prd": ["general"],
+    "sprint-plan": ["general"],
+    "summarize-meeting": ["general"],
+    "remotion": ["coding", "creative"],
+    "github-issue-creator": ["coding", "general"],
+    "auto-test-generator": ["coding"]
   }
 }

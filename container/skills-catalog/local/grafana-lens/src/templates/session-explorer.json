@@ -1,0 +1,1563 @@
+{
+  "title": "Session Explorer",
+  "description": "Per-session deep-dive — select a session to see its full trace hierarchy, every LLM call, tool call, conversation flow, and cost breakdown. The killer feature for debugging AI agent behavior.",
+  "tags": ["openclaw", "grafana-lens", "session-explorer"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "",
+  "links": [
+    {
+      "title": "LLM Command Center",
+      "tags": ["openclaw", "grafana-lens", "command-center"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "Cost Intelligence",
+      "tags": ["openclaw", "grafana-lens", "cost-intelligence"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "SRE Operations",
+      "tags": ["openclaw", "grafana-lens", "sre-operations"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "GenAI Observability",
+      "tags": ["openclaw", "grafana-lens", "genai-observability"],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "OpenClaw Dashboards",
+      "tags": ["openclaw", "grafana-lens"],
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prometheus",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "tempo",
+        "label": "Tempo",
+        "type": "datasource",
+        "query": "tempo",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "session",
+        "label": "Session ID",
+        "type": "textbox",
+        "current": { "text": "", "value": "" },
+        "hide": 0,
+        "description": "Click a session in the Recent Sessions table below, or paste a session ID here."
+      },
+      {
+        "name": "trace_id",
+        "type": "textbox",
+        "current": { "text": "", "value": "" },
+        "hide": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Session Picker",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Recent Sessions",
+      "description": "Click a session row to drill down. The Session ID column is clickable — it sets the $session variable automatically.",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id!=\"\" | line_format \"{{.openclaw_session_id}}\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "span_id": true,
+              "service_name": true,
+              "detected_level": true,
+              "severity_number": true,
+              "severity_text": true,
+              "openclaw_summary_type": true,
+              "openclaw_session_key": true,
+              "openclaw_agent_id": true,
+              "openclaw_cache_hit_ratio": true,
+              "openclaw_cache_savings_usd": true,
+              "openclaw_cost_cache_read": true,
+              "openclaw_cost_cache_write": true,
+              "openclaw_cost_input": true,
+              "openclaw_cost_output": true,
+              "openclaw_latency_avg_ms": true,
+              "openclaw_latency_min_ms": true,
+              "openclaw_latency_max_ms": true,
+              "openclaw_latency_p95_ms": true,
+              "openclaw_messages_errors": true,
+              "openclaw_messages_tool_calls": true,
+              "openclaw_messages_tool_results": true,
+              "openclaw_tokens_cache_read": true,
+              "openclaw_tokens_cache_write": true,
+              "openclaw_tokens_input": true,
+              "openclaw_tokens_output": true,
+              "labelTypes": true,
+              "flags": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "openclaw_session_id": 1,
+              "openclaw_is_subagent": 2,
+              "openclaw_parent_session_id": 3,
+              "gen_ai_request_model": 4,
+              "openclaw_messages_total": 5,
+              "openclaw_tools_total_calls": 6,
+              "openclaw_active_duration_ms": 7,
+              "openclaw_duration_ms": 8,
+              "openclaw_tokens_total": 9,
+              "openclaw_cost_total": 10,
+              "openclaw_latency_count": 11,
+              "openclaw_tools_unique_count": 12,
+              "openclaw_tools_top": 13,
+              "openclaw_messages_user": 14,
+              "openclaw_messages_assistant": 15,
+              "gen_ai_provider_name": 16,
+              "openclaw_child_count": 17,
+              "trace_id": 18
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "openclaw_session_id" },
+            "properties": [
+              { "id": "displayName", "value": "Session ID" },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Select this session",
+                    "url": "/d/${__dashboard.uid}?var-session=${__value.text}&var-trace_id=${__data.fields.trace_id}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "trace_id" },
+            "properties": [
+              { "id": "custom.hidden", "value": true }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_active_duration_ms" },
+            "properties": [
+              { "id": "displayName", "value": "Active Time" },
+              { "id": "unit", "value": "ms" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_duration_ms" },
+            "properties": [
+              { "id": "displayName", "value": "Wall Clock" },
+              { "id": "unit", "value": "ms" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_cost_total" },
+            "properties": [
+              { "id": "displayName", "value": "Cost" },
+              { "id": "unit", "value": "currencyUSD" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tokens_total" },
+            "properties": [
+              { "id": "displayName", "value": "Tokens" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gen_ai_request_model" },
+            "properties": [{ "id": "displayName", "value": "Model" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_messages_total" },
+            "properties": [
+              { "id": "displayName", "value": "Messages" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tools_total_calls" },
+            "properties": [
+              { "id": "displayName", "value": "Tool Calls" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_latency_count" },
+            "properties": [
+              { "id": "displayName", "value": "LLM Calls" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tools_unique_count" },
+            "properties": [
+              { "id": "displayName", "value": "Unique Tools" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tools_top" },
+            "properties": [{ "id": "displayName", "value": "Top Tools" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_messages_user" },
+            "properties": [
+              { "id": "displayName", "value": "User Msgs" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_messages_assistant" },
+            "properties": [
+              { "id": "displayName", "value": "Assistant Msgs" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "gen_ai_provider_name" },
+            "properties": [{ "id": "displayName", "value": "Provider" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_is_subagent" },
+            "properties": [
+              { "id": "displayName", "value": "Type" },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "true": { "text": "Subagent", "color": "blue" } } },
+                  { "type": "special", "options": { "match": "null+nan", "result": { "text": "Root", "color": "green" } } }
+                ]
+              },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_parent_session_id" },
+            "properties": [
+              { "id": "displayName", "value": "Parent" },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Go to parent session",
+                    "url": "/d/${__dashboard.uid}?var-session=${__value.text}&${__url_time_range}"
+                  }
+                ]
+              },
+              { "id": "custom.width", "value": 120 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_child_count" },
+            "properties": [
+              { "id": "displayName", "value": "Children" },
+              { "id": "unit", "value": "short" },
+              { "id": "custom.width", "value": 80 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": true }]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Session Summary",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 4,
+      "title": "Active Time",
+      "description": "Active processing time (LLM + tool calls), excluding idle time between user messages.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_active_duration_ms [$__range]))",
+          "legendFormat": "active time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Total Cost",
+      "description": "Session total cost in USD.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_cost_total [$__range]))",
+          "legendFormat": "cost",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Total Tokens",
+      "description": "Total tokens consumed by this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_tokens_total [$__range]))",
+          "legendFormat": "tokens",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 7,
+      "title": "LLM Calls",
+      "description": "Number of LLM calls in this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_latency_count [$__range]))",
+          "legendFormat": "llm calls",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Tool Calls",
+      "description": "Total tool calls in this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_tools_total_calls [$__range]))",
+          "legendFormat": "tool calls",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Cache Hit %",
+      "description": "Token cache hit ratio for this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 8 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_cache_hit_ratio [$__range]))",
+          "legendFormat": "cache %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Session Trace",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "title": "Session Trace Hierarchy",
+      "description": "Full invoke_agent → chat → execute_tool span hierarchy for this session. Requires a configured Tempo datasource — if empty, all session data is available in the panels below. Click spans to see attributes (token counts, model, cost, duration).",
+      "type": "traces",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "tempo", "uid": "$tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "${trace_id}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "LLM Calls",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "LLM Call Log",
+      "description": "LLM input/output events for this session. Click for trace correlation.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=~\"llm\\\\.(input|output)\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Ascending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": { "queryType": "traceql", "query": "${__data.fields.trace_id}" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Token Breakdown",
+      "description": "Per-LLM-call token breakdown: model, input/output/cache tokens, cost, and duration — sorted by cost descending.",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"llm.output\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "trace_id": true,
+              "span_id": true,
+              "service_name": true,
+              "detected_level": true,
+              "severity_number": true,
+              "severity_text": true,
+              "openclaw_session_id": true,
+              "openclaw_session_key": true,
+              "openclaw_run_id": true,
+              "openclaw_provider": true,
+              "openclaw_orphaned": true,
+              "gen_ai_operation_name": true,
+              "gen_ai_completion": true,
+              "openclaw_tokens_cache_write": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "openclaw_model": 1,
+              "openclaw_tokens_input": 2,
+              "openclaw_tokens_output": 3,
+              "openclaw_tokens_cache_read": 4,
+              "openclaw_duration_s": 5
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "openclaw_model" },
+            "properties": [{ "id": "displayName", "value": "Model" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tokens_input" },
+            "properties": [
+              { "id": "displayName", "value": "Input Tokens" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tokens_output" },
+            "properties": [
+              { "id": "displayName", "value": "Output Tokens" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_tokens_cache_read" },
+            "properties": [
+              { "id": "displayName", "value": "Cache Read" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "openclaw_duration_s" },
+            "properties": [
+              { "id": "displayName", "value": "Duration" },
+              { "id": "unit", "value": "s" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Duration", "desc": true }]
+      }
+    },
+    {
+      "id": 15,
+      "title": "Tool Calls",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Tool Call Log",
+      "description": "All tool call events for this session. Click for trace correlation.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 39 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"tool.call\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Ascending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": { "queryType": "traceql", "query": "${__data.fields.trace_id}" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Tool Duration & Status",
+      "description": "Per-tool-call duration and status for this session.",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 39 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"tool.call\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "trace_id": true,
+              "span_id": true,
+              "service_name": true,
+              "detected_level": true,
+              "severity_number": true,
+              "severity_text": true,
+              "openclaw_session_id": true,
+              "openclaw_session_key": true,
+              "gen_ai_operation_name": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "gen_ai_tool_name": 1,
+              "tool_duration_ms": 2,
+              "tool_param_keys": 3,
+              "tool_error": 4
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "gen_ai_tool_name" },
+            "properties": [{ "id": "displayName", "value": "Tool" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tool_duration_ms" },
+            "properties": [
+              { "id": "displayName", "value": "Duration" },
+              { "id": "unit", "value": "ms" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tool_error" },
+            "properties": [{ "id": "displayName", "value": "Error" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tool_param_keys" },
+            "properties": [{ "id": "displayName", "value": "Params" }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": false }]
+      }
+    },
+    {
+      "id": 18,
+      "title": "Conversation Flow",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 49 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 19,
+      "title": "Full Conversation Narrative",
+      "description": "Complete conversation flow: user messages → LLM calls → tool calls → responses, in chronological order. Shows actual message content when otlp.captureContent is enabled (default). Click any line for trace correlation.",
+      "type": "logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 50 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | event_name=~\"message\\\\.(received|sent)|llm\\\\.(input|output)|tool\\\\.call\" | line_format \"{{ if eq .event_name \\\"message.received\\\" }}[USER] {{ if .openclaw_content }}{{ .openclaw_content }}{{ else }}(message from {{ .openclaw_from }}){{ end }}{{ else if eq .event_name \\\"llm.input\\\" }}[LLM →] {{ .openclaw_model }} | history={{ .openclaw_history_length }}{{ if .gen_ai_prompt }} | {{ .gen_ai_prompt }}{{ end }}{{ else if eq .event_name \\\"llm.output\\\" }}[LLM ←] {{ .openclaw_model }} {{ .openclaw_duration_s }}s | {{ .openclaw_tokens_input }}in+{{ .openclaw_tokens_output }}out{{ if .gen_ai_completion }} | {{ .gen_ai_completion }}{{ end }}{{ else if eq .event_name \\\"tool.call\\\" }}[TOOL] {{ .gen_ai_tool_name }} {{ .tool_duration_ms }}ms{{ if .tool_error }} ERROR: {{ .tool_error }}{{ else }} | params: {{ .tool_param_keys }}{{ end }}{{ else if eq .event_name \\\"message.sent\\\" }}[ASSISTANT] {{ if .openclaw_content }}{{ .openclaw_content }}{{ else }}(sent to {{ .openclaw_to }}){{ end }}{{ else }}(event){{ end }}\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Ascending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": { "queryType": "traceql", "query": "${__data.fields.trace_id}" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 30,
+      "title": "Trace & Latency Deep-Dive",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 62 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 31,
+      "title": "Session Lifecycle Events",
+      "description": "Chronological lifecycle events for this session — session_start, llm.input, llm.output, tool.call, subagent.spawn, session_summary. Click trace IDs to open Tempo waterfall.",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 63 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | component=\"lifecycle\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | line_format \"[{{ .event_name }}] {{ __line__ }}\"",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Ascending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 32,
+      "title": "Tool Execution Timeline",
+      "description": "All tool calls for this session with tool name, duration, params, and errors. Click trace IDs to open Tempo waterfall.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 63 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"tool.call\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\"",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "id": true,
+              "tsNs": true,
+              "event_name": true,
+              "component": true,
+              "service_name": true,
+              "service_namespace": true,
+              "openclaw_session_id": true,
+              "openclaw_summary_type": true,
+              "detected_level": true,
+              "Line": true,
+              "labels": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "gen_ai_tool_name": 1,
+              "tool_duration_ms": 2,
+              "tool_param_keys": 3,
+              "tool_error": 4,
+              "trace_id": 5
+            },
+            "renameByName": {
+              "gen_ai_tool_name": "Tool",
+              "tool_duration_ms": "Duration (ms)",
+              "tool_param_keys": "Params",
+              "tool_error": "Error",
+              "trace_id": "Trace"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Duration (ms)" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "decimals", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Error" },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-text"
+              },
+              {
+                "id": "color",
+                "value": { "mode": "fixed", "fixedColor": "red" }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Time", "desc": false }]
+      }
+    },
+    {
+      "id": 33,
+      "title": "P50 Latency",
+      "description": "Median LLM call latency for this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 71 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_latency_avg_ms [$__range]))",
+          "legendFormat": "avg",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 34,
+      "title": "P95 Latency",
+      "description": "95th percentile LLM call latency for this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 71 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_latency_p95_ms [$__range]))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "red", "value": 15000 }
+            ]
+          },
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 35,
+      "title": "Max Latency",
+      "description": "Maximum LLM call latency in this session.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 71 },
+      "datasource": { "type": "loki", "uid": "$loki" },
+      "targets": [
+        {
+          "expr": "max(last_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | unwrap openclaw_latency_max_ms [$__range]))",
+          "legendFormat": "max",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10000 },
+              { "color": "red", "value": 30000 }
+            ]
+          },
+          "noValue": "Select a session"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 29,
+      "title": "Subagent Sessions",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 75 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 27,
+          "title": "Parent Navigation",
+          "description": "If this session is a subagent, click to navigate to its parent session. Shows 'Not a subagent' when the selected session has no parent.",
+          "type": "table",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 63 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | openclaw_is_subagent=\"true\"",
+              "refId": "A"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "extractFields",
+              "options": {
+                "source": "labels",
+                "format": "auto"
+              }
+            },
+            {
+              "id": "filterFieldsByName",
+              "options": {
+                "include": {
+                  "pattern": "^openclaw_parent_session_id$"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "Not a subagent"
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "openclaw_parent_session_id" },
+                "properties": [
+                  { "id": "displayName", "value": "Parent Session ID" },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Go to parent session",
+                        "url": "/d/${__dashboard.uid}?var-session=${__value.text}&${__url_time_range}"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true
+          }
+        },
+        {
+          "id": 25,
+          "title": "Subagent Count",
+          "description": "Number of subagents spawned by this session.",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 8, "x": 0, "y": 66 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({service_name=\"openclaw\"} | event_name=\"subagent.linked\" | openclaw_parent_session_id=\"$session\" | openclaw_parent_session_id!=\"\" [$__range]))",
+              "legendFormat": "subagents",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "noValue": "No subagents"
+            }
+          },
+          "options": {
+            "graphMode": "none",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          }
+        },
+        {
+          "id": 26,
+          "title": "Total Child Cost",
+          "description": "Aggregate cost of all subagent sessions spawned by this session.",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 66 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "sum(sum_over_time({service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_parent_session_id=\"$session\" | openclaw_parent_session_id!=\"\" | unwrap openclaw_cost_total [$__range]))",
+              "legendFormat": "child cost",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 4,
+              "noValue": "No subagents"
+            }
+          },
+          "options": {
+            "graphMode": "none",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          }
+        },
+        {
+          "id": 23,
+          "title": "Subagent Activity",
+          "description": "Subagent spawn/end/linked events for this session.",
+          "type": "logs",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 66 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | event_name=~\"subagent\\\\.(spawn|end|linked)\"",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "enableLogDetails": true,
+            "sortOrder": "Ascending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 24,
+          "title": "Child Sessions",
+          "description": "Subagent sessions spawned by this session. Click a child session ID to drill down.",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 16, "x": 0, "y": 70 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_parent_session_id=\"$session\" | openclaw_parent_session_id!=\"\"",
+              "refId": "A"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "extractFields",
+              "options": { "source": "labels", "format": "auto" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Line": true,
+                  "id": true,
+                  "tsNs": true,
+                  "labels": true,
+                  "event_domain": true,
+                  "event_name": true,
+                  "component": true,
+                  "span_id": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "severity_number": true,
+                  "severity_text": true,
+                  "openclaw_summary_type": true,
+                  "openclaw_session_key": true,
+                  "openclaw_cache_hit_ratio": true,
+                  "openclaw_cache_savings_usd": true,
+                  "openclaw_cost_cache_read": true,
+                  "openclaw_cost_cache_write": true,
+                  "openclaw_cost_input": true,
+                  "openclaw_cost_output": true,
+                  "openclaw_latency_avg_ms": true,
+                  "openclaw_latency_min_ms": true,
+                  "openclaw_latency_max_ms": true,
+                  "openclaw_latency_p95_ms": true,
+                  "openclaw_messages_errors": true,
+                  "openclaw_messages_tool_calls": true,
+                  "openclaw_messages_tool_results": true,
+                  "openclaw_tokens_cache_read": true,
+                  "openclaw_tokens_cache_write": true,
+                  "openclaw_tokens_input": true,
+                  "openclaw_tokens_output": true,
+                  "openclaw_parent_session_id": true,
+                  "openclaw_is_subagent": true,
+                  "openclaw_child_session_ids": true,
+                  "openclaw_child_count": true,
+                  "openclaw_has_children": true,
+                  "openclaw_duration_ms": true,
+                  "openclaw_latency_count": true,
+                  "openclaw_tools_unique_count": true,
+                  "openclaw_tools_top": true,
+                  "openclaw_messages_user": true,
+                  "openclaw_messages_assistant": true,
+                  "gen_ai_provider_name": true,
+                  "labelTypes": true,
+                  "flags": true
+                },
+                "indexByName": {
+                  "Time": 0,
+                  "openclaw_session_id": 1,
+                  "openclaw_agent_id": 2,
+                  "gen_ai_request_model": 3,
+                  "openclaw_active_duration_ms": 4,
+                  "openclaw_cost_total": 5,
+                  "openclaw_tokens_total": 6,
+                  "openclaw_tools_total_calls": 7,
+                  "openclaw_messages_total": 8,
+                  "trace_id": 9
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "openclaw_session_id" },
+                "properties": [
+                  { "id": "displayName", "value": "Child Session" },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Drill down to child session",
+                        "url": "/d/${__dashboard.uid}?var-session=${__value.text}&var-trace_id=${__data.fields.trace_id}&${__url_time_range}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "trace_id" },
+                "properties": [{ "id": "custom.hidden", "value": true }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_agent_id" },
+                "properties": [{ "id": "displayName", "value": "Agent" }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_active_duration_ms" },
+                "properties": [
+                  { "id": "displayName", "value": "Active Time" },
+                  { "id": "unit", "value": "ms" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_cost_total" },
+                "properties": [
+                  { "id": "displayName", "value": "Cost" },
+                  { "id": "unit", "value": "currencyUSD" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_tokens_total" },
+                "properties": [
+                  { "id": "displayName", "value": "Tokens" },
+                  { "id": "unit", "value": "short" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_tools_total_calls" },
+                "properties": [
+                  { "id": "displayName", "value": "Tool Calls" },
+                  { "id": "unit", "value": "short" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_messages_total" },
+                "properties": [
+                  { "id": "displayName", "value": "Messages" },
+                  { "id": "unit", "value": "short" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "gen_ai_request_model" },
+                "properties": [{ "id": "displayName", "value": "Model" }]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [{ "displayName": "Time", "desc": true }]
+          }
+        },
+        {
+          "id": 28,
+          "title": "Related Traces (Subagents)",
+          "description": "Traces from subagent sessions linked to this parent session. Click a Trace ID to open the full trace waterfall in Tempo.",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 78 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_parent_session_id=\"$session\" | openclaw_parent_session_id!=\"\"",
+              "refId": "A"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "extractFields",
+              "options": { "source": "labels", "format": "auto" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Line": true,
+                  "id": true,
+                  "tsNs": true,
+                  "labels": true,
+                  "labelTypes": true,
+                  "flags": true,
+                  "event_domain": true,
+                  "event_name": true,
+                  "component": true,
+                  "span_id": true,
+                  "service_name": true,
+                  "detected_level": true,
+                  "severity_number": true,
+                  "severity_text": true,
+                  "openclaw_summary_type": true,
+                  "openclaw_session_key": true,
+                  "openclaw_cache_hit_ratio": true,
+                  "openclaw_cache_savings_usd": true,
+                  "openclaw_cost_cache_read": true,
+                  "openclaw_cost_cache_write": true,
+                  "openclaw_cost_input": true,
+                  "openclaw_cost_output": true,
+                  "openclaw_latency_avg_ms": true,
+                  "openclaw_latency_min_ms": true,
+                  "openclaw_latency_max_ms": true,
+                  "openclaw_latency_p95_ms": true,
+                  "openclaw_latency_count": true,
+                  "openclaw_messages_errors": true,
+                  "openclaw_messages_tool_calls": true,
+                  "openclaw_messages_tool_results": true,
+                  "openclaw_messages_user": true,
+                  "openclaw_messages_assistant": true,
+                  "openclaw_messages_total": true,
+                  "openclaw_tokens_cache_read": true,
+                  "openclaw_tokens_cache_write": true,
+                  "openclaw_tokens_input": true,
+                  "openclaw_tokens_output": true,
+                  "openclaw_tokens_total": true,
+                  "openclaw_tools_total_calls": true,
+                  "openclaw_tools_unique_count": true,
+                  "openclaw_tools_top": true,
+                  "openclaw_parent_session_id": true,
+                  "openclaw_is_subagent": true,
+                  "openclaw_child_session_ids": true,
+                  "openclaw_child_count": true,
+                  "openclaw_has_children": true
+                },
+                "indexByName": {
+                  "Time": 0,
+                  "openclaw_session_id": 1,
+                  "trace_id": 2,
+                  "openclaw_agent_id": 3,
+                  "gen_ai_request_model": 4,
+                  "openclaw_active_duration_ms": 5,
+                  "openclaw_cost_total": 6,
+                  "openclaw_duration_ms": 7
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "openclaw_session_id" },
+                "properties": [
+                  { "id": "displayName", "value": "Child Session" },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Drill down to child session",
+                        "url": "/d/${__dashboard.uid}?var-session=${__value.text}&var-trace_id=${__data.fields.trace_id}&${__url_time_range}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "trace_id" },
+                "properties": [
+                  { "id": "displayName", "value": "Trace ID" },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "View trace in Tempo",
+                        "url": "/explore?left=%7B%22datasource%22:%22${tempo}%22,%22queries%22:%5B%7B%22queryType%22:%22traceql%22,%22query%22:%22${__value.text}%22%7D%5D%7D"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_agent_id" },
+                "properties": [{ "id": "displayName", "value": "Agent" }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "gen_ai_request_model" },
+                "properties": [{ "id": "displayName", "value": "Model" }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_active_duration_ms" },
+                "properties": [
+                  { "id": "displayName", "value": "Active Time" },
+                  { "id": "unit", "value": "ms" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_cost_total" },
+                "properties": [
+                  { "id": "displayName", "value": "Cost" },
+                  { "id": "unit", "value": "currencyUSD" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "openclaw_duration_ms" },
+                "properties": [
+                  { "id": "displayName", "value": "Wall Time" },
+                  { "id": "unit", "value": "ms" }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [{ "displayName": "Time", "desc": true }]
+          }
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Advanced",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 85 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 21,
+          "title": "Compaction Events",
+          "description": "Context compaction start/end events for this session.",
+          "type": "logs",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 86 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | event_name=~\"compaction\\\\.(start|end)\"",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "enableLogDetails": true,
+            "sortOrder": "Ascending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 22,
+          "title": "Cost Threshold Alerts",
+          "description": "Cost threshold crossing events for this session.",
+          "type": "logs",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 86 },
+          "datasource": { "type": "loki", "uid": "$loki" },
+          "targets": [
+            {
+              "expr": "{service_name=\"openclaw\"} | openclaw_session_id=\"$session\" | openclaw_session_id!=\"\" | event_name=\"cost.threshold\"",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "enableLogDetails": true,
+            "sortOrder": "Ascending",
+            "dedupStrategy": "none"
+          }
+        }
+      ]
+    }
+  ]
+}

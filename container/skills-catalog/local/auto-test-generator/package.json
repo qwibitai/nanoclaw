@@ -1,0 +1,9 @@
+{
+  "name": "auto-test-generator",
+  "version": "1.0.0",
+  "description": "Automatically generate basic unit/integration tests for OpenClaw skills",
+  "main": "index.js",
+  "dependencies": {},
+  "author": "OpenClaw Evolver",
+  "license": "MIT"
+}

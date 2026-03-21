@@ -1,0 +1,2136 @@
+{
+  "title": "LLM Command Center",
+  "description": "Tier 1 System Command Center — golden signals, cost, sessions, token flow, cache efficiency, session drill-down table, and live error/session feeds. The single pane of glass for AI agent health.",
+  "tags": [
+    "openclaw",
+    "grafana-lens",
+    "llm",
+    "command-center"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "links": [
+    {
+      "title": "Session Explorer",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "session-explorer"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "Cost Intelligence",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "cost-intelligence"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "Tool Performance",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "tool-performance"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "SRE Operations",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "sre-operations"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "GenAI Observability",
+      "tags": [
+        "openclaw",
+        "grafana-lens",
+        "genai-observability"
+      ],
+      "type": "dashboards",
+      "asDropdown": false,
+      "icon": "external link"
+    },
+    {
+      "title": "OpenClaw Dashboards",
+      "tags": [
+        "openclaw",
+        "grafana-lens"
+      ],
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "prometheus",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "tempo",
+        "label": "Tempo",
+        "type": "datasource",
+        "query": "tempo",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$prometheus"
+        },
+        "query": "label_values(openclaw_lens_tokens_total, provider)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$prometheus"
+        },
+        "query": "label_values(openclaw_lens_tokens_total{provider=~\"$provider\"}, model)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      },
+      {
+        "name": "channel",
+        "label": "Channel",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$prometheus"
+        },
+        "query": "label_values(openclaw_lens_messages_processed_total, channel)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "multi": true,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Golden Signals",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Throughput",
+      "description": "Messages processed per minute over the last 5 minutes.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(openclaw_lens_messages_processed_total{channel=~\"$channel\"}[5m])) * 60) or vector(0)",
+          "legendFormat": "msg/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Error Rate %",
+      "description": "Message error rate. <1% green, 1-5% yellow, >5% red.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_messages_processed_total{outcome=\"error\", channel=~\"$channel\"}[5m])) / sum(rate(openclaw_lens_messages_processed_total{channel=~\"$channel\"}[5m])) * 100",
+          "legendFormat": "error %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": "0%"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 4,
+      "title": "P95 LLM Latency",
+      "description": "95th percentile LLM call duration. <2s green, 2-5s yellow, >5s red.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_operation_name=~\"chat.*\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": "No LLM calls yet"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Active Sessions",
+      "description": "Currently active agent sessions.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(openclaw_lens_sessions_active) or vector(0)",
+          "legendFormat": "active",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Daily Cost",
+      "description": "Today's accumulated spend. Green <$3, yellow <$5, red >$5.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total[1d])) or vector(0)",
+          "legendFormat": "today",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Issues",
+      "description": "Count of stuck sessions + active tool loops. 0 = healthy.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(sum(openclaw_lens_sessions_stuck) or vector(0)) + (sum(openclaw_lens_tool_loops_active) or vector(0))",
+          "legendFormat": "issues",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 25,
+      "title": "Burn Rate",
+      "description": "Current spending velocity projected to hourly rate.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[5m])) * 3600",
+          "legendFormat": "$/hr",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 26,
+      "title": "Today's Tokens",
+      "description": "Total tokens consumed today across all models.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_tokens_total{provider=~\"$provider\", model=~\"$model\"}[1d])) or vector(0)",
+          "legendFormat": "tokens",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "area"
+      }
+    },
+    {
+      "id": 27,
+      "title": "Avg Response",
+      "description": "Average LLM response time over the last 5 minutes.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(gen_ai_client_operation_duration_seconds_sum{gen_ai_operation_name=~\"chat.*\"}[5m])) / sum(rate(gen_ai_client_operation_duration_seconds_count{gen_ai_operation_name=~\"chat.*\"}[5m]))",
+          "legendFormat": "avg",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "noValue": "No LLM calls yet"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 28,
+      "title": "Cache Hit %",
+      "description": "Current cache hit ratio. Higher is better — more tokens served from cache means lower cost.",
+      "type": "gauge",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 15,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "openclaw_lens_cache_read_ratio * 100",
+          "legendFormat": "cache %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          },
+          "noValue": "No cache data yet"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 29,
+      "title": "Model Mix",
+      "description": "Token consumption distribution across models over the selected range.",
+      "type": "piechart",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (increase(openclaw_lens_tokens_total{provider=~\"$provider\", model=~\"$model\"}[$__range]))",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Trends",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "Request Rate + Errors",
+      "description": "Message rate by outcome (stacked bars) with error rate line overlay.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_messages_processed_total{channel=~\"$channel\"}[5m])) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            },
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "completed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "skipped"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "LLM Latency (p50/p95/p99)",
+      "description": "LLM call duration percentiles from gen_ai standard metrics.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gen_ai_client_operation_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Cost Rate by Model + Queue",
+      "description": "Dual-axis: cost rate by model (stacked bars $/hr, left) + queue depth (line, right).",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[5m])) by (model) * 3600",
+          "legendFormat": "{{model}} $/hr",
+          "refId": "A"
+        },
+        {
+          "expr": "openclaw_lens_queue_depth",
+          "legendFormat": "queue depth",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "stacking": {
+              "mode": "normal"
+            },
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queue depth"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Token Flow & Cache",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "Token Flow (stacked area)",
+      "description": "Input, output, and cache_read token rates filtered by provider/model.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_tokens_total{token=\"input\", provider=~\"$provider\", model=~\"$model\"}[5m]))",
+          "legendFormat": "input",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(openclaw_lens_tokens_total{token=\"output\", provider=~\"$provider\", model=~\"$model\"}[5m]))",
+          "legendFormat": "output",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(openclaw_lens_tokens_total{token=\"cacheRead\", provider=~\"$provider\", model=~\"$model\"}[5m]))",
+          "legendFormat": "cache_read",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            },
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "output"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cache_read"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Cache Efficiency (dual-axis)",
+      "description": "Cache hit ratio % (area, left) + cache savings $ (line, right).",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "openclaw_lens_cache_token_ratio * 100",
+          "legendFormat": "cache hit %",
+          "refId": "A"
+        },
+        {
+          "expr": "openclaw_lens_cache_savings_usd",
+          "legendFormat": "savings (USD)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cache hit %"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "savings (USD)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Session Drill-Down",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 31,
+      "title": "Sessions / 1h",
+      "description": "Unique sessions seen in a 1-hour sliding window.",
+      "type": "stat",
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "openclaw_lens_unique_sessions_1h or vector(0)",
+          "legendFormat": "sessions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 32,
+      "title": "Avg $/Session",
+      "description": "Average cost per completed session over the selected range.",
+      "type": "stat",
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 6,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(openclaw_lens_cost_by_model_total{provider=~\"$provider\", model=~\"$model\"}[$__range])) / clamp_min(sum(increase(openclaw_lens_sessions_completed_total[$__range])), 1)",
+          "legendFormat": "$/session",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "noValue": "$0.00"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 33,
+      "title": "Message Rate",
+      "description": "Messages per minute by outcome — shows when the agent is busy and when errors cluster.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_messages_processed_total{channel=~\"$channel\", outcome=\"completed\"}[5m])) * 60",
+          "legendFormat": "completed",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(openclaw_lens_messages_processed_total{channel=~\"$channel\", outcome=\"error\"}[5m])) * 60",
+          "legendFormat": "errors",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            },
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "completed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Recent Sessions",
+      "description": "Session usage summaries — click Session ID to drill down into Session Explorer. Sorted by time descending.",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "$loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\" | openclaw_summary_type=\"final\" | openclaw_session_id!=\"\"",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "tsNs": true,
+              "labels": true,
+              "labelTypes": true,
+              "flags": true,
+              "event_domain": true,
+              "event_name": true,
+              "component": true,
+              "trace_id": true,
+              "span_id": true,
+              "service_name": true,
+              "severity_number": true,
+              "severity_text": true,
+              "detected_level": true,
+              "body": true,
+              "resources_openclaw_session_key": true,
+              "openclaw_session_key": true,
+              "openclaw_agent_id": true,
+              "openclaw_summary_type": true,
+              "openclaw_run_id": true,
+              "gen_ai_provider_name": true,
+              "openclaw_active_duration_ms": true,
+              "openclaw_latency_avg_ms": true,
+              "openclaw_latency_min_ms": true,
+              "openclaw_latency_max_ms": true,
+              "openclaw_latency_p95_ms": true,
+              "openclaw_messages_errors": true,
+              "openclaw_messages_tool_calls": true,
+              "openclaw_messages_tool_results": true,
+              "openclaw_messages_user": true,
+              "openclaw_messages_assistant": true,
+              "openclaw_tokens_input": true,
+              "openclaw_tokens_output": true,
+              "openclaw_tokens_cache_read": true,
+              "openclaw_tokens_cache_write": true,
+              "openclaw_tools_unique_count": true,
+              "openclaw_tools_top": true,
+              "openclaw_cost_input": true,
+              "openclaw_cost_output": true,
+              "openclaw_cost_cache_read": true,
+              "openclaw_cost_cache_write": true,
+              "openclaw_cache_savings_usd": true,
+              "openclaw_parent_session_id": true,
+              "openclaw_child_count": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "openclaw_session_id": 1,
+              "openclaw_is_subagent": 2,
+              "gen_ai_request_model": 3,
+              "openclaw_channel": 4,
+              "openclaw_messages_total": 5,
+              "openclaw_tools_total_calls": 6,
+              "openclaw_tokens_total": 7,
+              "openclaw_cost_total": 8,
+              "openclaw_cache_hit_ratio": 9,
+              "openclaw_duration_ms": 10,
+              "openclaw_latency_count": 11
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_session_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Session ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Explore session",
+                    "url": "/d/openclaw-session-explorer/session-explorer?var-session=${__value.text}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gen_ai_request_model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_messages_total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Messages"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_tools_total_calls"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tool Calls"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_duration_ms"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duration"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_tokens_total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tokens"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_is_subagent"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Type"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "text": "Sub",
+                        "color": "blue"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "Root",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_channel"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Channel"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_cache_hit_ratio"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache %"
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.2
+                    },
+                    {
+                      "color": "green",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_cost_total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cost"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openclaw_latency_count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "LLM Calls"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "openclaw_cost_total"
+          ]
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Live Feed",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 18,
+      "title": "Errors & Warnings",
+      "description": "Error and warning logs from the agent. Click a log line to view the correlated trace in Tempo.",
+      "type": "logs",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "$loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | severity_text=~\"ERROR|WARN\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": {
+                  "queryType": "traceql",
+                  "query": "${__data.fields.trace_id}"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 30,
+      "title": "Live Activity Feed",
+      "description": "Real-time stream of all agent activity — user messages, LLM calls, tool executions, assistant responses. Inspired by openclaw-dashboard live feed.",
+      "type": "logs",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "$loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | component=\"lifecycle\" | event_name=~\"message\\\\.(received|sent)|tool\\\\.call|llm\\\\.(input|output)\" | line_format \"{{ if eq .event_name \\\"message.received\\\" }}[USER] {{ .openclaw_from }}{{ if .openclaw_content }}: {{ .openclaw_content }}{{ end }}{{ else if eq .event_name \\\"llm.input\\\" }}[LLM] {{ .openclaw_model }}{{ else if eq .event_name \\\"llm.output\\\" }}[LLM] {{ .openclaw_model }} {{ .openclaw_duration_s }}s {{ .openclaw_tokens_output }}tok{{ else if eq .event_name \\\"tool.call\\\" }}[TOOL] {{ .gen_ai_tool_name }}{{ if .tool_error }} ERR{{ end }}{{ else if eq .event_name \\\"message.sent\\\" }}[SENT] {{ .openclaw_to }}{{ end }}\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 19,
+      "title": "Recent Session Summaries",
+      "description": "Session usage summaries with trace correlation. Click to view the full session trace.",
+      "type": "logs",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "$loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"openclaw\"} | event_name=\"usage.session_summary\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "View trace in Tempo",
+              "url": "",
+              "internal": {
+                "datasourceUid": "${tempo}",
+                "datasourceName": "Tempo",
+                "query": {
+                  "queryType": "traceql",
+                  "query": "${__data.fields.trace_id}"
+                }
+              }
+            },
+            {
+              "title": "Explore session",
+              "url": "/d/openclaw-session-explorer/session-explorer?var-session=${__data.fields.openclaw_session_id}&${__url_time_range}",
+              "targetBlank": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "GenAI Standard Metrics",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "title": "LLM Latency by Model",
+      "description": "P95 LLM call duration per model from gen_ai standard metrics. Identifies which models are slowest.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_operation_name=\"chat\"}[5m])) by (le, gen_ai_request_model))",
+          "legendFormat": "{{gen_ai_request_model}} p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "Message Type Breakdown",
+      "description": "Message type flow: user, assistant, tool_call, tool_result, error. Shows conversation dynamics.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(openclaw_lens_session_message_types_total[5m])) by (type)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            },
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "assistant"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tool_call"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tool_result"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 23,
+      "title": "Slowest LLM Calls",
+      "description": "Top 10 slowest LLM calls from Tempo traces. Click to drill into the full trace hierarchy.\n\nRequires Tempo search. If empty, check Tempo config or click trace_id links in log panels.",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 59
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "$tempo"
+      },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{resource.service.name=\"openclaw\" && resource.service.namespace=\"grafana-lens\" && name=~\"chat.*\"}",
+          "limit": 10,
+          "tableType": "traces",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "LLM Operation Distribution",
+      "description": "Breakdown of gen_ai operations: chat (LLM calls), execute_tool (tool calls), invoke_agent (sessions).",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 59
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_operation_name) (increase(gen_ai_client_operation_duration_seconds_count[$__range]))",
+          "legendFormat": "{{gen_ai_operation_name}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    }
+  ]
+}

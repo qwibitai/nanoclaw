@@ -1,0 +1,167 @@
+{
+  "id": "openclaw-grafana-lens",
+  "name": "Grafana Lens",
+  "description": "Agent-driven Grafana — query, visualize, alert, and deliver to messaging channels",
+  "version": "0.2.0",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "grafana": {
+        "type": "object",
+        "description": "Grafana connection settings",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Grafana instance URL",
+            "default": "http://localhost:3000"
+          },
+          "apiKey": {
+            "type": "string",
+            "description": "Grafana service account token (glsa_...)"
+          },
+          "orgId": {
+            "type": "number",
+            "description": "Grafana organization ID",
+            "default": 1
+          }
+        }
+      },
+      "metrics": {
+        "type": "object",
+        "description": "Metrics collection toggle",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "otlp": {
+        "type": "object",
+        "description": "OTLP push settings for metrics, logs, and traces. Defaults to http://localhost:4318 (LGTM stack collector).",
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "description": "OTLP HTTP endpoint for metrics push",
+            "default": "http://localhost:4318/v1/metrics"
+          },
+          "headers": {
+            "type": "object",
+            "description": "Additional HTTP headers (e.g., Authorization for Grafana Cloud)",
+            "additionalProperties": { "type": "string" }
+          },
+          "exportIntervalMs": {
+            "type": "number",
+            "description": "Export interval in milliseconds",
+            "default": 15000
+          },
+          "logs": {
+            "type": "boolean",
+            "description": "Enable OTLP log push (structured diagnostic event logs to Loki)",
+            "default": true
+          },
+          "traces": {
+            "type": "boolean",
+            "description": "Enable OTLP trace push (agent lifecycle and tool call spans to Tempo)",
+            "default": true
+          },
+          "captureContent": {
+            "type": "boolean",
+            "description": "Include conversation text (prompts, completions, messages) in logs and spans. Disable for cloud/multi-tenant deployments.",
+            "default": true
+          },
+          "contentMaxLength": {
+            "type": "number",
+            "description": "Maximum character length for captured content fields (truncated beyond this limit)",
+            "default": 2000
+          },
+          "forwardAppLogs": {
+            "type": "boolean",
+            "description": "Forward openclaw application logs (tslog output) to Loki via OTLP",
+            "default": true
+          },
+          "appLogMinSeverity": {
+            "type": "string",
+            "description": "Minimum severity for forwarded app logs: trace, debug, info, warn, error, fatal",
+            "default": "debug",
+            "enum": ["trace", "debug", "info", "warn", "error", "fatal"]
+          },
+          "redactSecrets": {
+            "type": "boolean",
+            "description": "Auto-redact API keys, tokens, and PEM blocks before sending to OTLP",
+            "default": true
+          }
+        }
+      },
+      "proactive": {
+        "type": "object",
+        "description": "Alert webhook handler — receives Grafana alert notifications and makes them visible to the agent.",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable alert webhook handler to receive Grafana alert notifications",
+            "default": false
+          },
+          "webhookPath": {
+            "type": "string",
+            "description": "HTTP path for the alert webhook endpoint",
+            "default": "/grafana-lens/alerts"
+          },
+          "costAlertThreshold": {
+            "type": "number",
+            "description": "Daily cost threshold (USD) that triggers an alert",
+            "default": 5.0
+          }
+        }
+      },
+      "customMetrics": {
+        "type": "object",
+        "description": "Custom metrics store — allows the agent to push arbitrary data (calendar, git, fitness, finance) via grafana_push_metrics.",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable custom metrics push via grafana_push_metrics tool",
+            "default": true
+          },
+          "maxMetrics": {
+            "type": "number",
+            "description": "Maximum number of custom metric definitions",
+            "default": 100
+          },
+          "maxLabelsPerMetric": {
+            "type": "number",
+            "description": "Maximum label keys per metric",
+            "default": 5
+          },
+          "maxLabelValues": {
+            "type": "number",
+            "description": "Maximum unique label-value combinations per metric",
+            "default": 50
+          },
+          "defaultTtlDays": {
+            "type": "number",
+            "description": "Default TTL in days for custom metrics (omit for no expiry)"
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "grafana.apiKey": {
+      "label": "API Key",
+      "sensitive": true,
+      "placeholder": "glsa_xxxxxxxxxxxx"
+    },
+    "grafana.url": {
+      "label": "Grafana URL",
+      "placeholder": "http://localhost:3000"
+    }
+  }
+}
