@@ -81,6 +81,38 @@ describe('extractArtifacts', () => {
     expect(r.prs).toHaveLength(1);
   });
 
+  it('extracts kaizen issue references from PR titles (kaizen #299)', () => {
+    const r = emptyResult();
+    extractArtifacts(
+      'fix: eliminate waived disposition (kaizen #198) (#258)',
+      r,
+    );
+    expect(r.issuesClosed).toContain('#198');
+  });
+
+  it('extracts multiple kaizen references from a single line', () => {
+    const r = emptyResult();
+    extractArtifacts(
+      'feat: waiver quality enforcement (kaizen #280, #258, #198) (#235)',
+      r,
+    );
+    // "kaizen #280" is caught; #258 and #198 without "kaizen" prefix are not
+    // (they are plain PR/issue numbers, not kaizen references)
+    expect(r.issuesClosed).toContain('#280');
+  });
+
+  it('extracts kaizen references case-insensitively', () => {
+    const r = emptyResult();
+    extractArtifacts('Kaizen #204 addressed in this PR', r);
+    expect(r.issuesClosed).toContain('#204');
+  });
+
+  it('deduplicates kaizen refs with explicit close refs', () => {
+    const r = emptyResult();
+    extractArtifacts('closes #204, also mentioned as kaizen #204', r);
+    expect(r.issuesClosed).toEqual(['#204']);
+  });
+
   it('handles text with no artifacts', () => {
     const r = emptyResult();
     extractArtifacts('Just some regular text with no URLs', r);

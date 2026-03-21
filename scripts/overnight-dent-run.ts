@@ -224,6 +224,13 @@ export function extractArtifacts(text: string, result: RunResult): void {
   )) {
     if (!result.issuesClosed.includes(m[1])) result.issuesClosed.push(m[1]);
   }
+  // Extract kaizen issue references from PR titles, commit messages, and agent text (kaizen #299)
+  // Pattern: "kaizen #N" — common in PR titles like "fix: xyz (kaizen #204)"
+  // These indicate the issue is being addressed even without explicit "closes #N"
+  for (const m of text.matchAll(/kaizen\s+#(\d+)/gi)) {
+    const ref = `#${m[1]}`;
+    if (!result.issuesClosed.includes(ref)) result.issuesClosed.push(ref);
+  }
   for (const m of text.matchAll(/case[:\s]+(\d{6}-\d{4}-[\w-]+)/g)) {
     if (!result.cases.includes(m[1])) result.cases.push(m[1]);
   }
