@@ -337,63 +337,10 @@ export class GitHubChannel implements Channel {
         return;
       }
 
-      // Determine the JID: per-issue/PR if possible, otherwise repo-level
-      const issueNumber = extractIssueNumber(event, payload);
-      const chatJid = issueNumber ? `gh:${repo}#${issueNumber}` : `gh:${repo}`;
-
-      // Store chat metadata for discovery
-      const chatName = issueNumber ? `${repo}#${issueNumber}` : repo;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'github', false);
-
-      // Auto-register group if not already registered
-      if (this.opts.registerGroup) {
-        const registered = this.opts.registeredGroups();
-        if (!registered[chatJid]) {
-          const folder = issueNumber
-            ? makeGitHubFolder(repo, issueNumber)
-            : `github_${repo
-                .replace(/\//g, '-')
-                .replace(/[^A-Za-z0-9-]/g, '')
-                .slice(0, 57)}`;
-          const groupType = extractGroupType(event, payload);
-          const title = extractTitle(event, payload);
-          const metadata: Record<string, string> = { type: groupType };
-          if (title) metadata.title = title;
-
-          // Skip trigger for PRs/issues opened by the bot itself
-          const author = extractAuthor(event, payload);
-          const isBotAuthor = !!this.botUsername && author === this.botUsername;
-          this.opts.registerGroup(chatJid, {
-            name: chatName,
-            folder,
-            trigger: `@${ASSISTANT_NAME}`,
-            added_at: timestamp,
-            requiresTrigger: !isBotAuthor,
-            metadata,
-          });
-          logger.info({ chatJid, folder }, 'Auto-registered GitHub group');
-        }
-      }
-
-      // Format the event into a human-readable message
-      const formatted = formatEvent(event, payload);
-      if (!formatted) return;
-
-      // Deliver message
-      this.opts.onMessage(chatJid, {
-        id: deliveryId || crypto.randomUUID(),
-        chat_jid: chatJid,
-        sender: senderName,
-        sender_name: senderName,
-        content: formatted.text,
-        timestamp,
-        is_from_me: false,
-        metadata: formatted.metadata,
-      });
-
-      logger.info(
-        { event, repo, chatJid, deliveryId },
-        'GitHub webhook event processed',
+      // Process asynchronously (already acknowledged with 200)
+      this.processWebhook(event, payload, repo, senderName, deliveryId).catch(
+        (err) =>
+          logger.error({ err, event, repo }, 'Error processing GitHub webhook'),
       );
     });
 
@@ -412,6 +359,115 @@ export class GitHubChannel implements Channel {
       });
       this.server.on('error', reject);
     });
+  }
+
+  private async processWebhook(
+    event: string,
+    payload: any,
+    repo: string,
+    senderName: string,
+    deliveryId: string,
+  ): Promise<void> {
+    const timestamp = new Date().toISOString();
+
+    // Determine the JID: per-issue/PR if possible, otherwise repo-level.
+    // For check_suite from forks, pull_requests is often empty — look up via API.
+    let issueNumber = extractIssueNumber(event, payload);
+    if (!issueNumber && event === 'check_suite' && this.token) {
+      const headSha = payload.check_suite?.head_sha;
+      if (headSha) {
+        issueNumber = await this.findPrByHeadSha(repo, headSha);
+      }
+    }
+    const chatJid = issueNumber ? `gh:${repo}#${issueNumber}` : `gh:${repo}`;
+
+    // Store chat metadata for discovery
+    const chatName = issueNumber ? `${repo}#${issueNumber}` : repo;
+    this.opts.onChatMetadata(chatJid, timestamp, chatName, 'github', false);
+
+    // Auto-register group if not already registered
+    if (this.opts.registerGroup) {
+      const registered = this.opts.registeredGroups();
+      if (!registered[chatJid]) {
+        const folder = issueNumber
+          ? makeGitHubFolder(repo, issueNumber)
+          : `github_${repo
+              .replace(/\//g, '-')
+              .replace(/[^A-Za-z0-9-]/g, '')
+              .slice(0, 57)}`;
+        const groupType = extractGroupType(event, payload);
+        const title = extractTitle(event, payload);
+        const metadata: Record<string, string> = { type: groupType };
+        if (title) metadata.title = title;
+
+        // Skip trigger for PRs/issues opened by the bot itself
+        const author = extractAuthor(event, payload);
+        const isBotAuthor = !!this.botUsername && author === this.botUsername;
+        this.opts.registerGroup(chatJid, {
+          name: chatName,
+          folder,
+          trigger: `@${ASSISTANT_NAME}`,
+          added_at: timestamp,
+          requiresTrigger: !isBotAuthor,
+          metadata,
+        });
+        logger.info({ chatJid, folder }, 'Auto-registered GitHub group');
+      }
+    }
+
+    // Format the event into a human-readable message
+    const formatted = formatEvent(event, payload);
+    if (!formatted) return;
+
+    // Deliver message
+    this.opts.onMessage(chatJid, {
+      id: deliveryId || crypto.randomUUID(),
+      chat_jid: chatJid,
+      sender: senderName,
+      sender_name: senderName,
+      content: formatted.text,
+      timestamp,
+      is_from_me: false,
+      metadata: formatted.metadata,
+    });
+
+    logger.info(
+      { event, repo, chatJid, deliveryId },
+      'GitHub webhook event processed',
+    );
+  }
+
+  /**
+   * Look up the PR number associated with a commit SHA via the GitHub API.
+   * Used for check_suite events from forks where pull_requests is empty.
+   */
+  private async findPrByHeadSha(
+    repo: string,
+    headSha: string,
+  ): Promise<number | null> {
+    try {
+      const url = `https://api.github.com/repos/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=30`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: 'application/vnd.github+json',
+        },
+      });
+      if (!res.ok) return null;
+      const pulls = (await res.json()) as any[];
+      const match = pulls.find((pr: any) => pr.head.sha === headSha);
+      if (match) {
+        logger.debug(
+          { repo, headSha, prNumber: match.number },
+          'Resolved check_suite head SHA to PR',
+        );
+        return match.number;
+      }
+      return null;
+    } catch (err) {
+      logger.warn({ err, repo, headSha }, 'Failed to look up PR by head SHA');
+      return null;
+    }
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
