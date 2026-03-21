@@ -14,6 +14,17 @@ import {
 
 let db: Database.Database;
 
+function columnExists(
+  database: Database.Database,
+  table: string,
+  column: string,
+): boolean {
+  const cols = database.pragma(`table_info(${table})`) as Array<{
+    name: string;
+  }>;
+  return cols.some((c) => c.name === column);
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -185,6 +196,24 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Migration: Add processed flag to messages table
+  if (!columnExists(database, 'messages', 'processed')) {
+    database.exec(
+      'ALTER TABLE messages ADD COLUMN processed INTEGER DEFAULT 0',
+    );
+    database.exec(
+      'CREATE INDEX IF NOT EXISTS idx_messages_unprocessed ON messages(processed, chat_jid) WHERE processed = 0',
+    );
+
+    // Mark all existing messages as processed — they were already handled
+    // by the cursor system before this migration
+    database.exec('UPDATE messages SET processed = 1');
+
+    logger.info(
+      'Migration: added processed column to messages, marked all existing as processed',
+    );
   }
 
   // Migrate active_threads → thread_contexts
