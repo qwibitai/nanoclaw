@@ -5,6 +5,7 @@ import {
   type TrustRule,
   type EventRouterConfig,
   type ClassifiedEvent,
+  type RoutingLevel,
 } from './event-router.js';
 
 vi.mock('./logger.js', () => ({
@@ -206,5 +207,162 @@ describe('EventRouter', () => {
     expect(stats.processed).toBe(2);
     expect(typeof stats.avgLatencyMs).toBe('number');
     expect(stats.byRouting).toBeDefined();
+  });
+});
+
+describe('EventRouter draft routing', () => {
+  const mockBusDraft = { publish: vi.fn() };
+  const mockHealthDraft = {
+    recordOllamaLatency: vi.fn(),
+    isOllamaDegraded: vi.fn(() => true), // skip Ollama for simplicity
+  };
+
+  function makeDraftConfig(
+    overrides: Partial<EventRouterConfig> = {},
+  ): EventRouterConfig {
+    return {
+      ollamaHost: 'http://localhost:11434',
+      ollamaModel: 'llama3.2',
+      trustRules: [],
+      defaultRouting: 'notify',
+      messageBus: mockBusDraft as EventRouterConfig['messageBus'],
+      healthMonitor: mockHealthDraft as EventRouterConfig['healthMonitor'],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    mockHealthDraft.isOllamaDegraded.mockReturnValue(true);
+  });
+
+  it('draft events do NOT publish to message bus', async () => {
+    const draftRules: TrustRule[] = [
+      {
+        id: 'rule-draft-1',
+        event_type: 'email',
+        conditions: { importance_gte: 0.5 },
+        routing: 'draft' as RoutingLevel,
+      },
+    ];
+
+    const sendToMainGroup = vi.fn().mockResolvedValue('tg-msg-123');
+    const recordDecision = vi.fn().mockReturnValue(42);
+    const setTelegramMsgId = vi.fn();
+
+    const router = new EventRouter(
+      makeDraftConfig({
+        trustRules: draftRules,
+        approvalTracker: { recordDecision, setTelegramMsgId },
+        sendToMainGroup,
+      }),
+    );
+
+    const result = await router.route(sampleEmailEvent);
+
+    expect(result.routing).toBe('draft');
+    expect(mockBusDraft.publish).not.toHaveBeenCalled();
+  });
+
+  it('draft events call sendToMainGroup with [Draft #N] message', async () => {
+    const draftRules: TrustRule[] = [
+      {
+        id: 'rule-draft-2',
+        event_type: 'email',
+        routing: 'draft' as RoutingLevel,
+      },
+    ];
+
+    const sendToMainGroup = vi.fn().mockResolvedValue('tg-msg-456');
+    const recordDecision = vi.fn().mockReturnValue(7);
+    const setTelegramMsgId = vi.fn();
+
+    const router = new EventRouter(
+      makeDraftConfig({
+        trustRules: draftRules,
+        approvalTracker: { recordDecision, setTelegramMsgId },
+        sendToMainGroup,
+      }),
+    );
+
+    await router.route(sampleEmailEvent);
+
+    expect(sendToMainGroup).toHaveBeenCalledWith(
+      expect.stringContaining('[Draft #7]'),
+    );
+    expect(setTelegramMsgId).toHaveBeenCalledWith(7, 'tg-msg-456');
+  });
+
+  it('draft events record decision via approval tracker', async () => {
+    const draftRules: TrustRule[] = [
+      {
+        id: 'rule-draft-3',
+        event_type: 'email',
+        routing: 'draft' as RoutingLevel,
+      },
+    ];
+
+    const recordDecision = vi.fn().mockReturnValue(99);
+    const setTelegramMsgId = vi.fn();
+    const sendToMainGroup = vi.fn().mockResolvedValue('tg-msg-789');
+
+    const router = new EventRouter(
+      makeDraftConfig({
+        trustRules: draftRules,
+        approvalTracker: { recordDecision, setTelegramMsgId },
+        sendToMainGroup,
+      }),
+    );
+
+    await router.route(sampleEmailEvent);
+
+    expect(recordDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ routing: 'draft' }),
+    );
+  });
+
+  it('notify events DO publish to message bus', async () => {
+    const notifyRules: TrustRule[] = [
+      {
+        id: 'rule-notify-1',
+        event_type: 'email',
+        routing: 'notify',
+      },
+    ];
+
+    const recordDecision = vi.fn().mockReturnValue(10);
+    const setTelegramMsgId = vi.fn();
+
+    const router = new EventRouter(
+      makeDraftConfig({
+        trustRules: notifyRules,
+        approvalTracker: { recordDecision, setTelegramMsgId },
+      }),
+    );
+
+    await router.route(sampleEmailEvent);
+
+    expect(mockBusDraft.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: 'classified_event' }),
+    );
+  });
+
+  it('ClassifiedEvent includes trustRuleId from matched rule', async () => {
+    const rulesWithId: TrustRule[] = [
+      {
+        id: 'my-rule-42',
+        event_type: 'email',
+        routing: 'notify',
+      },
+    ];
+
+    const router = new EventRouter(
+      makeDraftConfig({ trustRules: rulesWithId }),
+    );
+
+    const result = await router.route(sampleEmailEvent);
+
+    expect(result.trustRuleId).toBe('my-rule-42');
   });
 });
