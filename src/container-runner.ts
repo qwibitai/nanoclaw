@@ -665,6 +665,13 @@ export async function runContainerAgent(
 
       const isError = code !== 0;
 
+      // Always include stderr (contains agent-runner diagnostics)
+      logLines.push(
+        `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
+        stderr,
+        ``,
+      );
+
       if (isVerbose || isError) {
         // On error, log input metadata only — not the full prompt.
         // Full input is only included at verbose level to avoid
@@ -690,9 +697,6 @@ export async function runContainerAgent(
                 `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
             )
             .join('\n'),
-          ``,
-          `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stderr,
           ``,
           `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
           stdout,
