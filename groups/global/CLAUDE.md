@@ -19,6 +19,8 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+**For long responses:** Break large outputs into multiple `send_message` calls instead of one giant response. If you're generating a report, analysis, or any response that exceeds ~2000 words, send it in logical sections. This avoids hitting output token limits and gives the user incremental results.
+
 ### Discord Formatting Rules
 
 Discord does **not** render markdown tables — pipe-separated tables appear as raw text with `|` characters and look broken. **Never use markdown tables in responses.**
