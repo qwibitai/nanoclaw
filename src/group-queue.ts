@@ -150,6 +150,16 @@ export class GroupQueue {
     state.idleWaiting = true;
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
+    } else if (state.pendingMessages && this.processMessagesFn) {
+      // Messages arrived while the container was busy — now that it's idle,
+      // re-run the message loop so they get piped in.
+      state.pendingMessages = false;
+      this.processMessagesFn(groupJid).catch((err) =>
+        logger.error(
+          { groupJid, err },
+          'Unhandled error processing pending messages on idle',
+        ),
+      );
     }
   }
 
