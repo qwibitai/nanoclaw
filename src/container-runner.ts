@@ -175,27 +175,33 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // Agent-runner source: two-layer mount for clean upgrades + per-group customization.
+  // 1. Global source (read-only) — always reflects the latest codebase
+  // 2. Per-group custom dir (read-write) — agents can add/override tool files
+  // The entrypoint merges them at startup: global first, then custom overlay, then compile.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
     'agent-runner',
     'src',
   );
-  const groupAgentRunnerDir = path.join(
+  if (fs.existsSync(agentRunnerSrc)) {
+    mounts.push({
+      hostPath: agentRunnerSrc,
+      containerPath: '/app/src-global',
+      readonly: true,
+    });
+  }
+  const groupCustomSrcDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
-    'agent-runner-src',
+    'agent-runner-custom',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-  }
+  fs.mkdirSync(groupCustomSrcDir, { recursive: true });
   mounts.push({
-    hostPath: groupAgentRunnerDir,
-    containerPath: '/app/src',
+    hostPath: groupCustomSrcDir,
+    containerPath: '/app/src-custom',
     readonly: false,
   });
 
