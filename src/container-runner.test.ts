@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import fs from 'fs';
+import path from 'path';
+import { spawn } from 'child_process';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -42,6 +45,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -111,14 +115,86 @@ function emitOutputMarker(
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
+async function startAndCloseContainerRun() {
+  const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+  fakeProc.emit('close', 0);
+  await vi.advanceTimersByTimeAsync(10);
+  return resultPromise;
+}
+
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.existsSync).mockImplementation(() => false);
+    vi.mocked(fs.mkdirSync).mockReset();
+    vi.mocked(fs.writeFileSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.readFileSync).mockImplementation(() => '');
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.readdirSync).mockImplementation(() => []);
+    vi.mocked(fs.statSync).mockReset();
+    vi.mocked(fs.statSync).mockImplementation(
+      () =>
+        ({
+          isDirectory: () => false,
+        }) as never,
+    );
+    vi.mocked(fs.cpSync).mockReset();
+    vi.mocked(spawn).mockReset();
+    vi.mocked(spawn).mockImplementation(() => fakeProc as never);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('refreshes upstream agent-runner files while preserving group-only extras', async () => {
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    const projectRoot = process.cwd();
+    const agentRunnerSrc = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'src',
+    );
+    const groupAgentRunnerDir = path.join(
+      '/tmp/nanoclaw-test-data',
+      'sessions',
+      testGroup.folder,
+      'agent-runner-src',
+    );
+    const upstreamIndex = path.join(agentRunnerSrc, 'index.ts');
+    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    const extraFile = path.join(groupAgentRunnerDir, 'group-only-extra.ts');
+    const extraFileContents = '// keep me\n';
+
+    realFs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+
+    try {
+      realFs.mkdirSync(groupAgentRunnerDir, { recursive: true });
+      realFs.writeFileSync(cachedIndex, '// stale copy\n');
+      realFs.writeFileSync(extraFile, extraFileContents);
+
+      vi.mocked(fs.existsSync).mockImplementation(realFs.existsSync);
+      vi.mocked(fs.mkdirSync).mockImplementation(realFs.mkdirSync);
+      vi.mocked(fs.writeFileSync).mockImplementation(
+        realFs.writeFileSync as never,
+      );
+      vi.mocked(fs.readdirSync).mockImplementation(realFs.readdirSync as never);
+      vi.mocked(fs.statSync).mockImplementation(realFs.statSync as never);
+      vi.mocked(fs.cpSync).mockImplementation(realFs.cpSync);
+
+      await startAndCloseContainerRun();
+
+      expect(realFs.readFileSync(cachedIndex, 'utf8')).toBe(
+        realFs.readFileSync(upstreamIndex, 'utf8'),
+      );
+      expect(realFs.readFileSync(extraFile, 'utf8')).toBe(extraFileContents);
+    } finally {
+      realFs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+    }
   });
 
   it('timeout after output resolves as success', async () => {
