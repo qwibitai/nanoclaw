@@ -547,35 +547,29 @@ else
 fi
 
 echo ""
-echo "=== Cross-worktree isolation: only clears own branch ==="
+echo "=== Cross-worktree clearing: KAIZEN_IMPEDIMENTS clears any branch (kaizen #239) ==="
 
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 setup
 create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42" "wt/other-branch"
-create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/43" "$CURRENT_BRANCH"
 
-# INVARIANT: Clearing only affects state for the current branch
+# INVARIANT (kaizen #239): pr-kaizen-clear uses cross-branch lookup so the
+# agent can submit KAIZEN_IMPEDIMENTS from a different worktree than where
+# the PR was created. The declaration is an active agent action, so
+# cross-worktree contamination risk is acceptable.
 OUTPUT=$(run_posttool_bash \
   "echo 'KAIZEN_IMPEDIMENTS: [] cross-worktree test'" \
   "KAIZEN_IMPEDIMENTS: [] cross-worktree test")
 
-# PR 42 (other branch) should still exist
-if [ -f "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_42" ]; then
-  echo "  PASS: other branch's kaizen state preserved"
+# PR 42 (other branch) should be cleared — this is the fix for #239
+if [ ! -f "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_42" ]; then
+  echo "  PASS: cross-branch kaizen state cleared by active declaration"
   ((PASS++))
 else
-  echo "  FAIL: other branch's kaizen state was cleared"
+  echo "  FAIL: cross-branch kaizen state NOT cleared (kaizen #239 regression)"
   ((FAIL++))
 fi
 
-# PR 43 (our branch) should be cleared
-if [ ! -f "$STATE_DIR/pr-kaizen-Garsson-io_nanoclaw_43" ]; then
-  echo "  PASS: own branch's kaizen state cleared"
-  ((PASS++))
-else
-  echo "  FAIL: own branch's kaizen state NOT cleared"
-  ((FAIL++))
-fi
+assert_contains "output mentions gate cleared" "gate cleared" "$OUTPUT"
 
 echo ""
 echo "=== 'finding' field accepted as alias for 'impediment' (kaizen #162) ==="

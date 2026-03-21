@@ -133,8 +133,10 @@ fi
 
 CMD_LINE=$(strip_heredoc_body "$COMMAND")
 
-# Check if there's an active PR kaizen gate to clear
-STATE_INFO=$(find_state_with_status "needs_pr_kaizen")
+# Check if there's an active PR kaizen gate to clear (kaizen #239)
+# Use cross-branch lookup — the agent may submit the declaration from a
+# different worktree than where the PR was created.
+STATE_INFO=$(find_state_with_status_any_branch "needs_pr_kaizen")
 if [ $? -ne 0 ] || [ -z "$STATE_INFO" ]; then
   exit 0
 fi
@@ -411,7 +413,10 @@ Are any of these actionable at L2+? If so, file them before proceeding.
 ADVISORY
   fi
 
-  clear_state_with_status "needs_pr_kaizen"
+  clear_state_with_status_any_branch "needs_pr_kaizen"
+
+  # Auto-close referenced kaizen issues if PR is merged (kaizen #283)
+  auto_close_kaizen_issues "$GATE_PR_URL" 2>/dev/null || true
   cat <<EOF
 
 PR kaizen gate cleared ($CLEAR_REASON). You may proceed with other work.

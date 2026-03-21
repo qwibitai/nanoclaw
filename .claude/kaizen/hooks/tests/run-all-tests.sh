@@ -81,6 +81,7 @@ UNIT_TESTS=(
   "$SCRIPT_DIR/test-verify-before-stop.sh"
   "$SCRIPT_DIR/test-check-cleanup-on-stop.sh"
   "$SCRIPT_DIR/test-check-wip.sh"
+  "$SCRIPT_DIR/test-waiver-quality.sh"
 )
 
 # Bash harness tests (integration + interaction tests)

@@ -422,6 +422,131 @@ else
   ((FAIL++))
 fi
 
+# ================================================================
+# Cross-branch state functions (kaizen #239, #125)
+# ================================================================
+
+echo ""
+echo "=== list_state_files_any_branch: returns files from all branches ==="
+
+setup
+# Same branch
+printf 'PR_URL=url1\nSTATUS=needs_pr_kaizen\nBRANCH=%s\n' "$CURRENT_BRANCH" > "$STATE_DIR/cb1"
+# Different branch
+printf 'PR_URL=url2\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other-branch\n' > "$STATE_DIR/cb2"
+# Legacy (no BRANCH) — still rejected
+printf 'PR_URL=url3\nSTATUS=needs_pr_kaizen\n' > "$STATE_DIR/cb3"
+# Stale — rejected
+printf 'PR_URL=url4\nSTATUS=needs_pr_kaizen\nBRANCH=wt/stale\n' > "$STATE_DIR/cb4"
+backdate_file "$STATE_DIR/cb4" 3
+
+# INVARIANT: list_state_files_any_branch returns fresh files regardless of branch,
+# but still rejects stale and legacy files
+FILE_COUNT=$(list_state_files_any_branch | wc -l)
+FILE_COUNT=$(echo "$FILE_COUNT" | tr -d ' ')
+
+assert_eq "any_branch: returns 2 of 4 files (both branches, not stale/legacy)" "2" "$FILE_COUNT"
+
+LISTED=$(list_state_files_any_branch)
+assert_contains "any_branch: includes same-branch file" "cb1" "$LISTED"
+assert_contains "any_branch: includes other-branch file" "cb2" "$LISTED"
+assert_not_contains "any_branch: excludes legacy file" "cb3" "$LISTED"
+assert_not_contains "any_branch: excludes stale file" "cb4" "$LISTED"
+
+echo ""
+echo "=== find_state_with_status_any_branch: finds state on other branch ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/100\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other-worktree\n' > "$STATE_DIR/pr-kaizen-cross1"
+
+# INVARIANT: find_state_with_status_any_branch finds state regardless of branch
+# This is the core fix for kaizen #239
+STATE_INFO=$(find_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -eq 0 ]; then
+  echo "  PASS: find_state_with_status_any_branch found cross-branch state"
+  ((PASS++))
+else
+  echo "  FAIL: find_state_with_status_any_branch missed cross-branch state"
+  ((FAIL++))
+fi
+assert_contains "returns correct PR URL from other branch" "nanoclaw/pull/100" "$STATE_INFO"
+
+echo ""
+echo "=== find_state_with_status_any_branch: still rejects stale ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/101\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other\n' > "$STATE_DIR/pr-kaizen-stale1"
+backdate_file "$STATE_DIR/pr-kaizen-stale1" 3
+
+# INVARIANT: Even cross-branch lookup rejects stale files
+STATE_INFO=$(find_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -ne 0 ]; then
+  echo "  PASS: find_state_with_status_any_branch rejects stale cross-branch state"
+  ((PASS++))
+else
+  echo "  FAIL: find_state_with_status_any_branch accepted stale state"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== clear_state_with_status_any_branch: clears state on other branch ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/102\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other-worktree\n' > "$STATE_DIR/pr-kaizen-cross2"
+
+# INVARIANT: clear_state_with_status_any_branch removes state regardless of branch
+clear_state_with_status_any_branch "needs_pr_kaizen"
+if [ $? -eq 0 ] && [ ! -f "$STATE_DIR/pr-kaizen-cross2" ]; then
+  echo "  PASS: clear_state_with_status_any_branch removed cross-branch state"
+  ((PASS++))
+else
+  echo "  FAIL: clear_state_with_status_any_branch did not remove cross-branch state"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== clear_state_with_status_any_branch: preserves non-matching status ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/103\nSTATUS=needs_review\nBRANCH=wt/other\n' > "$STATE_DIR/review-keep"
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/104\nSTATUS=needs_pr_kaizen\nBRANCH=wt/other\n' > "$STATE_DIR/kaizen-clear"
+
+# INVARIANT: Only the matching status is cleared, other state preserved
+clear_state_with_status_any_branch "needs_pr_kaizen"
+if [ -f "$STATE_DIR/review-keep" ] && [ ! -f "$STATE_DIR/kaizen-clear" ]; then
+  echo "  PASS: only cleared matching status, preserved other"
+  ((PASS++))
+else
+  echo "  FAIL: did not correctly target status"
+  ((FAIL++))
+fi
+
+echo ""
+echo "=== Contrast: branch-scoped vs cross-branch lookup ==="
+
+setup
+printf 'PR_URL=https://github.com/Garsson-io/nanoclaw/pull/105\nSTATUS=needs_pr_kaizen\nBRANCH=wt/different\n' > "$STATE_DIR/pr-kaizen-contrast"
+
+# INVARIANT: find_state_with_status MISSES cross-branch state (by design)
+STATE_INFO=$(find_state_with_status "needs_pr_kaizen")
+if [ $? -ne 0 ]; then
+  echo "  PASS: branch-scoped lookup correctly misses cross-branch state"
+  ((PASS++))
+else
+  echo "  FAIL: branch-scoped lookup should NOT find cross-branch state"
+  ((FAIL++))
+fi
+
+# INVARIANT: find_state_with_status_any_branch FINDS the same state
+STATE_INFO=$(find_state_with_status_any_branch "needs_pr_kaizen")
+if [ $? -eq 0 ]; then
+  echo "  PASS: cross-branch lookup finds the same state"
+  ((PASS++))
+else
+  echo "  FAIL: cross-branch lookup should find cross-branch state"
+  ((FAIL++))
+fi
+
 teardown
 rm -rf "$DEFAULT_MOCK_DIR"
 

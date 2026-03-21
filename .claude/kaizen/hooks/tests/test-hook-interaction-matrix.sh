@@ -383,5 +383,135 @@ else
   ((FAIL++))
 fi
 
+# ================================================================
+# INTERACTION PAIR 4: Cross-worktree gate clearing (kaizen #239)
+# State created on branch A, cleared from branch B
+# ================================================================
+
+echo ""
+echo "=== PAIR 4: Cross-worktree kaizen gate lifecycle (#239) ==="
+echo ""
+
+echo "--- 4a: State on different branch — gate still blocks (correct) ---"
+
+setup
+# State created on a different branch
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/50" "wt/other-worktree"
+
+# PreToolUse gate uses branch-scoped lookup — should NOT find cross-branch state
+# (enforcement hooks must be branch-scoped to prevent cross-worktree contamination)
+OUTPUT=$(run_pretool_bash "$ENFORCE_PR_KAIZEN" "npm run build")
+assert_eq "cross-wt: non-kaizen cmd allowed when gate is on other branch" "" "$OUTPUT"
+
+echo ""
+echo "--- 4b: Cross-branch KAIZEN_IMPEDIMENTS declaration clears gate (#239) ---"
+
+setup
+# State was created on branch wt/other but we are on current branch
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/50" "wt/other-worktree"
+
+# PostToolUse (pr-kaizen-clear) uses cross-branch lookup — should find and clear
+CLEAR_CMD="echo 'KAIZEN_IMPEDIMENTS: [] no process issues'"
+OUTPUT=$(run_posttool_bash "$PR_KAIZEN_CLEAR" "$CLEAR_CMD" "KAIZEN_IMPEDIMENTS: [] no process issues")
+assert_contains "cross-wt: KAIZEN_IMPEDIMENTS clears gate from different branch" "gate cleared" "$OUTPUT"
+
+# Verify state file was actually removed
+REMAINING=$(ls "$STATE_DIR"/ 2>/dev/null | wc -l)
+REMAINING=$(echo "$REMAINING" | tr -d ' ')
+assert_eq "cross-wt: state file removed after cross-branch clear" "0" "$REMAINING"
+
+echo ""
+echo "--- 4c: Cross-branch KAIZEN_NO_ACTION declaration clears gate (#239) ---"
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/51" "wt/another-wt"
+
+NO_ACTION_CMD="echo 'KAIZEN_NO_ACTION [docs-only]: README update'"
+OUTPUT=$(run_posttool_bash "$PR_KAIZEN_CLEAR" "$NO_ACTION_CMD" "KAIZEN_NO_ACTION [docs-only]: README update")
+assert_contains "cross-wt: KAIZEN_NO_ACTION clears gate from different branch" "gate cleared" "$OUTPUT"
+
+echo ""
+echo "--- 4d: Full cross-worktree lifecycle ---"
+
+setup
+# Step 1: State created on different branch (simulates PR created in worktree A)
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/52" "wt/worktree-a"
+
+# Step 2: Clear from current branch using empty array (simulates reflection in worktree B)
+CLEAR_CMD="echo 'KAIZEN_IMPEDIMENTS: [] cross-worktree lifecycle test'"
+CLEAR_STDOUT="KAIZEN_IMPEDIMENTS: [] cross-worktree lifecycle test"
+OUTPUT=$(run_posttool_bash "$PR_KAIZEN_CLEAR" "$CLEAR_CMD" "$CLEAR_STDOUT")
+assert_contains "cross-wt lifecycle: gate cleared" "gate cleared" "$OUTPUT"
+
+# Step 3: Verify no orphaned state
+REMAINING=$(ls "$STATE_DIR"/ 2>/dev/null | wc -l)
+REMAINING=$(echo "$REMAINING" | tr -d ' ')
+assert_eq "cross-wt lifecycle: no orphaned state files" "0" "$REMAINING"
+
+# ================================================================
+# INTERACTION PAIR 5: Auto-close kaizen issues on merge (#283)
+# ================================================================
+
+echo ""
+echo "=== PAIR 5: Auto-close kaizen issues on merge (#283) ==="
+echo ""
+
+echo "--- 5a: auto_close_kaizen_issues extracts refs from PR body ---"
+
+setup
+# Create a mock gh that simulates a merged PR with kaizen issue refs
+AUTOCLOSE_MOCK_DIR=$(mktemp -d)
+cat > "$AUTOCLOSE_MOCK_DIR/gh" << 'MOCK_GH'
+#!/bin/bash
+if echo "$@" | grep -q "pr view.*--json state"; then
+  echo "MERGED"
+  exit 0
+fi
+if echo "$@" | grep -q "pr view.*--json body"; then
+  echo "Closes https://github.com/Garsson-io/kaizen/issues/99"
+  exit 0
+fi
+if echo "$@" | grep -q "issue view.*--json state"; then
+  echo "OPEN"
+  exit 0
+fi
+if echo "$@" | grep -q "issue close"; then
+  echo "closed"
+  exit 0
+fi
+echo "OPEN"
+exit 0
+MOCK_GH
+chmod +x "$AUTOCLOSE_MOCK_DIR/gh"
+
+OUTPUT=$(PATH="$AUTOCLOSE_MOCK_DIR:$PATH" auto_close_kaizen_issues "https://github.com/Garsson-io/nanoclaw/pull/42")
+assert_contains "auto-close: closed referenced kaizen issue" "Auto-closed" "$OUTPUT"
+
+echo ""
+echo "--- 5b: auto_close_kaizen_issues skips non-merged PRs ---"
+
+setup
+cat > "$AUTOCLOSE_MOCK_DIR/gh" << 'MOCK_GH2'
+#!/bin/bash
+if echo "$@" | grep -q "pr view.*--json state"; then
+  echo "OPEN"
+  exit 0
+fi
+echo ""
+exit 0
+MOCK_GH2
+chmod +x "$AUTOCLOSE_MOCK_DIR/gh"
+
+OUTPUT=$(PATH="$AUTOCLOSE_MOCK_DIR:$PATH" auto_close_kaizen_issues "https://github.com/Garsson-io/nanoclaw/pull/42")
+assert_eq "auto-close: no output for non-merged PR" "" "$OUTPUT"
+
+echo ""
+echo "--- 5c: auto_close_kaizen_issues handles empty PR URL ---"
+
+OUTPUT=$(auto_close_kaizen_issues "")
+assert_eq "auto-close: no-op for empty URL" "" "$OUTPUT"
+
+rm -rf "$AUTOCLOSE_MOCK_DIR"
+
 teardown
 print_results

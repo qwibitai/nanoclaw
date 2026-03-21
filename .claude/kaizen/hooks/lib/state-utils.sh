@@ -210,3 +210,127 @@ clear_all_states_with_status() {
   done < <(list_state_files_for_current_worktree)
   if [ "$cleared" = true ]; then return 0; else return 1; fi
 }
+
+# Cross-branch state lookup (kaizen #239, #125):
+# When an agent ACTIVELY submits a declaration (KAIZEN_IMPEDIMENTS,
+# KAIZEN_NO_ACTION, /kaizen), the current branch may differ from the
+# branch where the state was created (e.g., PR created in worktree A,
+# reflection submitted from worktree B). These functions skip branch
+# filtering but still enforce staleness checks.
+#
+# Use these ONLY for active agent declarations — passive enforcement
+# hooks must still use the branch-scoped variants to prevent
+# cross-worktree contamination.
+
+# List state files checking staleness but NOT branch.
+list_state_files_any_branch() {
+  local now
+  now=$(date +%s)
+  for f in "$STATE_DIR"/*; do
+    [ -f "$f" ] || continue
+    # Skip stale state files
+    local mtime
+    mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "0")
+    local age=$(( now - mtime ))
+    if [ "$age" -gt "$MAX_STATE_AGE" ]; then
+      continue
+    fi
+    # Skip files without BRANCH (legacy)
+    local file_branch
+    file_branch=$(grep -E '^BRANCH=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ -z "$file_branch" ]; then
+      continue
+    fi
+    echo "$f"
+  done
+}
+
+# Find state with given STATUS across all branches (not branch-scoped).
+# Outputs "PR_URL|STATUS" on success, returns 1 if none found.
+find_state_with_status_any_branch() {
+  local wanted_status="$1"
+  while IFS= read -r f; do
+    local status
+    status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ "$status" = "$wanted_status" ]; then
+      local pr_url
+      pr_url=$(grep -E '^PR_URL=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+      echo "$pr_url|$status"
+      return 0
+    fi
+  done < <(list_state_files_any_branch)
+  return 1
+}
+
+# Clear state with given STATUS across all branches (not branch-scoped).
+# Returns 0 if a file was cleared, 1 if none found.
+clear_state_with_status_any_branch() {
+  local wanted_status="$1"
+  while IFS= read -r f; do
+    local status
+    status=$(grep -E '^STATUS=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ "$status" = "$wanted_status" ]; then
+      rm -f "$f" 2>/dev/null
+      return 0
+    fi
+  done < <(list_state_files_any_branch)
+  return 1
+}
+
+# Auto-close kaizen issues referenced in a merged PR (kaizen #283).
+# Parses PR body for Garsson-io/kaizen#NNN references, closes any that are open.
+# Only runs for MERGED PRs — safe to call for any PR state.
+#
+# Usage:
+#   auto_close_kaizen_issues "$PR_URL"
+auto_close_kaizen_issues() {
+  local pr_url="$1"
+  [ -z "$pr_url" ] && return 0
+
+  # Extract repo and PR number
+  local pr_num repo
+  pr_num=$(echo "$pr_url" | grep -oE '[0-9]+$')
+  repo=$(echo "$pr_url" | sed -n 's|https://github.com/\([^/]*/[^/]*\)/pull/.*|\1|p')
+  [ -z "$pr_num" ] || [ -z "$repo" ] && return 0
+
+  # Check PR state — only auto-close for merged PRs
+  local pr_state
+  pr_state=$(gh pr view "$pr_num" --repo "$repo" --json state --jq .state 2>/dev/null)
+  if [ "$pr_state" != "MERGED" ]; then
+    return 0
+  fi
+
+  # Get PR body and extract kaizen issue references
+  local pr_body
+  pr_body=$(gh pr view "$pr_num" --repo "$repo" --json body --jq .body 2>/dev/null)
+  [ -z "$pr_body" ] && return 0
+
+  # Match patterns: Garsson-io/kaizen#NNN, kaizen/issues/NNN, Closes #NNN (in kaizen context)
+  local issue_nums
+  issue_nums=$(echo "$pr_body" | grep -oP 'Garsson-io/kaizen[#/issues/]*\K[0-9]+' | sort -un)
+  # Also match: Closes https://github.com/Garsson-io/kaizen/issues/NNN
+  local url_issue_nums
+  url_issue_nums=$(echo "$pr_body" | grep -oP 'https://github\.com/Garsson-io/kaizen/issues/\K[0-9]+' | sort -un)
+
+  # Combine and deduplicate
+  local all_issues
+  all_issues=$(printf '%s\n%s' "$issue_nums" "$url_issue_nums" | sort -un | grep -v '^$')
+  [ -z "$all_issues" ] && return 0
+
+  local closed_count=0
+  while IFS= read -r issue_num; do
+    [ -z "$issue_num" ] && continue
+    # Check if issue is still open
+    local issue_state
+    issue_state=$(gh issue view "$issue_num" --repo Garsson-io/kaizen --json state --jq .state 2>/dev/null)
+    if [ "$issue_state" = "OPEN" ]; then
+      gh issue close "$issue_num" --repo Garsson-io/kaizen \
+        --comment "Auto-closed: implementing PR merged ($pr_url)" 2>/dev/null && \
+        closed_count=$((closed_count + 1))
+    fi
+  done <<< "$all_issues"
+
+  if [ "$closed_count" -gt 0 ]; then
+    echo "Auto-closed $closed_count kaizen issue(s) referenced in $pr_url"
+  fi
+}
