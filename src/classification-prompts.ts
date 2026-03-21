@@ -19,7 +19,13 @@ export interface EmailPayload {
 }
 
 export interface CalendarPayload {
-  changeType: 'created' | 'updated' | 'deleted' | 'cancelled';
+  changeType:
+    | 'created'
+    | 'updated'
+    | 'deleted'
+    | 'cancelled'
+    | 'new_event'
+    | 'conflict';
   event: {
     title: string;
     start: string;
