@@ -220,4 +220,4 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Diagnostics (Optional)
 
-After completing all steps above, read and follow `.claude/skills/_shared/diagnostics.md`.
+After completing all steps above, read and follow [diagnostics.md](diagnostics.md).
