@@ -1,0 +1,5 @@
+name: add-telegram-reactions
+description: Adds emoji reaction support to the Telegram channel. Requires add-reactions skill to be applied first (for DB schema, IPC handler, and MCP tool).
+version: 1.0.0
+modifies:
+  - src/channels/telegram.ts
