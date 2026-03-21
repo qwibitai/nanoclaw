@@ -83,7 +83,7 @@ export function startCredentialProxy(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: upstreamUrl.pathname.replace(/\/+$/, '') + req.url,
             method: req.method,
             headers,
           } as RequestOptions,

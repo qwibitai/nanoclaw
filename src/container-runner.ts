@@ -28,6 +28,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -238,6 +239,10 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  const envModel = readEnvFile(['ANTHROPIC_MODEL']);
+  if (envModel.ANTHROPIC_MODEL) {
+    args.push('-e', `ANTHROPIC_MODEL=${envModel.ANTHROPIC_MODEL}`);
+  }
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
