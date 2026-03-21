@@ -107,7 +107,9 @@ These policies were learned from past mistakes. Follow them strictly.
 9. **Declare ALL dependencies.** Every `require()` or `import` must have a `package.json` entry.
 10. **Prefer simpler dependency stacks.** Fewer deps = fewer failure points.
 
-**Kaizen enforcement policies (#11-19):** See [`.claude/kaizen/policies.md`](.claude/kaizen/policies.md) — recursive kaizen, hooks infrastructure, MCP enforcement, security files, worktree isolation, co-commit tests, smoke tests ship with feature, hook language boundaries.
+11. **`--dangerously-skip-permissions` does NOT bypass hooks.** It auto-approves built-in tool permission prompts, but custom hooks (PreToolUse deny, PostToolUse gates) still fire and enforce. Use `--bare` to skip hooks entirely (also skips CLAUDE.md, skills, LSP). See kaizen #353.
+
+**Kaizen enforcement policies (#12-19):** See [`.claude/kaizen/policies.md`](.claude/kaizen/policies.md) — recursive kaizen, hooks infrastructure, MCP enforcement, security files, worktree isolation, co-commit tests, smoke tests ship with feature, hook language boundaries.
 
 ## Verification Discipline
 

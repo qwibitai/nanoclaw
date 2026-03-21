@@ -64,8 +64,9 @@ is_kaizen_command() {
     grep -qE '(^echo.*KAIZEN_NO_ACTION|^KAIZEN_NO_ACTION)'; then
     return 0
   fi
-  # gh pr diff/view/comment/edit/checks — PR-related commands
-  if is_gh_pr_command "$cmd" "diff|view|comment|edit|checks"; then
+  # gh pr diff/view/comment/edit/checks/merge — PR-related commands
+  # merge is allowed because it's a continuation of the PR workflow (kaizen #323)
+  if is_gh_pr_command "$cmd" "diff|view|comment|edit|checks|merge"; then
     return 0
   fi
   # Shared readonly monitoring commands (gh api, gh run, git read-only, ls/cat/etc.)

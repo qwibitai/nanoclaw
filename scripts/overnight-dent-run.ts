@@ -512,6 +512,8 @@ async function runClaude(
     nonce,
     '-p',
     prompt,
+    // Note: this bypasses interactive permission prompts but NOT custom hooks.
+    // Kaizen gates, review loops, and other hook denials still fire. (kaizen #353)
     '--dangerously-skip-permissions',
     '--output-format',
     'stream-json',

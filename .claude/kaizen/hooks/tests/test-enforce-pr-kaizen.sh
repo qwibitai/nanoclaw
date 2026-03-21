@@ -308,5 +308,25 @@ assert_eq "echo KAIZEN_IMPEDIMENTS && cat allowed" "" "$OUTPUT"
 OUTPUT=$(run_pretool_hook "echo 'KAIZEN_NO_ACTION [docs-only]: updated README'")
 assert_eq "echo KAIZEN_NO_ACTION at segment start allowed" "" "$OUTPUT"
 
+echo ""
+echo "=== Kaizen gate active: gh pr merge --auto allowed (kaizen #323) ==="
+
+setup
+create_pr_kaizen_state "https://github.com/Garsson-io/nanoclaw/pull/42"
+
+# INVARIANT (kaizen #323): gh pr merge --auto is a continuation of the PR
+# workflow and should NOT be blocked by the kaizen gate. The agent created
+# the PR — queuing auto-merge is the natural next step.
+OUTPUT=$(run_pretool_hook "gh pr merge 42 --repo Garsson-io/nanoclaw --squash --delete-branch --auto")
+assert_eq "gh pr merge --auto allowed during kaizen gate" "" "$OUTPUT"
+
+# Also allow direct merge (without --auto)
+OUTPUT=$(run_pretool_hook "gh pr merge 42 --squash")
+assert_eq "gh pr merge --squash allowed during kaizen gate" "" "$OUTPUT"
+
+# Also allow merge with URL form
+OUTPUT=$(run_pretool_hook "gh pr merge https://github.com/Garsson-io/nanoclaw/pull/42 --squash --delete-branch --auto")
+assert_eq "gh pr merge with URL allowed during kaizen gate" "" "$OUTPUT"
+
 teardown
 print_results

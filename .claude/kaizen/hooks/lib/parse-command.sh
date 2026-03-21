@@ -45,8 +45,10 @@ is_git_command() {
   local cmd_line="$1"
   local subcommand="$2"
   # Match both `git push` and `git -C /some/path push`
+  # Note: subcommand must be parenthesized to prevent regex alternation leak
+  # (kaizen #323: `--delete-branch` matched bare `branch` without grouping)
   echo "$cmd_line" | sed 's/[|;&]\{1,\}/\n/g' | sed 's/^[[:space:]]*//' | \
-    grep -qE "^git[[:space:]]+(-C[[:space:]]+[^[:space:]]+[[:space:]]+)?${subcommand}"
+    grep -qE "^git[[:space:]]+(-C[[:space:]]+[^[:space:]]+[[:space:]]+)?(${subcommand})"
 }
 
 # Extract the -C <path> argument from a git command, if present.
