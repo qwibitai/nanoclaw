@@ -612,16 +612,6 @@
       "path": "/skills-catalog/plugins/context-engineering-fundamentals/hosted-agents"
     },
     {
-      "name": "image-gen",
-      "source": "local",
-      "description": "Generate images from text prompts using Google Gemini AI. Use when asked to create, draw, generate, illustrate, or visualize an image. Requires GEMINI_API_KEY environment variable.",
-      "categories": [
-        "general",
-        "creative"
-      ],
-      "path": "/skills-catalog/local/image-gen"
-    },
-    {
       "name": "internal-comms",
       "source": "local",
       "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).",

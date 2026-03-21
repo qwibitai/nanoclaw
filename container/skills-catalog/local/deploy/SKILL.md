@@ -318,3 +318,79 @@ echo "Live at: $DEPLOY_URL"
 - **`.vercel/` directory**: Created automatically after first deploy. Contains project ID and org ID. Can be committed or ignored — if ignored, use `--name` consistently.
 - **Vercel vs Netlify**: Vercel is preferred for Next.js and React/Vite apps. Netlify handles static sites and Astro equally well.
 - **Preview vs Production**: `--prod` deploys to the production URL. Omitting it creates a preview deployment with a unique URL — useful for testing.
+
+---
+
+## 11. GitHub Actions Auto-Deploy
+
+Use this section when the user wants **automatic deploys on every push to main** — not just a one-time deploy.
+
+### Prerequisites
+
+Do a manual deploy first (see sections 4–5 above) to generate the `.vercel/` directory with project metadata.
+
+### Step 1: Get VERCEL_ORG_ID and VERCEL_PROJECT_ID
+
+After the first manual deploy, read the generated project config:
+
+```bash
+cat .vercel/project.json
+```
+
+This outputs something like:
+
+```json
+{"orgId":"team_abc123","projectId":"prj_xyz789"}
+```
+
+### Step 2: Store secrets in GitHub
+
+```bash
+gh secret set VERCEL_TOKEN        # paste your Vercel token
+gh secret set VERCEL_ORG_ID       # value from .vercel/project.json
+gh secret set VERCEL_PROJECT_ID   # value from .vercel/project.json
+```
+
+### Step 3: Create the workflow file
+
+Create `.github/workflows/deploy.yml` in the project root:
+
+```yaml
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run tests
+        run: npm test --if-present
+      - name: Deploy to Vercel
+        run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+```
+
+### How it works
+
+- Triggers on every push to `main`
+- Installs dependencies with `npm ci` (clean install, uses `package-lock.json`)
+- Runs tests with `npm test --if-present` — skips gracefully if no `test` script is defined
+- Deploys to production with `vercel --prod`
+- Uses `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` env vars so Vercel CLI knows which project to deploy to without interactive prompts
+
+### Notes
+
+- Commit and push the workflow file to trigger the first automated deploy
+- The `--if-present` flag on `npm test` prevents the workflow from failing when there are no tests
+- For monorepos, add a `working-directory` to each step pointing to the app subdirectory
