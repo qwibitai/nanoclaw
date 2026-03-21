@@ -44,7 +44,6 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
-import { startCronSubscriber, stopCronSubscriber } from './cron-subscriber.js';
 import {
   startDispatchLoop,
   startStallDetector,
@@ -186,7 +185,6 @@ export async function initApp(): Promise<void> {
     if (skillServer) skillServer.close();
     await stopAgencyHqSubsystems();
     stopHostExecWatcher();
-    await stopCronSubscriber();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -336,9 +334,6 @@ export async function initApp(): Promise<void> {
     },
   };
   startSchedulerLoop(schedulerDeps);
-  startCronSubscriber(schedulerDeps).catch((err) =>
-    logger.error({ err }, 'Failed to start cron subscriber'),
-  );
   startDispatchLoop(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start dispatch loop'),
   );

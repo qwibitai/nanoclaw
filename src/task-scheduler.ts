@@ -248,9 +248,6 @@ export async function runScheduledTask(
  * stored in SQLite but never registered with the cron-service, so they
  * would never execute without this loop.
  *
- * This runs alongside the cron-subscriber: each mechanism handles the tasks
- * it owns. The GroupQueue deduplicates by taskId, so there is no risk of
- * double-execution even if both mechanisms see the same task.
  */
 export function startSchedulerLoop(deps: SchedulerDependencies): void {
   logger.info('SQLite polling loop started for locally-scheduled tasks');
