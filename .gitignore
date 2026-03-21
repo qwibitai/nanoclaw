@@ -21,6 +21,7 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+secrets.yaml
 
 # OS
 .DS_Store
