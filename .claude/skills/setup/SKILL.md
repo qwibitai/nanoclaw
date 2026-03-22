@@ -50,7 +50,7 @@ Already configured. Continue.
 
 **Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
 
-## 1. Bootstrap (Node.js + Dependencies)
+## 1. Bootstrap (Node.js + Dependencies + OneCLI)
 
 Run `bash setup.sh` and parse the status block.
 
@@ -61,6 +61,34 @@ Run `bash setup.sh` and parse the status block.
 - If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
 - If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
 - Record PLATFORM and IS_WSL for later steps.
+
+After bootstrap succeeds, install OneCLI and its CLI tool:
+
+```bash
+curl -fsSL onecli.sh/install | sh
+curl -fsSL onecli.sh/cli/install | sh
+```
+
+Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+# Persist for future sessions (append to shell profile if not already present)
+grep -q '.local/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Then re-verify with `onecli version`.
+
+Point the CLI at the local OneCLI instance (it defaults to the cloud service otherwise):
+```bash
+onecli config set api-host http://127.0.0.1:10254
+```
+
+Ensure `.env` has the OneCLI URL (create the file if it doesn't exist):
+```bash
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=http://127.0.0.1:10254' >> .env
+```
 
 ## 2. Check Environment
 
@@ -112,15 +140,34 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Anthropic Credentials via OneCLI
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+NanoClaw uses OneCLI to manage credentials — API keys are never stored in `.env` or exposed to containers. The OneCLI gateway injects them at request time.
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+Check if a secret already exists:
+```bash
+onecli secrets list
+```
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
 
-**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+First, look up the exact command for creating an Anthropic secret:
+```bash
+onecli secrets create --help
+```
+
+Then AskUserQuestion with two options. Use the `description` field to include the one-liner guidance and the concrete instructions for each option so the user sees everything in the question itself (avoids the interactive modal hiding text above it):
+
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
+2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
+
+Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
+
+Ask them to let you know when done.
+
+**If the user's response happens to contain an API key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that key on their behalf.
+
+**After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
 
 ## 5. Set Up Channels
 
@@ -198,7 +245,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 4
+- CREDENTIALS=missing → re-run step 4 (check `onecli secrets list` for Anthropic secret)
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
@@ -207,7 +254,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), OneCLI not running (check `curl http://127.0.0.1:10254/api/health`), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
