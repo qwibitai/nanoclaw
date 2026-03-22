@@ -684,4 +684,185 @@ describe('LinearChannel', () => {
       );
     });
   });
+
+  describe('AgentSessionEvent', () => {
+    beforeEach(async () => {
+      opts = createTestOpts();
+      channel = new LinearChannel(
+        SECRET,
+        'test-client-id',
+        'test-client-secret',
+        '',
+        opts,
+      );
+      await channel.connect();
+      const result = await startServer(opts.app!);
+      server = result.server;
+      port = result.port;
+    });
+
+    it('processes AgentSessionEvent created webhook', async () => {
+      const payload = {
+        type: 'AgentSessionEvent',
+        action: 'created',
+        data: {
+          agentSession: {
+            id: 'session-1',
+            issue: {
+              id: 'issue-uuid',
+              identifier: 'CHR-6',
+              title: 'Implement dark mode',
+              url: 'https://linear.app/test/issue/CHR-6',
+              team: { key: 'CHR' },
+            },
+          },
+          promptContext: 'Please add dark mode support to the settings page.',
+        },
+        actor: { id: 'user-1', name: 'Chris' },
+        createdAt: '2026-03-21T12:00:00Z',
+      };
+      await sendLinearWebhook(port, { payload, secret: SECRET });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'linear:CHR-6',
+        expect.objectContaining({
+          chat_jid: 'linear:CHR-6',
+          sender: 'Chris',
+          content: expect.stringContaining(
+            '[Linear] Issue CHR-6 "Implement dark mode" delegated to Seb',
+          ),
+          metadata: expect.objectContaining({
+            linear_agent_session_id: 'session-1',
+            linear_issue_identifier: 'CHR-6',
+          }),
+        }),
+      );
+    });
+
+    it('includes promptContext in the formatted message', async () => {
+      const payload = {
+        type: 'AgentSessionEvent',
+        action: 'created',
+        data: {
+          agentSession: {
+            id: 'session-2',
+            issue: {
+              id: 'issue-uuid-2',
+              identifier: 'CHR-7',
+              title: 'Fix bug',
+              url: 'https://linear.app/test/issue/CHR-7',
+              team: { key: 'CHR' },
+            },
+          },
+          promptContext: 'The login form crashes on submit.',
+        },
+        actor: { id: 'user-1', name: 'Chris' },
+        createdAt: '2026-03-21T12:00:00Z',
+      };
+      await sendLinearWebhook(port, { payload, secret: SECRET });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'linear:CHR-7',
+        expect.objectContaining({
+          content: expect.stringContaining('The login form crashes on submit.'),
+        }),
+      );
+    });
+
+    it('sets requiresTrigger=false for delegated issues (new group)', async () => {
+      const payload = {
+        type: 'AgentSessionEvent',
+        action: 'created',
+        data: {
+          agentSession: {
+            id: 'session-3',
+            issue: {
+              id: 'issue-uuid-3',
+              identifier: 'CHR-8',
+              title: 'New feature',
+              url: 'https://linear.app/test/issue/CHR-8',
+              team: { key: 'CHR' },
+            },
+          },
+        },
+        actor: { id: 'user-1', name: 'Chris' },
+        createdAt: '2026-03-21T12:00:00Z',
+      };
+      await sendLinearWebhook(port, { payload, secret: SECRET });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(opts.registerGroup).toHaveBeenCalledWith(
+        'linear:CHR-8',
+        expect.objectContaining({
+          name: 'CHR-8',
+          folder: 'linear_chr-8',
+          requiresTrigger: false,
+        }),
+      );
+    });
+
+    it('updates existing group to requiresTrigger=false on delegation', async () => {
+      const existingGroup = {
+        name: 'CHR-9',
+        folder: 'linear_chr-9',
+        trigger: '@Seb',
+        added_at: '2026-03-21T10:00:00Z',
+        requiresTrigger: true,
+        metadata: {
+          type: 'issue',
+          identifier: 'CHR-9',
+          title: 'Existing issue',
+        },
+      };
+      // Recreate channel with existing group
+      await channel.disconnect();
+      server.close();
+      opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'linear:CHR-9': existingGroup,
+        })),
+      });
+      channel = new LinearChannel(
+        SECRET,
+        'test-client-id',
+        'test-client-secret',
+        '',
+        opts,
+      );
+      await channel.connect();
+      const result = await startServer(opts.app!);
+      server = result.server;
+      port = result.port;
+
+      const payload = {
+        type: 'AgentSessionEvent',
+        action: 'created',
+        data: {
+          agentSession: {
+            id: 'session-4',
+            issue: {
+              id: 'issue-uuid-4',
+              identifier: 'CHR-9',
+              title: 'Existing issue',
+              url: 'https://linear.app/test/issue/CHR-9',
+              team: { key: 'CHR' },
+            },
+          },
+        },
+        actor: { id: 'user-1', name: 'Chris' },
+        createdAt: '2026-03-21T12:00:00Z',
+      };
+      await sendLinearWebhook(port, { payload, secret: SECRET });
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(opts.registerGroup).toHaveBeenCalledWith(
+        'linear:CHR-9',
+        expect.objectContaining({
+          requiresTrigger: false,
+        }),
+      );
+    });
+  });
 });

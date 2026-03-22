@@ -18,7 +18,7 @@ interface LinearOAuthData {
 }
 
 /** Linear webhook event types we handle */
-const SUPPORTED_TYPES = new Set(['Issue', 'Comment']);
+const SUPPORTED_TYPES = new Set(['Issue', 'Comment', 'AgentSessionEvent']);
 
 /**
  * Verify the Linear webhook signature using HMAC-SHA256.
@@ -136,6 +136,29 @@ function formatEvent(
       }
 
       return null;
+    }
+
+    case 'AgentSessionEvent': {
+      const session = data.agentSession;
+      if (!session) return null;
+      const issue = session.issue;
+      if (!issue) return null;
+      const identifier = issue.identifier || issue.id;
+      const title = issue.title || '';
+      const url = issue.url || '';
+      const promptContext = data.promptContext || '';
+      const parts = [
+        `[Linear] Issue ${identifier} "${title}" delegated to ${ASSISTANT_NAME}`,
+      ];
+      if (promptContext) parts.push(promptContext);
+      if (url) parts.push(url);
+      return {
+        text: parts.join('\n'),
+        metadata: {
+          linear_agent_session_id: session.id || '',
+          linear_issue_identifier: identifier,
+        },
+      };
     }
 
     default:
@@ -423,7 +446,12 @@ export class LinearChannel implements Channel {
     }
 
     // Determine the issue identifier and JID
-    const issueData = type === 'Comment' ? data.issue : data;
+    const issueData =
+      type === 'AgentSessionEvent'
+        ? data.agentSession?.issue
+        : type === 'Comment'
+          ? data.issue
+          : data;
     const identifier = issueData?.identifier;
     if (!identifier) {
       logger.warn({ type, action }, 'Linear webhook missing issue identifier');
@@ -451,6 +479,9 @@ export class LinearChannel implements Channel {
       const registered = this.opts.registeredGroups();
       const assigneeId = issueData?.assignee?.id;
       const isAssignedToBot = !!this.botUserId && assigneeId === this.botUserId;
+      // Delegation via AgentSessionEvent always means the bot should auto-respond
+      const isDelegation = type === 'AgentSessionEvent';
+      const skipTrigger = isDelegation || isAssignedToBot;
 
       if (!registered[chatJid]) {
         const folder = makeLinearFolder(identifier);
@@ -474,12 +505,31 @@ export class LinearChannel implements Channel {
           folder,
           trigger: `@${ASSISTANT_NAME}`,
           added_at: timestamp,
-          requiresTrigger: !isAssignedToBot,
+          requiresTrigger: !skipTrigger,
           metadata,
         });
         logger.info(
-          { chatJid, folder, isAssignedToBot },
+          { chatJid, folder, isDelegation, isAssignedToBot },
           'Auto-registered Linear group',
+        );
+      } else if (
+        isDelegation &&
+        registered[chatJid].requiresTrigger !== false
+      ) {
+        // Delegation — ensure requiresTrigger is false
+        this.opts.registerGroup(chatJid, {
+          ...registered[chatJid],
+          requiresTrigger: false,
+          metadata: {
+            ...registered[chatJid].metadata,
+            ...(issueData?.assignee?.name
+              ? { assignee: issueData.assignee.name }
+              : {}),
+          },
+        });
+        logger.info(
+          { chatJid },
+          'Updated Linear group to skip trigger (delegation)',
         );
       } else if (
         type === 'Issue' &&
@@ -505,6 +555,19 @@ export class LinearChannel implements Channel {
       }
     }
 
+    // For AgentSessionEvent, acknowledge immediately by emitting a "thought" activity
+    if (type === 'AgentSessionEvent' && action === 'created') {
+      const sessionId = data.agentSession?.id;
+      if (sessionId) {
+        this.acknowledgeAgentSession(sessionId).catch((err) =>
+          logger.error(
+            { err, sessionId },
+            'Failed to acknowledge Linear agent session',
+          ),
+        );
+      }
+    }
+
     // Format the event
     const formatted = formatEvent(type, action, data, actor);
     if (!formatted) return;
@@ -525,6 +588,70 @@ export class LinearChannel implements Channel {
       { type, action, chatJid, deliveryId },
       'Linear webhook event processed',
     );
+  }
+
+  /**
+   * Acknowledge an agent session by emitting a "thought" activity.
+   * Linear requires a response within 10 seconds of delegation.
+   */
+  private async acknowledgeAgentSession(sessionId: string): Promise<void> {
+    const token = await this.getAccessToken();
+    if (!token) {
+      logger.warn(
+        { sessionId },
+        'Cannot acknowledge agent session — no access token',
+      );
+      return;
+    }
+
+    const mutation = `
+      mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
+        agentActivityCreate(input: $input) {
+          success
+        }
+      }
+    `;
+
+    const res = await fetch('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: mutation,
+        variables: {
+          input: {
+            agentSessionId: sessionId,
+            content: {
+              type: 'thought',
+              body: 'Starting work on this issue...',
+            },
+          },
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 401) this.accessToken = null;
+      logger.error(
+        { sessionId, status: res.status, body },
+        'Linear API error acknowledging agent session',
+      );
+      return;
+    }
+
+    const result = (await res.json()) as any;
+    if (result.errors) {
+      logger.error(
+        { sessionId, errors: result.errors },
+        'Linear GraphQL errors acknowledging agent session',
+      );
+      return;
+    }
+
+    logger.info({ sessionId }, 'Linear agent session acknowledged');
   }
 
   /**
