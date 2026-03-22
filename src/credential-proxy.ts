@@ -79,6 +79,10 @@ export function startCredentialProxy(
           }
         }
 
+        logger.debug(
+          { method: req.method, path: req.url },
+          'Credential proxy request',
+        );
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
@@ -88,6 +92,10 @@ export function startCredentialProxy(
             headers,
           } as RequestOptions,
           (upRes) => {
+            logger.debug(
+              { method: req.method, path: req.url, status: upRes.statusCode },
+              'Credential proxy response',
+            );
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
           },
