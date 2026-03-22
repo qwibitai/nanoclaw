@@ -268,6 +268,13 @@ async function buildContainerArgs(
     );
   }
 
+  if (process.env.HA_URL) {
+    args.push('-e', `HA_URL=${process.env.HA_URL}`);
+  }
+  if (process.env.HA_TOKEN) {
+    args.push('-e', `HA_TOKEN=${process.env.HA_TOKEN}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
