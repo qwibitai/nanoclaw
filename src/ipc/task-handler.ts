@@ -124,7 +124,7 @@ export async function handleTaskIpc(
         const contextMode =
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
-            : 'isolated';
+            : 'group';
         const inserted = createTask({
           id: taskId,
           group_folder: targetFolder,
