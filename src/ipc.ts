@@ -12,7 +12,7 @@ import {
   getAllTasks,
   getTaskById,
   updateTask,
-} from './db.js';
+} from './db/index.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { RegisteredGroup } from './types.js';

@@ -27,7 +27,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
-} from './db.js';
+} from './db/index.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startHostExecWatcher, stopHostExecWatcher } from './host-exec.js';
