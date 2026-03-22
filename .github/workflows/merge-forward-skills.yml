@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: merge-forward-skills
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write
@@ -134,7 +138,7 @@ jobs:
         if: always()
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.FORK_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.FORK_DISPATCH_TOKEN }}
           script: |
             const forks = [
               'nanoclaw-whatsapp',
@@ -144,7 +148,6 @@ jobs:
               'nanoclaw-gmail',
               'nanoclaw-docker-sandboxes',
             ];
-            const sha = context.sha.substring(0, 7);
             for (const repo of forks) {
               try {
                 await github.rest.repos.createDispatchEvent({

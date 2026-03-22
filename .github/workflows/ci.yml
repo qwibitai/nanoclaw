@@ -1,8 +1,14 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
@@ -19,7 +25,10 @@ jobs:
         run: npm run format:check
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
 
       - name: Tests
-        run: npx vitest run
+        run: npm test

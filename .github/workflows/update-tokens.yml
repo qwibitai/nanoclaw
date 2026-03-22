@@ -6,9 +6,17 @@ on:
     branches: [main]
     paths: ['src/**', 'container/**', 'launchd/**', 'CLAUDE.md']
 
+concurrency:
+  group: main-auto-commits
+  cancel-in-progress: false
+
 jobs:
   update-tokens:
     runs-on: ubuntu-latest
+    # Skip commits from auto-commit workflows to prevent loops
+    if: >-
+      !contains(github.event.head_commit.message, 'docs: update token count') &&
+      !contains(github.event.head_commit.message, 'chore: bump version')
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token

@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: skill-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -23,7 +27,7 @@ jobs:
 
           # Block if new skills are added AND source is modified
           if [ -n "$ADDED_SKILLS" ] && [ -n "$SOURCE" ]; then
-            echo "❌ PRs that add skills should not modify source files."
+            echo "::error::PRs that add skills should not modify source files."
             echo ""
             echo "New skill files:"
             echo "$ADDED_SKILLS"
@@ -40,13 +44,32 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `This PR adds a skill while also modifying source code. A skill PR should not change source files—the skill should contain **instructions** for Claude to follow. See \`/add-telegram\` for an example.
+            });
+            const marker = '<!-- skill-pr-check -->';
+            const existing = comments.find(c => c.body.includes(marker));
+            const body = `${marker}
+            This PR adds a skill while also modifying source code. A skill PR should not change source files—the skill should contain **instructions** for Claude to follow. See \`/add-telegram\` for an example.
 
             If you're fixing a bug or simplifying code, please submit that as a separate PR.
 
-            See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md) for details.`
-            })
+            See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md) for details.`;
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

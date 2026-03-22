@@ -8,6 +8,10 @@ on:
       - '.claude/skills/**'
       - 'src/**'
 
+concurrency:
+  group: skill-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest

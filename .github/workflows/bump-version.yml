@@ -5,9 +5,15 @@ on:
     branches: [main]
     paths: ['src/**', 'container/**']
 
+concurrency:
+  group: main-auto-commits
+  cancel-in-progress: false
+
 jobs:
   bump-version:
     runs-on: ubuntu-latest
+    # Skip commits from this workflow to prevent infinite loops
+    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
