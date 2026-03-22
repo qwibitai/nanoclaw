@@ -31,15 +31,19 @@ Two scheduled tasks running in `discord_general` with `context_mode: 'group'` (s
 
 **Deep loop — every 4 hours:**
 - Review recent conversations and extract knowledge (decisions, preferences, project facts, people context)
-- Read and work through the goals list (`groups/discord_general/goals.md`)
+- Read and work through the goals list (`knowledge/goals.md` in the group folder)
 - Organize and update the knowledge base
 - Compile a digest of all autonomous actions taken since last check-in and post to Discord
 
 Both loops are standard scheduled tasks — no new infrastructure. The intelligence is in the prompts and the skill they reference.
 
+**Failure handling:** If a think loop run fails (timeout, API error, crash), the task scheduler logs the error and computes the next run time normally — no special backoff. If the same loop fails 3 consecutive times, the skill instructs the agent to post a brief error notice to Discord on the next successful run so the user is aware.
+
+**Feedback loop prevention:** The think loop MUST ignore its own prior output. The skill explicitly instructs: "Skip any messages you posted during a previous think loop run. Do not follow up on your own digests, do not treat your own autonomous actions as 'stale conversations.' Only act on messages from humans or from other systems (PR comments, CI notifications, etc.)."
+
 ### 2. Autonomy Tiers (Container Skill)
 
-A container skill at `container/skills-catalog/local/autonomous-think/SKILL.md` loaded only during think loop runs. Regular conversations don't load this skill.
+A container skill at `container/skills-catalog/local/autonomous-think/SKILL.md`. Since skill loading is per-group (not per-task), this skill will be visible during regular conversations too — this is acceptable and helps the agent maintain consistent behavior.
 
 **Tier 1 — Do immediately (no approval):**
 - Follow up on stale conversations
@@ -76,11 +80,12 @@ A container skill at `container/skills-catalog/local/autonomous-think/SKILL.md` 
 Per-group knowledge stored in the group's filesystem:
 
 ```
-groups/discord_general/knowledge/
-  projects/        # Architecture decisions, how things work, gotchas
-  people/          # Who works on what, preferences, communication style
-  decisions/       # What was decided, why, when, context
-  status/          # What's in progress, blocked, completed
+{group_folder}/knowledge/
+  goals.md           # Active and completed goals
+  projects/          # Architecture decisions, how things work, gotchas
+  people/            # Who works on what, preferences, communication style
+  decisions/         # What was decided, why, when, context
+  status/            # What's in progress, blocked, completed
 ```
 
 Each entry is a markdown file with:
@@ -91,11 +96,13 @@ Each entry is a markdown file with:
 
 The deep loop reviews recent conversations and creates/updates entries. The agent also updates knowledge opportunistically during regular conversations when it learns something significant.
 
+The agent creates the knowledge directories on first run if they don't exist — no special initialization needed since the group folder is writable.
+
 **Why per-group:** Each group's knowledge is scoped to its context. Future multi-group orchestration can read across groups via the global mount (main has project-wide read access).
 
 ### 4. Digest Format
 
-Posted to Discord at the end of each deep loop run:
+Posted to Discord at the end of each deep loop run via the `send_message` MCP tool with `isScheduled` flag (posts to main channel, not a thread):
 
 ```
 **Autonomous Activity Digest**
@@ -120,7 +127,7 @@ If nothing happened, no digest is posted (avoid noise).
 
 ### 5. Goals File
 
-`groups/discord_general/goals.md` — a simple markdown checklist:
+`{group_folder}/knowledge/goals.md` — a simple markdown checklist:
 
 ```markdown
 # Goals
@@ -140,11 +147,11 @@ The agent updates this file as it makes progress. The user can edit it directly 
 
 No code built for this now. Design constraints that keep the door open:
 
-- The autonomous-think skill is written generically — no discord_general hardcoding
-- Scheduled tasks already support `target_group_jid` for cross-group dispatch
+- The autonomous-think skill is written generically — references `{group_folder}` paths, not hardcoded group names
+- Scheduled tasks already support `targetJid` for cross-group dispatch
 - Goals file format works for any group
 - Knowledge base structure is consistent across groups
-- Digest posting uses standard IPC `send_message`, not channel-specific APIs
+- Digest posting uses `send_message` MCP tool with `isScheduled` flag
 
 A future orchestrator in `main` could: read all groups' knowledge bases, maintain global goals, dispatch tasks to specific groups based on context.
 
@@ -152,8 +159,8 @@ A future orchestrator in `main` could: read all groups' knowledge bases, maintai
 
 ### What to build:
 
-1. **Container skill:** `container/skills-catalog/local/autonomous-think/SKILL.md` — autonomy tiers, think loop instructions, knowledge base guidelines, digest format
-2. **Initial goals file:** `groups/discord_general/goals.md` — seed with current priorities
+1. **Container skill:** `container/skills-catalog/local/autonomous-think/SKILL.md` — autonomy tiers, think loop instructions, knowledge base guidelines, digest format, feedback loop prevention
+2. **Initial goals file:** `groups/discord_general/knowledge/goals.md` — seed with current priorities
 3. **Knowledge base directories:** `groups/discord_general/knowledge/{projects,people,decisions,status}/`
 4. **Scheduled tasks:** Two tasks created via the agent's MCP tools (fast loop + deep loop) — these are data, not code
 5. **Rebuild container:** `./container/build.sh` to include the new skill
@@ -171,6 +178,6 @@ A future orchestrator in `main` could: read all groups' knowledge bases, maintai
 | File | Action |
 |------|--------|
 | `container/skills-catalog/local/autonomous-think/SKILL.md` | Create — the skill with autonomy tiers, loop instructions, KB guidelines |
-| `groups/discord_general/goals.md` | Create — initial goals list |
-| `groups/discord_general/knowledge/` | Create — directory structure |
+| `groups/discord_general/knowledge/goals.md` | Create — initial goals list |
+| `groups/discord_general/knowledge/{projects,people,decisions,status}/` | Create — directory structure |
 | `container/skills-catalog/catalog.json` | Auto-updated by `generate-catalog.ts` during build |
