@@ -51,3 +51,24 @@ Allow different model providers and models per group/channel instead of globally
 - Multi-provider MCP server approach
 
 ---
+
+## NanoClaw Search (Per-Group Local Search)
+
+**Status:** v1 Shipped (BM25 keyword search)
+**Priority:** High
+**Complexity:** Medium
+
+### Overview
+Provides agent containers with the ability to search past conversation history and custom document collections. Uses a deterministically isolated approach where an individual `search.db` (SQLite + FTS5) is maintained for each group and mounted exclusively into its respective container.
+
+### What's Working (v1)
+- **Host-side exporter** (`src/search-exporter.ts`): real-time message export on ingest + 10-minute background sync
+- **Container CLI** (`qsearch`): BM25 keyword search over messages and named document collections
+- **Skill doc** (`container/skills/search/SKILL.md`): declares `qsearch` for agent SDK
+- **Backfill script** (`scripts/backfill-search.ts`): one-shot population of search.db from existing messages
+- **Deterministic isolation**: each group's search.db lives in its group folder, physically inaccessible to other containers
+
+### v2 Upgrade Path (vectors)
+The schema anticipates semantic search via `sqlite-vec`. See [search_plan.md](./search_plan.md) for full details.
+
+---

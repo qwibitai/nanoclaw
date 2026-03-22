@@ -1,0 +1,335 @@
+#!/usr/bin/env node
+/**
+ * qsearch — BM25 search CLI for NanoClaw agent containers.
+ *
+ * Searches past conversation history and named document collections
+ * stored in the group's search.db (SQLite + FTS5).
+ *
+ * Usage:
+ *   qsearch <query>                            Search messages
+ *   qsearch --collection=<name> <query>        Search a collection
+ *   qsearch --top=N --offset=N <query>         Paginate results
+ *   qsearch collections                        List collections
+ *   qsearch reactions                          Reaction summary
+ *   qsearch reactions <sender|emoji>           Search reactions
+ *   qsearch index --collection=<name> <path>   Index documents
+ *   qsearch rm --collection=<name> [path]      Remove from index
+ */
+// Resolve from /app/node_modules where better-sqlite3 is installed
+const Database = require('/app/node_modules/better-sqlite3');
+const fs = require('fs');
+const path = require('path');
+
+const DB_PATH = '/workspace/group/search.db';
+
+function parseArgs(argv) {
+  const args = { top: 10, offset: 0, collection: null, query: null, command: null, path: null };
+  const positional = [];
+
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith('--top=')) {
+      args.top = Math.min(50, Math.max(1, parseInt(arg.slice(6), 10) || 10));
+    } else if (arg.startsWith('--offset=')) {
+      args.offset = Math.max(0, parseInt(arg.slice(9), 10) || 0);
+    } else if (arg.startsWith('--collection=')) {
+      args.collection = arg.slice(13);
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  if (positional[0] === 'collections') {
+    args.command = 'collections';
+  } else if (positional[0] === 'reactions') {
+    args.command = 'reactions';
+    args.query = positional.slice(1).join(' ') || null;
+  } else if (positional[0] === 'index') {
+    args.command = 'index';
+    args.path = positional[1] || null;
+  } else if (positional[0] === 'rm') {
+    args.command = 'rm';
+    args.path = positional[1] || null;
+  } else {
+    args.command = 'search';
+    args.query = positional.join(' ');
+  }
+
+  return args;
+}
+
+function ensureDb() {
+  if (!fs.existsSync(DB_PATH)) {
+    console.error('Search index not available yet. Try again in a moment.');
+    process.exit(1);
+  }
+  return new Database(DB_PATH, { readonly: false });
+}
+
+function sanitizeFtsQuery(query) {
+  // Remove FTS5 special characters, keep Unicode letters/numbers/spaces
+  return query.replace(/[^\w\s\u00C0-\u024F]/g, ' ').trim();
+}
+
+function searchMessages(db, query, topN, offset) {
+  const ftsQuery = sanitizeFtsQuery(query);
+  if (!ftsQuery) {
+    console.log('Query is empty after sanitization.');
+    return;
+  }
+
+  const rows = db.prepare(`
+    SELECT m.sender_name, m.content, m.timestamp, bm25(messages_fts) AS score
+    FROM messages_fts
+    JOIN messages m ON m.rowid = messages_fts.rowid
+    WHERE messages_fts MATCH ?
+    ORDER BY score
+    LIMIT ? OFFSET ?
+  `).all(ftsQuery, topN, offset);
+
+  if (rows.length === 0) {
+    console.log(`No results found for: "${query}"`);
+    return;
+  }
+
+  console.log(`Found ${rows.length} result(s) for "${query}":\n`);
+  for (const row of rows) {
+    const date = new Date(row.timestamp).toLocaleString('en-CA', {
+      timeZone: process.env.TZ || 'UTC',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    console.log(`[${date}] ${row.sender_name}:\n${row.content}\n`);
+  }
+}
+
+function searchCollection(db, query, collection, topN, offset) {
+  const ftsQuery = sanitizeFtsQuery(query);
+  if (!ftsQuery) {
+    console.log('Query is empty after sanitization.');
+    return;
+  }
+
+  const rows = db.prepare(`
+    SELECT c.title, c.content, c.source_path, bm25(collections_fts) AS score
+    FROM collections_fts
+    JOIN collections c ON c.rowid = collections_fts.rowid
+    WHERE collections_fts MATCH ? AND c.name = ?
+    ORDER BY score
+    LIMIT ? OFFSET ?
+  `).all(ftsQuery, collection, topN, offset);
+
+  if (rows.length === 0) {
+    console.log(`No results in collection '${collection}' for: "${query}"`);
+    return;
+  }
+
+  console.log(`Found ${rows.length} result(s) in '${collection}' for "${query}":\n`);
+  for (const row of rows) {
+    const snippet = row.content.slice(0, 300).replace(/\n+/g, ' ');
+    console.log(`[${row.title}]\n${snippet}...\n`);
+  }
+}
+
+function listCollections(db) {
+  const rows = db.prepare(`
+    SELECT name, COUNT(*) as doc_count
+    FROM collections
+    GROUP BY name
+    ORDER BY name
+  `).all();
+
+  if (rows.length === 0) {
+    console.log('No collections indexed.');
+    return;
+  }
+
+  console.log('Available collections:');
+  for (const row of rows) {
+    console.log(`  \u2022 ${row.name} (${row.doc_count} documents)`);
+  }
+}
+
+function indexCollection(db, collection, dirPath) {
+  if (!collection) {
+    console.error('Error: --collection=<name> is required for indexing.');
+    process.exit(1);
+  }
+  if (!dirPath) {
+    console.error('Error: path to directory is required.');
+    process.exit(1);
+  }
+  if (!fs.existsSync(dirPath)) {
+    console.error(`Error: path not found: ${dirPath}`);
+    process.exit(1);
+  }
+
+  const supportedExts = new Set(['.md', '.txt', '.csv']);
+  let files;
+
+  const stat = fs.statSync(dirPath);
+  if (stat.isFile()) {
+    files = [dirPath];
+  } else {
+    files = fs.readdirSync(dirPath)
+      .map(f => path.join(dirPath, f))
+      .filter(f => {
+        const ext = path.extname(f).toLowerCase();
+        return fs.statSync(f).isFile() && supportedExts.has(ext);
+      });
+  }
+
+  if (files.length === 0) {
+    console.log(`No supported files found in ${dirPath}`);
+    return;
+  }
+
+  const upsert = db.prepare(`
+    INSERT INTO collections (name, source_path, title, content, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(name, source_path) DO UPDATE SET
+      title = excluded.title,
+      content = excluded.content,
+      updated_at = excluded.updated_at
+  `);
+
+  const now = new Date().toISOString();
+  let indexed = 0;
+
+  const insertAll = db.transaction((fileList) => {
+    for (const filePath of fileList) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const title = path.basename(filePath);
+        upsert.run(collection, filePath, title, content, now);
+        console.log(`  \u2022 ${title} (${content.length} chars)`);
+        indexed++;
+      } catch (err) {
+        console.error(`  \u2717 ${path.basename(filePath)}: ${err.message}`);
+      }
+    }
+  });
+
+  insertAll(files);
+  console.log(`\nIndexed ${indexed} file(s) into collection '${collection}'`);
+}
+
+function searchReactions(db, query, topN, offset) {
+  if (!query) {
+    // List all reactions summary
+    const rows = db.prepare(`
+      SELECT r.emoji, COUNT(*) as count, GROUP_CONCAT(DISTINCT r.sender_name) as reactors
+      FROM reactions r
+      GROUP BY r.emoji
+      ORDER BY count DESC
+    `).all();
+
+    if (rows.length === 0) {
+      console.log('No reactions recorded.');
+      return;
+    }
+
+    console.log('Reaction summary:\n');
+    for (const row of rows) {
+      console.log(`  ${row.emoji}  ×${row.count}  — ${row.reactors}`);
+    }
+    return;
+  }
+
+  // Search: find messages reacted to by a sender or with a specific emoji
+  const rows = db.prepare(`
+    SELECT r.emoji, r.sender_name AS reactor, r.timestamp AS reaction_time,
+           m.sender_name AS author, m.content, m.timestamp AS message_time
+    FROM reactions r
+    JOIN messages m ON m.id = r.message_id
+    WHERE r.sender_name LIKE ? OR r.emoji = ?
+    ORDER BY r.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(`%${query}%`, query, topN, offset);
+
+  if (rows.length === 0) {
+    console.log(`No reactions found for: "${query}"`);
+    return;
+  }
+
+  console.log(`Found ${rows.length} reaction(s) matching "${query}":\n`);
+  for (const row of rows) {
+    const date = new Date(row.message_time).toLocaleString('en-CA', {
+      timeZone: process.env.TZ || 'UTC',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    console.log(`${row.emoji} by ${row.reactor} on [${date}] ${row.author}:\n${row.content}\n`);
+  }
+}
+
+function removeFromCollection(db, collection, filePath) {
+  if (!collection) {
+    console.error('Error: --collection=<name> is required.');
+    process.exit(1);
+  }
+
+  if (filePath) {
+    const result = db.prepare(
+      'DELETE FROM collections WHERE name = ? AND source_path = ?'
+    ).run(collection, filePath);
+    console.log(`Removed ${result.changes} document(s) from '${collection}'`);
+  } else {
+    const result = db.prepare(
+      'DELETE FROM collections WHERE name = ?'
+    ).run(collection);
+    console.log(`Removed collection '${collection}' (${result.changes} documents)`);
+  }
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+
+  if (args.command === 'search') {
+    if (!args.query) {
+      console.error('Usage: qsearch [--top=N] [--offset=N] [--collection=<name>] <query>');
+      process.exit(1);
+    }
+
+    const db = ensureDb();
+    try {
+      if (args.collection) {
+        searchCollection(db, args.query, args.collection, args.top, args.offset);
+      } else {
+        searchMessages(db, args.query, args.top, args.offset);
+      }
+    } finally {
+      db.close();
+    }
+  } else if (args.command === 'collections') {
+    const db = ensureDb();
+    try {
+      listCollections(db);
+    } finally {
+      db.close();
+    }
+  } else if (args.command === 'reactions') {
+    const db = ensureDb();
+    try {
+      searchReactions(db, args.query, args.top, args.offset);
+    } finally {
+      db.close();
+    }
+  } else if (args.command === 'index') {
+    const db = new Database(DB_PATH); // read-write for indexing
+    try {
+      indexCollection(db, args.collection, args.path);
+    } finally {
+      db.close();
+    }
+  } else if (args.command === 'rm') {
+    const db = new Database(DB_PATH);
+    try {
+      removeFromCollection(db, args.collection, args.path);
+    } finally {
+      db.close();
+    }
+  }
+}
+
+main();

@@ -40,6 +40,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  allowedSendPaths?: string[]; // Subfolders agents may send files from. Default: ["generated"]
+  blockedSendFilePatterns?: string[]; // Glob patterns that can never be sent (e.g. ["feature_requests.md", "*.db"])
 }
 
 export interface NewMessage {
@@ -81,6 +83,10 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export interface SendDocumentResult {
+  messageId: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -94,6 +100,20 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: send an image by URL with optional caption.
   sendImage?(jid: string, imageUrl: string, caption?: string): Promise<void>;
+  // Optional: send an emoji reaction to a specific message, or the latest if no key given.
+  sendReaction?(
+    chatJid: string,
+    emoji: string,
+    messageId?: string,
+  ): Promise<void>;
+  // Optional: send a local file as a document attachment. Returns the sent message ID.
+  sendDocument?(
+    jid: string,
+    filePath: string,
+    caption?: string,
+    fileName?: string,
+    mimeType?: string,
+  ): Promise<SendDocumentResult>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -1,0 +1,8 @@
+{
+  "name": "frontend-design",
+  "description": "Frontend design skill for UI/UX implementation",
+  "author": {
+    "name": "Anthropic",
+    "email": "support@anthropic.com"
+  }
+}

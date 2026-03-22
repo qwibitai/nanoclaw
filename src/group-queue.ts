@@ -59,6 +59,10 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  isActive(groupJid: string): boolean {
+    return this.groups.get(groupJid)?.active === true;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 

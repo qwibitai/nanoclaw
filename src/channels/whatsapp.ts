@@ -5,8 +5,9 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
-  WASocket,
+  WAMessageStubType,
   downloadMediaMessage,
+  WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
@@ -17,39 +18,101 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { transcribeAudio } from '../speech.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import {
   getLastGroupSync,
+  getLatestMessage,
   setLastGroupSync,
+  storeAttachment,
+  storeReaction,
   updateChatName,
+  getMessageContent,
   deleteMessages,
   deleteAllMessages,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { exportReaction } from '../search-exporter.js';
 import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
   RegisteredGroup,
+  SendDocumentResult,
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/3gpp': '.3gp',
+  'audio/ogg': '.ogg',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/aac': '.aac',
+  'application/pdf': '.pdf',
+};
+
+function getFileExtension(
+  mediaType: string,
+  normalized: proto.IMessage,
+): string {
+  const mime =
+    normalized.imageMessage?.mimetype ||
+    normalized.videoMessage?.mimetype ||
+    normalized.documentMessage?.mimetype ||
+    normalized.audioMessage?.mimetype ||
+    '';
+  if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+  // Fallback: derive from mime (e.g. "application/zip" -> ".zip")
+  const sub = mime.split('/')[1]?.split(';')[0];
+  if (sub) return `.${sub}`;
+  // Last resort by media type
+  const defaults: Record<string, string> = {
+    image: '.jpg',
+    video: '.mp4',
+    document: '.bin',
+    audio: '.ogg',
+  };
+  return defaults[mediaType] || '.bin';
+}
+
 function extractMessageText(msg: proto.IMessage | null | undefined): string {
   if (!msg) return '';
   const n = normalizeMessageContent(msg);
   if (!n) return '';
-  return (
+  // Text content from standard message types
+  const text =
     n.conversation ||
     n.extendedTextMessage?.text ||
     n.imageMessage?.caption ||
     n.videoMessage?.caption ||
-    ''
-  );
+    n.documentMessage?.caption ||
+    '';
+  if (text) return text;
+  // Fallback labels for media-only messages (no caption/text)
+  if (n.audioMessage) return '[Voice message]';
+  if (n.documentMessage)
+    return `[Document: ${n.documentMessage.fileName || 'file'}]`;
+  if (n.imageMessage) return '[Image]';
+  if (n.videoMessage) return '[Video]';
+  if (n.contactMessage)
+    return `[Contact: ${n.contactMessage.displayName || 'unknown'}]`;
+  if (n.contactsArrayMessage) {
+    const names = (n.contactsArrayMessage.contacts || [])
+      .map((c) => c.displayName || 'unknown')
+      .join(', ');
+    return `[Contacts: ${names}]`;
+  }
+  return '';
 }
 
 export interface WhatsAppChannelOpts {
@@ -226,16 +289,106 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const textContent =
+            let content =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
+              normalized.documentMessage?.caption ||
+              (normalized.contactMessage
+                ? `[Contact: ${normalized.contactMessage.displayName || 'unknown'}]`
+                : '') ||
+              (normalized.contactsArrayMessage?.contacts?.length
+                ? `[Contacts: ${(normalized.contactsArrayMessage.contacts || []).map((c) => c.displayName || 'unknown').join(', ')}]`
+                : '') ||
               '';
 
-            // Download image attachment and save to group folder so the agent can edit it
+            // Handle contact messages (vcard data is inline, not downloadable media)
             let attachmentRef = '';
-            if (normalized.imageMessage) {
+            if (normalized.contactMessage?.vcard) {
+              const group = groups[chatJid];
+              try {
+                const groupDir = resolveGroupFolderPath(group.folder);
+                const attachDir = path.join(groupDir, 'attachments');
+                fs.mkdirSync(attachDir, { recursive: true });
+                const displayName =
+                  normalized.contactMessage.displayName || 'contact';
+                const filename = `${Date.now()}-${displayName.replace(/[^a-z0-9]/gi, '_')}.vcf`;
+                fs.writeFileSync(
+                  path.join(attachDir, filename),
+                  normalized.contactMessage.vcard,
+                );
+                storeAttachment({
+                  message_id: msg.key.id || '',
+                  chat_jid: chatJid,
+                  direction: 'inbound',
+                  category: 'received',
+                  file_path: path.join(groupDir, 'attachments', filename),
+                  file_name: filename,
+                  mime_type: 'text/vcard',
+                  file_size: Buffer.byteLength(normalized.contactMessage.vcard),
+                  created_at: new Date().toISOString(),
+                });
+                attachmentRef = `\n[Contact saved: /workspace/group/attachments/${filename}]`;
+                logger.info({ chatJid, filename }, 'Contact VCF saved');
+              } catch (err) {
+                logger.warn({ err, chatJid }, 'Failed to save contact VCF');
+              }
+            } else if (normalized.contactsArrayMessage?.contacts?.length) {
+              const group = groups[chatJid];
+              try {
+                const groupDir = resolveGroupFolderPath(group.folder);
+                const attachDir = path.join(groupDir, 'attachments');
+                fs.mkdirSync(attachDir, { recursive: true });
+                const refs: string[] = [];
+                for (const contact of normalized.contactsArrayMessage
+                  .contacts) {
+                  if (!contact.vcard) continue;
+                  const displayName = contact.displayName || 'contact';
+                  const filename = `${Date.now()}-${displayName.replace(/[^a-z0-9]/gi, '_')}.vcf`;
+                  fs.writeFileSync(
+                    path.join(attachDir, filename),
+                    contact.vcard,
+                  );
+                  storeAttachment({
+                    message_id: msg.key.id || '',
+                    chat_jid: chatJid,
+                    direction: 'inbound',
+                    category: 'received',
+                    file_path: path.join(groupDir, 'attachments', filename),
+                    file_name: filename,
+                    mime_type: 'text/vcard',
+                    file_size: Buffer.byteLength(contact.vcard),
+                    created_at: new Date().toISOString(),
+                  });
+                  refs.push(`/workspace/group/attachments/${filename}`);
+                }
+                if (refs.length)
+                  attachmentRef = `\n[Contacts saved: ${refs.join(', ')}]`;
+                logger.info(
+                  { chatJid, count: refs.length },
+                  'Contact VCFs saved',
+                );
+              } catch (err) {
+                logger.warn(
+                  { err, chatJid },
+                  'Failed to save contacts array VCF',
+                );
+              }
+            }
+
+            // Download media attachments and save to group folder so the agent can access them
+            const mediaType = normalized.imageMessage
+              ? 'image'
+              : normalized.videoMessage
+                ? 'video'
+                : normalized.documentMessage
+                  ? 'document'
+                  : normalized.audioMessage && !normalized.audioMessage.ptt
+                    ? 'audio'
+                    : null;
+
+            if (mediaType) {
               const group = groups[chatJid];
               try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
@@ -243,22 +396,65 @@ export class WhatsAppChannel implements Channel {
                   const groupDir = resolveGroupFolderPath(group.folder);
                   const attachDir = path.join(groupDir, 'attachments');
                   fs.mkdirSync(attachDir, { recursive: true });
-                  const filename = `${Date.now()}.jpg`;
+
+                  const ext = getFileExtension(mediaType, normalized);
+                  const origName =
+                    normalized.documentMessage?.fileName || undefined;
+                  const filename = origName
+                    ? `${Date.now()}-${origName}`
+                    : `${Date.now()}${ext}`;
                   fs.writeFileSync(path.join(attachDir, filename), buffer);
-                  attachmentRef = `\n[Image saved: /workspace/group/attachments/${filename}]`;
-                  logger.info({ chatJid, filename }, 'Image attachment saved');
+
+                  storeAttachment({
+                    message_id: msg.key.id || '',
+                    chat_jid: chatJid,
+                    direction: 'inbound',
+                    category: 'received',
+                    file_path: path.join(groupDir, 'attachments', filename),
+                    file_name: origName ?? filename,
+                    mime_type:
+                      normalized.imageMessage?.mimetype ||
+                      normalized.videoMessage?.mimetype ||
+                      normalized.documentMessage?.mimetype ||
+                      normalized.audioMessage?.mimetype ||
+                      undefined,
+                    file_size: buffer.length,
+                    created_at: new Date().toISOString(),
+                  });
+
+                  const label =
+                    mediaType === 'image'
+                      ? 'Image'
+                      : mediaType === 'video'
+                        ? 'Video'
+                        : mediaType === 'document'
+                          ? 'Document'
+                          : 'Audio';
+                  attachmentRef += `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+
+                  // For PDFs, add pdf-reader usage hint
+                  if (
+                    normalized.documentMessage?.mimetype === 'application/pdf'
+                  ) {
+                    const sizeKB = Math.round(buffer.length / 1024);
+                    attachmentRef += `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
+                  }
+                  logger.info(
+                    { chatJid, filename, mediaType },
+                    'Media attachment saved',
+                  );
                 }
               } catch (err) {
                 logger.warn(
-                  { err, chatJid },
-                  'Failed to download image attachment',
+                  { err, chatJid, mediaType },
+                  'Failed to download media attachment',
                 );
               }
             }
 
-            // Transcribe voice notes
+            // Transcribe audio messages (voice notes and forwarded audio)
             let voiceTranscript = '';
-            if (normalized.audioMessage?.ptt) {
+            if (normalized.audioMessage) {
               try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
                 if (buffer instanceof Buffer) {
@@ -276,10 +472,21 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            const content = textContent + attachmentRef + voiceTranscript;
+            content = content + attachmentRef + voiceTranscript;
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content.trim()) continue;
+
+            // Voice messages are stored after transcription, which can take several
+            // seconds. During that time, other messages may arrive and advance the
+            // DB cursor past the voice message's WA send timestamp, causing it to be
+            // permanently missed. Use the current time so the stored timestamp is
+            // always >= any messages processed concurrently during transcription.
+            const effectiveTimestamp = voiceTranscript
+              ? new Date(
+                  Math.max(Number(msg.messageTimestamp) * 1000, Date.now()),
+                ).toISOString()
+              : timestamp;
 
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
@@ -296,7 +503,9 @@ export class WhatsAppChannel implements Channel {
             const contextInfo =
               normalized.extendedTextMessage?.contextInfo ||
               normalized.imageMessage?.contextInfo ||
-              normalized.videoMessage?.contextInfo;
+              normalized.videoMessage?.contextInfo ||
+              normalized.documentMessage?.contextInfo ||
+              normalized.audioMessage?.contextInfo;
 
             let quoted_content: string | undefined;
             let quoted_sender_name: string | undefined;
@@ -338,13 +547,78 @@ export class WhatsAppChannel implements Channel {
         deleteAllMessages(event.jid);
         logger.info({ jid: event.jid }, 'Cleared all messages for chat');
       } else {
-        // Specific messages deleted (delete for me or delete for everyone)
+        // Specific messages deleted (delete for me)
         const keys = event.keys
           .filter((k) => k.id && k.remoteJid)
           .map((k) => ({ id: k.id!, chatJid: k.remoteJid! }));
         if (keys.length > 0) {
+          this.markAttachmentsDeleted(keys);
           deleteMessages(keys);
           logger.info({ count: keys.length }, 'Deleted messages from DB');
+        }
+      }
+    });
+
+    // "Delete for everyone" arrives as a messages.update with REVOKE stub
+    this.sock.ev.on('messages.update', (updates) => {
+      for (const update of updates) {
+        if (update.update?.messageStubType !== WAMessageStubType.REVOKE)
+          continue;
+        const key = update.key;
+        if (!key.id || !key.remoteJid) continue;
+        const chatJid = key.remoteJid;
+        const id = key.id;
+        this.markAttachmentsDeleted([{ id, chatJid }]);
+        deleteMessages([{ id, chatJid }]);
+        logger.info({ chatJid, id }, 'Message revoked (delete for everyone)');
+      }
+    });
+
+    this.sock.ev.on('messages.reaction', (reactions) => {
+      const groups = this.opts.registeredGroups();
+      for (const { key, reaction } of reactions) {
+        const chatJid = key.remoteJid;
+        if (!chatJid || !key.id) continue;
+        const group = groups[chatJid];
+        if (!group) continue;
+        const sender =
+          reaction.key?.participant || reaction.key?.remoteJid || '';
+        const emoji = reaction.text || null;
+        const timestamp = reaction.senderTimestampMs
+          ? new Date(Number(reaction.senderTimestampMs)).toISOString()
+          : new Date().toISOString();
+        // Write to messages.db (host-side, for IPC/StatusTracker)
+        storeReaction({
+          message_id: key.id,
+          message_chat_jid: chatJid,
+          reactor_jid: sender,
+          reactor_name: sender.split('@')[0],
+          emoji: emoji ?? '',
+          timestamp,
+        });
+        // Write to search.db (container-side, for qsearch)
+        exportReaction(group.folder, {
+          message_id: key.id,
+          sender,
+          sender_name: sender.split('@')[0],
+          emoji,
+          timestamp,
+        });
+        logger.info(
+          { chatJid, messageId: key.id, emoji, sender },
+          emoji ? 'Reaction saved' : 'Reaction removed',
+        );
+      }
+    });
+
+    this.sock.ev.on('groups.upsert', (groups) => {
+      for (const group of groups) {
+        if (group.id && group.subject) {
+          updateChatName(group.id, group.subject);
+          logger.info(
+            { jid: group.id, name: group.subject },
+            'New group detected, metadata saved',
+          );
         }
       }
     });
@@ -400,6 +674,60 @@ export class WhatsAppChannel implements Channel {
       image: buffer,
       caption: caption ?? '',
     });
+  }
+
+  async sendReaction(
+    chatJid: string,
+    emoji: string,
+    messageId?: string,
+  ): Promise<void> {
+    if (!this.connected) throw new Error('Not connected to WhatsApp');
+    let msgId = messageId;
+    let fromMe = false;
+    if (!msgId) {
+      const latest = getLatestMessage(chatJid);
+      if (!latest) throw new Error(`No messages found for chat ${chatJid}`);
+      msgId = latest.id;
+      fromMe = latest.fromMe;
+    }
+    const messageKey = { id: msgId, remoteJid: chatJid, fromMe };
+    try {
+      await this.sock.sendMessage(chatJid, {
+        react: { text: emoji, key: messageKey },
+      });
+      logger.info(
+        {
+          chatJid,
+          messageId: msgId.slice(0, 10) + '...',
+          emoji: emoji || '(removed)',
+        },
+        emoji ? 'Reaction sent' : 'Reaction removed',
+      );
+    } catch (err) {
+      logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
+      throw err;
+    }
+  }
+
+  async sendDocument(
+    jid: string,
+    filePath: string,
+    caption?: string,
+    fileName?: string,
+    mimeType?: string,
+  ): Promise<SendDocumentResult> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const buffer = fs.readFileSync(filePath);
+    const result = await this.sock.sendMessage(jid, {
+      document: buffer,
+      mimetype: mimeType ?? 'application/octet-stream',
+      fileName: fileName ?? path.basename(filePath),
+      caption: caption ?? '',
+    });
+    const messageId = result?.key?.id;
+    if (!messageId)
+      throw new Error('Baileys did not return a message ID for sent document');
+    return { messageId };
   }
 
   isConnected(): boolean {
@@ -462,6 +790,41 @@ export class WhatsAppChannel implements Channel {
       logger.info({ count }, 'Group metadata synced');
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
+    }
+  }
+
+  private markAttachmentsDeleted(
+    keys: { id: string; chatJid: string }[],
+  ): void {
+    const groups = this.opts.registeredGroups();
+    for (const { id, chatJid } of keys) {
+      const group = groups[chatJid];
+      if (!group) continue;
+      const content = getMessageContent(id, chatJid);
+      if (!content) continue;
+      const match = content.match(
+        /\[(?:Image|Video|Document|Audio) saved: \/workspace\/group\/attachments\/(.+?)\]/,
+      );
+      if (!match) continue;
+      const filename = match[1];
+      const groupDir = resolveGroupFolderPath(group.folder);
+      const filePath = path.join(groupDir, 'attachments', filename);
+      const deletedPath = path.join(
+        groupDir,
+        'attachments',
+        `deleted-${filename}`,
+      );
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.renameSync(filePath, deletedPath);
+          logger.info({ chatJid, filename }, 'Attachment renamed as deleted');
+        }
+      } catch (err) {
+        logger.warn(
+          { err, chatJid, filename },
+          'Failed to rename deleted attachment',
+        );
+      }
     }
   }
 

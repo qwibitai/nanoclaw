@@ -44,16 +44,38 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Searching Conversation History
+
+Use the search skill to find past messages or document collections.
+
+ALWAYS use this before saying you don't remember something. Be proactive: if a user shares important reference material, save it to a local markdown file and index it without asking for permission.
+
+Commands:
+• qsearch "topic" — search message history
+• qsearch --top=20 --offset=20 "topic" — paginate results
+• qsearch --collection=name "topic" — search a collection
+• qsearch collections — list available collections
+• qsearch reactions — reaction summary (emoji counts and who reacted)
+• qsearch reactions "sender or emoji" — find messages a person reacted to
+• qsearch index --collection=name /workspace/group/collections/name/ — index docs
+• qsearch rm --collection=name [path] — unindex docs
+
+Results include sender, date, and content.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
-- *single asterisks* for bold (NEVER **double asterisks**)
+
+- _single asterisks_ for bold (NEVER **double asterisks**)
 - _underscores_ for italic
 - • bullet points
-- ```triple backticks``` for code
+- `triple backticks` for code
+
+No markdown tables.
 
 No ## headings. No [links](url). No **double stars**.

@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium and PDF tools
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -24,7 +24,12 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Set locale to UTF-8 so file writes default to UTF-8 encoding
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -42,11 +47,22 @@ COPY agent-runner/package*.json ./
 # Install dependencies
 RUN npm install
 
+# Install better-sqlite3 for qsearch CLI (conversation search)
+RUN npm install better-sqlite3
+
+# Install qsearch CLI (per-group conversation search)
+COPY skills/search/qsearch /usr/local/bin/qsearch
+RUN chmod +x /usr/local/bin/qsearch
+
 # Copy source code
 COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install pdf-reader CLI
+COPY skills/pdf-reader/pdf-reader /usr/local/bin/pdf-reader
+RUN chmod +x /usr/local/bin/pdf-reader
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

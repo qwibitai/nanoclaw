@@ -14,6 +14,15 @@ import {
 
 let db: Database.Database;
 
+export interface Reaction {
+  message_id: string;
+  message_chat_jid: string;
+  reactor_jid: string;
+  reactor_name?: string;
+  emoji: string;
+  timestamp: string;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -82,6 +91,35 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      message_id TEXT NOT NULL,
+      message_chat_jid TEXT NOT NULL,
+      reactor_jid TEXT NOT NULL,
+      reactor_name TEXT,
+      emoji TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      PRIMARY KEY (message_id, message_chat_jid, reactor_jid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, message_chat_jid);
+    CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
+    CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
+    CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id  TEXT    NOT NULL,
+      chat_jid    TEXT    NOT NULL,
+      direction   TEXT    NOT NULL CHECK(direction IN ('inbound','outbound')),
+      category    TEXT    NOT NULL CHECK(category IN ('received','generated')),
+      file_path   TEXT    NOT NULL,
+      file_name   TEXT    NOT NULL,
+      mime_type   TEXT,
+      file_size   INTEGER,
+      created_at  TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, chat_jid);
+    CREATE INDEX IF NOT EXISTS idx_attachments_chat    ON attachments(chat_jid, created_at);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -130,6 +168,51 @@ function createSchema(database: Database.Database): void {
     database.exec(`ALTER TABLE messages ADD COLUMN quoted_sender_name TEXT`);
   } catch {
     /* column already exists */
+  }
+
+  // Add group_settings column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN group_settings TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Drop FK constraint from attachments table if it exists (migration for existing DBs)
+  // The provisional temp IDs used before send don't exist in messages, so the FK fails.
+  try {
+    const hasFK =
+      (
+        database
+          .prepare(
+            `SELECT sql FROM sqlite_master WHERE type='table' AND name='attachments'`,
+          )
+          .get() as { sql: string } | undefined
+      )?.sql ?? '';
+    if (hasFK.includes('FOREIGN KEY')) {
+      database.exec(`
+        CREATE TABLE attachments_new (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id  TEXT    NOT NULL,
+          chat_jid    TEXT    NOT NULL,
+          direction   TEXT    NOT NULL CHECK(direction IN ('inbound','outbound')),
+          category    TEXT    NOT NULL CHECK(category IN ('received','generated')),
+          file_path   TEXT    NOT NULL,
+          file_name   TEXT    NOT NULL,
+          mime_type   TEXT,
+          file_size   INTEGER,
+          created_at  TEXT    NOT NULL
+        );
+        INSERT INTO attachments_new SELECT id,message_id,chat_jid,direction,category,file_path,file_name,mime_type,file_size,created_at FROM attachments;
+        DROP TABLE attachments;
+        ALTER TABLE attachments_new RENAME TO attachments;
+        CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, chat_jid);
+        CREATE INDEX IF NOT EXISTS idx_attachments_chat    ON attachments(chat_jid, created_at);
+      `);
+    }
+  } catch {
+    /* migration already applied or table doesn't exist yet */
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -273,6 +356,16 @@ export function setLastGroupSync(): void {
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */
+export function getMessageContent(
+  id: string,
+  chatJid: string,
+): string | undefined {
+  const row = db
+    .prepare(`SELECT content FROM messages WHERE id = ? AND chat_jid = ?`)
+    .get(id, chatJid) as { content: string } | undefined;
+  return row?.content;
+}
+
 export function deleteMessages(keys: { id: string; chatJid: string }[]): void {
   const del = db.prepare(`DELETE FROM messages WHERE id = ? AND chat_jid = ?`);
   const run = db.transaction(() => {
@@ -583,6 +676,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        group_settings: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -593,6 +687,9 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  const groupSettings = row.group_settings
+    ? JSON.parse(row.group_settings)
+    : {};
   return {
     jid: row.jid,
     name: row.name,
@@ -605,6 +702,8 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    allowedSendPaths: groupSettings.allowedSendPaths,
+    blockedSendFilePatterns: groupSettings.blockedSendFilePatterns,
   };
 }
 
@@ -612,9 +711,19 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
+  const groupSettings: Record<string, unknown> = {};
+  if (group.allowedSendPaths !== undefined)
+    groupSettings.allowedSendPaths = group.allowedSendPaths;
+  if (group.blockedSendFilePatterns !== undefined)
+    groupSettings.blockedSendFilePatterns = group.blockedSendFilePatterns;
+  const groupSettingsJson =
+    Object.keys(groupSettings).length > 0
+      ? JSON.stringify(groupSettings)
+      : null;
+
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_settings)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -624,6 +733,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    groupSettingsJson,
   );
 }
 
@@ -637,6 +747,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    group_settings: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -647,6 +758,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    const groupSettings = row.group_settings
+      ? JSON.parse(row.group_settings)
+      : {};
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
@@ -658,6 +772,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      allowedSendPaths: groupSettings.allowedSendPaths,
+      blockedSendFilePatterns: groupSettings.blockedSendFilePatterns,
     };
   }
   return result;
@@ -723,4 +839,102 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; fromMe: boolean } | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
+  if (!row) return undefined;
+  return { id: row.id, fromMe: row.is_from_me === 1 };
+}
+
+// --- Attachment tracking ---
+
+export interface AttachmentRecord {
+  id?: number;
+  message_id: string;
+  chat_jid: string;
+  direction: 'inbound' | 'outbound';
+  category: 'received' | 'generated';
+  file_path: string;
+  file_name: string;
+  mime_type?: string;
+  file_size?: number;
+  created_at: string;
+}
+
+export function storeAttachment(record: Omit<AttachmentRecord, 'id'>): void {
+  db.prepare(
+    `INSERT INTO attachments (message_id, chat_jid, direction, category, file_path, file_name, mime_type, file_size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    record.message_id,
+    record.chat_jid,
+    record.direction,
+    record.category,
+    record.file_path,
+    record.file_name,
+    record.mime_type ?? null,
+    record.file_size ?? null,
+    record.created_at,
+  );
+}
+
+export function updateAttachmentMessageId(
+  tempId: string,
+  chatJid: string,
+  realMessageId: string,
+): void {
+  db.prepare(
+    `UPDATE attachments SET message_id = ? WHERE message_id = ? AND chat_jid = ?`,
+  ).run(realMessageId, tempId, chatJid);
+}
+
+export function getAttachmentsForMessage(
+  messageId: string,
+  chatJid: string,
+): AttachmentRecord[] {
+  return db
+    .prepare(
+      `SELECT * FROM attachments WHERE message_id = ? AND chat_jid = ? ORDER BY created_at ASC`,
+    )
+    .all(messageId, chatJid) as AttachmentRecord[];
+}
+
+export function getGeneratedFilesForChat(
+  chatJid: string,
+  limit = 50,
+): AttachmentRecord[] {
+  return db
+    .prepare(
+      `SELECT * FROM attachments WHERE chat_jid = ? AND category = 'generated' ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(chatJid, limit) as AttachmentRecord[];
+}
+
+// --- Reactions ---
+
+export function storeReaction(reaction: Reaction): void {
+  if (!reaction.emoji) {
+    db.prepare(
+      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
+    ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
+    return;
+  }
+  db.prepare(
+    `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    reaction.message_id,
+    reaction.message_chat_jid,
+    reaction.reactor_jid,
+    reaction.reactor_name || null,
+    reaction.emoji,
+    reaction.timestamp,
+  );
 }
