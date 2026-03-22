@@ -1114,6 +1114,41 @@ describe('GitHubChannel sender allowlist', () => {
     expect(opts.onMessage).toHaveBeenCalled();
   });
 
+  it('delivers events from the bot username even when not in allowlist', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(
+      SECRET,
+      0,
+      'test-token',
+      ['alice'],
+      opts,
+      'my-bot',
+    );
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'pull_request',
+      secret: SECRET,
+      payload: {
+        action: 'opened',
+        repository: { full_name: 'cmraible/seb' },
+        pull_request: {
+          number: 42,
+          title: 'Auto-fix',
+          html_url: 'https://github.com/cmraible/seb/pull/42',
+          user: { login: 'my-bot' },
+          head: { ref: 'fix/auto' },
+          base: { ref: 'main' },
+          body: '',
+        },
+        sender: { login: 'my-bot' },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalled();
+  });
+
   it('supports multiple allowed senders', async () => {
     opts = createTestOpts();
     channel = new GitHubChannel(

@@ -334,7 +334,8 @@ export class GitHubChannel implements Channel {
       if (
         event !== 'check_suite' &&
         this.allowedSenders &&
-        !this.allowedSenders.has(senderName)
+        !this.allowedSenders.has(senderName) &&
+        senderName !== this.botUsername
       ) {
         logger.debug(
           { sender: senderName, event },
