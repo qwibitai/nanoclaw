@@ -19,7 +19,6 @@ Git and gh CLI are authenticated.
 2. NEVER merge your own PR. The user must review and merge.
 3. Always create a PR, even for small changes.
 4. Branch protection and a pre-push hook enforce this -- direct pushes to main will be rejected.
-5. ALWAYS notify the user when you finish a task, with a summary and PR link.
 
 ## Workflow
 
@@ -76,15 +75,13 @@ Created by NanoClaw agent via /self-modify" \
   --base main
 ```
 
-### Step 5: Report to user (REQUIRED)
+### Step 5: Report to user
 
-**Always** send a message to the user with:
+Tell the user:
 - What was changed and why
 - Link to the PR
 - That they need to review and merge
 - NanoClaw will auto-restart after merge (with changelog in the restart notification)
-
-This step is mandatory. Never complete a task silently.
 
 ### Step 6: Address review feedback
 
