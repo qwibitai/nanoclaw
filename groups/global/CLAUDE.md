@@ -134,69 +134,39 @@ You have MCP tools to manage scheduled tasks. **Always use these when asked abou
 - When users ask "what tasks do I have?" or "what's scheduled?", call `list_tasks` — don't guess from memory
 - Task IDs look like `task-1774069372084-otdh3j`
 
+## Project Management
+
+Use **Linear** for all project tracking — issues, status, roadmaps, bugs, and next steps. Do NOT maintain project briefs in `/knowledge/projects/`. When asked about a project's status or what's next, check Linear first.
+
+The `linear` skill is available at `~/.claude/skills/linear/`. Use it via:
+```bash
+python3 ~/.claude/skills/linear/linear.py <command>
+```
+
+Key commands:
+- `projects` — list all projects
+- `project-status "name"` — progress summary with issue breakdown
+- `issues --project "name"` — list issues for a project
+- `create` — create a new issue
+- `update PROJ-42` — update state, priority, or description
+
+When someone asks "what's next on X?" or "what's the status of Y?", run `project-status` on Linear rather than reading a local file.
+
+**What goes in Linear:** project status, roadmaps, user stories, bugs, sprint planning, next steps.
+
 ## Knowledge Base
 
 You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to store and retrieve information that should persist across conversations.
 
 ### Structure
 - `people/` — people you learn about (one file per person)
-- `projects/` — ongoing work, goals, status
 - `preferences/` — user preferences, communication style
 - `decisions/` — key decisions and their rationale
 - `reference/` — facts, links, resources
 
+**Don't use `knowledge/projects/`** — project tracking lives in Linear now.
+
 ### What to save
-
-**Project briefs (most important):**
-- Every project gets a living brief at `projects/{name}.md` — treat these like lightweight PRDs
-- Structure:
-  ```
-  # Project Name
-  **Repo:** github.com/...
-  **Stack:** Next.js, Vercel, Postgres
-  **Status:** Active / On hold / Done
-  **Owner:** who asked for this
-
-  ## What it is
-  One paragraph — what problem this solves, who it's for.
-
-  ## User stories
-  - As a user, I can see my dashboard with real-time stats
-  - As an admin, I can invite team members
-  - ~As a user, I can export to CSV~ (done Mar 20)
-
-  ## Current state
-  What's working, what's deployed, what's broken.
-
-  ## Next up
-  What we'd work on next session.
-
-  ## Key decisions
-  - Chose Vercel over AWS because of deploy speed (Mar 15)
-  ```
-- Strike through completed user stories rather than deleting them — it shows progress
-- For projects with enough scope, also maintain a `projects/{name}/ROADMAP.md`:
-  ```
-  # Roadmap — Project Name
-
-  ## Done
-  - [x] Basic dashboard with stats (Mar 15)
-  - [x] CSV export (Mar 20)
-
-  ## In Progress
-  - [ ] Auth — invite team members via email
-
-  ## Planned
-  - [ ] Real-time WebSocket updates
-  - [ ] Mobile-responsive layout
-
-  ## Icebox
-  - [ ] SSO integration (nice to have, not urgent)
-  ```
-- Move items between sections as they progress — this is the single source of truth for "what's next"
-- The brief (`projects/{name}.md`) explains *what and why*; the roadmap tracks *where we are*
-- Update the brief each session you touch the project
-- Keep it scannable — someone should understand the project in 30 seconds
 
 **People** — name, role, preferences. One file per person, update when you learn more.
 
@@ -204,20 +174,16 @@ You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to
 
 **Preferences** — communication style, tools they like, things they've told you to do/avoid
 
-**Don't save:** routine chit-chat, obvious facts, anything already in chat history.
+**Don't save:** project status, roadmaps, issue lists — use Linear for those. Also skip routine chit-chat, obvious facts, anything already in chat history.
 
 ### How to save
-- One concept per file, descriptive filename (e.g., `people/alex.md`, `projects/stoke-dashboard.md`)
+- One concept per file, descriptive filename (e.g., `people/alex.md`)
 - Keep notes short — a few lines, not essays
 - Use simple YAML frontmatter: `title`, `updated`, `tags`
-- Use `[[wiki-links]]` to connect related notes
 - Commit after changes
 
-### Before working on a project
-When someone mentions a project or asks you to work on something, check `knowledge/projects/` for a matching brief before asking them to explain it. Run `ls knowledge/projects/` to see what you know about, then read the relevant file. Don't read everything upfront — only load what's relevant to the current conversation.
-
 ### At conversation end
-Did you work on a project? **Update its file with current status and next steps.** Did you learn something new about a person, decision, or preference? Save it. If nothing stands out, skip it.
+Did you learn something new about a person, decision, or preference? Save it. If nothing stands out, skip it.
 
 ## Use Subagents for Complex Tasks
 
