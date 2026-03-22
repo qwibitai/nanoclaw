@@ -57,6 +57,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
+import { parseFaqFromClaudeMd, tryFaqShortCircuit } from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -221,6 +222,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+
+  // FAQ short-circuit — answer static questions without spawning a container.
+  // Saves the full container lifecycle cost for address/payment/parking queries.
+  const faqData = parseFaqFromClaudeMd(group.folder);
+  if (faqData) {
+    const faqAnswer = tryFaqShortCircuit(missedMessages, faqData);
+    if (faqAnswer) {
+      logger.info(
+        { group: group.name },
+        'FAQ short-circuit: answered without container',
+      );
+      await channel.sendMessage(chatJid, faqAnswer);
+      await channel.setTyping?.(chatJid, false);
+      return true;
+    }
+  }
+
   let hadError = false;
   let outputSentToUser = false;
 
