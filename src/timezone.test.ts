@@ -11,6 +11,7 @@ describe('formatLocalTime', () => {
       '2026-02-04T18:30:00.000Z',
       'America/New_York',
     );
+    expect(result).toContain('Wednesday');
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('Feb');
