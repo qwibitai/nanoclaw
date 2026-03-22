@@ -21,16 +21,14 @@ if [[ -n "$SOURCE_IMAGE" ]]; then
     -H "Authorization: Bearer $OPENAI_API_KEY" \
     -F "model=gpt-image-1" \
     -F "image=@${SOURCE_IMAGE}" \
-    -F "prompt=${PROMPT}" \
-    -F "response_format=b64_json")
+    -F "prompt=${PROMPT}")
 else
   # Text-to-image via gpt-image-1
   PAYLOAD=$(python3 -c "
 import json, sys
 print(json.dumps({
     'model': 'gpt-image-1',
-    'prompt': sys.argv[1],
-    'response_format': 'b64_json'
+    'prompt': sys.argv[1]
 }))
 " "$PROMPT")
 
