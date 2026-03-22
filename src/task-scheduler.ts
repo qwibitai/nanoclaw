@@ -13,7 +13,7 @@ import {
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
-} from './db.js';
+} from './db/index.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { createCorrelationLogger, logger } from './logger.js';

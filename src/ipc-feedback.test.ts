@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
-import { _initTestDatabase, setRegisteredGroup } from './db.js';
+import { _initTestDatabase, setRegisteredGroup } from './db/index.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 

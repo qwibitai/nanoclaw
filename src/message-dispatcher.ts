@@ -18,7 +18,7 @@ import {
   getNewMessages,
   deleteSession,
   setSession,
-} from './db.js';
+} from './db/index.js';
 import { findChannel, formatMessages } from './router.js';
 import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import { RegisteredGroup } from './types.js';

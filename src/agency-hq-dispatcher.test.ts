@@ -8,7 +8,7 @@ vi.mock('./task-scheduler.js', async (importOriginal) => {
   };
 });
 
-import { _initTestDatabase } from './db.js';
+import { _initTestDatabase } from './db/index.js';
 import {
   _testInternals,
   startDispatchLoop,

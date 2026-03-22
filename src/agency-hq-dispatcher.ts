@@ -4,7 +4,7 @@ import {
   STALL_DETECTOR_INTERVAL,
   STALL_THRESHOLD_MS,
 } from './config.js';
-import { completeStaleTasksByPrefix, createTask } from './db.js';
+import { completeStaleTasksByPrefix, createTask } from './db/index.js';
 import { createCorrelationLogger, logger } from './logger.js';
 import { SchedulerDependencies, runScheduledTask } from './task-scheduler.js';
 

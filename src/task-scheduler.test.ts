@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { _initTestDatabase } from './db.js';
+import { _initTestDatabase } from './db/index.js';
 import { computeNextRun } from './task-scheduler.js';
 
 describe('task scheduler', () => {
