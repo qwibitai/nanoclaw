@@ -940,8 +940,8 @@ export class LinearChannel implements Channel {
     // Check for active agent session — respond via session activity instead of comment
     const sessionId = this.activeAgentSessions.get(jid);
     if (sessionId) {
+      const activity = parseActivityType(text);
       try {
-        const activity = parseActivityType(text);
         await this.postAgentActivity(
           sessionId,
           token,
