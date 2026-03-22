@@ -60,10 +60,29 @@ python3 "$LINEAR_API" create \
   --title "Fix the login bug" \
   --description "Users can't log in after password reset" \
   --priority 2 \
-  --state "Todo"
+  --state "Todo" \
+  --project "My Project"   # optional: assign to a project
 ```
 
 Priority levels: 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low
+
+### Bulk-create issues from JSON
+```bash
+# From a file
+python3 "$LINEAR_API" bulk-create --team ENG --project "Purrogue" --file issues.json
+
+# From stdin (pipe from Claude output or script)
+echo '[{"title":"Add screen shake","priority":2,"state":"Backlog"}]' | \
+  python3 "$LINEAR_API" bulk-create --team ENG --project "Purrogue"
+```
+
+JSON format:
+```json
+[
+  {"title": "...", "description": "...", "priority": 2, "state": "Backlog"},
+  {"title": "...", "priority": 3}
+]
+```
 
 ### Update an issue
 ```bash
@@ -101,6 +120,45 @@ Example:
 ```bash
 python3 "$LINEAR_API" create --team ENG --title "Add CSV export" --description "As a user, I can export data to CSV from the dashboard" --priority 3 --state "Backlog"
 ```
+
+## Workflow: Building a 2-Month Roadmap
+
+Use this when populating a new project or fleshing out a sparse backlog.
+
+**Step 1 — Audit what exists:**
+```bash
+python3 "$LINEAR_API" project-status "Project Name"
+```
+Note: what milestones are covered, which priorities are missing, what state types are over/under-represented.
+
+**Step 2 — Define milestone structure (in your head or a file):**
+- Month 1, Week 1-2: Core game feel / foundation
+- Month 1, Week 3-4: Content depth
+- Month 2, Week 1-2: Balance + progression
+- Month 2, Week 3-4: Polish + launch prep
+
+**Step 3 — Identify gaps and generate issues:**
+Based on the audit, decide what's missing per milestone. Create issues as JSON:
+
+```json
+[
+  {"title": "Add screen shake on hit", "description": "Juice: camera shake when the player takes damage. Magnitude ~5px, duration 300ms.", "priority": 2, "state": "Backlog"},
+  {"title": "Enemy intent display", "description": "Show what the enemy will do next turn (attack/defend/buff icon above HP bar).", "priority": 2, "state": "Backlog"}
+]
+```
+
+**Step 4 — Bulk-create:**
+```bash
+python3 "$LINEAR_API" bulk-create --team ENG --project "Purrogue" --file issues.json
+```
+
+**Step 5 — Prioritize:**
+- Urgent (1): Bugs blocking the core loop
+- High (2): Month 1 features
+- Medium (3): Month 2 features
+- Low (4): Nice-to-haves / icebox
+
+**Repeat steps 1-4 until each milestone has 5-10 well-defined issues.**
 
 ## Output Formatting
 

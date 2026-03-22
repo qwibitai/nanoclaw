@@ -189,6 +189,21 @@ def get_team_id(team_key):
     return teams[0]["id"]
 
 
+def get_project_id(name):
+    data = gql("""
+    query($filter: ProjectFilter) { projects(filter: $filter) { nodes { id name } } }
+    """, {"filter": {"name": {"containsIgnoreCase": name}}})
+    projects = data["projects"]["nodes"]
+    if not projects:
+        print(f"Project '{name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    if len(projects) > 1:
+        names = ", ".join(p["name"] for p in projects)
+        print(f"Ambiguous project name '{name}'. Matches: {names}", file=sys.stderr)
+        sys.exit(1)
+    return projects[0]["id"]
+
+
 def get_state_id(team_id, state_name):
     data = gql("""
     query($teamId: ID!) {
@@ -222,16 +237,19 @@ def cmd_create(args):
         variables["priority"] = args.priority
     if args.state:
         variables["stateId"] = get_state_id(team_id, args.state)
+    if args.project:
+        variables["projectId"] = get_project_id(args.project)
 
     data = gql("""
     mutation($teamId: String!, $title: String!, $description: String,
-             $priority: Int, $stateId: String) {
+             $priority: Int, $stateId: String, $projectId: String) {
       issueCreate(input: {
         teamId: $teamId
         title: $title
         description: $description
         priority: $priority
         stateId: $stateId
+        projectId: $projectId
       }) {
         success
         issue { id identifier title url state { name } priority }
@@ -248,6 +266,66 @@ def cmd_create(args):
     else:
         print("Failed to create issue.", file=sys.stderr)
         sys.exit(1)
+
+
+# ── bulk-create ────────────────────────────────────────────────────────────────
+
+def cmd_bulk_create(args):
+    """Create multiple issues from a JSON array.
+
+    Input JSON format (file or stdin):
+    [
+      {"title": "...", "description": "...", "priority": 2, "state": "Backlog"},
+      ...
+    ]
+    """
+    if args.file and args.file != "-":
+        with open(args.file) as f:
+            issues = json.load(f)
+    else:
+        issues = json.load(sys.stdin)
+
+    if not isinstance(issues, list):
+        print("Input must be a JSON array of issue objects.", file=sys.stderr)
+        sys.exit(1)
+
+    team_id = get_team_id(args.team)
+    project_id = get_project_id(args.project) if args.project else None
+
+    created = 0
+    for item in issues:
+        variables = {"teamId": team_id, "title": item["title"]}
+        if item.get("description"):
+            variables["description"] = item["description"]
+        if item.get("priority") is not None:
+            variables["priority"] = item["priority"]
+        if item.get("state"):
+            variables["stateId"] = get_state_id(team_id, item["state"])
+        if project_id:
+            variables["projectId"] = project_id
+
+        data = gql("""
+        mutation($teamId: String!, $title: String!, $description: String,
+                 $priority: Int, $stateId: String, $projectId: String) {
+          issueCreate(input: {
+            teamId: $teamId title: $title description: $description
+            priority: $priority stateId: $stateId projectId: $projectId
+          }) {
+            success
+            issue { identifier title url priority state { name } }
+          }
+        }
+        """, variables)
+        result = data["issueCreate"]
+        if result["success"]:
+            issue = result["issue"]
+            priority = PRIORITY_LABELS.get(issue["priority"], "?")
+            print(f"  ✓ [{issue['identifier']}] {issue['title']} [{priority}]")
+            created += 1
+        else:
+            print(f"  ✗ Failed: {item['title']}", file=sys.stderr)
+
+    print(f"\nCreated {created}/{len(issues)} issues.")
 
 
 # ── update ─────────────────────────────────────────────────────────────────────
@@ -423,6 +501,13 @@ def main():
     p_create.add_argument("--priority", type=int, choices=[0, 1, 2, 3, 4],
                           help="0=None 1=Urgent 2=High 3=Medium 4=Low")
     p_create.add_argument("--state", help="State name (e.g. Todo, Backlog, In Progress)")
+    p_create.add_argument("--project", help="Project name to assign the issue to")
+
+    p_bulk = sub.add_parser("bulk-create", help="Create multiple issues from JSON")
+    p_bulk.add_argument("--team", required=True, help="Team key (e.g. ENG)")
+    p_bulk.add_argument("--project", help="Project name to assign all issues to")
+    p_bulk.add_argument("--file", default="-",
+                        help="JSON file path, or - to read from stdin (default)")
 
     p_update = sub.add_parser("update", help="Update an issue")
     p_update.add_argument("id", help="Issue identifier (e.g. ENG-42)")
@@ -449,6 +534,7 @@ def main():
         "issues": cmd_issues,
         "issue": cmd_issue,
         "create": cmd_create,
+        "bulk-create": cmd_bulk_create,
         "update": cmd_update,
         "comment": cmd_comment,
         "search": cmd_search,
