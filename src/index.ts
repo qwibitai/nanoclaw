@@ -1,9 +1,11 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -469,7 +471,73 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquirePidLock(): void {
+  const pidFile = path.join(DATA_DIR, 'nanoclaw.pid');
+
+  try {
+    const existing = fs.readFileSync(pidFile, 'utf-8').trim();
+    const existingPid = parseInt(existing, 10);
+    if (!isNaN(existingPid) && existingPid !== process.pid) {
+      if (isProcessAlive(existingPid)) {
+        // Another instance is running — ask it to stop and wait for it to exit
+        // so this instance can take over cleanly (handles `systemctl restart`).
+        logger.warn(
+          { existingPid },
+          'Existing instance found, sending SIGTERM and waiting up to 15s...',
+        );
+        try {
+          process.kill(existingPid, 'SIGTERM');
+        } catch {
+          /* ignore */
+        }
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline && isProcessAlive(existingPid)) {
+          try {
+            execSync('sleep 0.5');
+          } catch {
+            break;
+          }
+        }
+        if (isProcessAlive(existingPid)) {
+          logger.warn({ existingPid }, 'Still alive after 15s, sending SIGKILL');
+          try {
+            process.kill(existingPid, 'SIGKILL');
+          } catch {
+            /* ignore */
+          }
+        } else {
+          logger.info({ existingPid }, 'Existing instance exited, taking over');
+        }
+      } else {
+        logger.warn({ existingPid }, 'Removing stale PID lock file');
+      }
+    }
+  } catch {
+    // No PID file or unreadable — first instance, continue
+  }
+
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(pidFile, String(process.pid));
+  process.on('exit', () => {
+    try {
+      fs.unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
