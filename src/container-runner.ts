@@ -238,6 +238,17 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  // Pass UnraidClaw connection details if configured
+  if (process.env.UNRAIDCLAW_SERVERS) {
+    args.push('-e', `UNRAIDCLAW_SERVERS=${process.env.UNRAIDCLAW_SERVERS}`);
+  }
+  if (process.env.UNRAIDCLAW_URL) {
+    args.push('-e', `UNRAIDCLAW_URL=${process.env.UNRAIDCLAW_URL}`);
+  }
+  if (process.env.UNRAIDCLAW_API_KEY) {
+    args.push('-e', `UNRAIDCLAW_API_KEY=${process.env.UNRAIDCLAW_API_KEY}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
