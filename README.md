@@ -197,6 +197,22 @@ Everything else (new capabilities, OS compatibility, hardware support, enhanceme
 
 This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
 
+## Documentation
+
+**Understanding NanoClaw:**
+- [Architecture & Security](docs/SECURITY.md) - How container isolation, mounts, and the credential proxy work
+- [Credentials & Environment Variables](docs/CREDENTIALS_AND_ENV.md) - Explains `.env`, `data/env/env`, and how secrets are injected safely
+- [Full Specification](docs/SPEC.md) - Complete technical specification
+- [Requirements & Philosophy](docs/REQUIREMENTS.md) - Why NanoClaw exists and key design decisions
+
+**Advanced Setup:**
+- [Docker Sandboxes](docs/docker-sandboxes.md) - Extra isolation layer for containers
+- [Apple Container Networking](docs/APPLE-CONTAINER-NETWORKING.md) - macOS-specific networking details
+- [Debugging Guide](docs/DEBUG_CHECKLIST.md) - Troubleshooting steps
+
+**Skills & Customization:**
+- [Skills as Branches](docs/skills-as-branches.md) - How to create and distribute skills
+
 ## Community
 
 Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
