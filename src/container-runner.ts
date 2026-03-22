@@ -387,10 +387,7 @@ function buildContainerArgs(
     args.push('-e', `TS_API_CLIENT_ID=${process.env.TS_API_CLIENT_ID}`);
   }
   if (process.env.TS_API_CLIENT_SECRET) {
-    args.push(
-      '-e',
-      `TS_API_CLIENT_SECRET=${process.env.TS_API_CLIENT_SECRET}`,
-    );
+    args.push('-e', `TS_API_CLIENT_SECRET=${process.env.TS_API_CLIENT_SECRET}`);
   }
   if (process.env.TS_API_TAILNET) {
     args.push('-e', `TS_API_TAILNET=${process.env.TS_API_TAILNET}`);
