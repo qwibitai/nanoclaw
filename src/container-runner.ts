@@ -295,34 +295,22 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Check if Max subscription credentials are mounted into the container.
-  // When present, the Claude CLI uses them directly — no proxy needed.
-  const homeDir = process.env.HOME || '/home/node';
-  const hasOAuthCredentials = fs.existsSync(
-    path.join(homeDir, '.claude', '.credentials.json'),
+  // Always route API traffic through the credential proxy.
+  // The proxy re-reads the OAuth token from disk on every request, so
+  // mid-run token refreshes are picked up automatically. Previously,
+  // containers with a mounted credentials file bypassed the proxy and
+  // used the token snapshot from container start time — causing 401s
+  // when long-running tasks outlived the token's expiry.
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
 
-  if (hasOAuthCredentials) {
-    // Max subscription mode: Claude CLI uses mounted OAuth credentials directly.
-    // Do NOT set ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY — they would conflict
-    // with the OAuth flow that needs to reach Anthropic's real endpoints.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    // Route API traffic through the credential proxy (containers never see real secrets)
-    args.push(
-      '-e',
-      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-    );
-
-    // Mirror the host's auth method with a placeholder value.
-    // API key mode: SDK sends x-api-key, proxy replaces with real key.
-    // OAuth mode:   SDK exchanges placeholder token for temp API key,
-    //               proxy injects real OAuth token on that exchange request.
-    const authMode = detectAuthMode();
-    if (authMode === 'api-key') {
-      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-    } else {
-      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
-    }
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
   // Runtime-specific args for host gateway resolution
