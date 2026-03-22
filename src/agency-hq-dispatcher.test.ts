@@ -20,6 +20,7 @@ import type { GroupQueue } from './group-queue.js';
 
 const {
   dispatchRetryCount,
+  dispatchSkipTicks,
   dispatchTime,
   dispatchReadyTasks,
   detectStalledTasks,
@@ -78,6 +79,7 @@ describe('agency-hq-dispatcher', () => {
     // Clean module state
     resetStopping();
     dispatchRetryCount.clear();
+    dispatchSkipTicks.clear();
     dispatchTime.clear();
   });
 
@@ -380,6 +382,179 @@ describe('agency-hq-dispatcher', () => {
       expect(
         deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
       ).not.toHaveBeenCalled();
+    });
+
+    it('sets skip ticks to 1 after first dispatch failure', async () => {
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-backoff-1',
+              title: 'Backoff Task',
+              description: 'test',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress fails
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({}, false, 500),
+      );
+
+      const deps = makeMockDeps();
+      await dispatchReadyTasks(deps);
+
+      // After failure 1: retry count = 1, skip ticks = 1
+      expect(dispatchRetryCount.get('t-backoff-1')).toBe(1);
+      expect(dispatchSkipTicks.get('t-backoff-1')).toBe(1);
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('skips task during backoff cooldown and decrements counter', async () => {
+      // Pre-set: 1 failure, 1 tick remaining to skip
+      dispatchRetryCount.set('t-backoff-2', 1);
+      dispatchSkipTicks.set('t-backoff-2', 1);
+
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-backoff-2',
+              title: 'Backoff Task',
+              description: 'test',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+
+      const deps = makeMockDeps();
+      await dispatchReadyTasks(deps);
+
+      // Should have skipped — only the GET call, no PUT
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(dispatchSkipTicks.get('t-backoff-2')).toBe(0);
+      expect(
+        deps.queue.enqueueTask as ReturnType<typeof vi.fn>,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('sets skip ticks to 3 after second dispatch failure', async () => {
+      // Pre-set: 1 prior failure, cooldown expired (0 skip ticks)
+      dispatchRetryCount.set('t-backoff-3', 1);
+      dispatchSkipTicks.set('t-backoff-3', 0);
+
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-backoff-3',
+              title: 'Backoff Task',
+              description: 'test',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress fails again
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({}, false, 500),
+      );
+
+      const deps = makeMockDeps();
+      await dispatchReadyTasks(deps);
+
+      // After failure 2: retry count = 2, skip ticks = 3
+      expect(dispatchRetryCount.get('t-backoff-3')).toBe(2);
+      expect(dispatchSkipTicks.get('t-backoff-3')).toBe(3);
+    });
+
+    it('marks task blocked after third failure (retries=3)', async () => {
+      // Pre-set: 2 prior failures, cooldown expired
+      dispatchRetryCount.set('t-backoff-4', 3);
+      dispatchSkipTicks.set('t-backoff-4', 0);
+
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-backoff-4',
+              title: 'Backoff Task',
+              description: 'test',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT blocked
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+      // POST notification
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      const deps = makeMockDeps();
+      await dispatchReadyTasks(deps);
+
+      const putCall = fetchMock.mock.calls.find(
+        (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === 'PUT',
+      );
+      expect(putCall).toBeDefined();
+      expect(JSON.parse(putCall![1]!.body as string).status).toBe('blocked');
+
+      // Backoff state should be cleared
+      expect(dispatchRetryCount.has('t-backoff-4')).toBe(false);
+      expect(dispatchSkipTicks.has('t-backoff-4')).toBe(false);
+    });
+
+    it('clears backoff state when task succeeds', async () => {
+      // Pre-set: 1 prior failure but cooldown expired
+      dispatchRetryCount.set('t-recover', 1);
+      dispatchSkipTicks.set('t-recover', 0);
+
+      // GET ready tasks
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({
+          data: [
+            {
+              id: 't-recover',
+              title: 'Recovering Task',
+              description: 'test',
+              status: 'ready',
+            },
+          ],
+        }),
+      );
+      // PUT in-progress succeeds
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+      // GET persona
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ data: { value: '# Persona' } }),
+      );
+
+      const deps = makeMockDeps();
+      const enqueueTask = deps.queue.enqueueTask as ReturnType<typeof vi.fn>;
+
+      await dispatchReadyTasks(deps);
+      expect(enqueueTask).toHaveBeenCalledTimes(1);
+
+      // Execute the enqueued callback (simulates task completion)
+      const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
+      // GET task for context merge
+      fetchMock.mockResolvedValueOnce(
+        mockFetchResponse({ success: true, data: { id: 't-recover', context: {} } }),
+      );
+      // PUT result
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}));
+
+      await callback();
+
+      // Backoff state should be fully cleared after success
+      expect(dispatchRetryCount.has('t-recover')).toBe(false);
+      expect(dispatchSkipTicks.has('t-recover')).toBe(false);
     });
 
     it('skips dispatch when CEO group is not registered', async () => {

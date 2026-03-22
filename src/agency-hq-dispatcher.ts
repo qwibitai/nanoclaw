@@ -20,6 +20,19 @@ let dispatchRunning = false;
 /** Tracks retry counts per Agency HQ task ID (resets on process restart). */
 const dispatchRetryCount = new Map<string, number>();
 
+/**
+ * Exponential backoff: ticks remaining to skip before retrying a failed task.
+ *
+ * Backoff schedule (applied after each dispatch failure):
+ *   Failure 1 → skip 1 tick before retry
+ *   Failure 2 → skip 3 ticks before retry
+ *   Failure 3 → mark task as blocked (no more retries)
+ *
+ * This prevents transient API unavailability from permanently blocking tasks
+ * by giving the system time to recover between retry attempts.
+ */
+const dispatchSkipTicks = new Map<string, number>();
+
 /** Tracks when each task was dispatched (for stall detection). */
 const dispatchTime = new Map<string, number>();
 
@@ -220,7 +233,18 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
         }
       }
 
-      // Check retry count
+      // Exponential backoff: skip ticks if the task is cooling down from a prior failure
+      const remainingSkips = dispatchSkipTicks.get(task.id) ?? 0;
+      if (remainingSkips > 0) {
+        dispatchSkipTicks.set(task.id, remainingSkips - 1);
+        log.debug(
+          { taskId: task.id, remainingSkips: remainingSkips - 1 },
+          'Skipping task (backoff cooldown)',
+        );
+        continue;
+      }
+
+      // Check retry count — mark blocked after 3 consecutive failures
       const retries = dispatchRetryCount.get(task.id) ?? 0;
       if (retries >= 3) {
         log.warn(
@@ -231,20 +255,37 @@ async function dispatchReadyTasks(deps: SchedulerDependencies): Promise<void> {
         continue;
       }
 
-      await dispatchTask(task, target.jid, target.folder, deps, log);
+      const dispatched = await dispatchTask(task, target.jid, target.folder, deps, log);
+
+      // On failure, apply exponential backoff before the next retry:
+      //   Failure 1 (retries now 1) → skip 1 tick
+      //   Failure 2 (retries now 2) → skip 3 ticks
+      //   Failure 3+ will be caught by the retries >= 3 check on the next tick
+      if (!dispatched) {
+        const currentRetries = dispatchRetryCount.get(task.id) ?? 0;
+        const skipTicks = currentRetries === 1 ? 1 : currentRetries === 2 ? 3 : 0;
+        if (skipTicks > 0) {
+          dispatchSkipTicks.set(task.id, skipTicks);
+          log.info(
+            { taskId: task.id, retries: currentRetries, skipTicks },
+            'Dispatch failed, applying exponential backoff',
+          );
+        }
+      }
     }
   } finally {
     dispatchRunning = false;
   }
 }
 
+/** Returns true if dispatch succeeded, false if it failed (for backoff tracking). */
 async function dispatchTask(
   task: AgencyHqTask,
   targetJid: string,
   targetFolder: string,
   deps: SchedulerDependencies,
   parentLog: ReturnType<typeof createCorrelationLogger>,
-): Promise<void> {
+): Promise<boolean> {
   const log = createCorrelationLogger(undefined, {
     op: 'dispatch-loop',
     taskId: task.id,
@@ -272,11 +313,11 @@ async function dispatchTask(
         { status: res.status, body },
         'Failed to mark task in-progress',
       );
-      return;
+      return false;
     }
   } catch (err) {
     log.error({ err }, 'Failed to PUT task in-progress');
-    return;
+    return false;
   }
 
   // Fetch sprint goal if sprint_id is set
@@ -326,7 +367,7 @@ async function dispatchTask(
     });
   } catch (err) {
     log.error({ err }, 'Failed to create local task');
-    return;
+    return false;
   }
 
   // Track dispatch time for stall detection
@@ -401,12 +442,14 @@ async function dispatchTask(
       log.error({ err, taskId: task.id }, 'Failed to PUT result to Agency HQ');
     }
 
-    // Clean up dispatch tracking
+    // Clean up dispatch tracking (task succeeded — clear all backoff state)
     dispatchRetryCount.delete(task.id);
+    dispatchSkipTicks.delete(task.id);
     dispatchTime.delete(task.id);
   });
 
   log.info({ taskId: task.id, localTaskId }, 'Task dispatched successfully');
+  return true;
 }
 
 async function markBlocked(
@@ -438,8 +481,9 @@ async function markBlocked(
     log.error({ err, taskId: task.id }, 'Failed to POST blocked notification');
   }
 
-  // Clear retry count since task is now blocked
+  // Clear retry and backoff state since task is now blocked
   dispatchRetryCount.delete(task.id);
+  dispatchSkipTicks.delete(task.id);
 }
 
 // --- Stall Detector ---
@@ -585,6 +629,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
     stallIntervalHandle = null;
   }
   dispatchRetryCount.clear();
+  dispatchSkipTicks.clear();
   dispatchTime.clear();
   logger.info('Agency HQ subsystems stopped');
 }
@@ -592,6 +637,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
 // Exported for testing
 export const _testInternals = {
   dispatchRetryCount,
+  dispatchSkipTicks,
   dispatchTime,
   dispatchReadyTasks,
   detectStalledTasks,
