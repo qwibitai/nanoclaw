@@ -49,10 +49,7 @@ interface OpItem {
   fields?: OpField[];
 }
 
-async function opGetItem(
-  itemName: string,
-  field?: string,
-): Promise<OpResult> {
+async function opGetItem(itemName: string, field?: string): Promise<OpResult> {
   return new Promise((resolve) => {
     const args = [
       'item',
@@ -152,10 +149,7 @@ export async function handleOpIpc(
 
   // Only main group can access 1Password
   if (!isMain) {
-    logger.warn(
-      { sourceGroup, type },
-      '1Password IPC blocked: not main group',
-    );
+    logger.warn({ sourceGroup, type }, '1Password IPC blocked: not main group');
     writeResult(dataDir, sourceGroup, requestId, {
       success: false,
       message: '1Password access is restricted to main group only',
@@ -192,10 +186,7 @@ export async function handleOpIpc(
   const durationMs = Date.now() - requestStart;
 
   if (result.success) {
-    logger.info(
-      { type, requestId, durationMs },
-      '1Password request completed',
-    );
+    logger.info({ type, requestId, durationMs }, '1Password request completed');
   } else {
     logger.error(
       { type, requestId, durationMs, error: result.message },
