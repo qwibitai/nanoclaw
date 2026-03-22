@@ -151,21 +151,34 @@ onecli secrets list
 
 If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
 
-First, look up the exact command for creating an Anthropic secret:
-```bash
-onecli secrets create --help
-```
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
 
-Then AskUserQuestion with two options. Use the `description` field to include the one-liner guidance and the concrete instructions for each option so the user sees everything in the question itself (avoids the interactive modal hiding text above it):
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. You'll run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+### Subscription path
+
+Tell the user to run `claude setup-token` in another terminal and copy the token it outputs. Do NOT collect the token in chat.
+
+Once they have the token, they register it with OneCLI. AskUserQuestion with two options:
+
+1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
+2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
+
+### API key path
+
+Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
+
+Then AskUserQuestion with two options:
 
 1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
 
-Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
+### After either path
 
 Ask them to let you know when done.
 
-**If the user's response happens to contain an API key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that key on their behalf.
+**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
 
 **After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
 
