@@ -303,24 +303,7 @@ export class WhatsAppChannel implements Channel {
       return;
     }
     try {
-      const sent = await this.sock.sendMessage(jid, { text: prefixed });
-      // Mark chat unread so the owner gets a notification badge.
-      // Without this, bot-sent messages appear silently (same account).
-      if (sent?.key) {
-        try {
-          await this.sock.chatModify(
-            {
-              markRead: false,
-              lastMessages: [
-                { key: sent.key, messageTimestamp: sent.messageTimestamp },
-              ],
-            },
-            jid,
-          );
-        } catch {
-          // Non-fatal — message still sent, just no unread badge
-        }
-      }
+      await this.sock.sendMessage(jid, { text: prefixed });
       logger.info({ jid, length: prefixed.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
@@ -439,22 +422,7 @@ export class WhatsAppChannel implements Channel {
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
-        const sent = await this.sock.sendMessage(item.jid, { text: item.text });
-        if (sent?.key) {
-          try {
-            await this.sock.chatModify(
-              {
-                markRead: false,
-                lastMessages: [
-                  { key: sent.key, messageTimestamp: sent.messageTimestamp },
-                ],
-              },
-              item.jid,
-            );
-          } catch {
-            // Non-fatal
-          }
-        }
+        await this.sock.sendMessage(item.jid, { text: item.text });
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',
