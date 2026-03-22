@@ -628,43 +628,43 @@ export class LinearChannel implements Channel {
           ),
         );
 
-        // Query repo suggestions and store in group metadata
+        // Query repo suggestions and store in group metadata (fire-and-forget)
         const issueId = issueData?.id;
         if (issueId) {
-          const token = await this.getAccessToken();
-          if (token) {
-            this.queryRepoSuggestions(issueId, sessionId, token)
-              .then((suggestions) => {
-                if (suggestions.length > 0) {
-                  const repoList = suggestions
-                    .map(
-                      (s) =>
-                        `- ${s.repositoryFullName} (confidence: ${(s.confidence * 100).toFixed(0)}%)`,
-                    )
-                    .join('\n');
-                  const group = this.opts.registeredGroups()[chatJid];
-                  if (group && this.opts.registerGroup) {
-                    this.opts.registerGroup(chatJid, {
-                      ...group,
-                      metadata: {
-                        ...group.metadata,
-                        suggestedRepos: repoList,
-                      },
-                    });
-                  }
-                  logger.info(
-                    { chatJid, suggestions },
-                    'Linear repo suggestions fetched',
-                  );
+          this.getAccessToken()
+            .then((token) => {
+              if (token) {
+                return this.queryRepoSuggestions(issueId, sessionId, token);
+              }
+              return [];
+            })
+            .then((suggestions) => {
+              if (suggestions.length > 0) {
+                const repoList = suggestions
+                  .map(
+                    (s) =>
+                      `- ${s.repositoryFullName} (confidence: ${(s.confidence * 100).toFixed(0)}%)`,
+                  )
+                  .join('\n');
+                const group = this.opts.registeredGroups()[chatJid];
+                if (group && this.opts.registerGroup) {
+                  this.opts.registerGroup(chatJid, {
+                    ...group,
+                    metadata: {
+                      ...group.metadata,
+                      suggestedRepos: repoList,
+                    },
+                  });
                 }
-              })
-              .catch((err) =>
-                logger.warn(
-                  { err, chatJid },
-                  'Failed to fetch repo suggestions',
-                ),
-              );
-          }
+                logger.info(
+                  { chatJid, suggestions },
+                  'Linear repo suggestions fetched',
+                );
+              }
+            })
+            .catch((err) =>
+              logger.warn({ err, chatJid }, 'Failed to fetch repo suggestions'),
+            );
         }
       }
     }
