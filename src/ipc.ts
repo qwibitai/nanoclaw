@@ -209,12 +209,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
               // Results are written to op_results/ for the container to poll.
               if (type?.startsWith('op_')) {
                 fs.unlinkSync(filePath);
-                handleOpIpc(data, sourceGroup, isMain, DATA_DIR).catch((err) => {
-                  logger.error(
-                    { file, sourceGroup, err },
-                    'Background 1Password IPC handler error',
-                  );
-                });
+                handleOpIpc(data, sourceGroup, isMain, DATA_DIR).catch(
+                  (err) => {
+                    logger.error(
+                      { file, sourceGroup, err },
+                      'Background 1Password IPC handler error',
+                    );
+                  },
+                );
                 continue;
               }
 
@@ -660,7 +662,12 @@ export async function processTaskIpc(
     default: {
       const handled = await handleXIpc(data, sourceGroup, isMain, DATA_DIR);
       if (!handled) {
-        const handledOp = await handleOpIpc(data, sourceGroup, isMain, DATA_DIR);
+        const handledOp = await handleOpIpc(
+          data,
+          sourceGroup,
+          isMain,
+          DATA_DIR,
+        );
         if (!handledOp) {
           logger.warn({ type: data.type }, 'Unknown IPC task type');
         }
