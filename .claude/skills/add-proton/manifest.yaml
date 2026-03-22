@@ -1,0 +1,12 @@
+skill: proton
+version: 1.0.0
+description: "Proton suite integration via Bridge — Mail (Phase 1), Drive and Pass in follow-up PRs"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies: {}
+conflicts: []
+depends: []
