@@ -938,7 +938,9 @@ async function main(): Promise<void> {
       let msg = '服务已重启 ✅';
       try {
         if (fs.existsSync(UPDATE_CHANGELOG_PATH)) {
-          const changelog = fs.readFileSync(UPDATE_CHANGELOG_PATH, 'utf-8').trim();
+          const changelog = fs
+            .readFileSync(UPDATE_CHANGELOG_PATH, 'utf-8')
+            .trim();
           if (changelog) {
             msg += '\n\n*更新内容:*\n' + changelog;
           }

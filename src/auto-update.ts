@@ -127,9 +127,10 @@ export function startAutoUpdateLoop(queue?: QueueHandle): void {
         env: execEnv,
       });
 
-      // Capture a human-readable summary of what changed for the startup
-      // notification after restart.  Strip commit hashes and conventional
-      // commit prefixes (fix:, feat:, etc.) — the user wants plain language.
+      // Collect a human-readable summary of what changed.  Strip commit
+      // hashes and conventional commit prefixes (fix:, feat:, etc.).
+      // Written to disk only after a successful build (see below).
+      let changelogText = '';
       try {
         const newHead = execSync('git rev-parse HEAD', {
           cwd: projectRoot,
@@ -140,18 +141,15 @@ export function startAutoUpdateLoop(queue?: QueueHandle): void {
           { cwd: projectRoot, encoding: 'utf-8' },
         ).trim();
         if (subjects) {
-          const lines = subjects
+          changelogText = subjects
             .split('\n')
             .map((s) => s.replace(/^[a-z]+(\([^)]*\))?:\s*/i, '').trim())
             .filter(Boolean)
-            .map((s) => `• ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
-          fs.mkdirSync(path.dirname(UPDATE_CHANGELOG_PATH), {
-            recursive: true,
-          });
-          fs.writeFileSync(UPDATE_CHANGELOG_PATH, lines.join('\n'), 'utf-8');
+            .map((s) => `• ${s.charAt(0).toUpperCase()}${s.slice(1)}`)
+            .join('\n');
         }
       } catch (changelogErr) {
-        logger.warn({ err: changelogErr }, 'Failed to write update changelog');
+        logger.warn({ err: changelogErr }, 'Failed to build changelog text');
       }
 
       execSync('npm run build', {
@@ -160,6 +158,19 @@ export function startAutoUpdateLoop(queue?: QueueHandle): void {
         timeout: BUILD_TIMEOUT,
         env: execEnv,
       });
+
+      // Persist changelog only after a successful build so a failed
+      // update doesn't leave a stale file that misleads the next restart.
+      if (changelogText) {
+        try {
+          fs.mkdirSync(path.dirname(UPDATE_CHANGELOG_PATH), {
+            recursive: true,
+          });
+          fs.writeFileSync(UPDATE_CHANGELOG_PATH, changelogText, 'utf-8');
+        } catch (writeErr) {
+          logger.warn({ err: writeErr }, 'Failed to write update changelog');
+        }
+      }
 
       logger.info('Auto-update rebuild complete, restarting');
       process.exit(0);
