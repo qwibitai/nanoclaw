@@ -12,11 +12,26 @@ import { logger } from './logger.js';
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
 /** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+export const CONTAINER_HOST_GATEWAY = detectHostGateway();
+
+function detectHostGateway(): string {
+  if (process.env.CONTAINER_HOST_GATEWAY) return process.env.CONTAINER_HOST_GATEWAY;
+
+  // Apple Container uses a well-known bridge IP (192.168.64.1) instead of
+  // Docker Desktop's host.docker.internal magic hostname.  The bridge100
+  // interface doesn't exist until a container starts, so we hardcode the IP.
+  if (os.platform() === 'darwin' && (CONTAINER_RUNTIME_BIN as string) === 'container') {
+    return '192.168.64.1';
+  }
+
+  return 'host.docker.internal';
+}
 
 /**
  * Address the credential proxy binds to.
- * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
+ * macOS: 0.0.0.0 — Apple Container's bridge100 interface doesn't exist at
+ *   startup so we can't bind to it directly; binding all interfaces works for
+ *   both Apple Container and Docker Desktop.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
  */
@@ -24,7 +39,7 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') return '0.0.0.0';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
