@@ -199,6 +199,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount Copilot CLI OAuth credentials if available (from `copilot auth login`)
+  const copilotAuthDir = path.join(process.env.HOME || '/root', '.copilot');
+  if (fs.existsSync(copilotAuthDir)) {
+    mounts.push({
+      hostPath: copilotAuthDir,
+      containerPath: '/home/node/.copilot',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -236,6 +246,22 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass GITHUB_TOKEN for GitHub Copilot SDK and gh CLI
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (githubToken) {
+    args.push('-e', `GITHUB_TOKEN=${githubToken}`);
+  }
+
+  // Pass SDK backend selection and Copilot model for container agents
+  const nanoclavSdk = process.env.NANOCLAW_SDK;
+  if (nanoclavSdk) {
+    args.push('-e', `NANOCLAW_SDK=${nanoclavSdk}`);
+  }
+  const copilotModel = process.env.COPILOT_MODEL;
+  if (copilotModel) {
+    args.push('-e', `COPILOT_MODEL=${copilotModel}`);
   }
 
   // Runtime-specific args for host gateway resolution
