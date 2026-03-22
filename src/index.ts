@@ -63,6 +63,32 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+const AVAILABLE_MODELS: Record<string, string> = {
+  haiku: 'claude-haiku-4-5-20251001',
+  sonnet: 'claude-sonnet-4-6',
+  opus: 'claude-opus-4-6',
+};
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
+
+function modelFilePath(groupFolder: string): string {
+  return resolveGroupFolderPath(groupFolder) + '/model.txt';
+}
+
+function readGroupModel(groupFolder: string): string {
+  try {
+    return (
+      fs.readFileSync(modelFilePath(groupFolder), 'utf-8').trim() ||
+      DEFAULT_MODEL
+    );
+  } catch {
+    return DEFAULT_MODEL;
+  }
+}
+
+function writeGroupModel(groupFolder: string, modelId: string): void {
+  fs.writeFileSync(modelFilePath(groupFolder), modelId, 'utf-8');
+}
+
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -493,6 +519,54 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // Handle /model [name] command
+  async function handleModelCommand(
+    args: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
+    if (!msg.is_from_me) return; // admin only
+
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const alias = args.trim().toLowerCase();
+
+    if (!alias) {
+      const current = readGroupModel(group.folder);
+      const currentAlias =
+        Object.entries(AVAILABLE_MODELS).find(
+          ([, id]) => id === current,
+        )?.[0] ?? current;
+      const list = Object.entries(AVAILABLE_MODELS)
+        .map(([a, id]) => `  ${a} — ${id}${id === current ? ' ✓' : ''}`)
+        .join('\n');
+      await channel.sendMessage(
+        chatJid,
+        `Current model: ${currentAlias}\n\nAvailable:\n${list}`,
+      );
+      return;
+    }
+
+    const modelId = AVAILABLE_MODELS[alias];
+    if (!modelId) {
+      const names = Object.keys(AVAILABLE_MODELS).join(', ');
+      await channel.sendMessage(
+        chatJid,
+        `Unknown model "${alias}". Available: ${names}`,
+      );
+      return;
+    }
+
+    writeGroupModel(group.folder, modelId);
+    await channel.sendMessage(
+      chatJid,
+      `Model switched to ${alias} (${modelId}). Takes effect on the next message.`,
+    );
+  }
+
   // Handle /remote-control and /remote-control-end commands
   async function handleRemoteControl(
     command: string,
@@ -538,11 +612,17 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
+      // Intercept admin commands before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+      if (trimmed === '/model' || trimmed.startsWith('/model ')) {
+        handleModelCommand(trimmed.slice('/model'.length), chatJid, msg).catch(
+          (err) => logger.error({ err, chatJid }, 'Model command error'),
         );
         return;
       }
