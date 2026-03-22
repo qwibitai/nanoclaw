@@ -51,6 +51,22 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
+
+// Credential proxy ports for different services
+// Each service gets its own port to avoid Host header routing issues
+// SDKs don't send correct Host headers when using BASE_URL overrides
+export const CREDENTIAL_PROXY_PORT_ANTHROPIC = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT_ANTHROPIC || '4248',
+  10,
+);
+export const CREDENTIAL_PROXY_PORT_GROQ = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT_GROQ || '4249',
+  10,
+);
+export const CREDENTIAL_PROXY_PORT_OPENAI = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT_OPENAI || '4250',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(

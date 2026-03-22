@@ -11,11 +11,15 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
+  CREDENTIAL_PROXY_PORT_ANTHROPIC,
+  CREDENTIAL_PROXY_PORT_GROQ,
+  CREDENTIAL_PROXY_PORT_OPENAI,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -222,10 +226,22 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  // Each service gets its own port to avoid Host header routing issues
+  const proxyBaseUrlAnthropic = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT_ANTHROPIC}`;
+  args.push('-e', `ANTHROPIC_BASE_URL=${proxyBaseUrlAnthropic}`);
+
+  // Route Groq and OpenAI through the credential proxy (if keys are configured)
+  const proxyServices = readEnvFile(['GROQ_API_KEY', 'OPENAI_API_KEY']);
+  if (proxyServices.GROQ_API_KEY) {
+    // Point Groq requests to the Groq-specific proxy port
+    const proxyBaseUrlGroq = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT_GROQ}`;
+    args.push('-e', `GROQ_BASE_URL=${proxyBaseUrlGroq}`);
+  }
+  if (proxyServices.OPENAI_API_KEY) {
+    // Point OpenAI requests to the OpenAI-specific proxy port
+    const proxyBaseUrlOpenai = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT_OPENAI}`;
+    args.push('-e', `OPENAI_BASE_URL=${proxyBaseUrlOpenai}`);
+  }
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
