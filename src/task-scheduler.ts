@@ -19,6 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { runPreHook } from './pre-hook.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -127,6 +128,57 @@ async function runTask(
       error: `Group not found: ${task.group_folder}`,
     });
     return;
+  }
+
+  // Run preHook gate if configured
+  if (task.pre_hook) {
+    logger.info(
+      { taskId: task.id, command: task.pre_hook.command },
+      'Running preHook',
+    );
+    const hookResult = await runPreHook(task.pre_hook);
+    logger.info(
+      {
+        taskId: task.id,
+        action: hookResult.action,
+        exitCode: hookResult.exitCode,
+        durationMs: hookResult.durationMs,
+      },
+      'preHook completed',
+    );
+
+    if (hookResult.action === 'skip') {
+      logTaskRun({
+        task_id: task.id,
+        run_at: new Date().toISOString(),
+        duration_ms: hookResult.durationMs,
+        status: 'skipped',
+        result: `preHook skipped (exit 10): ${hookResult.stdout}`.slice(0, 500),
+        error: null,
+      });
+      const nextRun = computeNextRun(task);
+      updateTaskAfterRun(task.id, nextRun, 'Skipped by preHook');
+      return;
+    }
+
+    if (hookResult.action === 'error') {
+      const errorMsg =
+        `preHook failed (exit ${hookResult.exitCode}): ${hookResult.stderr || hookResult.stdout}`.slice(
+          0,
+          500,
+        );
+      logTaskRun({
+        task_id: task.id,
+        run_at: new Date().toISOString(),
+        duration_ms: hookResult.durationMs,
+        status: 'error',
+        result: null,
+        error: errorMsg,
+      });
+      const nextRun = computeNextRun(task);
+      updateTaskAfterRun(task.id, nextRun, `Error: ${errorMsg}`);
+      return;
+    }
   }
 
   // Update tasks snapshot for container to read (filtered by group)
