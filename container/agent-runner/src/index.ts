@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput } from './claude-backend.js';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -484,6 +484,11 @@ async function main(): Promise<void> {
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  // Pass assistant name via env so the standalone precompact-hook script can use it
+  if (containerInput.assistantName) {
+    sdkEnv.NANOCLAW_ASSISTANT_NAME = containerInput.assistantName;
+  }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
