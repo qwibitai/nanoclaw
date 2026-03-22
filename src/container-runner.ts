@@ -47,6 +47,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Streaming activity update (tool calls, thinking) — not a final result */
+  activity?: {
+    type: 'thought' | 'action';
+    content: string;
+    /** For action type: tool/action name */
+    action?: string;
+  };
 }
 
 function buildVolumeMounts(

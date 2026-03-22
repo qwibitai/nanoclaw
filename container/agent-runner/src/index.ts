@@ -39,6 +39,13 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Streaming activity update (tool calls, thinking) — not a final result */
+  activity?: {
+    type: 'thought' | 'action';
+    content: string;
+    /** For action type: tool/action name */
+    action?: string;
+  };
 }
 
 interface SessionEntry {
@@ -120,6 +127,99 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+/** Emit a streaming activity update (thought or action) to the host */
+function writeActivity(
+  type: 'thought' | 'action',
+  content: string,
+  action?: string,
+): void {
+  writeOutput({
+    status: 'success',
+    result: null,
+    activity: { type, content, action },
+  });
+}
+
+/**
+ * Throttle for activity emissions — avoids flooding Linear API.
+ * Tracks last emission time and skips if too recent.
+ */
+const ACTIVITY_MIN_INTERVAL_MS = 3000; // ~5-10s granularity target
+let lastActivityTime = 0;
+let pendingActivity: { type: 'thought' | 'action'; content: string; action?: string } | null = null;
+let pendingActivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+function emitActivity(
+  type: 'thought' | 'action',
+  content: string,
+  action?: string,
+): void {
+  const now = Date.now();
+  const elapsed = now - lastActivityTime;
+
+  if (elapsed >= ACTIVITY_MIN_INTERVAL_MS) {
+    // Enough time has passed — emit immediately
+    lastActivityTime = now;
+    pendingActivity = null;
+    if (pendingActivityTimer) {
+      clearTimeout(pendingActivityTimer);
+      pendingActivityTimer = null;
+    }
+    writeActivity(type, content, action);
+  } else {
+    // Too soon — buffer and emit after the interval
+    pendingActivity = { type, content, action };
+    if (!pendingActivityTimer) {
+      pendingActivityTimer = setTimeout(() => {
+        if (pendingActivity) {
+          lastActivityTime = Date.now();
+          writeActivity(pendingActivity.type, pendingActivity.content, pendingActivity.action);
+          pendingActivity = null;
+        }
+        pendingActivityTimer = null;
+      }, ACTIVITY_MIN_INTERVAL_MS - elapsed);
+    }
+  }
+}
+
+/**
+ * Map a tool name + input to a concise human-readable action description.
+ */
+function summarizeToolUse(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'Read':
+      return `${input.file_path || 'file'}`;
+    case 'Write':
+      return `${input.file_path || 'file'}`;
+    case 'Edit':
+      return `${input.file_path || 'file'}`;
+    case 'Bash':
+      return `${String(input.description || input.command || '').slice(0, 120)}`;
+    case 'Glob':
+      return `${input.pattern || ''}`;
+    case 'Grep':
+      return `"${input.pattern || ''}"`;
+    case 'WebSearch':
+      return `"${input.query || ''}"`;
+    case 'WebFetch':
+      return `${input.url || ''}`;
+    case 'TodoWrite':
+      return 'Updating task list';
+    case 'Agent':
+      return `${input.description || 'sub-agent'}`;
+    case 'Skill':
+      return `/${input.skill || ''}`;
+    default: {
+      // MCP tools: mcp__server__method → Server: method
+      const mcpMatch = toolName.match(/^mcp__(\w+)__(\w+)$/);
+      if (mcpMatch) {
+        return `${mcpMatch[1]}:${mcpMatch[2]}`;
+      }
+      return toolName;
+    }
+  }
 }
 
 function log(message: string): void {
@@ -527,6 +627,46 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Extract tool_use and thinking blocks from assistant messages
+      const assistantMsg = message as {
+        message?: {
+          content?: Array<{
+            type: string;
+            name?: string;
+            input?: Record<string, unknown>;
+            text?: string;
+            thinking?: string;
+          }>;
+        };
+      };
+      const content = assistantMsg.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_use' && block.name) {
+            const summary = summarizeToolUse(block.name, block.input || {});
+            emitActivity('action', summary, block.name);
+          } else if (block.type === 'thinking' && block.thinking) {
+            // Emit a concise summary of thinking (first meaningful line, max 200 chars)
+            const lines = block.thinking.split('\n').filter((l: string) => l.trim());
+            const firstLine = lines[0] || '';
+            const summary = firstLine.length > 200
+              ? firstLine.slice(0, 200) + '...'
+              : firstLine;
+            if (summary) {
+              emitActivity('thought', summary);
+            }
+          }
+        }
+      }
+    }
+
+    // Tool use summaries from SDK (collapsed descriptions of tool calls)
+    if (message.type === 'tool_use_summary') {
+      const tus = message as { summary: string };
+      if (tus.summary) {
+        emitActivity('thought', tus.summary);
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

@@ -264,6 +264,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     chatJid,
     ackContext,
     async (result) => {
+      // Streaming activity updates — forward tool calls and thinking to channel
+      if (result.activity) {
+        const { type, content, action } = result.activity;
+        let activityText: string;
+        if (type === 'action' && action) {
+          activityText = `[action:${action}] ${content}`;
+        } else {
+          activityText = `[thought] ${content}`;
+        }
+        try {
+          await channel.sendMessage(chatJid, activityText);
+        } catch (err) {
+          logger.warn(
+            { group: group.name, activityType: type, err },
+            'Failed to send activity update',
+          );
+        }
+        return;
+      }
+
       // Streaming output callback — called for each agent result
       if (result.result) {
         const raw =
