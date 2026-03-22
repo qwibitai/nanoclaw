@@ -12,10 +12,12 @@ import { logger } from './logger.js';
 export const CONTAINER_RUNTIME_BIN = 'container';
 
 /** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+export const CONTAINER_HOST_GATEWAY =
+  process.env.CONTAINER_HOST_GATEWAY || detectHostGateway();
 
 /**
  * Address the credential proxy binds to.
+ * Apple Container (macOS): bind to bridge100 IP (192.168.64.1) — containers route through it.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
@@ -23,8 +25,35 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
+function getAppleContainerBridgeIP(): string | undefined {
+  const ifaces = os.networkInterfaces();
+  const bridge100 = ifaces['bridge100'];
+  if (bridge100) {
+    const ipv4 = bridge100.find((a) => a.family === 'IPv4');
+    if (ipv4) return ipv4.address;
+  }
+  return undefined;
+}
+
+function detectHostGateway(): string {
+  if (os.platform() === 'darwin') {
+    // Apple Container: host is reachable at the bridge100 IP from inside the VM
+    const bridge = getAppleContainerBridgeIP();
+    if (bridge) return bridge;
+    // Docker Desktop: host.docker.internal is injected into /etc/hosts automatically
+    return 'host.docker.internal';
+  }
+  return 'host.docker.internal';
+}
+
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') {
+    // Apple Container: bind to bridge100 so containers can reach the proxy
+    const bridge = getAppleContainerBridgeIP();
+    if (bridge) return bridge;
+    // Docker Desktop: loopback is sufficient (host.docker.internal routes there)
+    return '127.0.0.1';
+  }
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
