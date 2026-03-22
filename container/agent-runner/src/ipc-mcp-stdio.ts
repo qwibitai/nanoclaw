@@ -45,8 +45,27 @@ server.tool(
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    file_path: z.string().optional().describe('Absolute path to a file inside the container (must start with /workspace/) to send as a media attachment. Supports .docx, .xlsx, .pptx, .pdf, .png, .jpg, .mp4, .zip, etc.'),
+    file_name: z.string().optional().describe('Display filename for the attachment (e.g. "report.docx"). Defaults to the actual filename if not set.'),
+    caption: z.string().optional().describe('Optional caption to display alongside the file attachment.'),
   },
   async (args) => {
+    // Validate file_path if provided
+    if (args.file_path) {
+      if (!args.file_path.startsWith('/workspace/')) {
+        return {
+          content: [{ type: 'text' as const, text: 'Error: file_path must start with /workspace/ (only container-accessible paths are allowed).' }],
+          isError: true,
+        };
+      }
+      if (!fs.existsSync(args.file_path)) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: file not found at ${args.file_path}` }],
+          isError: true,
+        };
+      }
+    }
+
     const data: Record<string, string | undefined> = {
       type: 'message',
       chatJid,
@@ -54,11 +73,15 @@ server.tool(
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
+      filePath: args.file_path || undefined,
+      fileName: args.file_name || undefined,
+      caption: args.caption || undefined,
     };
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const hasMedia = !!args.file_path;
+    return { content: [{ type: 'text' as const, text: hasMedia ? `Message with attachment sent (${path.basename(args.file_path!)}).` : 'Message sent.' }] };
   },
 );
 
