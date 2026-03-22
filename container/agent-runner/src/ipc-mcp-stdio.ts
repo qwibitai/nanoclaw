@@ -91,6 +91,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    script: z.string().optional().describe('Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.'),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -136,6 +137,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       type: 'schedule_task',
       taskId,
       prompt: args.prompt,
+      script: args.script || undefined,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
@@ -255,6 +257,7 @@ server.tool(
     prompt: z.string().optional().describe('New prompt for the task'),
     schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
     schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    script: z.string().optional().describe('New script for the task. Set to empty string to remove the script.'),
   },
   async (args) => {
     // Validate schedule_value if provided
@@ -288,6 +291,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
+    if (args.script !== undefined) data.script = args.script;
     if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
 
