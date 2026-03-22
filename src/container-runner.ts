@@ -1230,9 +1230,14 @@ export async function prepareThreadWorkspace(
             cwd: srcPath,
           });
         } catch (addErr) {
-          // Stale worktree registration — prune and retry once
+          // Stale worktree — prune, clean up directory, and retry once.
+          // Git says "already registered" when the .git/worktrees entry exists,
+          // and "already exists" when the directory itself is left over.
           const msg = addErr instanceof Error ? addErr.message : String(addErr);
-          if (msg.includes('already registered')) {
+          if (
+            msg.includes('already registered') ||
+            msg.includes('already exists')
+          ) {
             logger.warn(
               { repo: path.basename(srcPath), wtPath },
               'Stale worktree detected, pruning and retrying',
@@ -1863,6 +1868,12 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
+      // Remove stale symlinks left by previous container runs before copying
+      try {
+        if (fs.lstatSync(dstDir).isSymbolicLink()) fs.unlinkSync(dstDir);
+      } catch {
+        /* doesn't exist yet */
+      }
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }

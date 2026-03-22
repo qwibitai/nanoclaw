@@ -1601,6 +1601,26 @@ function recoverPendingMessages(): void {
     // slack:C12345:thread:ts:thread:ts which Slack rejects.
     const recoveryParentJid = getParentJid(chat_jid);
     const threadJid = `${recoveryParentJid}:thread:${thread_id}`;
+
+    // Only send a recovery notice if there are actually unprocessed user messages.
+    // The processing flag can be stale (process killed before finally block ran)
+    // even though the session completed and sent its response.
+    const group = Object.values(registeredGroups).find(
+      (g) => g.folder === group_folder,
+    );
+    if (group) {
+      const botName = resolveAssistantName(group.containerConfig);
+      const sinceTs = lastAgentTimestamp[threadJid] || '';
+      const pendingUserMsgs = getMessagesSince(threadJid, sinceTs, botName, 1);
+      if (pendingUserMsgs.length === 0) {
+        logger.info(
+          { group_folder, threadJid },
+          'Skipping recovery notice — no pending user messages (stale processing flag)',
+        );
+        continue;
+      }
+    }
+
     const channel = findChannel(channels, recoveryParentJid);
     if (channel?.isConnected()) {
       channel
