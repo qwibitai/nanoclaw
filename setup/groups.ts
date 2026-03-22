@@ -111,7 +111,7 @@ async function syncGroups(projectRoot: string): Promise<void> {
   let syncOk = false;
   try {
     const syncScript = `
-import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers, DisconnectReason, fetchLatestWaWebVersion } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
@@ -134,49 +134,74 @@ const upsert = db.prepare(
   'INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?) ON CONFLICT(jid) DO UPDATE SET name = excluded.name'
 );
 
-const { state, saveCreds } = await useMultiFileAuthState(authDir);
+let retries = 0;
+const MAX_RETRIES = 3;
 
-const sock = makeWASocket({
-  auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-  printQRInTerminal: false,
-  logger,
-  browser: Browsers.macOS('Chrome'),
-});
+const { version } = await fetchLatestWaWebVersion({}).catch(() => ({ version: undefined }));
 
-const timeout = setTimeout(() => {
-  console.error('TIMEOUT');
-  process.exit(1);
-}, 30000);
+async function connect() {
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-sock.ev.on('creds.update', saveCreds);
+  const sock = makeWASocket({
+    version,
+    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
+    printQRInTerminal: false,
+    logger,
+    browser: Browsers.macOS('Chrome'),
+  });
 
-sock.ev.on('connection.update', async (update) => {
-  if (update.connection === 'open') {
-    try {
-      const groups = await sock.groupFetchAllParticipating();
-      const now = new Date().toISOString();
-      let count = 0;
-      for (const [jid, metadata] of Object.entries(groups)) {
-        if (metadata.subject) {
-          upsert.run(jid, metadata.subject, now);
-          count++;
-        }
-      }
-      console.log('SYNCED:' + count);
-    } catch (err) {
-      console.error('FETCH_ERROR:' + err.message);
-    } finally {
-      clearTimeout(timeout);
-      sock.end(undefined);
-      db.close();
-      process.exit(0);
-    }
-  } else if (update.connection === 'close') {
-    clearTimeout(timeout);
-    console.error('CONNECTION_CLOSED');
+  const timeout = setTimeout(() => {
+    console.error('TIMEOUT');
     process.exit(1);
-  }
-});
+  }, 45000);
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async (update) => {
+    if (update.connection === 'open') {
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        const now = new Date().toISOString();
+        let count = 0;
+        for (const [jid, metadata] of Object.entries(groups)) {
+          if (metadata.subject) {
+            upsert.run(jid, metadata.subject, now);
+            count++;
+          }
+        }
+        console.log('SYNCED:' + count);
+      } catch (err) {
+        console.error('FETCH_ERROR:' + err.message);
+      } finally {
+        clearTimeout(timeout);
+        sock.end(undefined);
+        db.close();
+        process.exit(0);
+      }
+    } else if (update.connection === 'close') {
+      clearTimeout(timeout);
+      const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.error('LOGGED_OUT');
+        db.close();
+        process.exit(1);
+      }
+      retries++;
+      if (retries <= MAX_RETRIES) {
+        console.error('RETRY:' + retries + ':' + statusCode);
+        sock.end(undefined);
+        await new Promise(r => setTimeout(r, 2000 * retries));
+        connect();
+      } else {
+        console.error('CONNECTION_CLOSED:' + statusCode);
+        db.close();
+        process.exit(1);
+      }
+    }
+  });
+}
+
+connect();
 `;
 
     const tmpScript = path.join(projectRoot, '.tmp-group-sync.mjs');

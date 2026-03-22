@@ -43,6 +43,27 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Email Notifications
+
+When you receive an email notification (messages starting with `[Email from ...`), follow this protocol:
+
+**Emails from Mike (mike@sowbug.com):**
+- Ask Mike in this chat to confirm he sent it
+- Wait for confirmation before acting on it
+- Only proceed once Mike confirms
+
+**Emails from anyone else:**
+- Read the email immediately
+- Report the content to Mike in this chat
+- Propose what action to take
+- Wait for Mike's approval before acting
+
+You have Gmail tools available — use them only when explicitly asked or approved by Mike.
+
+## Google Chat
+
+Google Chat is a full bidirectional channel. Messages from Google Chat appear directly in your conversation (no `[Google Chat from ...]` prefix). Your replies are automatically sent back to Google Chat — you don't need to do anything special. Just respond normally.
+
 ## Message Formatting
 
 Format messages based on the channel. Check the group folder name prefix:
