@@ -474,10 +474,52 @@ export async function setSession(
   sessionId: string,
 ): Promise<void> {
   await q(
-    `INSERT INTO conversation_sessions (group_folder, session_id) VALUES ($1,$2)
-     ON CONFLICT (group_folder) DO UPDATE SET session_id = EXCLUDED.session_id`,
+    `INSERT INTO conversation_sessions (group_folder, session_id, updated_at, turn_count)
+     VALUES ($1, $2, NOW(), 0)
+     ON CONFLICT (group_folder) DO UPDATE SET
+       session_id = EXCLUDED.session_id,
+       updated_at = NOW()`,
     [groupFolder, sessionId],
   );
+}
+
+export async function deleteSession(groupFolder: string): Promise<void> {
+  await q(
+    'DELETE FROM conversation_sessions WHERE group_folder = $1',
+    [groupFolder],
+  );
+}
+
+export async function incrementSessionTurn(groupFolder: string): Promise<void> {
+  await q(
+    `UPDATE conversation_sessions
+     SET turn_count = turn_count + 1, updated_at = NOW()
+     WHERE group_folder = $1`,
+    [groupFolder],
+  );
+}
+
+export async function getSessionTurnCount(
+  groupFolder: string,
+): Promise<number> {
+  const row = await qOne<{ turn_count: number }>(
+    'SELECT turn_count FROM conversation_sessions WHERE group_folder = $1',
+    [groupFolder],
+  );
+  return row?.turn_count ?? 0;
+}
+
+/**
+ * Deletes all sessions older than ttlMs and returns their group folder names.
+ * Called at startup to prune stale sessions before loading state into memory.
+ */
+export async function pruneExpiredSessions(ttlMs: number): Promise<string[]> {
+  const cutoff = new Date(Date.now() - ttlMs);
+  const rows = await q<{ group_folder: string }>(
+    `DELETE FROM conversation_sessions WHERE updated_at < $1 RETURNING group_folder`,
+    [cutoff],
+  );
+  return rows.map((r) => r.group_folder);
 }
 
 export async function getAllSessions(): Promise<Record<string, string>> {

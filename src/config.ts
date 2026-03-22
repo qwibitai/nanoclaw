@@ -71,3 +71,14 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Session lifecycle cost controls
+// TTL: sessions inactive longer than this are pruned at startup (reset context = cheaper next visit)
+export const SESSION_TTL_MS =
+  parseInt(process.env.SESSION_TTL_HOURS || '6', 10) * 60 * 60 * 1000;
+
+// Turn cap: after this many container runs per session, context is reset to prevent runaway cost
+export const SESSION_TURN_CAP = parseInt(
+  process.env.SESSION_TURN_CAP || '20',
+  10,
+);

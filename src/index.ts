@@ -7,6 +7,8 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  SESSION_TTL_MS,
+  SESSION_TURN_CAP,
   STORE_DIR,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -30,6 +32,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -38,7 +41,10 @@ import {
   getNewMessages,
   getRegisteredGroup,
   getRouterState,
+  getSessionTurnCount,
+  incrementSessionTurn,
   initDatabase,
+  pruneExpiredSessions,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -82,6 +88,17 @@ async function loadState(): Promise<void> {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
+  // Prune sessions older than SESSION_TTL_MS before loading into memory.
+  // Expired sessions are deleted from DB so next conversation starts fresh
+  // (no token cost replaying stale context from days/weeks ago).
+  const expiredFolders = await pruneExpiredSessions(SESSION_TTL_MS);
+  if (expiredFolders.length > 0) {
+    logger.info(
+      { count: expiredFolders.length, folders: expiredFolders },
+      'Pruned expired sessions (TTL exceeded)',
+    );
+  }
+
   sessions = await getAllSessions();
   registeredGroups = await getAllRegisteredGroups();
   logger.info(
@@ -315,6 +332,21 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // Turn cap check — reset session after SESSION_TURN_CAP container runs to
+  // prevent runaway token costs from unbounded context growth.
+  if (sessions[group.folder]) {
+    const turnCount = await getSessionTurnCount(group.folder);
+    if (turnCount >= SESSION_TURN_CAP) {
+      logger.info(
+        { group: group.name, turnCount, cap: SESSION_TURN_CAP },
+        'Session turn cap reached — resetting context',
+      );
+      await deleteSession(group.folder);
+      delete sessions[group.folder];
+    }
+  }
+
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -384,6 +416,13 @@ async function runAgent(
         'Container agent error',
       );
       return 'error';
+    }
+
+    // Increment turn count for the active session (fire-and-forget, non-critical)
+    if (sessions[group.folder]) {
+      incrementSessionTurn(group.folder).catch((err) =>
+        logger.warn({ err }, 'Failed to increment session turn count'),
+      );
     }
 
     return 'success';
