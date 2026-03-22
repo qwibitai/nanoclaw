@@ -49,13 +49,61 @@ export function startCredentialProxy(
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        const body = Buffer.concat(chunks);
+        const rawBody = Buffer.concat(chunks);
+
+        // ── Prompt caching injection ─────────────────────────────────────────
+        // For every POST /v1/messages we inject cache_control on the system
+        // prompt so Anthropic caches CLAUDE.md across conversation turns.
+        // Cache read price = 10% of normal input price → ~30% overall cost
+        // reduction on multi-turn conversations.
+        let body = rawBody;
+        if (req.method === 'POST' && req.url?.startsWith('/v1/messages')) {
+          try {
+            const json = JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown>;
+            let modified = false;
+
+            if (typeof json.system === 'string' && json.system.length > 0) {
+              // String form → convert to content-block array with cache_control
+              json.system = [
+                { type: 'text', text: json.system, cache_control: { type: 'ephemeral' } },
+              ];
+              modified = true;
+            } else if (Array.isArray(json.system) && json.system.length > 0) {
+              // Array form — inject on the last block if not already cached
+              const last = json.system[json.system.length - 1] as Record<string, unknown>;
+              if (!last.cache_control) {
+                last.cache_control = { type: 'ephemeral' };
+                modified = true;
+              }
+            }
+
+            if (modified) {
+              body = Buffer.from(JSON.stringify(json), 'utf-8');
+            }
+          } catch {
+            // Not valid JSON or unexpected format — forward unchanged
+          }
+        }
+        // ────────────────────────────────────────────────────────────────────
+
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
             host: upstreamUrl.host,
             'content-length': body.length,
           };
+
+        // Enable prompt caching on messages API calls
+        if (req.url?.startsWith('/v1/messages')) {
+          const existing = headers['anthropic-beta'];
+          const parts = existing
+            ? (Array.isArray(existing) ? existing : [existing as string])
+            : [];
+          if (!parts.includes('prompt-caching-2024-07-31')) {
+            parts.push('prompt-caching-2024-07-31');
+          }
+          headers['anthropic-beta'] = parts.join(',');
+        }
 
         // Strip hop-by-hop headers that must not be forwarded by proxies
         delete headers['connection'];
