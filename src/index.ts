@@ -459,6 +459,16 @@ function recoverPendingMessages(): void {
         { group: group.name, pendingCount: pending.length },
         'Recovery: found unprocessed messages',
       );
+      // Clear session so recovery starts a fresh container instead of resuming
+      // a potentially huge session that will churn without producing output.
+      if (sessions[group.folder]) {
+        logger.info(
+          { chatJid, folder: group.folder },
+          'Recovery: clearing stale session',
+        );
+        delete sessions[group.folder];
+        setSession(group.folder, '');
+      }
       queue.enqueueMessageCheck(chatJid);
     }
   }
