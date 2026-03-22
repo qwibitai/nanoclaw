@@ -262,6 +262,20 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
+        // Atomically claim the task before dispatching: advance next_run to the
+        // next occurrence so that a process restart during execution won't find
+        // this task due again and double-fire it.  The in-memory dedup in
+        // GroupQueue.enqueueTask handles same-process races; this handles the
+        // cross-restart case where next_run was never advanced because
+        // updateTaskAfterRun() didn't complete.
+        const claimedNextRun = computeNextRun(currentTask);
+        if (claimedNextRun !== null) {
+          updateTask(currentTask.id, { next_run: claimedNextRun });
+        } else {
+          // 'once' task — mark completed now so a restart doesn't re-run it
+          updateTask(currentTask.id, { status: 'completed' });
+        }
+
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),
         );
