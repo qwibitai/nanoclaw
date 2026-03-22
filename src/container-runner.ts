@@ -1851,10 +1851,14 @@ function buildVolumeMounts(
   }
   fs.writeFileSync(mcpJsonPath, JSON.stringify({ mcpServers }, null, 2) + '\n');
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  // Sync skills from container/skills/ and ~/.claude/skills/ into each group's .claude/skills/
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
+  const skillsSources = [
+    path.join(process.cwd(), 'container', 'skills'),
+    path.join(os.homedir(), '.claude', 'skills'),
+  ];
+  for (const skillsSrc of skillsSources) {
+    if (!fs.existsSync(skillsSrc)) continue;
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;

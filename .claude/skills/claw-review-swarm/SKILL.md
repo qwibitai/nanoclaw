@@ -1,16 +1,15 @@
 ---
-name: review-swarm
+name: claw-review-swarm
 description: >
-  Multi-agent code review swarm for NanoClaw. Spawns 2 required reviewers (adversarial, NanoClaw
+  NanoClaw-specific multi-agent code review swarm. Spawns 2 required reviewers (adversarial, NanoClaw
   best practice) plus 1-3 dynamic reviewers (architecture, agentic AI, concurrency, security,
   API/IPC contract) based on the diff. Reviewers collaborate via SendMessage before reporting.
-  Use when reviewing code changes, checking uncommitted work, or auditing a branch/PR.
-  Triggers on "review", "review changes", "check my changes", "review this PR".
-  Do not use for design document reviews (use /team-review) or generic non-NanoClaw code reviews.
+  Use for NanoClaw codebase reviews only. Triggers on "claw review", "nanoclaw review".
+  For general code review across any codebase, use /review-swarm instead.
 version: 1.0.0
 ---
 
-# /review-swarm — NanoClaw Code Review Swarm
+# /claw-review-swarm — NanoClaw Code Review Swarm
 
 ## What This Skill Does
 
