@@ -501,17 +501,13 @@ export class TelegramChannel implements Channel {
       // original message so the user can see what they picked.
       if (messageId) {
         try {
-          const originalText =
-            (ctx.callbackQuery.message as any)?.text || '';
+          const originalText = (ctx.callbackQuery.message as any)?.text || '';
           const updatedHtml = toTelegramHtml(
             `${originalText}\n\n-- ${senderName}: ${buttonText}`,
           );
-          await this.bot!.api.editMessageText(
-            chatId,
-            messageId,
-            updatedHtml,
-            { parse_mode: 'HTML' },
-          );
+          await this.bot!.api.editMessageText(chatId, messageId, updatedHtml, {
+            parse_mode: 'HTML',
+          });
         } catch (err) {
           // Fallback: just remove the keyboard without changing text
           logger.debug(
@@ -768,7 +764,10 @@ export class TelegramChannel implements Channel {
         'Telegram message with buttons sent',
       );
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send Telegram message with buttons');
+      logger.error(
+        { jid, err },
+        'Failed to send Telegram message with buttons',
+      );
     }
   }
 

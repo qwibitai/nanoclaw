@@ -174,7 +174,9 @@ export class GroupQueue {
     if (this.mainGroupJid) {
       const mainState = this.groups.get(this.mainGroupJid);
       if (mainState?.activeMessage && mainState.idleWaiting) {
-        logger.info('Preempting main group idle container for new main message');
+        logger.info(
+          'Preempting main group idle container for new main message',
+        );
         this.closeStdin(this.mainGroupJid);
         return true;
       }
@@ -270,9 +272,7 @@ export class GroupQueue {
     if (
       this.waitingQueue.some(
         (e) =>
-          e.type === 'task' &&
-          e.groupJid === groupJid &&
-          e.task?.id === taskId,
+          e.type === 'task' && e.groupJid === groupJid && e.task?.id === taskId,
       )
     ) {
       logger.info(
@@ -765,7 +765,11 @@ export class GroupQueue {
   getQueueMetrics(): {
     activeCount: number;
     maxContainers: number;
-    waitingByPriority: { mainMessages: number; messages: number; tasks: number };
+    waitingByPriority: {
+      mainMessages: number;
+      messages: number;
+      tasks: number;
+    };
     reservedSlotAvailable: boolean;
   } {
     let mainMessages = 0;

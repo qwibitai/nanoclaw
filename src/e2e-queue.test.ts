@@ -150,7 +150,8 @@ vi.mock('child_process', async () => {
     spawn: vi.fn((_cmd: string, args: string[]) => {
       // Extract container name from args: ['run', '-i', '--rm', '--name', 'nanoclaw-xxx', ...]
       const nameIdx = args.indexOf('--name');
-      const containerName = nameIdx !== -1 ? args[nameIdx + 1] : `unknown-${Date.now()}`;
+      const containerName =
+        nameIdx !== -1 ? args[nameIdx + 1] : `unknown-${Date.now()}`;
       const proc = createFakeProcess(Math.floor(Math.random() * 100000));
       spawnedProcesses.set(containerName, proc);
       spawnOrder.push(containerName);
@@ -282,7 +283,11 @@ function buildProcessMessagesFn(
     if (!group) return true;
 
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    const missedMessages = getMessagesSince(
+      chatJid,
+      sinceTimestamp,
+      ASSISTANT_NAME,
+    );
     if (missedMessages.length === 0) return true;
 
     const prompt = formatMessages(missedMessages, 'UTC');
@@ -306,7 +311,13 @@ function buildProcessMessagesFn(
         isMain,
       },
       (proc, containerName) => {
-        queue.registerProcess(chatJid, proc, containerName, group.folder, 'message');
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          'message',
+        );
       },
       async (result) => {
         if (result.result) {
@@ -314,7 +325,9 @@ function buildProcessMessagesFn(
             typeof result.result === 'string'
               ? result.result
               : JSON.stringify(result.result);
-          const cleaned = text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          const cleaned = text
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
           if (cleaned) {
             await channel.setTyping(chatJid, false);
             await channel.sendMessage(chatJid, cleaned, lastMessageId);
@@ -357,7 +370,11 @@ async function completeContainer(
 ) {
   const proc = findProcessForGroup(groupFolder);
   if (!proc) throw new Error(`No container found for ${groupFolder}`);
-  emitOutput(proc, { status: 'success', result: response, newSessionId: sessionId });
+  emitOutput(proc, {
+    status: 'success',
+    result: response,
+    newSessionId: sessionId,
+  });
   await vi.advanceTimersByTimeAsync(10);
   proc.emit('close', 0);
   await vi.advanceTimersByTimeAsync(10);
@@ -389,7 +406,13 @@ describe('E2E Queue: Multi-Group Concurrency with Priority', () => {
 
     // Set up DB with chat metadata for all groups
     for (const [jid, group] of Object.entries(allGroups)) {
-      storeChatMetadata(jid, '2025-01-01T00:00:00.000Z', group.name, 'telegram', true);
+      storeChatMetadata(
+        jid,
+        '2025-01-01T00:00:00.000Z',
+        group.name,
+        'telegram',
+        true,
+      );
       setRegisteredGroup(jid, group);
     }
 
@@ -546,7 +569,8 @@ describe('E2E Queue: Multi-Group Concurrency with Priority', () => {
     const fsModule = await import('fs');
     const writeFileSync = vi.mocked(fsModule.default.writeFileSync);
     const closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('_close'),
+      (call) =>
+        typeof call[0] === 'string' && (call[0] as string).endsWith('_close'),
     );
     expect(closeWrites.length).toBeGreaterThanOrEqual(1);
 
@@ -612,9 +636,13 @@ describe('E2E Queue: Multi-Group Concurrency with Priority', () => {
 
     // Queue a task and a main message (both waiting)
     let taskStarted = false;
-    queue.enqueueTask(GROUP_A_JID, 'task-low-priority', vi.fn(async () => {
-      taskStarted = true;
-    }));
+    queue.enqueueTask(
+      GROUP_A_JID,
+      'task-low-priority',
+      vi.fn(async () => {
+        taskStarted = true;
+      }),
+    );
     storeMessage(createMessage(MAIN_JID, 'High priority main'));
     queue.enqueueMessageCheck(MAIN_JID);
     await vi.advanceTimersByTimeAsync(50);
@@ -689,7 +717,11 @@ describe('E2E Queue: Multi-Group Concurrency with Priority', () => {
     expect(metrics.waitingByPriority.tasks).toBe(0);
 
     // Queue a task
-    queue.enqueueTask(GROUP_A_JID, 'task-1', vi.fn(async () => {}));
+    queue.enqueueTask(
+      GROUP_A_JID,
+      'task-1',
+      vi.fn(async () => {}),
+    );
 
     metrics = queue.getQueueMetrics();
     expect(metrics.waitingByPriority.tasks).toBe(1);
@@ -761,7 +793,10 @@ describe('E2E Queue: Multi-Group Concurrency with Priority', () => {
     expect(mainSpawned).toBe(true);
 
     // Complete one -- the 4th group should start
-    await completeContainer(spawnOrder[0].includes('main') ? 'main' : spawnOrder[0].split('-')[1], 'done');
+    await completeContainer(
+      spawnOrder[0].includes('main') ? 'main' : spawnOrder[0].split('-')[1],
+      'done',
+    );
     await vi.advanceTimersByTimeAsync(100);
 
     expect(spawnOrder.length).toBe(4);
