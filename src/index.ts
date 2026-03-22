@@ -57,7 +57,10 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
-import { parseFaqFromClaudeMd, tryFaqShortCircuit } from './faq-shortcircuit.js';
+import {
+  parseFaqFromClaudeMd,
+  tryFaqShortCircuit,
+} from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -229,11 +232,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (faqData) {
     const faqAnswer = tryFaqShortCircuit(missedMessages, faqData);
     if (faqAnswer) {
-      logger.info(
-        { group: group.name },
-        'FAQ short-circuit: answered without container',
-      );
-      await channel.sendMessage(chatJid, faqAnswer);
+      try {
+        await channel.sendMessage(chatJid, faqAnswer);
+        logger.info(
+          { group: group.name },
+          'FAQ short-circuit: answered without container',
+        );
+      } catch (err) {
+        // Roll back cursor so GroupQueue retry can re-process this message
+        logger.warn(
+          { group: group.name, err },
+          'FAQ short-circuit: sendMessage failed, rolling back cursor',
+        );
+        lastAgentTimestamp[chatJid] = previousCursor;
+        saveState();
+        await channel.setTyping?.(chatJid, false);
+        return false;
+      }
       await channel.setTyping?.(chatJid, false);
       return true;
     }

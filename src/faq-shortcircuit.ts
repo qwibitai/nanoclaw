@@ -45,12 +45,19 @@ export function parseFaqFromClaudeMd(groupFolder: string): FaqData | null {
   try {
     content = fs.readFileSync(claudeMdPath, 'utf-8');
   } catch (err) {
-    logger.warn({ groupFolder, err }, 'faq-shortcircuit: failed to read CLAUDE.md');
+    logger.warn(
+      { groupFolder, err },
+      'faq-shortcircuit: failed to read CLAUDE.md',
+    );
     return null;
   }
 
-  // Extract the ## FAQ section (everything until the next ## heading or EOF)
-  const faqMatch = content.match(/^## FAQ\s*\n([\s\S]*?)(?=\n## |\s*$)/m);
+  // Extract the ## FAQ section (everything until the next ## heading or EOF).
+  // No `m` flag — with `m`, $ matches end of any line, causing the lazy
+  // quantifier to stop at the first blank line and capture nothing.
+  // Without `m`, $ only matches true end-of-string, so \s*$ only satisfies
+  // at EOF and \n## correctly catches the next heading.
+  const faqMatch = content.match(/## FAQ\s*\n([\s\S]*?)(?=\n## |\s*$)/);
   if (!faqMatch) return null;
 
   const section = faqMatch[1];
@@ -79,9 +86,9 @@ export function parseFaqFromClaudeMd(groupFolder: string): FaqData | null {
  * If ANY of these match, we pass to the LLM — never short-circuit.
  */
 const BOOKING_INTENT: RegExp[] = [
-  /\bprogramar/,          // programare, programări
-  /\brezervari?\b/,       // rezervare
-  /\bvreau\s+sa\b/,       // vreau să
+  /\bprogramar/, // programare, programări
+  /\brezervari?\b/, // rezervare
+  /\bvreau\s+sa\b/, // vreau să
   /\bdisponibil/,
   /\bslot\b/,
   /\bma\s+programez\b/,
@@ -95,15 +102,15 @@ const BOOKING_INTENT: RegExp[] = [
   /\bsambata\b/,
   /\bduminica\b/,
   // Time references
-  /\bmaine\b/,            // mâine
+  /\bmaine\b/, // mâine
   /\bazi\b/,
-  /\bastazi\b/,           // astăzi
-  /\bsaptamana\b/,        // săptămâna
+  /\bastazi\b/, // astăzi
+  /\bsaptamana\b/, // săptămâna
   /\bora\b/,
   /\b\d{1,2}:\d{2}\b/,
   /\bdimineata\b/,
   /\bseara\b/,
-  /\bliber[aă]?\b/,       // loc liber
+  /\bliber[aă]?\b/, // loc liber
 ];
 
 /**
@@ -182,7 +189,9 @@ export function tryFaqShortCircuit(
   messages: NewMessage[],
   faqData: FaqData,
 ): string | null {
-  const userMessages = messages.filter((m) => !m.is_from_me && !m.is_bot_message);
+  const userMessages = messages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
   if (userMessages.length !== 1) return null;
 
   const raw = userMessages[0].content;
