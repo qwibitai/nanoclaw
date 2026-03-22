@@ -507,6 +507,15 @@ async function main(): Promise<void> {
       );
       return;
     }
+    if (group.remoteControl === false) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Remote control rejected: disabled for this group',
+      );
+      const channel = findChannel(channels, chatJid);
+      await channel?.sendMessage(chatJid, 'Remote control has been disabled, see https://github.com/qwibitai/nanoclaw/pull/1126 for more info');
+      return;
+    }
 
     const channel = findChannel(channels, chatJid);
     if (!channel) return;

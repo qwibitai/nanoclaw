@@ -131,6 +131,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Can schedule tasks for any group
 - Can view and manage tasks from all groups
 - Can configure additional directory mounts for any group
+- Can start/stop Remote Control sessions (`/remote-control`, `/remote-control-end`) to access the host machine from claude.ai/code — can be disabled per-group with `remoteControl: false` (set via `--no-remote-control` during registration)
 
 ---
 

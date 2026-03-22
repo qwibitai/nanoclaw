@@ -22,6 +22,7 @@ interface RegisterArgs {
   requiresTrigger: boolean;
   isMain: boolean;
   assistantName: string;
+  remoteControl: boolean;
 }
 
 function parseArgs(args: string[]): RegisterArgs {
@@ -34,6 +35,7 @@ function parseArgs(args: string[]): RegisterArgs {
     requiresTrigger: true,
     isMain: false,
     assistantName: 'Andy',
+    remoteControl: true, // enable or disables Claude's Remote Control feature for your installation (see: https://code.claude.com/docs/en/remote-control)
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -62,6 +64,8 @@ function parseArgs(args: string[]): RegisterArgs {
       case '--assistant-name':
         result.assistantName = args[++i] || 'Andy';
         break;
+      case '--no-remote-control':
+        result.remoteControl = false;
     }
   }
 
@@ -107,6 +111,7 @@ export async function run(args: string[]): Promise<void> {
     added_at: new Date().toISOString(),
     requiresTrigger: parsed.requiresTrigger,
     isMain: parsed.isMain,
+    remoteControl: parsed.remoteControl,
   });
 
   logger.info('Wrote registration to SQLite');
