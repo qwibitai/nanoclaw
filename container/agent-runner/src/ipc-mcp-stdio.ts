@@ -333,6 +333,165 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- MCP Bridge: dynamically discover and proxy host-side MCP tools ---
+
+const MCP_REQUESTS_DIR = path.join(IPC_DIR, 'mcp_requests');
+const MCP_RESPONSES_DIR = path.join(IPC_DIR, 'mcp_responses');
+const MCP_BRIDGE_POLL_INTERVAL = 100; // ms
+const MCP_BRIDGE_TIMEOUT = 30_000; // ms
+
+async function callHostMcp(
+  serverName: string,
+  tool: string,
+  args: Record<string, unknown>,
+  type?: string,
+): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+  fs.mkdirSync(MCP_REQUESTS_DIR, { recursive: true });
+
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestFile = path.join(MCP_REQUESTS_DIR, `${requestId}.json`);
+  const tempFile = `${requestFile}.tmp`;
+
+  // Write request atomically
+  const request: Record<string, unknown> = {
+    requestId,
+    server: serverName,
+    tool,
+    args,
+  };
+  if (type) request.type = type;
+
+  fs.writeFileSync(tempFile, JSON.stringify(request));
+  fs.renameSync(tempFile, requestFile);
+
+  // Poll for response
+  const responseFile = path.join(MCP_RESPONSES_DIR, `${requestId}.json`);
+  const start = Date.now();
+
+  while (Date.now() - start < MCP_BRIDGE_TIMEOUT) {
+    if (fs.existsSync(responseFile)) {
+      const raw = fs.readFileSync(responseFile, 'utf-8');
+      fs.unlinkSync(responseFile);
+      const response = JSON.parse(raw);
+      if (response.error) {
+        return {
+          content: [
+            { type: 'text', text: `Error: ${response.error}` },
+          ],
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(response.result),
+          },
+        ],
+      };
+    }
+    await new Promise((r) => setTimeout(r, MCP_BRIDGE_POLL_INTERVAL));
+  }
+
+  return {
+    content: [{ type: 'text', text: 'Error: MCP bridge request timed out' }],
+  };
+}
+
+// Discover bridged tools from host and register them dynamically.
+// Only attempts discovery if the host wrote a bridge manifest file,
+// avoiding a 30s timeout on every container spawn when no bridge is configured.
+async function registerBridgedTools(): Promise<void> {
+  const manifestFile = path.join(IPC_DIR, 'mcp_bridge_enabled');
+  if (!fs.existsSync(manifestFile)) return;
+
+  try {
+    const result = await callHostMcp('', '', {}, 'list_tools');
+    const text = result.content[0]?.text;
+    if (!text || text.startsWith('Error:')) return;
+
+    const serverTools: Array<{
+      server: string;
+      tools: Array<{
+        name: string;
+        description?: string;
+        inputSchema?: {
+          type: string;
+          properties?: Record<string, unknown>;
+          required?: string[];
+        };
+      }>;
+    }> = JSON.parse(text);
+
+    for (const entry of serverTools) {
+      const serverName = entry.server;
+      for (const tool of entry.tools) {
+        // Build zod schema from JSON Schema properties
+        const zodSchema: Record<string, z.ZodType> = {};
+        const props = tool.inputSchema?.properties || {};
+        const requiredFields = new Set(tool.inputSchema?.required || []);
+
+        for (const [key, schemaDef] of Object.entries(props)) {
+          const def = schemaDef as {
+            type?: string;
+            description?: string;
+            enum?: string[];
+            items?: { type?: string };
+          };
+          let zodType: z.ZodType;
+
+          // Map JSON Schema types to zod
+          switch (def.type) {
+            case 'number':
+            case 'integer':
+              zodType = z.number();
+              break;
+            case 'boolean':
+              zodType = z.boolean();
+              break;
+            case 'array':
+              if (def.items?.type === 'number') {
+                zodType = z.array(z.number());
+              } else {
+                zodType = z.array(z.string());
+              }
+              break;
+            default:
+              // string, or unknown — treat as string
+              if (def.enum) {
+                zodType = z.enum(def.enum as [string, ...string[]]);
+              } else {
+                zodType = z.string();
+              }
+          }
+
+          if (def.description) {
+            zodType = zodType.describe(def.description);
+          }
+
+          if (!requiredFields.has(key)) {
+            zodType = zodType.optional();
+          }
+
+          zodSchema[key] = zodType;
+        }
+
+        server.tool(
+          tool.name,
+          tool.description || `Bridged tool: ${tool.name}`,
+          zodSchema,
+          async (args: Record<string, unknown>) => {
+            return callHostMcp(serverName, tool.name, args);
+          },
+        );
+      }
+    }
+  } catch {
+    // No bridged tools available — not an error, bridge may not be configured
+  }
+}
+
+await registerBridgedTools();
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

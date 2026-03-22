@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -169,6 +170,17 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'mcp_requests'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'mcp_responses'), { recursive: true });
+
+  // Write bridge manifest so containers know to attempt tool discovery
+  const bridgeEnv = readEnvFile(['MCP_BRIDGE_SERVERS']);
+  const bridgeManifest = path.join(groupIpcDir, 'mcp_bridge_enabled');
+  if (bridgeEnv.MCP_BRIDGE_SERVERS) {
+    fs.writeFileSync(bridgeManifest, bridgeEnv.MCP_BRIDGE_SERVERS);
+  } else if (fs.existsSync(bridgeManifest)) {
+    fs.unlinkSync(bridgeManifest);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',

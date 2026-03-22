@@ -8,6 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { McpBridge } from './mcp-bridge.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -23,6 +24,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  mcpBridge?: McpBridge;
 }
 
 let ipcWatcherRunning = false;
@@ -144,6 +146,49 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process MCP bridge requests from this group's IPC directory
+      if (deps.mcpBridge) {
+        const requestsDir = path.join(ipcBaseDir, sourceGroup, 'mcp_requests');
+        const responsesDir = path.join(
+          ipcBaseDir,
+          sourceGroup,
+          'mcp_responses',
+        );
+        try {
+          if (fs.existsSync(requestsDir)) {
+            const requestFiles = fs
+              .readdirSync(requestsDir)
+              .filter((f) => f.endsWith('.json'));
+            for (const file of requestFiles) {
+              const filePath = path.join(requestsDir, file);
+              try {
+                const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+                fs.unlinkSync(filePath);
+
+                // Process async — write response when done
+                processMcpRequest(
+                  deps.mcpBridge,
+                  data,
+                  responsesDir,
+                  sourceGroup,
+                );
+              } catch (err) {
+                logger.error(
+                  { file, sourceGroup, err },
+                  'Error reading MCP bridge request',
+                );
+                fs.unlinkSync(filePath);
+              }
+            }
+          }
+        } catch (err) {
+          logger.error(
+            { err, sourceGroup },
+            'Error reading MCP requests directory',
+          );
+        }
       }
     }
 
@@ -457,5 +502,77 @@ export async function processTaskIpc(
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+/**
+ * Process an MCP bridge request from a container.
+ * Handles both tool calls and tool discovery (list_tools).
+ * Forwards to the host-side MCP server and writes the response.
+ */
+async function processMcpRequest(
+  bridge: McpBridge,
+  data: {
+    requestId: string;
+    type?: string;
+    server: string;
+    tool: string;
+    args: Record<string, unknown>;
+  },
+  responsesDir: string,
+  sourceGroup: string,
+): Promise<void> {
+  fs.mkdirSync(responsesDir, { recursive: true });
+
+  const responseFile = path.join(responsesDir, `${data.requestId}.json`);
+  const tempFile = `${responseFile}.tmp`;
+
+  try {
+    let result: unknown;
+
+    if (data.type === 'list_tools') {
+      // Tool discovery: return all tools from all bridged servers
+      result = await bridge.listAllTools();
+    } else {
+      // Tool call: forward to the specific server
+      result = await bridge.callTool(data.server, data.tool, data.args);
+    }
+
+    fs.writeFileSync(
+      tempFile,
+      JSON.stringify({ requestId: data.requestId, result, error: null }),
+    );
+    fs.renameSync(tempFile, responseFile);
+    logger.debug(
+      {
+        requestId: data.requestId,
+        type: data.type || 'call_tool',
+        server: data.server,
+        tool: data.tool,
+        sourceGroup,
+      },
+      'MCP bridge request completed',
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    fs.writeFileSync(
+      tempFile,
+      JSON.stringify({
+        requestId: data.requestId,
+        result: null,
+        error: errorMsg,
+      }),
+    );
+    fs.renameSync(tempFile, responseFile);
+    logger.error(
+      {
+        requestId: data.requestId,
+        server: data.server,
+        tool: data.tool,
+        sourceGroup,
+        err,
+      },
+      'MCP bridge request failed',
+    );
   }
 }
