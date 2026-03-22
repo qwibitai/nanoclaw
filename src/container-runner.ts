@@ -218,8 +218,14 @@ function buildContainerArgs(
   // Route API traffic through the credential proxy (containers never see real secrets)
   // For Apple Container, the credential proxy is unreachable from inside the VM
   // (host.docker.internal TCP responses don't flow back). Pass credentials directly.
-  const directSecrets = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL']);
-  if (CONTAINER_RUNTIME_BIN === 'container' && directSecrets.ANTHROPIC_API_KEY) {
+  const directSecrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+  ]);
+  if (
+    CONTAINER_RUNTIME_BIN === 'container' &&
+    directSecrets.ANTHROPIC_API_KEY
+  ) {
     args.push('-e', `ANTHROPIC_API_KEY=${directSecrets.ANTHROPIC_API_KEY}`);
     if (directSecrets.ANTHROPIC_BASE_URL) {
       args.push('-e', `ANTHROPIC_BASE_URL=${directSecrets.ANTHROPIC_BASE_URL}`);
