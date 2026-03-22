@@ -20,11 +20,15 @@ function exec(cmd) {
   }
 }
 
-const commitHash = exec('git rev-parse HEAD');
-const commitShort = exec('git rev-parse --short HEAD');
-const commitDate = exec('git log -1 --format=%cI');
-const branch = exec('git rev-parse --abbrev-ref HEAD');
-const dirty = exec('git status --porcelain') ? true : false;
+// Support env var overrides for sandboxed builds (Nix, CI, etc.)
+// where .git is unavailable. Set GIT_COMMIT, GIT_BRANCH, etc. from the derivation.
+const commitHash = process.env.GIT_COMMIT || exec('git rev-parse HEAD');
+const commitShort = process.env.GIT_COMMIT_SHORT || (commitHash ? commitHash.slice(0, 7) : null);
+const commitDate = process.env.GIT_COMMIT_DATE || exec('git log -1 --format=%cI');
+const branch = process.env.GIT_BRANCH || exec('git rev-parse --abbrev-ref HEAD');
+const dirty = process.env.GIT_DIRTY !== undefined
+  ? process.env.GIT_DIRTY === 'true'
+  : (exec('git status --porcelain') ? true : false);
 
 const buildInfo = {
   commit: commitHash || 'unknown',
