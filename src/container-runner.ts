@@ -255,6 +255,12 @@ function buildContainerArgs(
     args.push('-e', `PANEL_URL=${panelUrl || ''}`);
   }
 
+  // OpenAI: pass API key to container (image generation)
+  const openaiKey = readEnvFile(['OPENAI_API_KEY']).OPENAI_API_KEY;
+  if (openaiKey) {
+    args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
+  }
+
   // Smatch MCP: pass credentials to container
   const smatchEnv = readEnvFile(['SMATCH_MONGODB_URI', 'SMATCH_CLUB_ID']);
   if (smatchEnv.SMATCH_MONGODB_URI) {

@@ -46,6 +46,8 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      readFileSync: vi.fn(() => Buffer.from('fake-image')),
     },
   };
 });

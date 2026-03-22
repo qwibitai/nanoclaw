@@ -639,6 +639,15 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendImage: (jid, filePath, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (channel.sendImage) {
+        return channel.sendImage(jid, filePath, caption);
+      }
+      // Fallback: send caption as text if channel doesn't support images
+      return channel.sendMessage(jid, caption || '[Image not supported on this channel]');
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

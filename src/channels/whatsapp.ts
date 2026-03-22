@@ -44,7 +44,10 @@ export class WhatsAppChannel implements Channel {
   private sock!: WASocket;
   private connected = false;
   private lidToPhoneMap: Record<string, string> = {};
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<
+    | { kind: 'text'; jid: string; text: string }
+    | { kind: 'image'; jid: string; filePath: string; caption: string }
+  > = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
 
@@ -84,17 +87,39 @@ export class WhatsAppChannel implements Channel {
       browser: Browsers.macOS('Chrome'),
     });
 
+    // Use pairing code when phone number is provided (more reliable than QR for remote setups)
+    const phoneNumber = process.env.WHATSAPP_PHONE_NUMBER;
+    if (phoneNumber && !state.creds.registered) {
+      setTimeout(async () => {
+        try {
+          const code = await this.sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
+          logger.info({ code }, `PAIRING CODE: ${code}`);
+          const pairingFile = path.join(STORE_DIR, 'pairing-code.txt');
+          fs.writeFileSync(pairingFile, code);
+        } catch (err) {
+          logger.error({ err }, 'Failed to request pairing code');
+        }
+      }, 3000);
+    }
+
     this.sock.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        // Write QR data to file so external scripts can display it
+        const qrFile = path.join(STORE_DIR, 'qr-code.txt');
+        fs.writeFileSync(qrFile, qr);
+        logger.info('WhatsApp QR code written to store/qr-code.txt');
+
+        if (!phoneNumber && !process.env.WHATSAPP_RECONNECT_MODE) {
+          const msg =
+            'WhatsApp authentication required. Run /setup in Claude Code.';
+          logger.error(msg);
+          exec(
+            `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          );
+          setTimeout(() => process.exit(1), 1000);
+        }
       }
 
       if (connection === 'close') {
@@ -270,7 +295,7 @@ export class WhatsAppChannel implements Channel {
       : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ kind: 'text', jid, text: prefixed });
       logger.info(
         { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
         'WA disconnected, message queued',
@@ -282,11 +307,27 @@ export class WhatsAppChannel implements Channel {
       logger.info({ jid, length: prefixed.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text: prefixed });
+      this.outgoingQueue.push({ kind: 'text', jid, text: prefixed });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
       );
+    }
+  }
+
+  async sendImage(jid: string, filePath: string, caption: string): Promise<void> {
+    if (!this.connected) {
+      this.outgoingQueue.push({ kind: 'image', jid, filePath, caption });
+      logger.info({ jid, filePath }, 'WA disconnected, image queued');
+      return;
+    }
+    try {
+      const buffer = fs.readFileSync(filePath);
+      await this.sock.sendMessage(jid, { image: buffer, caption });
+      logger.info({ jid, filePath }, 'Image sent');
+    } catch (err) {
+      this.outgoingQueue.push({ kind: 'image', jid, filePath, caption });
+      logger.warn({ jid, filePath, err }, 'Failed to send image, queued');
     }
   }
 
@@ -407,12 +448,14 @@ export class WhatsAppChannel implements Channel {
       );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info(
-          { jid: item.jid, length: item.text.length },
-          'Queued message sent',
-        );
+        if (item.kind === 'image') {
+          const buffer = fs.readFileSync(item.filePath);
+          await this.sock.sendMessage(item.jid, { image: buffer, caption: item.caption });
+          logger.info({ jid: item.jid, filePath: item.filePath }, 'Queued image sent');
+        } else {
+          await this.sock.sendMessage(item.jid, { text: item.text });
+          logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        }
       }
     } finally {
       this.flushing = false;

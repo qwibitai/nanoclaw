@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# generate-image: call OpenAI image API
+# Usage:
+#   generate-image "prompt"                       # text-to-image
+#   generate-image "prompt" /path/to/source.png   # image editing
+set -euo pipefail
+
+PROMPT="${1:?Usage: generate-image \"prompt\" [source-image]}"
+SOURCE_IMAGE="${2:-}"
+OUTPUT_DIR="/workspace/group"
+OUTPUT_FILE="${OUTPUT_DIR}/generated-$(date +%s%3N).png"
+
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "ERROR: OPENAI_API_KEY not set" >&2
+  exit 1
+fi
+
+if [[ -n "$SOURCE_IMAGE" ]]; then
+  # Image editing via gpt-image-1
+  RESPONSE=$(curl -sS -X POST "https://api.openai.com/v1/images/edits" \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -F "model=gpt-image-1" \
+    -F "image=@${SOURCE_IMAGE}" \
+    -F "prompt=${PROMPT}" \
+    -F "response_format=b64_json")
+else
+  # Text-to-image via gpt-image-1
+  PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'model': 'gpt-image-1',
+    'prompt': sys.argv[1],
+    'response_format': 'b64_json'
+}))
+" "$PROMPT")
+
+  RESPONSE=$(curl -sS -X POST "https://api.openai.com/v1/images/generations" \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD")
+fi
+
+# Check for API error
+ERROR=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+e = d.get('error', {})
+if isinstance(e, dict) and e.get('message'):
+    print(e['message'])
+" <<< "$RESPONSE" 2>/dev/null || true)
+
+if [[ -n "$ERROR" ]]; then
+  echo "ERROR: OpenAI API: $ERROR" >&2
+  exit 1
+fi
+
+# Decode base64 and save
+python3 -c "
+import json, sys, base64
+d = json.load(sys.stdin)
+b64 = d['data'][0]['b64_json']
+with open(sys.argv[1], 'wb') as f:
+    f.write(base64.b64decode(b64))
+" "$OUTPUT_FILE" <<< "$RESPONSE"
+
+echo "$OUTPUT_FILE"

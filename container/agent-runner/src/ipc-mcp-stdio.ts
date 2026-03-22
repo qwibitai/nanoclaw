@@ -41,12 +41,27 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message or image to the user or group immediately while you're still running. Use this for progress updates, to send multiple messages, or to deliver generated images. You can call this multiple times.",
   {
-    text: z.string().describe('The message text to send'),
+    text: z.string().describe('The message text to send (used as caption when sending an image)'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    image_path: z.string().optional().describe('Absolute path to an image file (e.g. /workspace/group/generated-123.png). When provided, sends a native image with the text as caption.'),
   },
   async (args) => {
+    if (args.image_path) {
+      const filename = path.basename(args.image_path);
+      const data = {
+        type: 'image',
+        chatJid,
+        filename,
+        caption: args.text,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      };
+      writeIpcFile(MESSAGES_DIR, data);
+      return { content: [{ type: 'text' as const, text: 'Image queued for delivery.' }] };
+    }
+
     const data: Record<string, string | undefined> = {
       type: 'message',
       chatJid,
