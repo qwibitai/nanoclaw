@@ -1,6 +1,7 @@
 /**
  * Session Runner for NanoClaw
- * Spawns agent execution in tmux sessions and handles IPC
+ * Orchestrates agent execution in tmux sessions — delegates output polling
+ * to output-reader.ts and session bootstrapping to session-settings.ts.
  */
 import { exec, execSync } from 'child_process';
 import fs from 'fs';
@@ -10,11 +11,9 @@ import path from 'path';
 import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import {
@@ -23,16 +22,21 @@ import {
   logger,
 } from './logger.js';
 import { hasSession, stopSession } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
-// Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-// Polling interval for reading output file (ms)
-const OUTPUT_POLL_INTERVAL = 250;
+import {
+  OUTPUT_START_MARKER,
+  OUTPUT_END_MARKER,
+  OUTPUT_POLL_INTERVAL,
+  createOutputReaderState,
+  pollOutput,
+  cleanupTempFiles,
+} from './output-reader.js';
+import {
+  bootstrapSessionSettings,
+  buildSessionEnv,
+  ensureAgentRunnerCompiled,
+} from './session-settings.js';
 
 export interface ContainerInput {
   prompt: string;
@@ -103,42 +107,7 @@ export function buildVolumeMounts(
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
-  const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
-
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
-  }
+  const groupSessionsDir = bootstrapSessionSettings(group.folder);
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -216,72 +185,6 @@ export function buildVolumeMounts(
   }
 
   return mounts;
-}
-
-/**
- * Build environment variables for the tmux session.
- * These replace the Docker -e flags and path-mapping volume mounts.
- */
-function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  env.TZ = TIMEZONE;
-
-  // Route API traffic through the credential proxy
-  env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${CREDENTIAL_PROXY_PORT}`;
-
-  // Auth mode placeholder (proxy handles real credentials)
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    env.ANTHROPIC_API_KEY = 'placeholder';
-  } else {
-    env.CLAUDE_CODE_OAUTH_TOKEN = 'placeholder';
-  }
-
-  // Map volume mount paths to env vars for the agent-runner
-  for (const mount of mounts) {
-    if (mount.containerPath === '/workspace/group') {
-      env.NANOCLAW_GROUP_DIR = mount.hostPath;
-    } else if (mount.containerPath === '/workspace/global') {
-      env.NANOCLAW_GLOBAL_DIR = mount.hostPath;
-    } else if (mount.containerPath === '/workspace/ipc') {
-      env.NANOCLAW_IPC_INPUT_DIR = path.join(mount.hostPath, 'input');
-    } else if (mount.containerPath === '/home/node/.claude') {
-      env.CLAUDE_CONFIG_DIR = mount.hostPath;
-    } else if (mount.containerPath === '/workspace/extra') {
-      env.NANOCLAW_EXTRA_DIR = mount.hostPath;
-    }
-  }
-
-  return env;
-}
-
-/**
- * Ensure the agent-runner is compiled and ready to run on the host.
- * Returns the path to the compiled index.js.
- */
-function ensureAgentRunnerCompiled(): string {
-  const projectRoot = process.cwd();
-  const agentRunnerDir = path.join(projectRoot, 'container', 'agent-runner');
-  const distIndex = path.join(agentRunnerDir, 'dist', 'index.js');
-
-  if (!fs.existsSync(distIndex)) {
-    logger.info('Compiling agent-runner for host execution...');
-    try {
-      execSync('npm run build', {
-        cwd: agentRunnerDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 30000,
-      });
-      logger.info('Agent-runner compiled successfully');
-    } catch (err) {
-      throw new Error(
-        `Failed to compile agent-runner: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  return distIndex;
 }
 
 export async function runContainerAgent(
@@ -371,16 +274,8 @@ export async function runContainerAgent(
 
     onProcess(null, sessionName);
 
-    let stdout = '';
-    let stdoutTruncated = false;
-    let bytesRead = 0;
-
-    // Streaming output: parse OUTPUT_START/END marker pairs
-    let parseBuffer = '';
-    let newSessionId: string | undefined;
-    let outputChain = Promise.resolve();
+    const readerState = createOutputReaderState();
     let timedOut = false;
-    let hadStreamingOutput = false;
 
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
@@ -402,77 +297,21 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    // Poll output file for new data and sentinel markers
-    const pollOutput = () => {
-      try {
-        const stat = fs.statSync(outputFile);
-        if (stat.size > bytesRead) {
-          const fd = fs.openSync(outputFile, 'r');
-          const newBytes = stat.size - bytesRead;
-          const buffer = Buffer.alloc(newBytes);
-          fs.readSync(fd, buffer, 0, newBytes, bytesRead);
-          fs.closeSync(fd);
-          bytesRead = stat.size;
-
-          const chunk = buffer.toString('utf-8');
-
-          // Accumulate for logging
-          if (!stdoutTruncated) {
-            const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
-            if (chunk.length > remaining) {
-              stdout += chunk.slice(0, remaining);
-              stdoutTruncated = true;
-              log.warn(
-                { sessionName, size: stdout.length },
-                'Session stdout truncated due to size limit',
-              );
-            } else {
-              stdout += chunk;
-            }
-          }
-
-          // Stream-parse for output markers
-          if (onOutput) {
-            parseBuffer += chunk;
-            let startIdx: number;
-            while (
-              (startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
-            ) {
-              const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-              if (endIdx === -1) break;
-
-              const jsonStr = parseBuffer
-                .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-                .trim();
-              parseBuffer = parseBuffer.slice(
-                endIdx + OUTPUT_END_MARKER.length,
-              );
-
-              try {
-                const parsed: ContainerOutput = JSON.parse(jsonStr);
-                if (parsed.newSessionId) {
-                  newSessionId = parsed.newSessionId;
-                }
-                hadStreamingOutput = true;
-                resetTimeout();
-                outputChain = outputChain.then(() => onOutput(parsed));
-              } catch (err) {
-                log.warn(
-                  { sessionName, error: err },
-                  'Failed to parse streamed output chunk',
-                );
-              }
-            }
-          }
-        }
-      } catch {
-        // File may not exist yet or be temporarily unavailable
-      }
+    const doPoll = () => {
+      pollOutput(
+        outputFile,
+        readerState,
+        CONTAINER_MAX_OUTPUT_SIZE,
+        sessionName,
+        log,
+        onOutput,
+        resetTimeout,
+      );
     };
 
     // Poll for session completion and output
     const checkSession = () => {
-      pollOutput();
+      doPoll();
 
       if (hasSession(sessionName)) {
         // Session still running, keep polling
@@ -481,7 +320,7 @@ export async function runContainerAgent(
       }
 
       // Session has ended — do a final read of the output file
-      pollOutput();
+      doPoll();
       clearTimeout(timeout);
 
       const duration = Date.now() - startTime;
@@ -508,20 +347,20 @@ export async function runContainerAgent(
             `Group: ${group.name}`,
             `Session: ${sessionName}`,
             `Duration: ${duration}ms`,
-            `Had Streaming Output: ${hadStreamingOutput}`,
+            `Had Streaming Output: ${readerState.hadStreamingOutput}`,
           ].join('\n'),
         );
 
-        if (hadStreamingOutput) {
+        if (readerState.hadStreamingOutput) {
           log.info(
             { sessionName, duration },
             'Session timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
+          readerState.outputChain.then(() => {
             resolve({
               status: 'success',
               result: null,
-              newSessionId,
+              newSessionId: readerState.newSessionId,
             });
           });
           return;
@@ -551,14 +390,14 @@ export async function runContainerAgent(
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
-        `Stdout Truncated: ${stdoutTruncated}`,
+        `Stdout Truncated: ${readerState.stdoutTruncated}`,
         ``,
       ];
 
       // Determine exit status from whether we got output or not
       const isError =
-        !hadStreamingOutput &&
-        stdout.indexOf(OUTPUT_START_MARKER) === -1 &&
+        !readerState.hadStreamingOutput &&
+        readerState.stdout.indexOf(OUTPUT_START_MARKER) === -1 &&
         stderr.length > 0;
 
       if (isVerbose || isError) {
@@ -577,8 +416,8 @@ export async function runContainerAgent(
           `=== Stderr ===`,
           stderr,
           ``,
-          `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stdout,
+          `=== Stdout${readerState.stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
+          readerState.stdout,
         );
       } else {
         logLines.push(
@@ -617,15 +456,15 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle
       if (onOutput) {
-        outputChain.then(() => {
+        readerState.outputChain.then(() => {
           log.info(
-            { sessionName, duration, newSessionId },
+            { sessionName, duration, newSessionId: readerState.newSessionId },
             'Session completed (streaming mode)',
           );
           resolve({
             status: 'success',
             result: null,
-            newSessionId,
+            newSessionId: readerState.newSessionId,
           });
         });
         return;
@@ -633,16 +472,16 @@ export async function runContainerAgent(
 
       // Legacy mode: parse the last output marker pair from accumulated stdout
       try {
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+        const startIdx = readerState.stdout.indexOf(OUTPUT_START_MARKER);
+        const endIdx = readerState.stdout.indexOf(OUTPUT_END_MARKER);
 
         let jsonLine: string;
         if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
+          jsonLine = readerState.stdout
             .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
             .trim();
         } else {
-          const lines = stdout.trim().split('\n');
+          const lines = readerState.stdout.trim().split('\n');
           jsonLine = lines[lines.length - 1];
         }
 
@@ -663,7 +502,7 @@ export async function runContainerAgent(
         log.error(
           {
             sessionName,
-            stdout: stdout.slice(-500),
+            stdout: readerState.stdout.slice(-500),
             stderr: stderr.slice(-500),
             error: err,
           },
@@ -686,17 +525,6 @@ export async function runContainerAgent(
 /** Escape a string for use in a shell command. */
 function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
-}
-
-/** Clean up temporary files created for the session. */
-function cleanupTempFiles(...files: string[]): void {
-  for (const file of files) {
-    try {
-      fs.unlinkSync(file);
-    } catch {
-      // ignore
-    }
-  }
 }
 
 export function writeTasksSnapshot(
