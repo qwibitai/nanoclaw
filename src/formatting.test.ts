@@ -64,6 +64,7 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()], TZ);
     expect(result).toContain('<context timezone="UTC" />');
     expect(result).toContain('<message sender="Alice"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hello</message>');
     expect(result).toContain('Jan 1, 2024');
   });
@@ -86,6 +87,7 @@ describe('formatMessages', () => {
     const result = formatMessages(msgs, TZ);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hi</message>');
     expect(result).toContain('>hey</message>');
   });

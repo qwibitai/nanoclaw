@@ -16,7 +16,10 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    const senderId = escapeXml(m.sender || '');
+    const senderName = escapeXml(m.sender_name || m.sender || 'unknown');
+    const time = escapeXml(displayTime);
+    return `<message sender="${senderName}" sender_id="${senderId}" time="${time}">${escapeXml(m.content)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
