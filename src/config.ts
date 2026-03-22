@@ -63,9 +63,9 @@ export const X_HEALTH_CHECK_INTERVAL = parseInt(
 );
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '120000', 10); // 2min default — how long to keep container alive after last result
 export const FIRST_OUTPUT_TIMEOUT = parseInt(
-  process.env.FIRST_OUTPUT_TIMEOUT || '600000',
+  process.env.FIRST_OUTPUT_TIMEOUT || '2100000',
   10,
-); // 10min default — kill container if no output marker received within this time
+); // 35min default — must exceed SDK query timeout (30min) so long coding/research turns aren't killed prematurely
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '7', 10) || 7,

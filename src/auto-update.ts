@@ -11,6 +11,7 @@
  */
 
 import { execSync } from 'child_process';
+import path from 'path';
 
 import { logger } from './logger.js';
 
@@ -20,8 +21,26 @@ const FETCH_TIMEOUT = 30_000;
 const PULL_TIMEOUT = 60_000;
 const BUILD_TIMEOUT = 120_000;
 
+/**
+ * Resolve the directory containing the current Node binary so we can build
+ * a PATH that includes npm/npx.  When NanoClaw is launched via launchd the
+ * default shell PATH (/usr/bin:/bin) doesn't contain the Homebrew or nvm
+ * managed node/npm, so bare `npm run build` fails with "command not found".
+ */
+function resolveNodeBinDir(): string {
+  return path.dirname(process.execPath);
+}
+
 export function startAutoUpdateLoop(): void {
   const projectRoot = process.cwd();
+  const nodeBinDir = resolveNodeBinDir();
+
+  // Prepend the Node binary's directory to PATH so npm/npx are reachable
+  // even when launched from a minimal launchd/systemd environment.
+  const execEnv = {
+    ...process.env,
+    PATH: `${nodeBinDir}:${process.env.PATH || '/usr/bin:/bin'}`,
+  };
 
   const check = () => {
     try {
@@ -52,12 +71,14 @@ export function startAutoUpdateLoop(): void {
         cwd: projectRoot,
         stdio: 'pipe',
         timeout: PULL_TIMEOUT,
+        env: execEnv,
       });
 
       execSync('npm run build', {
         cwd: projectRoot,
         stdio: 'pipe',
         timeout: BUILD_TIMEOUT,
+        env: execEnv,
       });
 
       logger.info('Auto-update rebuild complete, restarting');
@@ -73,7 +94,11 @@ export function startAutoUpdateLoop(): void {
   }, STARTUP_DELAY);
 
   logger.info(
-    { intervalMs: AUTO_UPDATE_INTERVAL, startupDelayMs: STARTUP_DELAY },
+    {
+      intervalMs: AUTO_UPDATE_INTERVAL,
+      startupDelayMs: STARTUP_DELAY,
+      nodeBinDir,
+    },
     'Auto-update loop started',
   );
 }

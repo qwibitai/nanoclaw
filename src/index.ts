@@ -304,10 +304,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (text) {
           await channel.setTyping?.(chatJid, false);
           await channel.sendMessage(chatJid, text, lastMessageId);
-          outputSentToUser = true;
+          // Warnings (e.g. large session) should be sent to the user but must NOT
+          // set outputSentToUser — otherwise a subsequent container failure skips
+          // cursor rollback and the user's prompt is silently lost.
+          if (!result.isWarning) {
+            outputSentToUser = true;
+          }
         }
-        // Only reset idle timer on actual results, not session-update markers (result: null)
-        resetIdleTimer();
+        // Only reset idle timer on actual results, not warnings or session-update markers
+        if (!result.isWarning) {
+          resetIdleTimer();
+        }
       }
 
       if (result.status === 'success') {
