@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import express from 'express';
-import http from 'http';
 
 import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -257,10 +256,9 @@ function formatEvent(event: string, payload: any): FormattedEvent | null {
 export class GitHubChannel implements Channel {
   name = 'github';
 
-  private server: http.Server | null = null;
+  private connected = false;
   private opts: ChannelOpts;
   private webhookSecret: string;
-  private port: number;
   private token: string;
   /** If set, only process events from these GitHub usernames */
   private allowedSenders: Set<string> | null;
@@ -269,14 +267,12 @@ export class GitHubChannel implements Channel {
 
   constructor(
     webhookSecret: string,
-    port: number,
     token: string,
     allowedSenders: string[],
     opts: ChannelOpts,
     botUsername: string = '',
   ) {
     this.webhookSecret = webhookSecret;
-    this.port = port;
     this.token = token;
     this.allowedSenders =
       allowedSenders.length > 0 ? new Set(allowedSenders) : null;
@@ -285,12 +281,14 @@ export class GitHubChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    const app = express();
+    const app = this.opts.app;
+    if (!app) {
+      throw new Error(
+        'GitHub channel requires a shared Express app via opts.app',
+      );
+    }
 
-    // Parse raw body for signature verification
-    app.use(express.json({ limit: '1mb' }));
-
-    app.post('/webhook', (req, res) => {
+    app.post('/github/webhook', express.json({ limit: '1mb' }), (req, res) => {
       const signature = req.headers['x-hub-signature-256'] as string;
       const event = req.headers['x-github-event'] as string;
       const deliveryId = req.headers['x-github-delivery'] as string;
@@ -351,21 +349,8 @@ export class GitHubChannel implements Channel {
       );
     });
 
-    // Health check
-    app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', channel: 'github' });
-    });
-
-    return new Promise<void>((resolve, reject) => {
-      this.server = app.listen(this.port, () => {
-        logger.info({ port: this.port }, 'GitHub webhook server listening');
-        console.log(
-          `\n  GitHub webhooks: http://localhost:${this.port}/webhook`,
-        );
-        resolve();
-      });
-      this.server.on('error', reject);
-    });
+    this.connected = true;
+    logger.info('GitHub webhook routes mounted on /github/webhook');
   }
 
   private async processWebhook(
@@ -604,7 +589,7 @@ export class GitHubChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.server !== null && this.server.listening;
+    return this.connected;
   }
 
   ownsJid(jid: string): boolean {
@@ -612,30 +597,20 @@ export class GitHubChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    if (this.server) {
-      await new Promise<void>((resolve) => {
-        this.server!.close(() => resolve());
-      });
-      this.server = null;
-      logger.info('GitHub webhook server stopped');
-    }
+    this.connected = false;
+    logger.info('GitHub channel disconnected');
   }
 }
 
 registerChannel('github', (opts: ChannelOpts) => {
   const envVars = readEnvFile([
     'GITHUB_WEBHOOK_SECRET',
-    'GITHUB_WEBHOOK_PORT',
     'GITHUB_TOKEN',
     'GITHUB_ALLOWED_SENDERS',
     'GITHUB_BOT_USERNAME',
   ]);
   const secret =
     process.env.GITHUB_WEBHOOK_SECRET || envVars.GITHUB_WEBHOOK_SECRET || '';
-  const port = parseInt(
-    process.env.GITHUB_WEBHOOK_PORT || envVars.GITHUB_WEBHOOK_PORT || '0',
-    10,
-  );
   const token = process.env.GITHUB_TOKEN || envVars.GITHUB_TOKEN || '';
   const allowedSendersRaw =
     process.env.GITHUB_ALLOWED_SENDERS || envVars.GITHUB_ALLOWED_SENDERS || '';
@@ -644,8 +619,8 @@ registerChannel('github', (opts: ChannelOpts) => {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  if (!secret || !port) {
-    logger.warn('GitHub: GITHUB_WEBHOOK_SECRET or GITHUB_WEBHOOK_PORT not set');
+  if (!secret) {
+    logger.warn('GitHub: GITHUB_WEBHOOK_SECRET not set');
     return null;
   }
 
@@ -669,12 +644,5 @@ registerChannel('github', (opts: ChannelOpts) => {
     );
   }
 
-  return new GitHubChannel(
-    secret,
-    port,
-    token,
-    allowedSenders,
-    opts,
-    botUsername,
-  );
+  return new GitHubChannel(secret, token, allowedSenders, opts, botUsername);
 });

@@ -1,3 +1,5 @@
+import type { Application } from 'express';
+
 import {
   Channel,
   OnInboundMessage,
@@ -15,6 +17,8 @@ export interface ChannelOpts {
   cancelTask?: (taskId: string) => void;
   pauseTask?: (taskId: string) => void;
   resumeTask?: (taskId: string) => void;
+  /** Shared Express app for webhook channels to mount routes on */
+  app?: Application;
   requestRestart?: () => void;
 }
 

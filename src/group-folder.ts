@@ -78,6 +78,25 @@ export function writeGroupTemplate(
 
   if (!jid) return;
 
+  // Try Linear first
+  const linearCtx = parseLinearJid(jid);
+  if (linearCtx) {
+    const content = generateLinearClaudeMd({
+      identifier: linearCtx.identifier,
+      title: metadata?.title || '',
+      description: metadata?.description,
+      status: metadata?.status,
+      priority: metadata?.priority,
+      team: metadata?.team,
+      assignee: metadata?.assignee,
+      url: metadata?.url,
+    });
+    if (content) {
+      fs.writeFileSync(targetPath, content, 'utf-8');
+    }
+    return;
+  }
+
   const parsed = parseGitHubJid(jid);
   if (!parsed) return;
 
@@ -209,6 +228,86 @@ You are activated by check_suite events on the main branch. If CI fails on main,
 ## Useful Commands
 - \`gh run list --repo ${ctx.repo} --limit 5\` — check recent CI runs
 - \`gh pr create --repo ${ctx.repo} --title "..." --body "..."\` — raise a fix PR
+`;
+}
+
+// --- Linear support ---
+
+export interface LinearGroupContext {
+  identifier: string;
+  title: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  team?: string;
+  assignee?: string;
+  url?: string;
+}
+
+/**
+ * Parse a Linear JID into structured context.
+ * JID format: `linear:ENG-123`
+ */
+export function parseLinearJid(jid: string): { identifier: string } | null {
+  const match = jid.match(/^linear:(.+)$/);
+  if (!match) return null;
+  return { identifier: match[1] };
+}
+
+function generateLinearClaudeMd(ctx: LinearGroupContext): string {
+  const titleLine = ctx.title ? ` — ${ctx.title}` : '';
+  const priorityLabel =
+    ctx.priority != null
+      ? {
+          '0': 'No priority',
+          '1': 'Urgent',
+          '2': 'High',
+          '3': 'Medium',
+          '4': 'Low',
+        }[ctx.priority] || `P${ctx.priority}`
+      : undefined;
+
+  const metaLines: string[] = [];
+  if (ctx.status) metaLines.push(`- **Status**: ${ctx.status}`);
+  if (priorityLabel) metaLines.push(`- **Priority**: ${priorityLabel}`);
+  if (ctx.team) metaLines.push(`- **Team**: ${ctx.team}`);
+  if (ctx.assignee) metaLines.push(`- **Assignee**: ${ctx.assignee}`);
+  if (ctx.url) metaLines.push(`- **URL**: ${ctx.url}`);
+
+  const descriptionSection = ctx.description
+    ? `\n## Description\n${ctx.description}\n`
+    : '';
+
+  return `# Linear Issue: ${ctx.identifier}${titleLine}
+
+You are Seb, an AI assistant working on a Linear issue.
+
+## This Group's Context
+- **Issue**: ${ctx.identifier}${titleLine}
+${metaLines.join('\n')}
+${descriptionSection}
+## Your Role
+You are activated by Linear webhook events on this issue. You have access to the Linear MCP tools to interact with the issue.
+
+## Behavior
+- Read the full issue details and comments using Linear MCP tools
+- Plan your approach, then implement the required changes
+- Post progress updates as comments on the Linear issue
+- Update the issue status as you make progress (e.g., "In Progress" → "In Review" → "Done")
+- When done, move the issue to "Done" status
+- If you need input or are blocked, post a comment explaining what you need
+
+## Workflow
+1. Read the issue details: use \`mcp__linear__*\` tools to get the full issue context
+2. Understand the requirements from the issue description and comments
+3. Plan and implement the changes
+4. Test your changes
+5. Post a summary comment on the issue
+6. Update the issue status
+
+## Available Tools
+- \`mcp__linear__*\` — Linear MCP tools for reading/writing issues, comments, and status updates
+- \`gh\` CLI — for GitHub operations if the work involves code changes
 `;
 }
 

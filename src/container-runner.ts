@@ -268,7 +268,8 @@ function buildRuntimeEnv(): Record<string, string> {
   const toolSecrets = readEnvFile([
     'GITHUB_TOKEN',
     'OP_SERVICE_ACCOUNT_TOKEN',
-    'LINEAR_ACCESS_TOKEN',
+    'LINEAR_CLIENT_ID',
+    'LINEAR_CLIENT_SECRET',
   ]);
   for (const [key, value] of Object.entries(toolSecrets)) {
     if (value) env[key] = value;

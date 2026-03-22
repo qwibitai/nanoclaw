@@ -5,6 +5,8 @@
 
 import './github.js';
 
+import './linear.js';
+
 // gmail
 
 // slack

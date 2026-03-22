@@ -4,7 +4,11 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GROUPS_DIR } from './config.js';
-import { parseGitHubJid, writeGroupTemplate } from './group-folder.js';
+import {
+  parseGitHubJid,
+  parseLinearJid,
+  writeGroupTemplate,
+} from './group-folder.js';
 
 describe('parseGitHubJid', () => {
   it('parses a PR/issue JID', () => {
@@ -24,6 +28,19 @@ describe('parseGitHubJid', () => {
   it('returns null for non-GitHub JIDs', () => {
     expect(parseGitHubJid('tg:-1001234')).toBeNull();
     expect(parseGitHubJid('120363@g.us')).toBeNull();
+  });
+});
+
+describe('parseLinearJid', () => {
+  it('parses a Linear issue JID', () => {
+    expect(parseLinearJid('linear:ENG-123')).toEqual({
+      identifier: 'ENG-123',
+    });
+  });
+
+  it('returns null for non-Linear JIDs', () => {
+    expect(parseLinearJid('gh:cmraible/seb#42')).toBeNull();
+    expect(parseLinearJid('tg:-1001234')).toBeNull();
   });
 });
 
@@ -101,6 +118,38 @@ describe('writeGroupTemplate', () => {
   it('does nothing for non-GitHub JIDs', () => {
     writeGroupTemplate(testFolder, 'tg:-1001234');
     expect(fs.existsSync(claudeMdPath)).toBe(false);
+  });
+
+  it('writes a Linear issue CLAUDE.md', () => {
+    const linearFolder = 'linear_eng-50';
+    const linearDir = path.join(GROUPS_DIR, linearFolder);
+    fs.mkdirSync(path.join(linearDir, 'logs'), { recursive: true });
+    try {
+      writeGroupTemplate(linearFolder, 'linear:ENG-50', {
+        type: 'issue',
+        title: 'Fix login bug',
+        status: 'In Progress',
+        priority: '2',
+        team: 'ENG',
+        assignee: 'Seb',
+        url: 'https://linear.app/test/issue/ENG-50',
+        description: 'The login page crashes when...',
+      });
+      const content = fs.readFileSync(
+        path.join(linearDir, 'CLAUDE.md'),
+        'utf-8',
+      );
+      expect(content).toContain('Linear Issue: ENG-50');
+      expect(content).toContain('Fix login bug');
+      expect(content).toContain('In Progress');
+      expect(content).toContain('High');
+      expect(content).toContain('ENG');
+      expect(content).toContain('Seb');
+      expect(content).toContain('The login page crashes when...');
+      expect(content).toContain('mcp__linear__');
+    } finally {
+      fs.rmSync(linearDir, { recursive: true, force: true });
+    }
   });
 
   it('does nothing for non-matching folder patterns', () => {
