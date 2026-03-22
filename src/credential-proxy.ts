@@ -34,7 +34,11 @@ export interface ProxyConfig {
 }
 
 // Credentials file path (where Claude Code stores OAuth tokens)
-const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const CREDENTIALS_PATH = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
 
 // Anthropic OAuth endpoints
 const OAUTH_BASE = 'https://claude.ai';
@@ -65,7 +69,10 @@ interface OAuthCredentials {
  * Read OAuth credentials from ~/.claude/.credentials.json.
  * Falls back to .env CLAUDE_CODE_OAUTH_TOKEN if file doesn't exist.
  */
-function loadCredentials(envFallback?: string): { accessToken: string; refreshToken: string | null } {
+function loadCredentials(envFallback?: string): {
+  accessToken: string;
+  refreshToken: string | null;
+} {
   try {
     if (fs.existsSync(CREDENTIALS_PATH)) {
       const data = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf-8'));
@@ -78,7 +85,10 @@ function loadCredentials(envFallback?: string): { accessToken: string; refreshTo
       }
     }
   } catch (err) {
-    logger.warn({ err }, 'Failed to read credentials.json, falling back to .env');
+    logger.warn(
+      { err },
+      'Failed to read credentials.json, falling back to .env',
+    );
   }
 
   // Fallback to .env token (no refresh capability)
@@ -91,7 +101,11 @@ function loadCredentials(envFallback?: string): { accessToken: string; refreshTo
 /**
  * Save refreshed credentials back to ~/.claude/.credentials.json.
  */
-function saveCredentials(newAccessToken: string, newRefreshToken: string, expiresIn: number): void {
+function saveCredentials(
+  newAccessToken: string,
+  newRefreshToken: string,
+  expiresIn: number,
+): void {
   try {
     let data: Record<string, unknown> = {};
     if (fs.existsSync(CREDENTIALS_PATH)) {
@@ -103,7 +117,7 @@ function saveCredentials(newAccessToken: string, newRefreshToken: string, expire
       ...existing,
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
-      expiresAt: Date.now() + (expiresIn * 1000),
+      expiresAt: Date.now() + expiresIn * 1000,
     };
 
     const dir = path.dirname(CREDENTIALS_PATH);
@@ -206,7 +220,10 @@ function refreshAccessToken(refreshToken: string): Promise<RefreshResult> {
  * Polls with exponential backoff. When API comes back, refreshes tokens
  * and resumes service automatically — no CEO intervention needed.
  */
-function startOutageRecovery(creds: { accessToken: string; refreshToken: string | null }): void {
+function startOutageRecovery(creds: {
+  accessToken: string;
+  refreshToken: string | null;
+}): void {
   if (healthCheckTimer) return; // already recovering
 
   if (!isInOutage) {
@@ -219,9 +236,9 @@ function startOutageRecovery(creds: { accessToken: string; refreshToken: string 
     outageAlertSent = true;
     sendTelegramAlert(
       '*Anthropic API Outage Detected*\n\n' +
-      'Atlas credential proxy cannot reach the API. ' +
-      'Auto-recovery is active — will restore service automatically when the outage ends.\n\n' +
-      'No action needed unless this persists for hours.',
+        'Atlas credential proxy cannot reach the API. ' +
+        'Auto-recovery is active — will restore service automatically when the outage ends.\n\n' +
+        'No action needed unless this persists for hours.',
     );
   }
 
@@ -237,7 +254,11 @@ function startOutageRecovery(creds: { accessToken: string; refreshToken: string 
 
     if (result.ok) {
       // API is back — save tokens, restore service
-      saveCredentials(result.accessToken, result.refreshToken, result.expiresIn);
+      saveCredentials(
+        result.accessToken,
+        result.refreshToken,
+        result.expiresIn,
+      );
       creds.accessToken = result.accessToken;
       creds.refreshToken = result.refreshToken;
 
@@ -246,18 +267,28 @@ function startOutageRecovery(creds: { accessToken: string; refreshToken: string 
       healthCheckTimer = null;
 
       const downtimeMin = Math.round((Date.now() - outageStartedAt) / 60_000);
-      logger.info({ downtimeMinutes: downtimeMin }, 'Outage resolved — auto-recovered');
+      logger.info(
+        { downtimeMinutes: downtimeMin },
+        'Outage resolved — auto-recovered',
+      );
       sendTelegramAlert(
         '*API Recovered*\n\n' +
-        `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
-        'Tokens refreshed, service fully restored.',
+          `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
+          'Tokens refreshed, service fully restored.',
       );
     } else if (!result.ok) {
       // Still down — schedule next check with backoff
-      const delay = HEALTH_CHECK_BACKOFF_MS[Math.min(attempt, HEALTH_CHECK_BACKOFF_MS.length - 1)];
+      const delay =
+        HEALTH_CHECK_BACKOFF_MS[
+          Math.min(attempt, HEALTH_CHECK_BACKOFF_MS.length - 1)
+        ];
       attempt++;
       logger.info(
-        { attempt, nextCheckSec: Math.round(delay / 1000), reason: result.reason },
+        {
+          attempt,
+          nextCheckSec: Math.round(delay / 1000),
+          reason: result.reason,
+        },
         'Outage persists — scheduling next health check',
       );
       healthCheckTimer = setTimeout(tryRecover, delay);
@@ -273,24 +304,35 @@ function startOutageRecovery(creds: { accessToken: string; refreshToken: string 
  */
 function sendTelegramAlert(message: string): void {
   try {
-    const ipcDir = path.join(process.cwd(), 'data', 'ipc', 'atlas_main', 'messages');
+    const ipcDir = path.join(
+      process.cwd(),
+      'data',
+      'ipc',
+      'atlas_main',
+      'messages',
+    );
     fs.mkdirSync(ipcDir, { recursive: true });
 
     // Read main group JID
     const Database = require('better-sqlite3');
     const dbPath = path.join(process.cwd(), 'store', 'messages.db');
     const db = new Database(dbPath, { readonly: true });
-    const row = db.prepare('SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1').get() as { jid: string } | undefined;
+    const row = db
+      .prepare('SELECT jid FROM registered_groups WHERE is_main = 1 LIMIT 1')
+      .get() as { jid: string } | undefined;
     db.close();
 
     if (!row) return;
 
     const alertFile = path.join(ipcDir, `auth-alert-${Date.now()}.json`);
-    fs.writeFileSync(alertFile, JSON.stringify({
-      type: 'message',
-      chatJid: row.jid,
-      text: message,
-    }));
+    fs.writeFileSync(
+      alertFile,
+      JSON.stringify({
+        type: 'message',
+        chatJid: row.jid,
+        text: message,
+      }),
+    );
   } catch {
     // Best effort — don't crash the proxy over an alert
   }
@@ -303,7 +345,11 @@ function forwardRequest(
   makeReq: typeof httpsRequest,
   options: RequestOptions,
   body: Buffer,
-): Promise<{ statusCode: number; headers: IncomingMessage['headers']; body: Buffer }> {
+): Promise<{
+  statusCode: number;
+  headers: IncomingMessage['headers'];
+  body: Buffer;
+}> {
   return new Promise((resolve, reject) => {
     const upstream = makeReq(options, (upRes) => {
       const chunks: Buffer[] = [];
@@ -360,29 +406,46 @@ export function startCredentialProxy(
         // The <= 0 case is critical: after an outage, the token may have
         // expired while API was unreachable. This ensures recovery.
         if (timeToExpiry < 600_000) {
-          const label = timeToExpiry <= 0
-            ? `expired ${Math.round(-timeToExpiry / 60000)}m ago`
-            : `expiring in ${Math.round(timeToExpiry / 60000)}m`;
+          const label =
+            timeToExpiry <= 0
+              ? `expired ${Math.round(-timeToExpiry / 60000)}m ago`
+              : `expiring in ${Math.round(timeToExpiry / 60000)}m`;
           logger.info(label, 'Proactively refreshing token');
 
           refreshAccessToken(oauth.refreshToken).then((result) => {
             if (result.ok) {
-              saveCredentials(result.accessToken, result.refreshToken, result.expiresIn);
-              currentCreds = { accessToken: result.accessToken, refreshToken: result.refreshToken };
+              saveCredentials(
+                result.accessToken,
+                result.refreshToken,
+                result.expiresIn,
+              );
+              currentCreds = {
+                accessToken: result.accessToken,
+                refreshToken: result.refreshToken,
+              };
               // If we were in outage mode, clear it — we just recovered
               if (isInOutage) {
-                const downtimeMin = Math.round((Date.now() - outageStartedAt) / 60_000);
+                const downtimeMin = Math.round(
+                  (Date.now() - outageStartedAt) / 60_000,
+                );
                 isInOutage = false;
                 outageAlertSent = false;
-                if (healthCheckTimer) { clearTimeout(healthCheckTimer); healthCheckTimer = null; }
+                if (healthCheckTimer) {
+                  clearTimeout(healthCheckTimer);
+                  healthCheckTimer = null;
+                }
                 sendTelegramAlert(
                   '*API Recovered*\n\n' +
-                  `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
-                  'Tokens refreshed via proactive check.',
+                    `Atlas auto-recovered after ~${downtimeMin} minute(s). ` +
+                    'Tokens refreshed via proactive check.',
                 );
               }
               logger.info('Proactive token refresh succeeded');
-            } else if (!result.ok && (result.reason === 'network_error' || result.reason === 'server_error')) {
+            } else if (
+              !result.ok &&
+              (result.reason === 'network_error' ||
+                result.reason === 'server_error')
+            ) {
               // API is down — enter outage recovery mode
               startOutageRecovery(currentCreds);
             }
@@ -392,10 +455,17 @@ export function startCredentialProxy(
 
         // Also reload from file if it was updated externally (e.g., manual scp)
         if (oauth.accessToken !== currentCreds.accessToken) {
-          currentCreds = { accessToken: oauth.accessToken, refreshToken: oauth.refreshToken };
-          logger.info('Credentials reloaded from file (external update detected)');
+          currentCreds = {
+            accessToken: oauth.accessToken,
+            refreshToken: oauth.refreshToken,
+          };
+          logger.info(
+            'Credentials reloaded from file (external update detected)',
+          );
         }
-      } catch { /* non-fatal */ }
+      } catch {
+        /* non-fatal */
+      }
     }, 300_000); // Every 5 minutes
   }
 
@@ -406,8 +476,14 @@ export function startCredentialProxy(
       req.on('end', async () => {
         const body = Buffer.concat(chunks);
 
-        function buildHeaders(): Record<string, string | number | string[] | undefined> {
-          const headers: Record<string, string | number | string[] | undefined> = {
+        function buildHeaders(): Record<
+          string,
+          string | number | string[] | undefined
+        > {
+          const headers: Record<
+            string,
+            string | number | string[] | undefined
+          > = {
             ...(req.headers as Record<string, string>),
             host: upstreamUrl.host,
             'content-length': body.length,
@@ -452,9 +528,13 @@ export function startCredentialProxy(
             Date.now() - lastRefreshAttempt > REFRESH_COOLDOWN_MS
           ) {
             lastRefreshAttempt = Date.now();
-            logger.info('Got 401 from upstream — attempting OAuth token refresh');
+            logger.info(
+              'Got 401 from upstream — attempting OAuth token refresh',
+            );
 
-            const refreshResult = await refreshAccessToken(currentCreds.refreshToken);
+            const refreshResult = await refreshAccessToken(
+              currentCreds.refreshToken,
+            );
 
             if (refreshResult.ok) {
               // Save new tokens and retry the request
@@ -471,7 +551,10 @@ export function startCredentialProxy(
               if (isInOutage) {
                 isInOutage = false;
                 outageAlertSent = false;
-                if (healthCheckTimer) { clearTimeout(healthCheckTimer); healthCheckTimer = null; }
+                if (healthCheckTimer) {
+                  clearTimeout(healthCheckTimer);
+                  healthCheckTimer = null;
+                }
               }
               logger.info('Token refreshed successfully, retrying request');
 
@@ -481,20 +564,28 @@ export function startCredentialProxy(
                 { ...options, headers: buildHeaders() },
                 body,
               );
-            } else if (!refreshResult.ok && (refreshResult.reason === 'network_error' || refreshResult.reason === 'server_error')) {
+            } else if (
+              !refreshResult.ok &&
+              (refreshResult.reason === 'network_error' ||
+                refreshResult.reason === 'server_error')
+            ) {
               // API is down — this is an outage, not a token problem
               // Start background recovery loop instead of alerting for manual intervention
-              logger.warn('Cannot refresh token — API unreachable. Entering outage recovery mode.');
+              logger.warn(
+                'Cannot refresh token — API unreachable. Entering outage recovery mode.',
+              );
               startOutageRecovery(currentCreds);
             } else {
               // token_invalid — refresh token itself is broken, CEO must re-auth
-              logger.error('OAuth refresh token is invalid — manual intervention required');
+              logger.error(
+                'OAuth refresh token is invalid — manual intervention required',
+              );
               sendTelegramAlert(
                 '*OAuth Refresh Token Failed*\n\n' +
-                'The refresh token is invalid or expired. This is NOT an outage — the token needs replacing.\n\n' +
-                'From your laptop, run:\n' +
-                '`scp ~/.claude/.credentials.json root@5.78.190.56:/home/atlas/.claude/.credentials.json`\n\n' +
-                'Then: `ssh root@5.78.190.56 systemctl restart nanoclaw`',
+                  'The refresh token is invalid or expired. This is NOT an outage — the token needs replacing.\n\n' +
+                  'From your laptop, run:\n' +
+                  '`scp ~/.claude/.credentials.json root@5.78.190.56:/home/atlas/.claude/.credentials.json`\n\n' +
+                  'Then: `ssh root@5.78.190.56 systemctl restart nanoclaw`',
               );
             }
           }
@@ -516,14 +607,21 @@ export function startCredentialProxy(
           res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
           res.end(upstreamRes.body);
         } catch (err) {
-          logger.error({ err, url: req.url }, 'Credential proxy upstream error');
+          logger.error(
+            { err, url: req.url },
+            'Credential proxy upstream error',
+          );
           // Connection failure to upstream = likely outage
           if (!isInOutage && authMode === 'oauth') {
             startOutageRecovery(currentCreds);
           }
           if (!res.headersSent) {
             res.writeHead(isInOutage ? 503 : 502);
-            res.end(isInOutage ? 'Service Temporarily Unavailable — outage recovery in progress' : 'Bad Gateway');
+            res.end(
+              isInOutage
+                ? 'Service Temporarily Unavailable — outage recovery in progress'
+                : 'Bad Gateway',
+            );
           }
         }
       });

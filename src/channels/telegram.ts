@@ -280,8 +280,7 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-      const filename =
-        options.filename || pathMod.basename(filePath);
+      const filename = options.filename || pathMod.basename(filePath);
 
       // Grammy InputFile accepts a readable stream + optional filename
       const file = new InputFile(fs.createReadStream(filePath), filename);

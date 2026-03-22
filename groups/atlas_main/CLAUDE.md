@@ -185,6 +185,18 @@ CEO has FULL READ-WRITE access to all departments.
 | /workspace/extra/atlas-state/entities | ~/.atlas/entities/ | read-only (via atlas-state mount) |
 | /workspace/extra/atlas-state/agents | ~/.atlas/agents/ | read-only (via atlas-state mount) |
 
+## Deployment Authorization Policy (CEO-DEFINED 2026-03-20)
+
+Ship immediately on queue — no sign-off needed:
+- Data corrections (fixing wrong values in state or snapshot files)
+- Label/message fixes (renaming misleading error strings, clarifying output text)
+- Step reordering within existing logic (changing sequence, not behavior)
+
+Explicit CEO sign-off required before executing:
+- Anything touching external systems (APIs, webhooks, third-party services)
+- New behavior (logic that didn't exist before — not just reordering)
+- Autonomous loop configuration changes (cron schedule, task definitions, tier gates)
+
 ## Repeated Questions Rule (NON-NEGOTIABLE)
 
 If the CEO asks the same question again — even word for word, even 10 times

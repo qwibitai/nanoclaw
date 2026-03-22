@@ -10,20 +10,36 @@ import fs from 'fs';
 import path from 'path';
 
 import { ATLAS_STATE_DIR } from './config.js';
-import {
-  getAllTasks,
-  getTaskById,
-  updateTask,
-} from './db.js';
+import { getAllTasks, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
 
 // Atlas state paths (host-level)
-const GRADUATION_STATUS_PATH = path.join(ATLAS_STATE_DIR, 'autonomy', 'graduation-status.json');
-const QUOTA_TRACKING_PATH = path.join(ATLAS_STATE_DIR, 'autonomy', 'quota-tracking.jsonl');
+const GRADUATION_STATUS_PATH = path.join(
+  ATLAS_STATE_DIR,
+  'autonomy',
+  'graduation-status.json',
+);
+const QUOTA_TRACKING_PATH = path.join(
+  ATLAS_STATE_DIR,
+  'autonomy',
+  'quota-tracking.jsonl',
+);
 const MODE_PATH = path.join(ATLAS_STATE_DIR, 'state', 'mode.json');
-const APPROVAL_PENDING_DIR = path.join(ATLAS_STATE_DIR, 'approval-queue', 'pending');
-const APPROVAL_APPROVED_DIR = path.join(ATLAS_STATE_DIR, 'approval-queue', 'approved');
-const APPROVAL_REJECTED_DIR = path.join(ATLAS_STATE_DIR, 'approval-queue', 'rejected');
+const APPROVAL_PENDING_DIR = path.join(
+  ATLAS_STATE_DIR,
+  'approval-queue',
+  'pending',
+);
+const APPROVAL_APPROVED_DIR = path.join(
+  ATLAS_STATE_DIR,
+  'approval-queue',
+  'approved',
+);
+const APPROVAL_REJECTED_DIR = path.join(
+  ATLAS_STATE_DIR,
+  'approval-queue',
+  'rejected',
+);
 
 // Model weights for quota display (mirrors governance/quota.ts)
 const MODEL_WEIGHTS: Record<string, number> = {
@@ -79,7 +95,8 @@ function handlePause(args: string[]): string {
     const task = getTaskById(taskId);
     if (!task) return `Task not found: ${taskId}`;
     if (task.status === 'paused') return `Task already paused: ${taskId}`;
-    if (task.status !== 'active') return `Task is ${task.status}, cannot pause: ${taskId}`;
+    if (task.status !== 'active')
+      return `Task is ${task.status}, cannot pause: ${taskId}`;
 
     updateTask(taskId, { status: 'paused' });
     logger.info({ taskId }, 'Task paused via command');
@@ -87,7 +104,7 @@ function handlePause(args: string[]): string {
   }
 
   // Pause all active tasks
-  const tasks = getAllTasks().filter(t => t.status === 'active');
+  const tasks = getAllTasks().filter((t) => t.status === 'active');
   if (tasks.length === 0) return 'No active tasks to pause.';
 
   let count = 0;
@@ -106,7 +123,8 @@ function handleResume(args: string[]): string {
     const task = getTaskById(taskId);
     if (!task) return `Task not found: ${taskId}`;
     if (task.status === 'active') return `Task already active: ${taskId}`;
-    if (task.status !== 'paused') return `Task is ${task.status}, cannot resume: ${taskId}`;
+    if (task.status !== 'paused')
+      return `Task is ${task.status}, cannot resume: ${taskId}`;
 
     updateTask(taskId, { status: 'active' });
     logger.info({ taskId }, 'Task resumed via command');
@@ -114,7 +132,7 @@ function handleResume(args: string[]): string {
   }
 
   // Resume all paused tasks
-  const tasks = getAllTasks().filter(t => t.status === 'paused');
+  const tasks = getAllTasks().filter((t) => t.status === 'paused');
   if (tasks.length === 0) return 'No paused tasks to resume.';
 
   let count = 0;
@@ -135,13 +153,16 @@ function handleStatus(): string {
 
   // Scheduled tasks
   const tasks = getAllTasks();
-  const active = tasks.filter(t => t.status === 'active');
-  const paused = tasks.filter(t => t.status === 'paused');
+  const active = tasks.filter((t) => t.status === 'active');
+  const paused = tasks.filter((t) => t.status === 'paused');
   lines.push('');
-  lines.push(`Tasks: ${active.length} active, ${paused.length} paused, ${tasks.length} total`);
+  lines.push(
+    `Tasks: ${active.length} active, ${paused.length} paused, ${tasks.length} total`,
+  );
 
   for (const t of active) {
-    const schedule = t.schedule_type === 'cron' ? t.schedule_value : t.schedule_type;
+    const schedule =
+      t.schedule_type === 'cron' ? t.schedule_value : t.schedule_type;
     const nextRun = t.next_run ? formatRelativeTime(t.next_run) : 'none';
     lines.push(`  [active] ${t.id} | ${schedule} | next: ${nextRun}`);
     lines.push(`    ${t.prompt.slice(0, 60)}...`);
@@ -156,16 +177,23 @@ function handleStatus(): string {
     lines.push('');
     lines.push('Graduation:');
     for (const [key, milestone] of Object.entries(grad.milestones || {})) {
-      const m = milestone as { status: string; progress?: Record<string, unknown> };
+      const m = milestone as {
+        status: string;
+        progress?: Record<string, unknown>;
+      };
       const progressStr = m.progress ? summarizeProgress(m.progress) : '';
-      lines.push(`  ${key}: ${m.status}${progressStr ? ` (${progressStr})` : ''}`);
+      lines.push(
+        `  ${key}: ${m.status}${progressStr ? ` (${progressStr})` : ''}`,
+      );
     }
   }
 
   // Quota
   const quota = readQuotaStatus();
   lines.push('');
-  lines.push(`Quota: ${quota.todayTotal} invocations | ${quota.weightedUsage} weighted | ${quota.throttleLevel}`);
+  lines.push(
+    `Quota: ${quota.todayTotal} invocations | ${quota.weightedUsage} weighted | ${quota.throttleLevel}`,
+  );
 
   // Approval queue
   const pending = readApprovalQueue();
@@ -205,7 +233,9 @@ function handleQuota(): string {
   lines.push(`Today: ${quota.todayTotal} invocations`);
   lines.push(`  Autonomous: ${quota.autonomousCount}`);
   lines.push(`  CEO sessions: ${quota.ceoCount}`);
-  lines.push(`  Weighted usage: ${quota.weightedUsage} (limit ~${quota.dailyLimit}, self-calibrating)`);
+  lines.push(
+    `  Weighted usage: ${quota.weightedUsage} (limit ~${quota.dailyLimit}, self-calibrating)`,
+  );
   lines.push('');
 
   if (quota.throttleLevel === 'normal') {
@@ -233,21 +263,33 @@ function handleResetMode(): string {
         const data = JSON.parse(fs.readFileSync(MODE_PATH, 'utf-8'));
         previousMode = data.mode || 'unknown';
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     if (previousMode === 'active') {
       return 'Mode is already active. No reset needed.';
     }
 
     // Write active mode
-    fs.writeFileSync(MODE_PATH, JSON.stringify({
-      mode: 'active',
-      previous_mode: previousMode,
-      reset_by: 'telegram_command',
-      reset_at: new Date().toISOString(),
-    }, null, 2));
+    fs.writeFileSync(
+      MODE_PATH,
+      JSON.stringify(
+        {
+          mode: 'active',
+          previous_mode: previousMode,
+          reset_by: 'telegram_command',
+          reset_at: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
 
-    logger.info({ previousMode }, 'Mode reset to active via /reset-mode command');
+    logger.info(
+      { previousMode },
+      'Mode reset to active via /reset-mode command',
+    );
     return `Mode reset: ${previousMode} → active\nAll autonomous operations restored.`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -291,13 +333,19 @@ interface QuotaResult {
 }
 
 function readCalibratedLimit(): number {
-  const calibrationPath = path.join(ATLAS_STATE_DIR, 'autonomy', 'quota-calibration.json');
+  const calibrationPath = path.join(
+    ATLAS_STATE_DIR,
+    'autonomy',
+    'quota-calibration.json',
+  );
   try {
     if (fs.existsSync(calibrationPath)) {
       const data = JSON.parse(fs.readFileSync(calibrationPath, 'utf-8'));
       return data.estimated_limit || 1000;
     }
-  } catch { /* use default */ }
+  } catch {
+    /* use default */
+  }
   return 1000;
 }
 
@@ -329,7 +377,10 @@ function readQuotaStatus(): QuotaResult {
         const model = (entry.model || 'sonnet').toLowerCase();
         let weight = 1.0;
         for (const [key, w] of Object.entries(MODEL_WEIGHTS)) {
-          if (model.includes(key)) { weight = w; break; }
+          if (model.includes(key)) {
+            weight = w;
+            break;
+          }
         }
         totalWeighted += weight;
 
@@ -338,14 +389,16 @@ function readQuotaStatus(): QuotaResult {
         } else {
           result.ceoCount++;
         }
-      } catch { /* skip malformed */ }
+      } catch {
+        /* skip malformed */
+      }
     }
 
     result.weightedUsage = Math.round(totalWeighted * 100) / 100;
     const usagePercent = totalWeighted / dailyLimit;
-    if (usagePercent >= 0.90) {
+    if (usagePercent >= 0.9) {
       result.throttleLevel = 'paused';
-    } else if (usagePercent >= 0.60) {
+    } else if (usagePercent >= 0.6) {
       result.throttleLevel = 'throttled';
     }
   } catch {
@@ -365,18 +418,24 @@ function readApprovalQueue(): ApprovalItem[] {
   try {
     if (!fs.existsSync(APPROVAL_PENDING_DIR)) return [];
 
-    const files = fs.readdirSync(APPROVAL_PENDING_DIR).filter(f => f.endsWith('.json'));
+    const files = fs
+      .readdirSync(APPROVAL_PENDING_DIR)
+      .filter((f) => f.endsWith('.json'));
     const items: ApprovalItem[] = [];
 
     for (const file of files) {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(APPROVAL_PENDING_DIR, file), 'utf-8'));
+        const data = JSON.parse(
+          fs.readFileSync(path.join(APPROVAL_PENDING_DIR, file), 'utf-8'),
+        );
         items.push({
           id: data.id || path.basename(file, '.json'),
           summary: data.summary || data.description || data.action,
           ...data,
         });
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     return items;
@@ -385,29 +444,41 @@ function readApprovalQueue(): ApprovalItem[] {
   }
 }
 
-function moveApprovalItem(itemId: string, destination: 'approved' | 'rejected'): string {
+function moveApprovalItem(
+  itemId: string,
+  destination: 'approved' | 'rejected',
+): string {
   try {
     if (!fs.existsSync(APPROVAL_PENDING_DIR)) {
       return `No approval queue found at ${APPROVAL_PENDING_DIR}`;
     }
 
     // Find the item file (could be {id}.json or contain the id)
-    const files = fs.readdirSync(APPROVAL_PENDING_DIR).filter(f => f.endsWith('.json'));
+    const files = fs
+      .readdirSync(APPROVAL_PENDING_DIR)
+      .filter((f) => f.endsWith('.json'));
     let matchedFile: string | null = null;
 
     for (const file of files) {
-      if (file === `${itemId}.json` || path.basename(file, '.json') === itemId) {
+      if (
+        file === `${itemId}.json` ||
+        path.basename(file, '.json') === itemId
+      ) {
         matchedFile = file;
         break;
       }
       // Check inside the file for matching id
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(APPROVAL_PENDING_DIR, file), 'utf-8'));
+        const data = JSON.parse(
+          fs.readFileSync(path.join(APPROVAL_PENDING_DIR, file), 'utf-8'),
+        );
         if (data.id === itemId) {
           matchedFile = file;
           break;
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     if (!matchedFile) {
@@ -415,7 +486,10 @@ function moveApprovalItem(itemId: string, destination: 'approved' | 'rejected'):
     }
 
     const srcPath = path.join(APPROVAL_PENDING_DIR, matchedFile);
-    const destDir = destination === 'approved' ? APPROVAL_APPROVED_DIR : APPROVAL_REJECTED_DIR;
+    const destDir =
+      destination === 'approved'
+        ? APPROVAL_APPROVED_DIR
+        : APPROVAL_REJECTED_DIR;
     const destPath = path.join(destDir, matchedFile);
 
     fs.mkdirSync(destDir, { recursive: true });
@@ -429,7 +503,10 @@ function moveApprovalItem(itemId: string, destination: 'approved' | 'rejected'):
     fs.writeFileSync(destPath, JSON.stringify(data, null, 2));
     fs.unlinkSync(srcPath);
 
-    logger.info({ itemId, destination }, `Approval item ${destination} via command`);
+    logger.info(
+      { itemId, destination },
+      `Approval item ${destination} via command`,
+    );
     const verb = destination === 'approved' ? 'Approved' : 'Rejected';
     return `${verb}: ${itemId}\n${data.summary || data.description || ''}`;
   } catch (err) {
@@ -464,7 +541,9 @@ function summarizeProgress(progress: Record<string, unknown>): string {
     if (typeof value === 'number' || typeof value === 'string') {
       const target = progress.target;
       const label = key.replace(/_/g, ' ');
-      parts.push(target ? `${label}: ${value}/${target}` : `${label}: ${value}`);
+      parts.push(
+        target ? `${label}: ${value}/${target}` : `${label}: ${value}`,
+      );
     }
   }
   return parts.join(', ');

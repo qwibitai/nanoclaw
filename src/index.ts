@@ -106,7 +106,9 @@ function invalidateStaleClaudeMdSessions(): void {
   let oldHashes: Record<string, string> = {};
   try {
     oldHashes = stored ? JSON.parse(stored) : {};
-  } catch { /* reset on corruption */ }
+  } catch {
+    /* reset on corruption */
+  }
 
   const newHashes: Record<string, string> = {};
   let invalidated = 0;
@@ -130,10 +132,15 @@ function invalidateStaleClaudeMdSessions(): void {
           'CLAUDE.md changed — session invalidated for fresh system prompt',
         );
       }
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
-  if (invalidated > 0 || JSON.stringify(newHashes) !== JSON.stringify(oldHashes)) {
+  if (
+    invalidated > 0 ||
+    JSON.stringify(newHashes) !== JSON.stringify(oldHashes)
+  ) {
     setRouterState(hashKey, JSON.stringify(newHashes));
   }
 
@@ -396,7 +403,11 @@ async function runAgent(
     if (output.status === 'error') {
       // Self-heal: if error is session-related, clear stale session so next retry starts fresh
       const errText = output.error || '';
-      if (errText.includes('No conversation found') || errText.includes('session') || errText.includes('Session')) {
+      if (
+        errText.includes('No conversation found') ||
+        errText.includes('session') ||
+        errText.includes('Session')
+      ) {
         delete sessions[group.folder];
         setSession(group.folder, '');
         logger.warn(
@@ -627,9 +638,11 @@ async function main(): Promise<void> {
         if (result.handled && result.response) {
           const channel = findChannel(channels, chatJid);
           if (channel) {
-            channel.sendMessage(chatJid, result.response).catch((err) =>
-              logger.error({ err, chatJid }, 'Command response send error'),
-            );
+            channel
+              .sendMessage(chatJid, result.response)
+              .catch((err) =>
+                logger.error({ err, chatJid }, 'Command response send error'),
+              );
           }
           return;
         }
@@ -711,7 +724,9 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (!channel.sendDocument) {
-        throw new Error(`Channel ${channel.name} does not support sendDocument`);
+        throw new Error(
+          `Channel ${channel.name} does not support sendDocument`,
+        );
       }
       return channel.sendDocument(jid, filePath, options);
     },
