@@ -9,6 +9,7 @@ import {
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
+  SuspendedTask,
   TaskRunLog,
 } from './types.js';
 
@@ -83,6 +84,32 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1
     );
   `);
+
+  // Suspended tasks table for task suspend/resume durability.
+  // UNIQUE on group_folder enforces single-slot: only one suspended task per group.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS suspended_tasks (
+      group_folder TEXT NOT NULL,
+      task_id TEXT NOT NULL PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      resume_at TEXT NOT NULL,
+      suspended_at TEXT NOT NULL
+    )
+  `);
+  // Add unique index on group_folder (migration for existing DBs).
+  // Clean up any pre-existing duplicates first — keep the most recent per group.
+  try {
+    database.exec(`
+      DELETE FROM suspended_tasks WHERE rowid NOT IN (
+        SELECT MAX(rowid) FROM suspended_tasks GROUP BY group_folder
+      )
+    `);
+    database.exec(
+      `CREATE UNIQUE INDEX idx_suspended_tasks_group ON suspended_tasks(group_folder)`,
+    );
+  } catch {
+    /* index already exists */
+  }
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
@@ -449,7 +476,18 @@ export function updateTask(
 export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
   db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
+  db.prepare('DELETE FROM suspended_tasks WHERE task_id = ?').run(id);
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+}
+
+export function setTaskStatus(
+  id: string,
+  status: ScheduledTask['status'],
+): void {
+  db.prepare('UPDATE scheduled_tasks SET status = ? WHERE id = ?').run(
+    status,
+    id,
+  );
 }
 
 export function getDueTasks(): ScheduledTask[] {
@@ -694,4 +732,41 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Suspended task accessors ---
+
+export function saveSuspendedTask(task: SuspendedTask): void {
+  // Clear any existing suspended task for this group first (single-slot invariant).
+  db.prepare('DELETE FROM suspended_tasks WHERE group_folder = ?').run(
+    task.group_folder,
+  );
+  db.prepare(
+    `INSERT INTO suspended_tasks (group_folder, task_id, session_id, resume_at, suspended_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    task.group_folder,
+    task.task_id,
+    task.session_id,
+    task.resume_at,
+    task.suspended_at,
+  );
+}
+
+export function getSuspendedTask(
+  groupFolder: string,
+): SuspendedTask | null {
+  return (
+    (db
+      .prepare('SELECT * FROM suspended_tasks WHERE group_folder = ?')
+      .get(groupFolder) as SuspendedTask | undefined) ?? null
+  );
+}
+
+export function getAllSuspendedTasks(): SuspendedTask[] {
+  return db.prepare('SELECT * FROM suspended_tasks').all() as SuspendedTask[];
+}
+
+export function clearSuspendedTask(taskId: string): void {
+  db.prepare('DELETE FROM suspended_tasks WHERE task_id = ?').run(taskId);
 }

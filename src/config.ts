@@ -71,3 +71,6 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// How long to wait for a container to exit after writing _interrupt before hard-killing it
+export const INTERRUPT_HARD_KILL_DELAY = 5000;

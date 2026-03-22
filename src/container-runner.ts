@@ -36,6 +36,7 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  resumeAt?: string; // lastAssistantUuid — resume from this point in the session
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -44,9 +45,10 @@ export interface ContainerInput {
 }
 
 export interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'interrupted';
   result: string | null;
   newSessionId?: string;
+  lastAssistantUuid?: string;
   error?: string;
 }
 
@@ -324,6 +326,7 @@ export async function runContainerAgent(
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
     let newSessionId: string | undefined;
+    let lastAssistantUuid: string | undefined;
     let outputChain = Promise.resolve();
 
     container.stdout.on('data', (data) => {
@@ -361,6 +364,9 @@ export async function runContainerAgent(
             const parsed: ContainerOutput = JSON.parse(jsonStr);
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
+            }
+            if (parsed.lastAssistantUuid) {
+              lastAssistantUuid = parsed.lastAssistantUuid;
             }
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
@@ -465,6 +471,7 @@ export async function runContainerAgent(
               status: 'success',
               result: null,
               newSessionId,
+              lastAssistantUuid,
             });
           });
           return;
@@ -583,6 +590,7 @@ export async function runContainerAgent(
             status: 'success',
             result: null,
             newSessionId,
+            lastAssistantUuid,
           });
         });
         return;

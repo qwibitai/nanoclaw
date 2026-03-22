@@ -22,6 +22,7 @@ import { fileURLToPath } from 'url';
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  resumeAt?: string; // lastAssistantUuid — resume from this point in the session
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -30,9 +31,10 @@ interface ContainerInput {
 }
 
 interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'interrupted';
   result: string | null;
   newSessionId?: string;
+  lastAssistantUuid?: string;
   error?: string;
 }
 
@@ -56,6 +58,7 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_INPUT_INTERRUPT_SENTINEL = path.join(IPC_INPUT_DIR, '_interrupt');
 const IPC_POLL_MS = 500;
 
 /**
@@ -270,6 +273,17 @@ function shouldClose(): boolean {
 }
 
 /**
+ * Check for _interrupt sentinel.
+ */
+function shouldInterrupt(): boolean {
+  if (fs.existsSync(IPC_INPUT_INTERRUPT_SENTINEL)) {
+    try { fs.unlinkSync(IPC_INPUT_INTERRUPT_SENTINEL); } catch { /* ignore */ }
+    return true;
+  }
+  return false;
+}
+
+/**
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
@@ -302,12 +316,16 @@ function drainIpcInput(): string[] {
 }
 
 /**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Wait for a new IPC message, _close sentinel, or _interrupt sentinel.
+ * Returns the messages as a single string, null if _close, or '__interrupted__' if _interrupt.
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
+      if (shouldInterrupt()) {
+        resolve('__interrupted__');
+        return;
+      }
       if (shouldClose()) {
         resolve(null);
         return;
@@ -336,15 +354,25 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  abortController?: AbortController,
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; interrupted: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC for follow-up messages, _close and _interrupt sentinels during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
+  let interrupted = false;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
+    if (shouldInterrupt()) {
+      log('Interrupt sentinel detected during query, aborting');
+      interrupted = true;
+      abortController?.abort();
+      stream.end();
+      ipcPolling = false;
+      return;
+    }
     if (shouldClose()) {
       log('Close sentinel detected during query, ending stream');
       closedDuringQuery = true;
@@ -454,14 +482,15 @@ async function runQuery(
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        lastAssistantUuid,
       });
     }
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}, interrupted: ${interrupted}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, interrupted };
 }
 
 async function main(): Promise<void> {
@@ -491,8 +520,9 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
+  // Clean up stale sentinels from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try { fs.unlinkSync(IPC_INPUT_INTERRUPT_SENTINEL); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
@@ -506,17 +536,25 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
-  let resumeAt: string | undefined;
+  let resumeAt: string | undefined = containerInput.resumeAt;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const abortController = new AbortController();
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, abortController);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // If interrupted, emit status and exit
+      if (queryResult.interrupted) {
+        log('Interrupted during query, exiting');
+        writeOutput({ status: 'interrupted', result: null, newSessionId: sessionId, lastAssistantUuid: resumeAt });
+        break;
       }
 
       // If _close was consumed during the query, exit immediately.
@@ -528,12 +566,17 @@ async function main(): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, lastAssistantUuid: resumeAt });
 
       log('Query ended, waiting for next IPC message...');
 
-      // Wait for the next message or _close sentinel
+      // Wait for the next message, _close sentinel, or _interrupt sentinel
       const nextMessage = await waitForIpcMessage();
+      if (nextMessage === '__interrupted__') {
+        log('Interrupt sentinel received while idle, exiting');
+        writeOutput({ status: 'interrupted', result: null, newSessionId: sessionId, lastAssistantUuid: resumeAt });
+        break;
+      }
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
@@ -544,14 +587,31 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      newSessionId: sessionId,
-      error: errorMessage
-    });
-    process.exit(1);
+    // AbortController.abort() in the SDK throws — treat as interrupt, not error.
+    const isAbort = errorMessage.includes('aborted') || (err instanceof Error && err.name === 'AbortError');
+    if (isAbort) {
+      log(`Agent aborted (interrupt): ${errorMessage}`);
+      writeOutput({
+        status: 'interrupted',
+        result: null,
+        newSessionId: sessionId,
+        lastAssistantUuid: resumeAt,
+      });
+      // Wait for stdout to flush before exiting — the host pipe reader needs
+      // to receive the interrupted marker before the process closes.
+      await new Promise<void>((resolve) => {
+        process.stdout.write('', () => resolve());
+      });
+    } else {
+      log(`Agent error: ${errorMessage}`);
+      writeOutput({
+        status: 'error',
+        result: null,
+        newSessionId: sessionId,
+        error: errorMessage
+      });
+      process.exit(1);
+    }
   }
 }
 
