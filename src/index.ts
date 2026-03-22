@@ -921,7 +921,7 @@ async function main(): Promise<void> {
   recoverPendingMessages();
   startHealthMonitor();
   stopXHealthCheck = startXHealthCheck(X_HEALTH_CHECK_INTERVAL);
-  startAutoUpdateLoop(() => queue.getActiveCount());
+  startAutoUpdateLoop(queue);
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

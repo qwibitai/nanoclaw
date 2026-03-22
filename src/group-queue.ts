@@ -64,6 +64,7 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private quiesceResolve: (() => void) | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -480,6 +481,7 @@ export class GroupQueue {
       state.messageContainerName = null;
       state.messageGroupFolder = null;
       this.activeCount--;
+      this.notifyQuiesceIfDrained();
       this.drainGroup(groupJid);
     }
   }
@@ -513,6 +515,7 @@ export class GroupQueue {
       state.taskContainerName = null;
       state.taskGroupFolder = null;
       this.activeCount--;
+      this.notifyQuiesceIfDrained();
       logger.debug(
         {
           groupJid,
@@ -552,6 +555,14 @@ export class GroupQueue {
         this.enqueueMessageCheck(groupJid);
       }
     }, delayMs);
+  }
+
+  /** Resolve the quiesce promise if all containers have drained. */
+  private notifyQuiesceIfDrained(): void {
+    if (this.quiesceResolve && this.activeCount === 0) {
+      this.quiesceResolve();
+      this.quiesceResolve = null;
+    }
   }
 
   // ── Drain logic ──────────────────────────────────────────────────────
@@ -793,6 +804,28 @@ export class GroupQueue {
   /** Number of container slots currently in use. */
   getActiveCount(): number {
     return this.activeCount;
+  }
+
+  /**
+   * Stop accepting new work and return a promise that resolves once all
+   * running containers have finished.  Used by auto-update to ensure no
+   * work is lost during pull/build/restart.
+   */
+  quiesce(): Promise<void> {
+    this.shuttingDown = true;
+    if (this.activeCount === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.quiesceResolve = resolve;
+    });
+  }
+
+  /**
+   * Re-open the queue after a deferred update.  Undoes `quiesce()` so
+   * normal message/task processing resumes.
+   */
+  unquiesce(): void {
+    this.shuttingDown = false;
+    this.quiesceResolve = null;
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {
