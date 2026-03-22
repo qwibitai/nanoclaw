@@ -941,10 +941,22 @@ async function main(): Promise<void> {
           const changelog = fs
             .readFileSync(UPDATE_CHANGELOG_PATH, 'utf-8')
             .trim();
+          logger.info(
+            {
+              changelogPath: UPDATE_CHANGELOG_PATH,
+              changelogLength: changelog.length,
+            },
+            'Read update changelog from disk',
+          );
           if (changelog) {
             msg += '\n\n*更新内容:*\n' + changelog;
           }
           fs.unlinkSync(UPDATE_CHANGELOG_PATH);
+        } else {
+          logger.debug(
+            { changelogPath: UPDATE_CHANGELOG_PATH },
+            'No changelog file found at startup',
+          );
         }
       } catch (changelogErr) {
         logger.warn({ err: changelogErr }, 'Failed to read update changelog');

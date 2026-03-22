@@ -136,10 +136,33 @@ export function startAutoUpdateLoop(queue?: QueueHandle): void {
           cwd: projectRoot,
           encoding: 'utf-8',
         }).trim();
-        const subjects = execSync(
-          `git log --format=%s --no-merges ${local}..${newHead}`,
+        const range = `${local}..${newHead}`;
+
+        // Try --first-parent --no-merges first (clean linear history).
+        // If that yields nothing (e.g. only merge commits), fall back to
+        // --first-parent alone, then strip "Merge pull request" lines.
+        let subjects = execSync(
+          `git log --format=%s --first-parent --no-merges ${range}`,
           { cwd: projectRoot, encoding: 'utf-8' },
         ).trim();
+
+        if (!subjects) {
+          subjects = execSync(`git log --format=%s --first-parent ${range}`, {
+            cwd: projectRoot,
+            encoding: 'utf-8',
+          })
+            .trim()
+            .split('\n')
+            .filter((s) => !/^Merge (pull request|branch) /i.test(s))
+            .join('\n')
+            .trim();
+        }
+
+        logger.info(
+          { range, subjectCount: subjects ? subjects.split('\n').length : 0 },
+          'Changelog subjects collected',
+        );
+
         if (subjects) {
           changelogText = subjects
             .split('\n')
@@ -167,9 +190,17 @@ export function startAutoUpdateLoop(queue?: QueueHandle): void {
             recursive: true,
           });
           fs.writeFileSync(UPDATE_CHANGELOG_PATH, changelogText, 'utf-8');
+          logger.info(
+            { path: UPDATE_CHANGELOG_PATH, length: changelogText.length },
+            'Changelog written to disk',
+          );
         } catch (writeErr) {
           logger.warn({ err: writeErr }, 'Failed to write update changelog');
         }
+      } else {
+        logger.warn(
+          'No changelog text generated — restart message will be bare',
+        );
       }
 
       logger.info('Auto-update rebuild complete, restarting');
