@@ -162,6 +162,7 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    pre_hook?: { command: string; timeout_seconds?: number } | null;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -255,6 +256,28 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
+
+        // Validate and normalize pre_hook if provided
+        let preHook: { command: string; timeout_seconds?: number } | undefined;
+        if (data.pre_hook) {
+          if (
+            typeof data.pre_hook.command !== 'string' ||
+            !data.pre_hook.command.trim()
+          ) {
+            logger.warn(
+              { taskId, pre_hook: data.pre_hook },
+              'Invalid pre_hook: command must be a non-empty string',
+            );
+            break;
+          }
+          preHook = {
+            command: data.pre_hook.command.trim(),
+            timeout_seconds: data.pre_hook.timeout_seconds
+              ? Math.min(Math.max(1, data.pre_hook.timeout_seconds), 300)
+              : undefined,
+          };
+        }
+
         createTask({
           id: taskId,
           group_folder: targetFolder,
@@ -263,6 +286,7 @@ export async function processTaskIpc(
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
+          pre_hook: preHook,
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),
@@ -359,6 +383,21 @@ export async function processTaskIpc(
             | 'once';
         if (data.schedule_value !== undefined)
           updates.schedule_value = data.schedule_value;
+        if (data.pre_hook !== undefined) {
+          if (data.pre_hook === null) {
+            updates.pre_hook = null;
+          } else if (
+            typeof data.pre_hook.command === 'string' &&
+            data.pre_hook.command.trim()
+          ) {
+            updates.pre_hook = {
+              command: data.pre_hook.command.trim(),
+              timeout_seconds: data.pre_hook.timeout_seconds
+                ? Math.min(Math.max(1, data.pre_hook.timeout_seconds), 300)
+                : undefined,
+            };
+          }
+        }
 
         // Recompute next_run if schedule changed
         if (data.schedule_type || data.schedule_value) {
