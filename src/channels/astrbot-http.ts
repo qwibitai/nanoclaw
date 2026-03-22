@@ -11,13 +11,20 @@ interface AstrBotInboundPayload {
   umo?: string;
   sender_id?: string;
   sender_name?: string;
+  sender_nickname?: string;
+  sender_username?: string;
+  sender_card?: string;
   content: string;
   timestamp?: string;
   is_group?: boolean;
   group_name?: string;
+  group_id?: string;
   is_bot?: boolean;
   is_from_me?: boolean;
   message_id?: string;
+  platform_name?: string;
+  platform_id?: string;
+  session_id?: string;
 }
 
 interface AstrBotControlPayload {
@@ -265,7 +272,13 @@ class AstrBotHttpChannel implements Channel {
       if (inbound.umo) this.umoByJid.set(chatJid, inbound.umo);
 
       const timestamp = inbound.timestamp || new Date().toISOString();
-      const senderName = inbound.sender_name || inbound.sender_id || 'unknown';
+      const senderName =
+        inbound.sender_name ||
+        inbound.sender_nickname ||
+        inbound.sender_username ||
+        inbound.sender_card ||
+        inbound.sender_id ||
+        'unknown';
       const senderId = inbound.sender_id || senderName;
 
       const msg: NewMessage = {
@@ -279,10 +292,11 @@ class AstrBotHttpChannel implements Channel {
         is_bot_message: inbound.is_bot || false,
       };
 
+      const groupName = inbound.group_name || inbound.group_id || senderName;
       this.onChatMetadata(
         chatJid,
         timestamp,
-        inbound.group_name || senderName,
+        groupName,
         this.name,
         inbound.is_group ?? false,
       );
@@ -291,7 +305,7 @@ class AstrBotHttpChannel implements Channel {
       if (!this.registeredGroups()[chatJid]) {
         const folder = deriveFolder(chatJid);
         this.registerGroup(chatJid, {
-          name: inbound.group_name || senderName,
+          name: groupName,
           folder,
           trigger: this.defaultTrigger,
           added_at: new Date().toISOString(),
