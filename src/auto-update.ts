@@ -2,9 +2,10 @@
  * Auto-Update Loop
  *
  * Polls origin/main for new commits. When detected:
- * 1. git pull --ff-only
- * 2. npm run build
- * 3. process.exit(0) — launchd KeepAlive restarts the process
+ * 1. Quiesce the queue (stop accepting new work, wait for containers to drain)
+ * 2. git pull --ff-only
+ * 3. npm run build
+ * 4. process.exit(0) — launchd KeepAlive restarts the process
  *
  * This enables a safe self-modification workflow where the agent creates PRs,
  * the user reviews and merges, and NanoClaw picks up changes automatically.
@@ -20,6 +21,13 @@ const STARTUP_DELAY = 30_000; // Wait 30s after startup before first check
 const FETCH_TIMEOUT = 30_000;
 const PULL_TIMEOUT = 60_000;
 const BUILD_TIMEOUT = 120_000;
+const QUIESCE_TIMEOUT = 180_000; // Max 3 minutes to wait for containers to drain
+
+interface QueueHandle {
+  getActiveCount(): number;
+  quiesce(): Promise<void>;
+  unquiesce(): void;
+}
 
 /**
  * Resolve the directory containing the current Node binary so we can build
@@ -31,7 +39,7 @@ function resolveNodeBinDir(): string {
   return path.dirname(process.execPath);
 }
 
-export function startAutoUpdateLoop(): void {
+export function startAutoUpdateLoop(queue?: QueueHandle): void {
   const projectRoot = process.cwd();
   const nodeBinDir = resolveNodeBinDir();
 
@@ -42,7 +50,11 @@ export function startAutoUpdateLoop(): void {
     PATH: `${nodeBinDir}:${process.env.PATH || '/usr/bin:/bin'}`,
   };
 
-  const check = () => {
+  let checking = false;
+
+  const check = async () => {
+    if (checking) return;
+    checking = true;
     try {
       execSync('git fetch origin main', {
         cwd: projectRoot,
@@ -67,6 +79,39 @@ export function startAutoUpdateLoop(): void {
         'New commits on main detected, pulling and rebuilding',
       );
 
+      // Quiesce the queue: stop accepting new work and wait for all
+      // running containers to drain before pulling / building / restarting.
+      // This prevents the race where a container starts during the build
+      // window and gets killed by process.exit().
+      if (queue) {
+        const active = queue.getActiveCount();
+        if (active > 0) {
+          logger.info(
+            { activeContainers: active },
+            'Quiescing queue — waiting for containers to drain',
+          );
+          const drained = await Promise.race([
+            queue.quiesce().then(() => true),
+            new Promise<false>((r) =>
+              setTimeout(() => r(false), QUIESCE_TIMEOUT),
+            ),
+          ]);
+          if (!drained) {
+            logger.warn(
+              { activeContainers: queue.getActiveCount() },
+              'Quiesce timed out, deferring auto-update to next cycle',
+            );
+            queue.unquiesce();
+            return;
+          }
+          logger.info('All containers drained, proceeding with update');
+        } else {
+          // No active containers — quiesce immediately to block new work
+          // during pull/build.
+          queue.quiesce();
+        }
+      }
+
       execSync('git pull --ff-only origin main', {
         cwd: projectRoot,
         stdio: 'pipe',
@@ -84,7 +129,12 @@ export function startAutoUpdateLoop(): void {
       logger.info('Auto-update rebuild complete, restarting');
       process.exit(0);
     } catch (err) {
+      // If we quiesced but failed to update, re-open the queue so normal
+      // processing resumes.
+      if (queue) queue.unquiesce();
       logger.error({ err }, 'Auto-update check failed');
+    } finally {
+      checking = false;
     }
   };
 
