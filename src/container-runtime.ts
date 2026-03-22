@@ -2,7 +2,7 @@
  * Container runtime abstraction for NanoClaw.
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 
@@ -37,7 +37,14 @@ function detectProxyBindHost(): string {
     const ipv4 = docker0.find((a) => a.family === 'IPv4');
     if (ipv4) return ipv4.address;
   }
-  return '0.0.0.0';
+  // docker0 not found — fall back to loopback. Containers may not reach the
+  // proxy, but binding to 0.0.0.0 would expose the credential proxy to the
+  // local network. Set CREDENTIAL_PROXY_HOST explicitly if needed.
+  logger.warn(
+    'docker0 interface not found; credential proxy binding to 127.0.0.1. ' +
+    'Set CREDENTIAL_PROXY_HOST to the docker bridge IP if containers cannot reach the proxy.',
+  );
+  return '127.0.0.1';
 }
 
 /** CLI args needed for the container to resolve the host gateway. */
@@ -112,7 +119,7 @@ export function cleanupOrphans(): void {
     const orphans = output.trim().split('\n').filter(Boolean);
     for (const name of orphans) {
       try {
-        execSync(stopContainer(name), { stdio: 'pipe' });
+        spawnSync(CONTAINER_RUNTIME_BIN, ['stop', name], { stdio: 'pipe' });
       } catch {
         /* already stopped */
       }
