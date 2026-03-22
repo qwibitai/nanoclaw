@@ -122,6 +122,22 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
+## 4b. Credential Sanity Check
+
+Immediately after step 4, run:
+
+```bash
+npx tsx setup/index.ts --step credentials
+```
+
+This performs a fast live probe against the configured upstream using NanoClaw's real credential-proxy path.
+
+- `AUTH_PROBE=ok` means the configured credential can authenticate.
+- `MODEL_PROBE=ok` means the configured `ANTHROPIC_MODEL` also works through the same path NanoClaw will use at runtime.
+- `MODEL_PROBE=skipped` means no `ANTHROPIC_MODEL` is configured, so only credential auth was checked.
+
+**If the step fails, stop and fix credentials/base URL/model before setting up channels.** This avoids finding out later via silent channel failures.
+
 ## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
@@ -199,6 +215,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4
+- CREDENTIALS=configured_invalid or CREDENTIAL_HEALTH=invalid → re-run step 4b and fix the reported `CREDENTIAL_ERROR` before debugging channels/services
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
