@@ -35,6 +35,10 @@ export interface WhatsAppChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+const KEEPALIVE_INTERVAL_MS = 15_000; // ping every 15s
+const WATCHDOG_INTERVAL_MS = 60_000; // check every 60s
+const WATCHDOG_STALE_MS = 5 * 60_000; // reconnect if no event for 5 min
+
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
@@ -44,6 +48,8 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private lastEventAt = Date.now();
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   private opts: WhatsAppChannelOpts;
 
@@ -79,9 +85,11 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger,
       browser: Browsers.macOS('Chrome'),
+      keepAliveIntervalMs: KEEPALIVE_INTERVAL_MS,
     });
 
     this.sock.ev.on('connection.update', (update) => {
+      this.lastEventAt = Date.now();
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -125,7 +133,22 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.lastEventAt = Date.now();
         logger.info('Connected to WhatsApp');
+
+        // Start watchdog on first open (only once)
+        if (!this.watchdogTimer) {
+          this.watchdogTimer = setInterval(() => {
+            const staleness = Date.now() - this.lastEventAt;
+            if (staleness > WATCHDOG_STALE_MS) {
+              logger.warn(
+                { staleMs: staleness },
+                'No WhatsApp events for 5 min, forcing reconnect',
+              );
+              this.sock.end(new Error('watchdog reconnect'));
+            }
+          }, WATCHDOG_INTERVAL_MS);
+        }
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
         this.sock.sendPresenceUpdate('available').catch((err) => {
@@ -172,6 +195,7 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('creds.update', saveCreds);
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
+      this.lastEventAt = Date.now();
       for (const msg of messages) {
         try {
           if (!msg.message) continue;
