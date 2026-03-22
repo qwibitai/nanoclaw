@@ -79,11 +79,13 @@ export function startCredentialProxy(
           }
         }
 
+        // Prepend the upstream base path (e.g. /api/anthropic) to the request path
+        const basePath = upstreamUrl.pathname.replace(/\/+$/, '');
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: basePath + req.url,
             method: req.method,
             headers,
           } as RequestOptions,
