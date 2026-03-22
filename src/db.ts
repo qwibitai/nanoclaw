@@ -24,9 +24,7 @@ export function initDatabase(): void {
   const env = readEnvFile(['DATABASE_URL']);
   const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
   if (!databaseUrl) {
-    throw new Error(
-      'DATABASE_URL is required — set it in .env or environment',
-    );
+    throw new Error('DATABASE_URL is required — set it in .env or environment');
   }
   pool = new pg.Pool({ connectionString: databaseUrl, max: 10 });
   pool.on('error', (err) => logger.warn({ err }, 'pg: pool error'));
@@ -292,7 +290,8 @@ function mapTask(row: TaskRow): ScheduledTask {
     prompt: row.prompt,
     schedule_type: row.schedule_type as ScheduledTask['schedule_type'],
     schedule_value: row.schedule_value,
-    context_mode: (row.context_mode ?? 'isolated') as ScheduledTask['context_mode'],
+    context_mode: (row.context_mode ??
+      'isolated') as ScheduledTask['context_mode'],
     next_run: row.next_run ? new Date(row.next_run).toISOString() : null,
     last_run: row.last_run ? new Date(row.last_run).toISOString() : null,
     last_result: row.last_result ?? null,
