@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -493,6 +494,66 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // Handle /new-session command — clears the current session for a group
+  async function handleNewSession(
+    command: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+
+    const isMain = group.isMain === true;
+
+    // Non-main groups: device owner only
+    if (!isMain && !msg.is_from_me) {
+      await channel.sendMessage(
+        chatJid,
+        'Session commands require owner access.',
+      );
+      return;
+    }
+
+    // Resolve target folder
+    let targetFolder = group.folder;
+    if (isMain && command.startsWith('/new-session ')) {
+      const requestedFolder = command.slice('/new-session '.length).trim();
+      const match = Object.values(registeredGroups).find(
+        (g) => g.folder === requestedFolder,
+      );
+      if (!match) {
+        await channel.sendMessage(
+          chatJid,
+          `Unknown group folder: ${requestedFolder}`,
+        );
+        return;
+      }
+      targetFolder = match.folder;
+    }
+
+    if (!sessions[targetFolder]) {
+      await channel.sendMessage(chatJid, 'No active session to clear.');
+      return;
+    }
+
+    deleteSession(targetFolder);
+    delete sessions[targetFolder];
+
+    // If a container is currently running for this group, send it a reset
+    // control message so it clears its in-memory sessionId/resumeAt before
+    // the next query. Without this the container would continue the old
+    // Claude session even though the host has already discarded it.
+    const resetSent = queue.sendResetByFolder(targetFolder);
+    logger.info(
+      { targetFolder, sender: msg.sender, containerReset: resetSent },
+      'Session cleared via /new-session command',
+    );
+    await channel.sendMessage(chatJid, 'Session cleared. Starting fresh.');
+  }
+
   // Handle /remote-control and /remote-control-end commands
   async function handleRemoteControl(
     command: string,
@@ -543,6 +604,14 @@ async function main(): Promise<void> {
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+
+      // New session command — clears the current session
+      if (trimmed === '/new-session' || trimmed.startsWith('/new-session ')) {
+        handleNewSession(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'New session command error'),
         );
         return;
       }
