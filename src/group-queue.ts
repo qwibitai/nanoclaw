@@ -150,17 +150,34 @@ export class GroupQueue {
     state.idleWaiting = true;
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
+    } else if (state.pendingMessages && this.processMessagesFn) {
+      // Messages arrived while the container was busy — now that it's idle,
+      // re-run the message loop so they get piped in.
+      state.pendingMessages = false;
+      this.processMessagesFn(groupJid).catch((err) =>
+        logger.error(
+          { groupJid, err },
+          'Unhandled error processing pending messages on idle',
+        ),
+      );
     }
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Send a follow-up message to an idle-waiting container via IPC file.
+   * Returns true if the message was written, false if the container is
+   * absent, busy with the current turn, or belongs to a task runner.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
+    if (
+      !state.active ||
+      !state.groupFolder ||
+      state.isTaskContainer ||
+      !state.idleWaiting
+    ) {
       return false;
+    }
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
