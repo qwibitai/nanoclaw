@@ -1,0 +1,17 @@
+skill: github
+version: 1.0.0
+description: "GitHub CLI skill for container agents"
+core_version: 0.1.0
+adds:
+  - container/skills/agent-github/SKILL.md
+modifies:
+  - container/Dockerfile
+  - src/container-runner.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - GITHUB_TOKEN
+    - GH_REPO
+conflicts: []
+depends: []
+test: "npm run build"
