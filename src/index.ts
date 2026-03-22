@@ -44,6 +44,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { McpBridge } from './mcp-bridge.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -488,6 +489,7 @@ async function main(): Promise<void> {
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    mcpBridge.stop();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -613,6 +615,44 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+  // Initialize MCP bridge for host-side MCP servers that can't run in containers
+  const mcpBridge = new McpBridge();
+  {
+    const { readEnvFile } = await import('./env.js');
+    const envKeys = ['MCP_BRIDGE_SERVERS'];
+    const env = readEnvFile(envKeys);
+    const serverNames = (env.MCP_BRIDGE_SERVERS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (serverNames.length > 0) {
+      // Read per-server config: MCP_BRIDGE_{NAME}_COMMAND, _ARGS, _ENV_{KEY}
+      const serverEnvKeys = serverNames.flatMap((name) => {
+        const prefix = `MCP_BRIDGE_${name.toUpperCase().replace(/-/g, '_')}`;
+        return [`${prefix}_COMMAND`, `${prefix}_ARGS`];
+      });
+      const serverEnv = readEnvFile(serverEnvKeys);
+
+      for (const name of serverNames) {
+        const prefix = `MCP_BRIDGE_${name.toUpperCase().replace(/-/g, '_')}`;
+        const command = serverEnv[`${prefix}_COMMAND`];
+        if (!command) {
+          logger.warn(
+            { server: name },
+            `MCP bridge server "${name}" missing ${prefix}_COMMAND, skipping`,
+          );
+          continue;
+        }
+
+        const argsStr = serverEnv[`${prefix}_ARGS`];
+        const args = argsStr ? argsStr.split(' ').filter(Boolean) : undefined;
+
+        mcpBridge.addServer({ name, command, args });
+      }
+    }
+  }
+
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -646,6 +686,7 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    mcpBridge: mcpBridge.hasServers() ? mcpBridge : undefined,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
