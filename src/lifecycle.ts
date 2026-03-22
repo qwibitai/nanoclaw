@@ -50,6 +50,10 @@ import {
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  startUptimeMonitor,
+  stopUptimeMonitor,
+} from './uptime-monitor.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { connectWithBackoff, shouldSkipChannel } from './circuit-breaker.js';
@@ -183,6 +187,7 @@ export async function initApp(): Promise<void> {
     shutdownSkillRegistry();
     proxyServer.close();
     if (skillServer) skillServer.close();
+    stopUptimeMonitor();
     await stopAgencyHqSubsystems();
     stopHostExecWatcher();
     await queue.shutdown(10000);
@@ -340,6 +345,10 @@ export async function initApp(): Promise<void> {
   startStallDetector(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start stall detector'),
   );
+  startUptimeMonitor({
+    registeredGroups: () => state.registeredGroups,
+    sendMessage: schedulerDeps.sendMessage,
+  });
   startHostExecWatcher();
   startIpcWatcher({
     sendMessage: (jid, text) => {
