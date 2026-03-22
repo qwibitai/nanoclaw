@@ -30,9 +30,10 @@ interface ContainerInput {
 }
 
 interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'interrupted';
   result: string | null;
   newSessionId?: string;
+  lastAssistantUuid?: string;
   error?: string;
 }
 
@@ -544,14 +545,26 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      newSessionId: sessionId,
-      error: errorMessage
-    });
-    process.exit(1);
+    // AbortController.abort() in the SDK throws — treat as interrupt, not error.
+    const isAbort = errorMessage.includes('aborted') || (err instanceof Error && err.name === 'AbortError');
+    if (isAbort) {
+      log(`Agent aborted (interrupt): ${errorMessage}`);
+      writeOutput({
+        status: 'interrupted',
+        result: null,
+        newSessionId: sessionId,
+        lastAssistantUuid: resumeAt,
+      });
+    } else {
+      log(`Agent error: ${errorMessage}`);
+      writeOutput({
+        status: 'error',
+        result: null,
+        newSessionId: sessionId,
+        error: errorMessage
+      });
+      process.exit(1);
+    }
   }
 }
 
