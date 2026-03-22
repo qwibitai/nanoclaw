@@ -473,7 +473,11 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   logger.info(
-    { commit: buildInfo.commit, branch: buildInfo.branch, buildTime: buildInfo.buildTime },
+    {
+      commit: buildInfo.commit,
+      branch: buildInfo.branch,
+      buildTime: buildInfo.buildTime,
+    },
     `NanoClaw starting (${versionTag})`,
   );
   ensureContainerSystemRunning();
