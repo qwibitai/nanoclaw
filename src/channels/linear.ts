@@ -4,10 +4,13 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
+import { getRouterState, setRouterState } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
+
+const AGENT_SESSIONS_KEY = 'linear_agent_sessions';
 
 interface AgentActivity {
   type: 'thought' | 'action' | 'response' | 'error' | 'elicitation';
@@ -342,7 +345,7 @@ export class LinearChannel implements Channel {
   private botUserId: string;
   /** If set, only process events from these Linear team keys */
   private allowedTeams: Set<string> | null;
-  /** Map from chatJid to active agent session ID */
+  /** Map from chatJid to active agent session ID — persisted to DB */
   private activeAgentSessions = new Map<string, string>();
 
   constructor(
@@ -359,6 +362,48 @@ export class LinearChannel implements Channel {
     this.botUserId = botUserId;
     this.opts = opts;
     this.allowedTeams = allowedTeams.length > 0 ? new Set(allowedTeams) : null;
+
+    // Restore active agent sessions from DB
+    this.loadAgentSessions();
+  }
+
+  /** Persist activeAgentSessions to the DB */
+  private saveAgentSessions(): void {
+    const obj = Object.fromEntries(this.activeAgentSessions);
+    setRouterState(AGENT_SESSIONS_KEY, JSON.stringify(obj));
+  }
+
+  /** Load activeAgentSessions from the DB */
+  private loadAgentSessions(): void {
+    try {
+      const raw = getRouterState(AGENT_SESSIONS_KEY);
+      if (raw) {
+        const obj = JSON.parse(raw) as Record<string, string>;
+        for (const [jid, sessionId] of Object.entries(obj)) {
+          this.activeAgentSessions.set(jid, sessionId);
+        }
+        if (this.activeAgentSessions.size > 0) {
+          logger.info(
+            { count: this.activeAgentSessions.size },
+            'Linear: restored active agent sessions from DB',
+          );
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to restore Linear agent sessions from DB');
+    }
+  }
+
+  /** Set an agent session and persist */
+  private setAgentSession(jid: string, sessionId: string): void {
+    this.activeAgentSessions.set(jid, sessionId);
+    this.saveAgentSessions();
+  }
+
+  /** Delete an agent session and persist */
+  private deleteAgentSession(jid: string): void {
+    this.activeAgentSessions.delete(jid);
+    this.saveAgentSessions();
   }
 
   /**
@@ -637,7 +682,7 @@ export class LinearChannel implements Channel {
     if (type === 'AgentSessionEvent') {
       const sessionId = data.agentSession?.id;
       if (sessionId) {
-        this.activeAgentSessions.set(chatJid, sessionId);
+        this.setAgentSession(chatJid, sessionId);
       }
     }
 
@@ -1014,7 +1059,7 @@ export class LinearChannel implements Channel {
           }
         }
         // Only delete session if we truly can't post ANY activity
-        this.activeAgentSessions.delete(jid);
+        this.deleteAgentSession(jid);
         // Fall through to comment
       }
     }

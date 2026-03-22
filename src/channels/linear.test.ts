@@ -20,6 +20,11 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+vi.mock('../db.js', () => ({
+  getRouterState: vi.fn(() => undefined),
+  setRouterState: vi.fn(),
+}));
+
 import fs from 'fs';
 import path from 'path';
 
