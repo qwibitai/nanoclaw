@@ -1,0 +1,19 @@
+skill: matrix
+version: 1.0.0
+description: "Matrix channel via matrix-bot-sdk — connect to any homeserver (Synapse, Dendrite, Conduit)"
+core_version: 0.1.0
+adds:
+  - src/channels/matrix.ts
+  - src/channels/matrix.test.ts
+modifies:
+  - src/channels/index.ts
+structured:
+  npm_dependencies:
+    matrix-bot-sdk: "^0.8.0"
+  env_additions:
+    - MATRIX_HOMESERVER_URL
+    - MATRIX_ACCESS_TOKEN
+    - MATRIX_E2EE
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/matrix.test.ts"
