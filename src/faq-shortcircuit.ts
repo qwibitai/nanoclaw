@@ -41,7 +41,9 @@ const faqCache = new Map<string, CacheEntry>();
  *
  * On any error, returns null so the message falls through to the LLM.
  */
-export async function fetchPredefinedFaq(groupFolder: string): Promise<FaqData | null> {
+export async function fetchPredefinedFaq(
+  groupFolder: string,
+): Promise<FaqData | null> {
   const now = Date.now();
   const cached = faqCache.get(groupFolder);
   if (cached && cached.expiresAt > now) {
@@ -75,7 +77,10 @@ export async function fetchPredefinedFaq(groupFolder: string): Promise<FaqData |
     });
     return hasData ? data : null;
   } catch (err) {
-    logger.warn({ groupFolder, err }, 'faq-shortcircuit: fetch failed, passing to LLM');
+    logger.warn(
+      { groupFolder, err },
+      'faq-shortcircuit: fetch failed, passing to LLM',
+    );
     // Don't cache on network error — retry on next message
     return null;
   }

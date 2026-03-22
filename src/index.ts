@@ -57,10 +57,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
-import {
-  fetchPredefinedFaq,
-  tryFaqShortCircuit,
-} from './faq-shortcircuit.js';
+import { fetchPredefinedFaq, tryFaqShortCircuit } from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 

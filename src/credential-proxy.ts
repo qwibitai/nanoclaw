@@ -59,18 +59,28 @@ export function startCredentialProxy(
         let body = rawBody;
         if (req.method === 'POST' && req.url?.startsWith('/v1/messages')) {
           try {
-            const json = JSON.parse(rawBody.toString('utf-8')) as Record<string, unknown>;
+            const json = JSON.parse(rawBody.toString('utf-8')) as Record<
+              string,
+              unknown
+            >;
             let modified = false;
 
             if (typeof json.system === 'string' && json.system.length > 0) {
               // String form → convert to content-block array with cache_control
               json.system = [
-                { type: 'text', text: json.system, cache_control: { type: 'ephemeral' } },
+                {
+                  type: 'text',
+                  text: json.system,
+                  cache_control: { type: 'ephemeral' },
+                },
               ];
               modified = true;
             } else if (Array.isArray(json.system) && json.system.length > 0) {
               // Array form — inject on the last block if not already cached
-              const last = json.system[json.system.length - 1] as Record<string, unknown>;
+              const last = json.system[json.system.length - 1] as Record<
+                string,
+                unknown
+              >;
               if (!last.cache_control) {
                 last.cache_control = { type: 'ephemeral' };
                 modified = true;
@@ -97,7 +107,9 @@ export function startCredentialProxy(
         if (req.url?.startsWith('/v1/messages')) {
           const existing = headers['anthropic-beta'];
           const parts = existing
-            ? (Array.isArray(existing) ? existing : [existing as string])
+            ? Array.isArray(existing)
+              ? existing
+              : [existing as string]
             : [];
           if (!parts.includes('prompt-caching-2024-07-31')) {
             parts.push('prompt-caching-2024-07-31');
