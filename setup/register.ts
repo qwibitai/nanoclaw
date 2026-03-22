@@ -124,10 +124,11 @@ export async function run(args: string[]): Promise<void> {
       'Updating assistant name',
     );
 
-    const mdFiles = [
-      path.join(projectRoot, 'groups', 'global', 'CLAUDE.md'),
-      path.join(projectRoot, 'groups', parsed.folder, 'CLAUDE.md'),
-    ];
+    const groupsDir = path.join(projectRoot, 'groups');
+    const mdFiles = fs
+      .readdirSync(groupsDir)
+      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
+      .filter((f) => fs.existsSync(f));
 
     for (const mdFile of mdFiles) {
       if (fs.existsSync(mdFile)) {
