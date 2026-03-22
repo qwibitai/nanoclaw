@@ -3,6 +3,11 @@ import { EventEmitter } from 'events';
 
 // --- Mocks ---
 
+// Mock speech (prevents @google-cloud/speech from attempting auth at import time)
+vi.mock('../speech.js', () => ({
+  transcribeAudio: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
