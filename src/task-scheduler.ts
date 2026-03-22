@@ -3,10 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
-import {
-  ContainerOutput,
-  AvailableGroup,
-} from './index.js';
+import { ContainerOutput, AvailableGroup } from './index.js';
 
 // Stubs for removed container-runner.ts
 function runContainerAgent(
@@ -23,7 +20,9 @@ function runContainerAgent(
   _onProcess: (proc: ChildProcess, containerName: string) => void,
   _onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  throw new Error('container-runner.ts removed - runContainerAgent not implemented');
+  throw new Error(
+    'container-runner.ts removed - runContainerAgent not implemented',
+  );
 }
 
 function writeTasksSnapshot(

@@ -44,7 +44,9 @@ function runContainerAgent(
   _onProcess: (proc: ChildProcess, containerName: string) => void,
   _onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
-  throw new Error('container-runner.ts removed - runContainerAgent not implemented');
+  throw new Error(
+    'container-runner.ts removed - runContainerAgent not implemented',
+  );
 }
 
 function writeTasksSnapshot(
