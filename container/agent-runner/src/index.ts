@@ -18,6 +18,8 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { SmartExtractor } from './smart-extractor.js';
+import { runReflectionPipeline } from './reflection-store.js';
 
 interface ContainerInput {
   prompt: string;
@@ -176,6 +178,28 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // Run extraction + reflection during PreCompact (if provider configured)
+      try {
+        const extractor = SmartExtractor.getInstance();
+        if (extractor.isAvailable() && messages.length > 0) {
+          const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n\n');
+          const scope = 'global';
+          const agentId = process.env.NANOCLAW_GROUP_FOLDER || 'unknown';
+
+          // Run extraction
+          log('Running smart extraction during PreCompact...');
+          const extractStats = await extractor.extractAndPersist(conversationText, scope);
+          log(`Extraction: extracted=${extractStats.extracted}, created=${extractStats.created}, merged=${extractStats.merged}, skipped=${extractStats.skipped}`);
+
+          // Run reflection
+          log('Running reflection pipeline during PreCompact...');
+          const reflectionResult = await runReflectionPipeline(conversationText, agentId, sessionId, 'precompact', scope);
+          log(`Reflection: generated=${reflectionResult.generated}, stored=${reflectionResult.stored}, deduped=${reflectionResult.deduped}`);
+        }
+      } catch (err) {
+        log(`Extraction/reflection during PreCompact failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -407,7 +431,7 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
