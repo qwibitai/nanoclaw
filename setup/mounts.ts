@@ -37,6 +37,21 @@ export async function run(args: string[]): Promise<void> {
 
   fs.mkdirSync(configDir, { recursive: true });
 
+  if (fs.existsSync(configFile)) {
+    logger.info(
+      { configFile },
+      'Mount allowlist already exists — skipping (use --force to overwrite)',
+    );
+    emitStatus('CONFIGURE_MOUNTS', {
+      PATH: configFile,
+      ALLOWED_ROOTS: 0,
+      NON_MAIN_READ_ONLY: 'unknown',
+      STATUS: 'skipped',
+      LOG: 'logs/setup.log',
+    });
+    return;
+  }
+
   let allowedRoots = 0;
   let nonMainReadOnly = 'true';
 
