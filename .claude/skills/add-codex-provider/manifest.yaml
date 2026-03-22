@@ -1,0 +1,29 @@
+skill: codex-provider
+version: 1.2.0
+description: "OpenAI Codex as alternative LLM provider via ChatGPT OAuth PKCE"
+core_version: 0.1.0
+adds:
+  - packages/codex-oauth/package.json
+  - packages/codex-oauth/tsconfig.json
+  - packages/codex-oauth/src/index.ts
+  - packages/codex-oauth/src/auth.ts
+  - packages/codex-oauth/src/client.ts
+  - packages/codex-oauth/src/cli.ts
+  - packages/codex-oauth/src/models.ts
+  - packages/codex-oauth/src/types.ts
+  - src/plugin-loader.ts
+  - src/provider-plugin.ts
+  - plugins/codex/host.ts
+  - plugins/codex/provider-codex.ts
+  - plugins/codex/types.ts
+  - plugins/codex/package.json
+  - plugins/codex/README.md
+  - plugins/codex/LICENSE
+  - setup/codex-auth-step.ts
+modifies: []
+structured:
+  env_additions:
+    - AGENT_PROVIDER
+conflicts: []
+depends: []
+test: "npm run build"
