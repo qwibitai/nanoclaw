@@ -9,11 +9,23 @@ import path from 'path';
  */
 
 // Helper: generate a plist string the same way service.ts does
+function buildServicePath(nodePath: string, homeDir: string): string {
+  const segments = [
+    path.dirname(nodePath),
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    `${homeDir}/.local/bin`,
+  ];
+  return [...new Set(segments)].join(':');
+}
+
 function generatePlist(
   nodePath: string,
   projectRoot: string,
   homeDir: string,
 ): string {
+  const envPath = buildServicePath(nodePath, homeDir);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -34,7 +46,7 @@ function generatePlist(
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
+        <string>${envPath}</string>
         <key>HOME</key>
         <string>${homeDir}</string>
     </dict>
@@ -52,6 +64,7 @@ function generateSystemdUnit(
   homeDir: string,
   isSystem: boolean,
 ): string {
+  const envPath = buildServicePath(nodePath, homeDir);
   return `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
@@ -64,7 +77,7 @@ Restart=always
 RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${envPath}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -108,6 +121,17 @@ describe('plist generation', () => {
     );
     expect(plist).toContain('nanoclaw.log');
     expect(plist).toContain('nanoclaw.error.log');
+  });
+
+  it('includes the node directory in PATH for Homebrew installs', () => {
+    const plist = generatePlist(
+      '/opt/homebrew/bin/node',
+      '/Users/test/nanoclaw',
+      '/Users/test',
+    );
+    expect(plist).toContain(
+      '<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/test/.local/bin</string>',
+    );
   });
 });
 
@@ -162,6 +186,18 @@ describe('systemd unit generation', () => {
     );
     expect(unit).toContain(
       'ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js',
+    );
+  });
+
+  it('includes the node directory in PATH', () => {
+    const unit = generateSystemdUnit(
+      '/opt/custom/bin/node',
+      '/srv/nanoclaw',
+      '/home/user',
+      false,
+    );
+    expect(unit).toContain(
+      'Environment=PATH=/opt/custom/bin:/usr/local/bin:/usr/bin:/bin:/home/user/.local/bin',
     );
   });
 });

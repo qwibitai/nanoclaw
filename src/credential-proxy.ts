@@ -79,11 +79,13 @@ export function startCredentialProxy(
           }
         }
 
+        // Prepend the base path from ANTHROPIC_BASE_URL (e.g. /coding/ for Kimi)
+        const basePath = upstreamUrl.pathname.replace(/\/$/, '');
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: basePath + req.url,
             method: req.method,
             headers,
           } as RequestOptions,
