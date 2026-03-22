@@ -9,6 +9,49 @@ import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
 
+interface AgentActivity {
+  type: 'thought' | 'action' | 'response' | 'error' | 'elicitation';
+  content: string;
+  action?: string; // only for 'action' type
+  parameter?: string; // only for 'action' type
+}
+
+/**
+ * Parse activity type from message text prefixes.
+ * Supports: [thought] ..., [action:Name] ..., [action:Name|param] ..., [error] ..., [elicitation] ...
+ * Default (no prefix): response
+ */
+function parseActivityType(text: string): AgentActivity {
+  const thoughtMatch = text.match(/^\[thought\]\s*([\s\S]*)/);
+  if (thoughtMatch) {
+    return { type: 'thought', content: thoughtMatch[1].trim() };
+  }
+
+  const actionMatch = text.match(
+    /^\[action:([^\]|]+)(?:\|([^\]]*))?\]\s*([\s\S]*)/,
+  );
+  if (actionMatch) {
+    return {
+      type: 'action',
+      action: actionMatch[1].trim(),
+      parameter: actionMatch[2]?.trim(),
+      content: actionMatch[3].trim(),
+    };
+  }
+
+  const errorMatch = text.match(/^\[error\]\s*([\s\S]*)/);
+  if (errorMatch) {
+    return { type: 'error', content: errorMatch[1].trim() };
+  }
+
+  const elicitMatch = text.match(/^\[elicitation\]\s*([\s\S]*)/);
+  if (elicitMatch) {
+    return { type: 'elicitation', content: elicitMatch[1].trim() };
+  }
+
+  return { type: 'response', content: text };
+}
+
 /** Path to the persisted OAuth token file */
 const LINEAR_OAUTH_FILE = path.join(DATA_DIR, 'linear-oauth.json');
 
@@ -584,6 +627,45 @@ export class LinearChannel implements Channel {
             'Failed to acknowledge Linear agent session',
           ),
         );
+
+        // Query repo suggestions and store in group metadata (fire-and-forget)
+        const issueId = issueData?.id;
+        if (issueId) {
+          this.getAccessToken()
+            .then((token) => {
+              if (token) {
+                return this.queryRepoSuggestions(issueId, sessionId, token);
+              }
+              return [];
+            })
+            .then((suggestions) => {
+              if (suggestions.length > 0) {
+                const repoList = suggestions
+                  .map(
+                    (s) =>
+                      `- ${s.repositoryFullName} (confidence: ${(s.confidence * 100).toFixed(0)}%)`,
+                  )
+                  .join('\n');
+                const group = this.opts.registeredGroups()[chatJid];
+                if (group && this.opts.registerGroup) {
+                  this.opts.registerGroup(chatJid, {
+                    ...group,
+                    metadata: {
+                      ...group.metadata,
+                      suggestedRepos: repoList,
+                    },
+                  });
+                }
+                logger.info(
+                  { chatJid, suggestions },
+                  'Linear repo suggestions fetched',
+                );
+              }
+            })
+            .catch((err) =>
+              logger.warn({ err, chatJid }, 'Failed to fetch repo suggestions'),
+            );
+        }
       }
     }
 
@@ -685,12 +767,20 @@ export class LinearChannel implements Channel {
   }
 
   /**
-   * Post a response activity to a Linear agent session.
+   * Post an activity to a Linear agent session.
    */
   private async postAgentActivity(
     sessionId: string,
     token: string,
     body: string,
+    type:
+      | 'thought'
+      | 'action'
+      | 'response'
+      | 'error'
+      | 'elicitation' = 'response',
+    action?: string,
+    parameter?: string,
   ): Promise<void> {
     const mutation = `
       mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
@@ -699,6 +789,16 @@ export class LinearChannel implements Channel {
         }
       }
     `;
+
+    // Build content based on type
+    let content: Record<string, string>;
+    if (type === 'action') {
+      content = { type: 'action', action: action || body };
+      if (parameter) content.parameter = parameter;
+      if (body && body !== action) content.result = body;
+    } else {
+      content = { type, body };
+    }
 
     const res = await fetch('https://api.linear.app/graphql', {
       method: 'POST',
@@ -711,10 +811,7 @@ export class LinearChannel implements Channel {
         variables: {
           input: {
             agentSessionId: sessionId,
-            content: {
-              type: 'response',
-              body,
-            },
+            content,
           },
         },
       }),
@@ -733,6 +830,59 @@ export class LinearChannel implements Channel {
       throw new Error(
         `Linear GraphQL errors: ${JSON.stringify(result.errors)}`,
       );
+    }
+  }
+
+  /**
+   * Query Linear's issueRepositorySuggestions API for repo matches.
+   */
+  private async queryRepoSuggestions(
+    issueId: string,
+    sessionId: string,
+    token: string,
+  ): Promise<
+    Array<{ repositoryFullName: string; hostname: string; confidence: number }>
+  > {
+    const query = `
+      query($issueId: String!, $agentSessionId: String!) {
+        issueRepositorySuggestions(
+          issueId: $issueId
+          agentSessionId: $agentSessionId
+          candidateRepositories: [
+            { hostname: "github.com", repositoryFullName: "cmraible/seb" }
+          ]
+        ) {
+          suggestions {
+            repositoryFullName
+            hostname
+            confidence
+          }
+        }
+      }
+    `;
+
+    try {
+      const res = await fetch('https://api.linear.app/graphql', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          variables: { issueId, agentSessionId: sessionId },
+        }),
+      });
+
+      if (!res.ok) return [];
+      const result = (await res.json()) as any;
+      return result?.data?.issueRepositorySuggestions?.suggestions || [];
+    } catch (err) {
+      logger.warn(
+        { err, issueId, sessionId },
+        'Failed to query repo suggestions',
+      );
+      return [];
     }
   }
 
@@ -787,17 +937,34 @@ export class LinearChannel implements Channel {
     const sessionId = this.activeAgentSessions.get(jid);
     if (sessionId) {
       try {
-        await this.postAgentActivity(sessionId, token, text);
-        this.activeAgentSessions.delete(jid);
+        const activity = parseActivityType(text);
+        await this.postAgentActivity(
+          sessionId,
+          token,
+          activity.content,
+          activity.type,
+          activity.action,
+          activity.parameter,
+        );
+        // Only clear session on 'response' (final) or 'error' activities
+        if (activity.type === 'response' || activity.type === 'error') {
+          this.activeAgentSessions.delete(jid);
+        }
         logger.info(
-          { jid, identifier, sessionId, length: text.length },
-          'Linear agent session response posted',
+          {
+            jid,
+            identifier,
+            sessionId,
+            activityType: activity.type,
+            length: text.length,
+          },
+          'Linear agent session activity posted',
         );
         return;
       } catch (err) {
         logger.error(
           { jid, identifier, sessionId, err },
-          'Failed to post agent session response, falling back to comment',
+          'Failed to post agent session activity, falling back to comment',
         );
         this.activeAgentSessions.delete(jid);
         // Fall through to comment
