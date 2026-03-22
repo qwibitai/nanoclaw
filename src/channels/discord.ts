@@ -94,8 +94,10 @@ export class DiscordChannel implements Channel {
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
-      // Ignore bot messages (including own)
+      // Ignore bot messages (including own) and system messages (thread
+      // renames, pins, member joins, etc.)
       if (message.author.bot) return;
+      if (message.system) return;
 
       const channelId = message.channelId;
       let content = message.content;
