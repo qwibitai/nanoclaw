@@ -58,6 +58,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { buildInfo, versionTag } from './build-info.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -470,6 +471,14 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  logger.info(
+    {
+      commit: buildInfo.commit,
+      branch: buildInfo.branch,
+      buildTime: buildInfo.buildTime,
+    },
+    `NanoClaw starting (${versionTag})`,
+  );
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
