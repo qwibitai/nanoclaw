@@ -10,18 +10,18 @@ This guide covers debugging the containerized agent execution system.
 ## Architecture Overview
 
 ```
-Host (macOS)                          Container (Linux VM)
+Host (Linux)                          Container (Docker)
 ─────────────────────────────────────────────────────────────
 src/container-runner.ts               container/agent-runner/
     │                                      │
     │ spawns container                      │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
-    ├── data/env/env ──────────────> /workspace/env-dir/env
     ├── groups/{folder} ───────────> /workspace/group
+    ├── groups/global ─────────────> /workspace/global (non-main, read-only)
     ├── data/ipc/{folder} ────────> /workspace/ipc
     ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
-    └── (main only) project root ──> /workspace/project
+    └── (main only) project root ──> /workspace/project (read-only)
 ```
 
 **Important:** The container runs as user `node` with `HOME=/home/node`. Session files must be mounted to `/home/node/.claude/` (not `/root/.claude/`) for session resumption to work.
@@ -30,7 +30,7 @@ src/container-runner.ts               container/agent-runner/
 
 | Log | Location | Content |
 |-----|----------|---------|
-| **Main app logs** | `logs/nanoclaw.log` | Host-side WhatsApp, routing, container spawning |
+| **Main app logs** | `logs/nanoclaw.log` | Host-side routing, container spawning, IPC |
 | **Main app errors** | `logs/nanoclaw.error.log` | Host-side errors |
 | **Container run logs** | `groups/{folder}/logs/container-*.log` | Per-run: input, mounts, stderr, stdout |
 | **Claude sessions** | `~/.claude/projects/` | Claude Code session history |
@@ -288,32 +288,60 @@ grep "Session initialized" logs/nanoclaw.log | tail -5
 # Should show the SAME session ID for consecutive messages in the same group
 ```
 
-## IPC Debugging
-
-The container communicates back to the host via files in `/workspace/ipc/`:
+## Quick Status Check
 
 ```bash
-# Check pending messages
-ls -la data/ipc/messages/
+# 1. Is the service running?
+systemctl status nanoclaw
 
-# Check pending task operations
-ls -la data/ipc/tasks/
+# 2. Any running containers?
+docker ps --format '{{.Names}} {{.Status}}' | grep nanoclaw
 
-# Read a specific IPC file
-cat data/ipc/messages/*.json
+# 3. Any stopped/orphaned containers?
+docker ps -a --format '{{.Names}} {{.Status}}' | grep nanoclaw
 
-# Check available groups (main channel only)
-cat data/ipc/main/available_groups.json
+# 4. Recent errors?
+grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# Check current tasks snapshot
-cat data/ipc/{groupFolder}/current_tasks.json
+# 5. Are groups loaded?
+grep 'groupCount' logs/nanoclaw.log | tail -3
+
+# 6. Is Discord connected?
+grep -E 'Discord.*ready|Discord.*connected|connection.*close' logs/nanoclaw.log | tail -5
+
+# 7. Agent not responding? Check message flow:
+grep 'New messages' logs/nanoclaw.log | tail -5        # messages arriving?
+grep 'Processing messages' logs/nanoclaw.log | tail -5  # containers spawning?
+grep 'Piped messages' logs/nanoclaw.log | tail -5       # piped to active container?
+
+# 8. Container timeouts?
+grep -E 'Container timeout|timed out' logs/nanoclaw.log | tail -10
 ```
 
-**IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
-- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
-- `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
+## IPC Debugging
+
+The container communicates back to the host via files in `/workspace/ipc/queue/`:
+
+```bash
+# Check pending IPC files (unified queue)
+ls -la data/ipc/{groupFolder}/queue/
+
+# Check legacy directories (deprecated, still read for backward compat)
+ls -la data/ipc/{groupFolder}/messages/ data/ipc/{groupFolder}/tasks/ 2>/dev/null
+
+# Check current tasks snapshot (host-written, read-only for containers)
+cat data/ipc/{groupFolder}/current_tasks.json
+
+# Check available groups
+cat data/ipc/{groupFolder}/available_groups.json
+```
+
+**IPC types** (all written to `queue/` as JSON with a `type` field):
+- `message` — outgoing chat messages
+- `send_files` — file attachments
+- `schedule_task`, `pause_task`, `resume_task`, `cancel_task`, `update_task` — task CRUD
+- `register_group`, `refresh_groups` — group management
+- `watch_pr`, `unwatch_pr` — PR watching (registered by pr-watcher module)
 
 ## Quick Diagnostic Script
 
