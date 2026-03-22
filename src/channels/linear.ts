@@ -492,7 +492,10 @@ export class LinearChannel implements Channel {
     if (this.opts.registerGroup) {
       const registered = this.opts.registeredGroups();
       const assigneeId = issueData?.assignee?.id;
-      const isAssignedToBot = !!this.botUserId && assigneeId === this.botUserId;
+      const delegateId = issueData?.delegate?.id;
+      const isAssignedToBot =
+        !!this.botUserId &&
+        (assigneeId === this.botUserId || delegateId === this.botUserId);
       // Delegation via AgentSessionEvent always means the bot should auto-respond
       const isDelegation = type === 'AgentSessionEvent';
       const skipTrigger = isDelegation || isAssignedToBot;
@@ -548,6 +551,7 @@ export class LinearChannel implements Channel {
       } else if (
         type === 'Issue' &&
         action === 'update' &&
+        !this.activeAgentSessions.has(chatJid) &&
         registered[chatJid].requiresTrigger !== !isAssignedToBot
       ) {
         // Assignment changed — update requiresTrigger
@@ -586,6 +590,17 @@ export class LinearChannel implements Channel {
     // Format the event
     const formatted = formatEvent(type, action, data, actor);
     if (!formatted) return;
+
+    // For AgentSessionEvent, include promptContext for the container agent
+    if (type === 'AgentSessionEvent') {
+      const promptContext =
+        payload.promptContext ||
+        payload.agentSession?.promptContext ||
+        data.agentSession?.promptContext;
+      if (promptContext) {
+        formatted.text += `\n\n<linear-context>\n${promptContext}\n</linear-context>`;
+      }
+    }
 
     // Deliver message
     this.opts.onMessage(chatJid, {
