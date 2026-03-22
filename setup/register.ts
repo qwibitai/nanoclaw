@@ -116,6 +116,16 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
+  // Copy main CLAUDE.md template into main group folder
+  if (parsed.isMain) {
+    const templatePath = path.join(projectRoot, 'groups', 'main', 'CLAUDE.md');
+    const destPath = path.join(projectRoot, 'groups', parsed.folder, 'CLAUDE.md');
+    if (fs.existsSync(templatePath) && !fs.existsSync(destPath)) {
+      fs.copyFileSync(templatePath, destPath);
+      logger.info({ dest: destPath }, 'Copied main CLAUDE.md template');
+    }
+  }
+
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
