@@ -12,6 +12,7 @@ import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 import type { ButtonRows } from './types.js';
 import { handleXIpc } from './x-ipc.js';
+import { handleOpIpc } from './op-ipc.js';
 import type { QueueStatusEntry, QueueMetrics } from './container-runner.js';
 
 export interface IpcDeps {
@@ -199,6 +200,19 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.error(
                     { file, sourceGroup, err },
                     'Background X IPC handler error',
+                  );
+                });
+                continue;
+              }
+
+              // 1Password credential requests: same fire-and-forget pattern.
+              // Results are written to op_results/ for the container to poll.
+              if (type?.startsWith('op_')) {
+                fs.unlinkSync(filePath);
+                handleOpIpc(data, sourceGroup, isMain, DATA_DIR).catch((err) => {
+                  logger.error(
+                    { file, sourceGroup, err },
+                    'Background 1Password IPC handler error',
                   );
                 });
                 continue;
@@ -646,7 +660,10 @@ export async function processTaskIpc(
     default: {
       const handled = await handleXIpc(data, sourceGroup, isMain, DATA_DIR);
       if (!handled) {
-        logger.warn({ type: data.type }, 'Unknown IPC task type');
+        const handledOp = await handleOpIpc(data, sourceGroup, isMain, DATA_DIR);
+        if (!handledOp) {
+          logger.warn({ type: data.type }, 'Unknown IPC task type');
+        }
       }
     }
   }

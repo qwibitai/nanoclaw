@@ -55,7 +55,7 @@ Confirm which tool families are available to you:
 ### 4. Container utilities
 
 ```bash
-which agent-browser 2>/dev/null && echo "agent-browser: available" || echo "agent-browser: not installed"
+which browser-agent 2>/dev/null && echo "browser-agent: available" || echo "browser-agent: not installed"
 node --version 2>/dev/null
 claude --version 2>/dev/null
 ```
@@ -91,7 +91,7 @@ Present as a clean, readable message:
 • Core: ✓  Web: ✓  Orchestration: ✓  MCP: ✓
 
 *Container:*
-• agent-browser: ✓ / not installed
+• browser-agent: ✓ / not installed
 • Node: vXX.X.X
 • Claude Code: vX.X.X
 

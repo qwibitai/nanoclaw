@@ -120,10 +120,10 @@
 │              │            │                │                         │
 │              ▼            ▼                ▼                         │
 │   ┌──────────────┐ ┌───────────┐ ┌──────────────────┐               │
-│   │  Claude SDK  │ │ MCP Server│ │  agent-browser    │               │
-│   │  Tools       │ │ (IPC-MCP) │ │  (Playwright)     │               │
+│   │  Claude SDK  │ │ MCP Server│ │  browser-agent    │               │
+│   │  Tools       │ │ (IPC-MCP) │ │  (browser-use/CDP)│               │
 │   │              │ │           │ │                    │               │
-│   │  - Bash      │ │ Tools:    │ │  - Web scraping    │               │
+│   │  - Bash      │ │ Tools:    │ │  - AI-driven nav   │               │
 │   │  - Read      │ │ send_msg  │ │  - Screenshots     │               │
 │   │  - Write     │ │ sched_task│ │  - Form filling    │               │
 │   │  - Glob      │ │ list_tasks│ │  - Navigation      │               │

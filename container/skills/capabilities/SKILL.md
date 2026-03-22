@@ -30,7 +30,7 @@ List skill directories available to you:
 ls -1 /home/node/.claude/skills/ 2>/dev/null || echo "No skills found"
 ```
 
-Each directory is an installed skill. The directory name is the skill name (e.g., `agent-browser` → `/agent-browser`).
+Each directory is an installed skill. The directory name is the skill name (e.g., `browser-use` → `/browser-use`).
 
 ### 2. Available tools
 
@@ -58,7 +58,7 @@ The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
 Check for executable tools in the container:
 
 ```bash
-which agent-browser 2>/dev/null && echo "agent-browser: available" || echo "agent-browser: not found"
+which browser-agent 2>/dev/null && echo "browser-agent: available" || echo "browser-agent: not found"
 ```
 
 ### 5. Group info
@@ -76,7 +76,7 @@ Present the report as a clean, readable message. Example:
 📋 *NanoClaw Capabilities*
 
 *Installed Skills:*
-• /agent-browser — Browse the web, fill forms, extract data
+• /browser-use — AI-driven browser automation
 • /capabilities — This report
 (list all found skills)
 
@@ -87,7 +87,7 @@ Present the report as a clean, readable message. Example:
 • MCP: send_message, schedule_task, list_tasks, pause/resume/cancel/update_task, register_group
 
 *Container Tools:*
-• agent-browser: ✓
+• browser-agent: ✓
 
 *System:*
 • Group memory: yes/no

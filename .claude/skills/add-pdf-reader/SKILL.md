@@ -97,7 +97,7 @@ Container needs rebuilding. Run `./container/build.sh` and restart the service.
 
 ### PDF text extraction is empty
 
-The PDF may be scanned (image-based). pdftotext only handles text-based PDFs. Consider using the agent-browser to open the PDF visually instead.
+The PDF may be scanned (image-based). pdftotext only handles text-based PDFs. Consider using browser-agent to open the PDF visually instead.
 
 ### WhatsApp PDF not detected
 

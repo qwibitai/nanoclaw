@@ -63,7 +63,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │  │    • Bash (safe - sandboxed in container!)                     │    │
 │  │    • Read, Write, Edit, Glob, Grep (file operations)           │    │
 │  │    • WebSearch, WebFetch (internet access)                     │    │
-│  │    • agent-browser (browser automation)                        │    │
+│  │    • browser-agent (AI-driven browser automation via browser-use) │    │
 │  │    • mcp__nanoclaw__* (scheduler tools via IPC)                │    │
 │  │                                                                │    │
 │  └──────────────────────────────────────────────────────────────┘    │
@@ -79,7 +79,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
-| Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
+| Browser Automation | browser-use + Chromium (CDP) | AI-driven web interaction |
 | Runtime | Node.js 20+ | Host process for routing and scheduling |
 
 ---
@@ -278,7 +278,7 @@ nanoclaw/
 │   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
 │   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
 │   └── skills/
-│       └── agent-browser.md       # Browser automation skill
+│       └── browser-use/SKILL.md    # AI-driven browser automation skill
 │
 ├── dist/                          # Compiled JavaScript (gitignored)
 │

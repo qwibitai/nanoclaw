@@ -1,9 +1,9 @@
 # NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# Runs Claude Agent SDK in isolated Linux VM with AI-driven browser automation
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium and Python
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    python3 \
+    python3-pip \
+    python3-venv \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/* \
@@ -34,12 +37,17 @@ RUN apt-get update && apt-get install -y \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chromium path for agent-browser
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+# Set Chromium path for browser-use (CDP-based)
+ENV BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser, claude-code, and MCP servers globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code @notionhq/notion-mcp-server tavily-mcp
+# Install browser-agent (AI-driven browser automation via browser-use)
+COPY browser-agent/ /opt/browser-agent/
+RUN pip3 install --break-system-packages -r /opt/browser-agent/requirements.txt \
+    && chmod +x /opt/browser-agent/browser_agent.py \
+    && ln -s /opt/browser-agent/browser_agent.py /usr/local/bin/browser-agent
+
+# Install claude-code and MCP servers globally
+RUN npm install -g @anthropic-ai/claude-code @notionhq/notion-mcp-server tavily-mcp
 
 # Create app directory
 WORKDIR /app
@@ -58,11 +66,12 @@ COPY agent-runner/ ./
 RUN npm run build
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/browser-state \
+    /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/op_results
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.
-# Credentials are injected by the host's credential proxy — never passed here.
+# Credentials are injected by the host's credential proxy -- never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 

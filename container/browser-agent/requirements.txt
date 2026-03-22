@@ -1,0 +1,3 @@
+browser-use>=0.12.0
+langchain-openai>=0.3.0
+click>=8.0.0

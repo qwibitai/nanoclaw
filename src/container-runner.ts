@@ -221,6 +221,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Global browser state (cookies, localStorage) shared across groups.
+  // Main group: read-write (can export storage after login).
+  // Other groups: read-only (can use saved auth but can't modify it).
+  const browserStateDir = path.join(DATA_DIR, 'browser-state');
+  fs.mkdirSync(browserStateDir, { recursive: true });
+  mounts.push({
+    hostPath: browserStateDir,
+    containerPath: '/workspace/browser-state',
+    readonly: !isMain,
+  });
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
@@ -303,6 +314,15 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Browser-use LLM configuration (routes through LiteLLM on host)
+  args.push(
+    '-e',
+    `BROWSER_LLM_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:4000/v1`,
+  );
+  args.push('-e', 'BROWSER_LLM_API_KEY=sk-local');
+  args.push('-e', 'BROWSER_LLM_MODEL=claude-sonnet-4.6');
+  args.push('-e', 'BROWSER_EXECUTABLE_PATH=/usr/bin/chromium');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
