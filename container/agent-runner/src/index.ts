@@ -596,6 +596,14 @@ async function main(): Promise<void> {
       execSync('git config --global user.name "NanoClaw Agent"', { stdio: 'ignore' });
       execSync('git config --global user.email "agent@nanoclaw.local"', { stdio: 'ignore' });
       log('Git credential helper configured for GitHub HTTPS');
+
+      // Authenticate gh CLI with the same token (non-interactive)
+      try {
+        execSync(`printf '%s' '${githubToken.replace(/'/g, "'\\''")}' | gh auth login --with-token`, { stdio: 'ignore' });
+        log('GitHub CLI (gh) authenticated');
+      } catch (ghErr) {
+        log(`Failed to authenticate gh CLI: ${ghErr instanceof Error ? ghErr.message : String(ghErr)}`);
+      }
     } catch (err) {
       log(`Failed to configure git credentials: ${err instanceof Error ? err.message : String(err)}`);
     }
