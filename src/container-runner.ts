@@ -16,6 +16,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -220,6 +221,14 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Optional model override (read from .env or process.env)
+  const modelEnv = readEnvFile(['NANOCLAW_MODEL']);
+  const model =
+    process.env.NANOCLAW_MODEL || modelEnv.NANOCLAW_MODEL || undefined;
+  if (model) {
+    args.push('-e', `NANOCLAW_MODEL=${model}`);
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(

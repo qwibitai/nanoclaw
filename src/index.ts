@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -35,6 +36,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -42,7 +44,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -116,6 +118,52 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+function setMainGroup(jid: string, group: RegisteredGroup): void {
+  // Demote any existing main group
+  for (const [existingJid, existingGroup] of Object.entries(registeredGroups)) {
+    if (existingGroup.isMain) {
+      registeredGroups[existingJid] = {
+        ...existingGroup,
+        isMain: false,
+      };
+      setRegisteredGroup(existingJid, registeredGroups[existingJid]);
+    }
+  }
+
+  // Ensure main group does not require trigger
+  const mainGroup: RegisteredGroup = {
+    ...group,
+    isMain: true,
+    requiresTrigger: false,
+  };
+
+  registerGroup(jid, mainGroup);
+}
+
+function resetGroupSession(jid: string): { ok: boolean; error?: string } {
+  const group = registeredGroups[jid];
+  if (!group) {
+    return { ok: false, error: 'Group not registered' };
+  }
+  const groupFolder = group.folder;
+  try {
+    deleteSession(groupFolder);
+    delete sessions[groupFolder];
+    delete lastAgentTimestamp[groupFolder];
+    const claudeDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+    fs.rmSync(claudeDir, { recursive: true, force: true });
+    const groupSessionsDir = path.join(DATA_DIR, 'sessions', groupFolder);
+    fs.rmSync(groupSessionsDir, { recursive: true, force: true });
+    const groupIpcDir = resolveGroupIpcPath(groupFolder);
+    fs.rmSync(groupIpcDir, { recursive: true, force: true });
+    logger.info({ jid, groupFolder }, 'Reset session state');
+    return { ok: true };
+  } catch (err) {
+    logger.error({ err, jid, groupFolder }, 'Failed to reset session state');
+    return { ok: false, error: 'Failed to reset session state' };
+  }
 }
 
 /**
@@ -573,6 +621,10 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    registerGroup,
+    setMainGroup,
+    resetSession: resetGroupSession,
+    defaultTrigger: TRIGGER_PATTERN.source,
   };
 
   // Create and connect all registered channels.
