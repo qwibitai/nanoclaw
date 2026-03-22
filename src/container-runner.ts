@@ -238,6 +238,11 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  // Pass Ollama connection details if configured
+  if (process.env.OLLAMA_URL) {
+    args.push('-e', `OLLAMA_URL=${process.env.OLLAMA_URL}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
