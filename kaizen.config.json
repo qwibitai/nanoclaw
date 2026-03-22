@@ -1,0 +1,26 @@
+{
+  "host": {
+    "name": "nanoclaw",
+    "repo": "Garsson-io/nanoclaw",
+    "description": "Personal Claude assistant",
+    "caseCli": "npx tsx src/cli-cases.ts"
+  },
+  "kaizen": {
+    "repo": "Garsson-io/kaizen",
+    "issueLabel": "kaizen"
+  },
+  "taxonomy": {
+    "levels": [
+      "level-1",
+      "level-2",
+      "level-3"
+    ],
+    "areas": [],
+    "areaPrefix": "area/",
+    "epicPrefix": "epic/",
+    "horizonPrefix": "horizon/"
+  },
+  "notifications": {
+    "channel": "telegram"
+  }
+}
