@@ -57,6 +57,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /**
+   * When true, this output is a pre-spawn informational warning (e.g. large session).
+   * Consumers should send it to the user but NOT treat it as a real agent result —
+   * it must not affect cursor rollback (outputSentToUser), idle timer reset, or
+   * task close scheduling.
+   */
+  isWarning?: boolean;
 }
 
 interface VolumeMount {
@@ -364,11 +371,13 @@ export async function runContainerAgent(
             { group: group.name, sessionSize: totalSize, sizeMB },
             'Large session detected — may cause slow responses',
           );
-          // Send warning to the chat via a synthetic output
+          // Send warning to the chat — marked as isWarning so consumers
+          // don't treat it as a real agent result (no cursor advance, no task close).
           await onOutput({
             status: 'success',
             result: `⚠️ Session 较长（${sizeMB}MB），可能导致响应变慢或超时。如需清理 session 请回复「清理 session」。`,
             newSessionId: input.sessionId,
+            isWarning: true,
           });
         }
       }

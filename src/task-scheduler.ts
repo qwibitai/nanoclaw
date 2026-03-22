@@ -237,6 +237,23 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        // Warnings (e.g. large session size) should be forwarded to the user
+        // but must NOT set the task result or arm scheduleClose() — the real
+        // task hasn't even started yet and closing prematurely would kill it.
+        if (streamedOutput.isWarning) {
+          if (streamedOutput.result) {
+            try {
+              await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            } catch (err) {
+              logger.debug(
+                { taskId: task.id, err },
+                'Failed to send task warning to chat',
+              );
+            }
+          }
+          return;
+        }
+
         if (streamedOutput.result) {
           result = streamedOutput.result;
           logger.info(
