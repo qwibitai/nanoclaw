@@ -5,6 +5,7 @@ import {
 import {
   dispatchReadyTasks,
   dispatchRetryCount,
+  dispatchSkipTicks,
   findDispatchTarget,
   findCeoJid,
   buildPrompt,
@@ -74,6 +75,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
     stallIntervalHandle = null;
   }
   dispatchRetryCount.clear();
+  dispatchSkipTicks.clear();
   dispatchTime.clear();
   logger.info('Agency HQ subsystems stopped');
 }
@@ -81,6 +83,7 @@ export async function stopAgencyHqSubsystems(): Promise<void> {
 // Exported for testing
 export const _testInternals = {
   dispatchRetryCount,
+  dispatchSkipTicks,
   dispatchTime,
   dispatchReadyTasks: (deps: SchedulerDependencies) =>
     dispatchReadyTasks(deps, isStopping),
