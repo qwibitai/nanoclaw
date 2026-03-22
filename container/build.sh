@@ -8,7 +8,11 @@ cd "$SCRIPT_DIR"
 
 IMAGE_NAME="nanoclaw-agent"
 TAG="${1:-latest}"
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+DEFAULT_RUNTIME="docker"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_RUNTIME="container"
+fi
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-$DEFAULT_RUNTIME}"
 
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"

@@ -24,7 +24,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
-  PROXY_BIND_HOST,
+  getProxyBindHost,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -480,7 +480,7 @@ async function main(): Promise<void> {
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
     CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
+    getProxyBindHost(),
   );
 
   // Graceful shutdown handlers

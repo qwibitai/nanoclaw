@@ -11,7 +11,7 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import { buildUpstreamPath, startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -49,12 +49,15 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamPath: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    lastUpstreamPath = '';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamPath = req.url || '';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -65,8 +68,16 @@ describe('credential-proxy', () => {
   });
 
   afterEach(async () => {
-    await new Promise<void>((r) => proxyServer?.close(() => r()));
-    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    await new Promise<void>((resolve) => {
+      if (!proxyServer) return resolve();
+      proxyServer.closeAllConnections?.();
+      proxyServer.close(() => resolve());
+    });
+    await new Promise<void>((resolve) => {
+      if (!upstreamServer) return resolve();
+      upstreamServer.closeAllConnections?.();
+      upstreamServer.close(() => resolve());
+    });
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
   });
 
@@ -168,6 +179,27 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['transfer-encoding']).toBeUndefined();
   });
 
+  it('prepends the base path from ANTHROPIC_BASE_URL', async () => {
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/coding`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamPath).toBe('/coding/v1/messages');
+  });
+
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: 'sk-ant-real-key',
@@ -188,5 +220,24 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+});
+
+describe('buildUpstreamPath', () => {
+  it('prepends the base path for normal request URLs', () => {
+    expect(buildUpstreamPath('/coding', '/v1/messages')).toBe(
+      '/coding/v1/messages',
+    );
+  });
+
+  it('defaults missing request URLs to the base root', () => {
+    expect(buildUpstreamPath('/coding', undefined)).toBe('/coding/');
+    expect(buildUpstreamPath('', undefined)).toBe('/');
+  });
+
+  it('joins non-slash-prefixed request URLs safely', () => {
+    expect(buildUpstreamPath('/coding', 'v1/messages')).toBe(
+      '/coding/v1/messages',
+    );
   });
 });

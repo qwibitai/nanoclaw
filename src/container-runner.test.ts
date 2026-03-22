@@ -76,7 +76,9 @@ vi.mock('child_process', async () => {
     await vi.importActual<typeof import('child_process')>('child_process');
   return {
     ...actual,
-    spawn: vi.fn(() => fakeProc),
+    spawn: vi.fn(
+      (_command: string, _args: string[], _opts?: unknown) => fakeProc,
+    ),
     exec: vi.fn(
       (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
         if (cb) cb(null);
@@ -86,6 +88,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -114,7 +117,9 @@ function emitOutputMarker(
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.restoreAllMocks();
     fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
   });
 
   afterEach(() => {
@@ -206,5 +211,55 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner user args', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  it('starts main containers as root and passes RUN_UID/RUN_GID for non-root hosts', async () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(1000);
+    vi.spyOn(process, 'getgid').mockReturnValue(1000);
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: true },
+      () => {},
+    );
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0]![1];
+    expect(spawnArgs).toContain('--user');
+    expect(spawnArgs).toContain('0');
+    expect(spawnArgs).toContain('-e');
+    expect(spawnArgs).toContain('RUN_UID=1000');
+    expect(spawnArgs).toContain('RUN_GID=1000');
+    expect(spawnArgs).toContain('HOME=/home/node');
+
+    fakeProc.emit('close', 0);
+    await resultPromise;
+  });
+
+  it('runs non-main containers as the host user even when uid is 1000', async () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(1000);
+    vi.spyOn(process, 'getgid').mockReturnValue(1000);
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: false },
+      () => {},
+    );
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0]![1];
+    expect(spawnArgs).toContain('--user');
+    expect(spawnArgs).toContain('1000:1000');
+    expect(spawnArgs).not.toContain('RUN_UID=1000');
+    expect(spawnArgs).toContain('HOME=/home/node');
+
+    fakeProc.emit('close', 0);
+    await resultPromise;
   });
 });

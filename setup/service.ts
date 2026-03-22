@@ -68,6 +68,17 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
+function buildServicePath(nodePath: string, homeDir: string): string {
+  const segments = [
+    path.dirname(nodePath),
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    `${homeDir}/.local/bin`,
+  ];
+  return [...new Set(segments)].join(':');
+}
+
 function setupLaunchd(
   projectRoot: string,
   nodePath: string,
@@ -80,6 +91,7 @@ function setupLaunchd(
     'com.nanoclaw.plist',
   );
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+  const envPath = buildServicePath(nodePath, homeDir);
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -101,7 +113,7 @@ function setupLaunchd(
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
+        <string>${envPath}</string>
         <key>HOME</key>
         <string>${homeDir}</string>
     </dict>
@@ -149,10 +161,11 @@ function setupLinux(
   nodePath: string,
   homeDir: string,
 ): void {
+  const envPath = buildServicePath(nodePath, homeDir);
   const serviceManager = getServiceManager();
 
   if (serviceManager === 'systemd') {
-    setupSystemd(projectRoot, nodePath, homeDir);
+    setupSystemd(projectRoot, nodePath, homeDir, envPath);
   } else {
     // WSL without systemd or other Linux without systemd
     setupNohupFallback(projectRoot, nodePath, homeDir);
@@ -205,6 +218,7 @@ function setupSystemd(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
+  envPath: string,
 ): void {
   const runningAsRoot = isRoot();
 
@@ -245,7 +259,7 @@ Restart=always
 RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${envPath}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
