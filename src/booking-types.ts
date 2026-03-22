@@ -34,8 +34,8 @@ export interface TenantConfig {
 
 export interface Tenant {
   id: string;
-  whatsapp_jid: string;  // JID of the business WhatsApp number/group
-  group_folder: string;  // NanoClaw group folder name — used to look up tenant per container
+  whatsapp_jid: string; // JID of the business WhatsApp number/group
+  group_folder: string; // NanoClaw group folder name — used to look up tenant per container
   business_name: string; // "Frizeria Andrei"
   category: BusinessCategory;
   config: TenantConfig;

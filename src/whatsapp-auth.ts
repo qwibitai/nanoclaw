@@ -20,9 +20,14 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-const AUTH_DIR = './store/auth';
-const QR_FILE = './store/qr-data.txt';
-const STATUS_FILE = './store/auth-status.txt';
+const sessionArg = process.argv.find((_, i, arr) => arr[i - 1] === '--session');
+const AUTH_DIR = sessionArg ? `./store/auth-${sessionArg}` : './store/auth';
+const QR_FILE = sessionArg
+  ? `./store/qr-data-${sessionArg}.txt`
+  : './store/qr-data.txt';
+const STATUS_FILE = sessionArg
+  ? `./store/auth-status-${sessionArg}.txt`
+  : './store/auth-status.txt';
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
@@ -55,7 +60,7 @@ async function connectSocket(
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
     console.log('✓ Already authenticated with WhatsApp');
     console.log(
-      '  To re-authenticate, delete the store/auth folder and run again.',
+      `  To re-authenticate, delete the ${AUTH_DIR} folder and run again.`,
     );
     process.exit(0);
   }
@@ -140,7 +145,7 @@ async function connectSocket(
         fs.unlinkSync(QR_FILE);
       } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
+      console.log(`  Credentials saved to ${AUTH_DIR}/`);
       console.log('  You can now start the NanoClaw service.\n');
 
       // Give it a moment to save credentials, then exit

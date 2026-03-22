@@ -97,7 +97,9 @@ function saveState(): void {
   setRouterState(
     'last_agent_timestamp',
     JSON.stringify(lastAgentTimestamp),
-  ).catch((err) => logger.warn({ err }, 'Failed to persist last_agent_timestamp'));
+  ).catch((err) =>
+    logger.warn({ err }, 'Failed to persist last_agent_timestamp'),
+  );
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {

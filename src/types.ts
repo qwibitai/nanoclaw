@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  tenantFolder?: string; // For auto-registered customer DMs: the session/tenant group folder
 }
 
 export interface RegisteredGroup {

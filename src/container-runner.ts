@@ -27,7 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { getTenantByFolder } from './booking-db.js';
+import { readEnvFile } from './env.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -242,8 +242,11 @@ function buildContainerArgs(
   }
 
   // Booking API connection — available to all tenant containers
-  const bookingApiUrl = process.env.BOOKING_API_URL;
-  const bookingApiKey = process.env.BOOKING_API_KEY;
+  const _bookingEnv = readEnvFile(['BOOKING_API_URL', 'BOOKING_API_KEY']);
+  const bookingApiUrl =
+    process.env.BOOKING_API_URL || _bookingEnv.BOOKING_API_URL;
+  const bookingApiKey =
+    process.env.BOOKING_API_KEY || _bookingEnv.BOOKING_API_KEY;
   if (bookingApiUrl && bookingApiKey) {
     args.push('-e', `BOOKING_API_URL=${bookingApiUrl}`);
     args.push('-e', `BOOKING_API_KEY=${bookingApiKey}`);
@@ -278,6 +281,30 @@ function buildContainerArgs(
   return args;
 }
 
+async function fetchTenantId(folder: string): Promise<string | undefined> {
+  const env = readEnvFile(['BOOKING_API_URL', 'BOOKING_API_KEY']);
+  const apiUrl = process.env.BOOKING_API_URL || env.BOOKING_API_URL;
+  const apiKey = process.env.BOOKING_API_KEY || env.BOOKING_API_KEY;
+  if (!apiUrl || !apiKey) return undefined;
+
+  // Convert docker internal URL to localhost for nanoclaw host process
+  const hostUrl = apiUrl.replace('host.docker.internal', 'localhost');
+  try {
+    const res = await fetch(
+      `${hostUrl}/admin/tenants/by-folder/${encodeURIComponent(folder)}`,
+      {
+        headers: { 'x-api-key': apiKey },
+      },
+    );
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { id?: string };
+    return data.id;
+  } catch (err) {
+    logger.warn({ folder, err }, 'fetchTenantId failed');
+    return undefined;
+  }
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -292,8 +319,13 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const tenant = getTenantByFolder(group.folder);
-  const containerArgs = buildContainerArgs(mounts, containerName, tenant?.id);
+  const tenantFolder = group.containerConfig?.tenantFolder ?? group.folder;
+  const tenantId = await fetchTenantId(tenantFolder);
+  logger.info(
+    { tenantFolder, tenantId: tenantId ?? 'NOT FOUND' },
+    'Resolved tenant for container',
+  );
+  const containerArgs = buildContainerArgs(mounts, containerName, tenantId);
 
   logger.debug(
     {
