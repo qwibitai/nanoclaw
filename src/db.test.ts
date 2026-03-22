@@ -16,11 +16,13 @@ import {
   getTaskById,
   getTaskHealthSummary,
   logTaskRun,
+  parseTaskRunResult,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
 } from './db/index.js';
+import { TaskRunResult } from './types.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -523,7 +525,7 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 5000,
       status: 'success',
-      result: 'ok',
+      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
       error: null,
     });
     logTaskRun({
@@ -531,7 +533,7 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 6000,
       status: 'success',
-      result: 'ok',
+      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
       error: null,
     });
 
@@ -566,7 +568,7 @@ describe('getTaskHealthSummary', () => {
       run_at: oldDate,
       duration_ms: 5000,
       status: 'success',
-      result: 'ok',
+      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
       error: null,
     });
 
@@ -580,7 +582,7 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 400000,
       status: 'success',
-      result: 'ok',
+      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
       error: null,
     });
 
@@ -596,12 +598,66 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 5000,
       status: 'success',
-      result: 'ok',
+      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
       error: null,
     });
 
     const summary = getTaskHealthSummary(24, 300000);
     expect(summary.avgDurationByTask).toHaveLength(0);
+  });
+});
+
+// --- parseTaskRunResult ---
+
+describe('parseTaskRunResult', () => {
+  it('returns null for null values', () => {
+    expect(parseTaskRunResult({ result_json: null, result_legacy: null })).toBeNull();
+  });
+
+  it('returns null for undefined values', () => {
+    expect(parseTaskRunResult({})).toBeNull();
+  });
+
+  it('parses valid JSON from result_json', () => {
+    const result: TaskRunResult = {
+      exitCode: 0,
+      stdout: 'hello',
+      stderr: null,
+      durationMs: 1234,
+      completedAt: '2024-01-01T00:00:00.000Z',
+    };
+    const parsed = parseTaskRunResult({ result_json: JSON.stringify(result) });
+    expect(parsed).toEqual(result);
+  });
+
+  it('returns null for invalid JSON in result_json', () => {
+    expect(parseTaskRunResult({ result_json: 'not-json' })).toBeNull();
+  });
+
+  it('wraps legacy text in structured shape', () => {
+    const parsed = parseTaskRunResult({ result_legacy: 'old text result' });
+    expect(parsed).toEqual({
+      exitCode: 0,
+      stdout: 'old text result',
+      stderr: null,
+      durationMs: 0,
+      completedAt: '',
+    });
+  });
+
+  it('prefers result_json over result_legacy', () => {
+    const result: TaskRunResult = {
+      exitCode: 0,
+      stdout: 'json result',
+      stderr: null,
+      durationMs: 500,
+      completedAt: '2024-01-01T00:00:00.000Z',
+    };
+    const parsed = parseTaskRunResult({
+      result_json: JSON.stringify(result),
+      result_legacy: 'legacy text',
+    });
+    expect(parsed).toEqual(result);
   });
 });
 

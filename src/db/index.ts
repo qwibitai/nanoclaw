@@ -79,6 +79,7 @@ export {
   getTaskHealthSummary,
   getTasksForGroup,
   logTaskRun,
+  parseTaskRunResult,
   updateTask,
   updateTaskAfterRun,
 } from './tasks.js';

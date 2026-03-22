@@ -17,7 +17,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { createCorrelationLogger, logger } from './logger.js';
-import { RegisteredGroup, ScheduledTask } from './types.js';
+import { RegisteredGroup, ScheduledTask, TaskRunResult } from './types.js';
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -120,12 +120,20 @@ export async function runScheduledTask(
 
   if (!group) {
     log.error({ groupFolder: task.group_folder }, 'Group not found for task');
+    const now = new Date().toISOString();
+    const durationMs = Date.now() - startTime;
     logTaskRun({
       task_id: task.id,
-      run_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
+      run_at: now,
+      duration_ms: durationMs,
       status: 'error',
-      result: null,
+      result: {
+        exitCode: 1,
+        stdout: null,
+        stderr: `Group not found: ${task.group_folder}`,
+        durationMs,
+        completedAt: now,
+      },
       error: `Group not found: ${task.group_folder}`,
     });
     return null;
@@ -219,13 +227,22 @@ export async function runScheduledTask(
   }
 
   const durationMs = Date.now() - startTime;
+  const completedAt = new Date().toISOString();
+
+  const structuredResult: TaskRunResult = {
+    exitCode: error ? 1 : 0,
+    stdout: result,
+    stderr: error,
+    durationMs,
+    completedAt,
+  };
 
   logTaskRun({
     task_id: task.id,
-    run_at: new Date().toISOString(),
+    run_at: completedAt,
     duration_ms: durationMs,
     status: error ? 'error' : 'success',
-    result,
+    result: structuredResult,
     error,
   });
 

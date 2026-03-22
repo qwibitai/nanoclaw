@@ -74,12 +74,21 @@ export interface ScheduledTask {
   created_at: string;
 }
 
+/** Structured result stored as JSON in task_run_logs.result_json */
+export interface TaskRunResult {
+  exitCode: number;
+  stdout: string | null;
+  stderr: string | null;
+  durationMs: number;
+  completedAt: string;
+}
+
 export interface TaskRunLog {
   task_id: string;
   run_at: string;
   duration_ms: number;
   status: 'success' | 'error';
-  result: string | null;
+  result: TaskRunResult | null;
   error: string | null;
 }
 
