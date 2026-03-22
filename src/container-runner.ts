@@ -197,7 +197,9 @@ function buildVolumeMounts(
   // Fix: compare a version marker and resync when source changes.
   if (fs.existsSync(agentRunnerSrc)) {
     const versionFile = path.join(groupAgentRunnerDir, '.source-hash');
-    const sourceFiles = fs.readdirSync(agentRunnerSrc, { recursive: true }) as string[];
+    const sourceFiles = fs.readdirSync(agentRunnerSrc, {
+      recursive: true,
+    }) as string[];
     const sourceHash = sourceFiles
       .filter((f) => f.toString().endsWith('.ts'))
       .map((f) => {
@@ -213,7 +215,10 @@ function buildVolumeMounts(
       // Source changed — resync entire directory
       fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-      fs.writeFileSync(path.join(groupAgentRunnerDir, '.source-hash'), sourceHash);
+      fs.writeFileSync(
+        path.join(groupAgentRunnerDir, '.source-hash'),
+        sourceHash,
+      );
     }
   }
   mounts.push({

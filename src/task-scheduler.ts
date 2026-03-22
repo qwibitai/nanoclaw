@@ -243,7 +243,6 @@ async function runTask(
   evaluateM2CleanRun(task.id, error ? 'error' : 'success', !!result, error);
 }
 
-
 /**
  * Evaluate a completed task run against M2 clean run criteria.
  * Non-blocking — failures here don't affect the task result.
