@@ -10,6 +10,7 @@ import {
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
+  TaskRunResult,
 } from './types.js';
 
 let db: Database.Database;
@@ -482,7 +483,7 @@ export function updateTaskAfterRun(
 export function logTaskRun(log: TaskRunLog): void {
   db.prepare(
     `
-    INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
+    INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result_json, error)
     VALUES (?, ?, ?, ?, ?, ?)
   `,
   ).run(
@@ -490,9 +491,37 @@ export function logTaskRun(log: TaskRunLog): void {
     log.run_at,
     log.duration_ms,
     log.status,
-    log.result,
+    log.result ? JSON.stringify(log.result) : null,
     log.error,
   );
+}
+
+/**
+ * Parse a task run result from the database row.
+ * Handles: null, JSON in result_json, legacy text in result_legacy.
+ */
+export function parseTaskRunResult(row: {
+  result_json?: string | null;
+  result_legacy?: string | null;
+}): TaskRunResult | null {
+  if (row.result_json) {
+    try {
+      return JSON.parse(row.result_json) as TaskRunResult;
+    } catch {
+      return null;
+    }
+  }
+  // Legacy fallback: wrap plain text in the structured shape
+  if (row.result_legacy) {
+    return {
+      exitCode: 0,
+      stdout: row.result_legacy,
+      stderr: null,
+      durationMs: 0,
+      completedAt: '',
+    };
+  }
+  return null;
 }
 
 // --- Task health summary ---
