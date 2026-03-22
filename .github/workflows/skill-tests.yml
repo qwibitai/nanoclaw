@@ -53,7 +53,7 @@ jobs:
       - run: npm ci
 
       - name: Initialize nanoclaw dir
-        run: npx tsx -e "import { initNanoclawDir } from './skills-engine/index.js'; initNanoclawDir();"
+        run: npx tsx -e "import { initNanoclawDir } from './skills-engine/index.ts'; initNanoclawDir();"
 
       - name: Apply skills in sequence
         run: |
