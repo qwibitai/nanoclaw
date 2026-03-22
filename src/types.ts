@@ -53,6 +53,11 @@ export interface NewMessage {
   is_bot_message?: boolean;
 }
 
+export interface PreHook {
+  command: string;
+  timeout_seconds?: number; // Default 30, max 300
+}
+
 export interface ScheduledTask {
   id: string;
   group_folder: string;
@@ -61,6 +66,7 @@ export interface ScheduledTask {
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
+  pre_hook?: PreHook;
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
@@ -72,7 +78,7 @@ export interface TaskRunLog {
   task_id: string;
   run_at: string;
   duration_ms: number;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'skipped';
   result: string | null;
   error: string | null;
 }

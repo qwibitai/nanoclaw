@@ -7,6 +7,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   NewMessage,
+  PreHook,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -138,6 +139,15 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Add pre_hook column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN pre_hook TEXT`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -363,13 +373,20 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+function parseTaskRow(row: any): ScheduledTask {
+  return {
+    ...row,
+    pre_hook: row.pre_hook ? (JSON.parse(row.pre_hook) as PreHook) : undefined,
+  };
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, pre_hook, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -379,6 +396,7 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.pre_hook ? JSON.stringify(task.pre_hook) : null,
     task.next_run,
     task.status,
     task.created_at,
@@ -386,23 +404,26 @@ export function createTask(
 }
 
 export function getTaskById(id: string): ScheduledTask | undefined {
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
-    | ScheduledTask
-    | undefined;
+  const row = db
+    .prepare('SELECT * FROM scheduled_tasks WHERE id = ?')
+    .get(id) as any | undefined;
+  return row ? parseTaskRow(row) : undefined;
 }
 
 export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
-  return db
+  const rows = db
     .prepare(
       'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
     )
-    .all(groupFolder) as ScheduledTask[];
+    .all(groupFolder) as any[];
+  return rows.map(parseTaskRow);
 }
 
 export function getAllTasks(): ScheduledTask[] {
-  return db
+  const rows = db
     .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
-    .all() as ScheduledTask[];
+    .all() as any[];
+  return rows.map(parseTaskRow);
 }
 
 export function updateTask(
@@ -410,9 +431,13 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
     >
-  >,
+  > & { pre_hook?: ScheduledTask['pre_hook'] | null },
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -437,6 +462,12 @@ export function updateTask(
     fields.push('status = ?');
     values.push(updates.status);
   }
+  if (updates.pre_hook !== undefined) {
+    fields.push('pre_hook = ?');
+    values.push(
+      updates.pre_hook ? JSON.stringify(updates.pre_hook) : null,
+    );
+  }
 
   if (fields.length === 0) return;
 
@@ -454,7 +485,7 @@ export function deleteTask(id: string): void {
 
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
-  return db
+  const rows = db
     .prepare(
       `
     SELECT * FROM scheduled_tasks
@@ -462,7 +493,8 @@ export function getDueTasks(): ScheduledTask[] {
     ORDER BY next_run
   `,
     )
-    .all(now) as ScheduledTask[];
+    .all(now) as any[];
+  return rows.map(parseTaskRow);
 }
 
 export function updateTaskAfterRun(
