@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        retryTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -193,6 +195,29 @@ export class GroupQueue {
     }
   }
 
+  resetGroup(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+
+    state.pendingMessages = false;
+    state.pendingTasks = [];
+    state.retryCount = 0;
+
+    if (state.retryTimer) {
+      clearTimeout(state.retryTimer);
+      state.retryTimer = null;
+    }
+
+    this.waitingGroups = this.waitingGroups.filter((jid) => jid !== groupJid);
+
+    if (state.process && !state.process.killed) {
+      logger.info(
+        { groupJid, containerName: state.containerName },
+        'Resetting group: terminating active container',
+      );
+      state.process.kill('SIGTERM');
+    }
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
@@ -276,7 +301,8 @@ export class GroupQueue {
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
-    setTimeout(() => {
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = null;
       if (!this.shuttingDown) {
         this.enqueueMessageCheck(groupJid);
       }

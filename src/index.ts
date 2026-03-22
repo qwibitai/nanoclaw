@@ -69,6 +69,7 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+let sessionGenerations: Record<string, number> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -94,6 +95,16 @@ function loadState(): void {
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+}
+
+function getSessionGeneration(groupFolder: string): number {
+  return sessionGenerations[groupFolder] || 0;
+}
+
+function bumpSessionGeneration(groupFolder: string): number {
+  const nextGeneration = getSessionGeneration(groupFolder) + 1;
+  sessionGenerations[groupFolder] = nextGeneration;
+  return nextGeneration;
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -149,6 +160,8 @@ function resetGroupSession(jid: string): { ok: boolean; error?: string } {
   }
   const groupFolder = group.folder;
   try {
+    bumpSessionGeneration(groupFolder);
+    queue.resetGroup(jid);
     deleteSession(groupFolder);
     delete sessions[groupFolder];
     delete lastAgentTimestamp[groupFolder];
@@ -320,6 +333,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
+  const sessionGeneration = getSessionGeneration(group.folder);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -349,7 +363,10 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (
+          output.newSessionId &&
+          getSessionGeneration(group.folder) === sessionGeneration
+        ) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -373,7 +390,10 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (
+      output.newSessionId &&
+      getSessionGeneration(group.folder) === sessionGeneration
+    ) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
