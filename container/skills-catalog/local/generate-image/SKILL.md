@@ -1,6 +1,6 @@
 ---
 name: generate-image
-description: Generate images from text prompts using Google Gemini AI (Imagen 3 / gemini-2.0-flash). Use when asked to generate, create, draw, or make an image of something. Trigger phrases include "generate an image of...", "create an image of...", "draw me...", "make an image of...".
+description: Generate images from text prompts using Google Gemini AI (gemini-2.5-flash-image). Use when asked to generate, create, draw, or make an image of something. Trigger phrases include "generate an image of...", "create an image of...", "draw me...", "make an image of...".
 ---
 
 # Image Generation with Google Gemini
@@ -75,9 +75,9 @@ echo "$IMAGE_B64" | base64 -d > "$OUTPUT_FILE"
 echo "Image saved to $OUTPUT_FILE"
 ```
 
-## Fallback: Imagen 3 endpoint
+## Fallback: Imagen 4 endpoint
 
-If the gemini-2.0-flash endpoint fails, try the Imagen 3 endpoint:
+If the gemini-2.5-flash-image endpoint fails, try the Imagen 4 endpoint:
 
 ```bash
 PROMPT="a red fox sitting in a snowy forest"

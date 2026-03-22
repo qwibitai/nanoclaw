@@ -29,14 +29,14 @@ npm list jimp | grep jimp || npm install jimp
 
 ## Step 1: Generate a Tilesheet
 
-Use Gemini `gemini-2.0-flash-exp` (supports image output). Generate multiple sprites in a single call using a grid layout prompt. Specify exact coordinates in the prompt so you know where to crop.
+Use Gemini `gemini-2.5-flash-image` (supports image output). Generate multiple sprites in a single call using a grid layout prompt. Specify exact coordinates in the prompt so you know where to crop.
 
 ```bash
 cat << 'PYEOF' > /tmp/gen_tilesheet.py
 import os, base64, json, urllib.request
 
 API_KEY = os.environ["GEMINI_API_KEY"]
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={API_KEY}"
+URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={API_KEY}"
 
 # Example: heroes tilesheet — 3 cols (warrior, mage, rogue) × 3 rows (idle, attack, hurt)
 PROMPT = """Create a pixel art sprite tilesheet. 3 columns × 3 rows, each cell exactly 128×128 pixels.
