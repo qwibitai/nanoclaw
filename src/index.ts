@@ -58,7 +58,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
 import {
-  parseFaqFromClaudeMd,
+  fetchPredefinedFaq,
   tryFaqShortCircuit,
 } from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -228,7 +228,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // FAQ short-circuit — answer static questions without spawning a container.
   // Saves the full container lifecycle cost for address/payment/parking queries.
-  const faqData = parseFaqFromClaudeMd(group.folder);
+  // Predefined FAQ is fetched from the booking API with a 5-min in-memory cache.
+  const faqData = await fetchPredefinedFaq(group.folder);
   if (faqData) {
     const faqAnswer = tryFaqShortCircuit(missedMessages, faqData);
     if (faqAnswer) {
