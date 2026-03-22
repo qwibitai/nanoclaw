@@ -257,6 +257,23 @@ async function buildContainerArgs(
     );
   }
 
+  // Pass Tailscale connection details if configured
+  if (process.env.TS_API_KEY) {
+    args.push('-e', `TS_API_KEY=${process.env.TS_API_KEY}`);
+  }
+  if (process.env.TS_API_CLIENT_ID) {
+    args.push('-e', `TS_API_CLIENT_ID=${process.env.TS_API_CLIENT_ID}`);
+  }
+  if (process.env.TS_API_CLIENT_SECRET) {
+    args.push(
+      '-e',
+      `TS_API_CLIENT_SECRET=${process.env.TS_API_CLIENT_SECRET}`,
+    );
+  }
+  if (process.env.TS_API_TAILNET) {
+    args.push('-e', `TS_API_TAILNET=${process.env.TS_API_TAILNET}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
