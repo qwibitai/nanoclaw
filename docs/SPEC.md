@@ -295,7 +295,8 @@ nanoclaw/
 │       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
 │
 ├── groups/
-│   ├── CLAUDE.md                  # Global memory (all groups read this)
+│   ├── global/CLAUDE.md           # Global memory (all groups read this)
+│   ├── main/CLAUDE.md             # Starting memory for main channel
 │   ├── {channel}_main/             # Main control channel (e.g., whatsapp_main/)
 │   │   ├── CLAUDE.md              # Main channel memory
 │   │   └── logs/                  # Task execution logs
