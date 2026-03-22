@@ -5,9 +5,42 @@ import fs from 'fs';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
-  runContainerAgent,
-  writeTasksSnapshot,
-} from './container-runner.js';
+  AvailableGroup,
+} from './index.js';
+
+// Stubs for removed container-runner.ts
+function runContainerAgent(
+  _group: RegisteredGroup,
+  _input: {
+    prompt: string;
+    sessionId?: string;
+    groupFolder: string;
+    chatJid: string;
+    isMain: boolean;
+    isScheduledTask?: boolean;
+    assistantName?: string;
+  },
+  _onProcess: (proc: ChildProcess, containerName: string) => void,
+  _onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  throw new Error('container-runner.ts removed - runContainerAgent not implemented');
+}
+
+function writeTasksSnapshot(
+  _groupFolder: string,
+  _isMain: boolean,
+  _tasks: Array<{
+    id: string;
+    groupFolder: string;
+    prompt: string;
+    schedule_type: string;
+    schedule_value: string;
+    status: string;
+    next_run: string | null;
+  }>,
+): void {
+  // no-op stub
+}
 import {
   getAllTasks,
   getDueTasks,

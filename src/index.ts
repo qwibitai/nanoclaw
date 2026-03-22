@@ -1,3 +1,4 @@
+import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,12 +16,61 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
-} from './container-runner.js';
+// TODO: container-runner.ts removed - stub types and functions
+export interface ContainerOutput {
+  status: 'success' | 'error';
+  result: string | null;
+  newSessionId?: string;
+  error?: string;
+}
+
+export interface AvailableGroup {
+  jid: string;
+  name: string;
+  lastActivity: string;
+  isRegistered: boolean;
+}
+
+function runContainerAgent(
+  _group: RegisteredGroup,
+  _input: {
+    prompt: string;
+    sessionId?: string;
+    groupFolder: string;
+    chatJid: string;
+    isMain: boolean;
+    assistantName?: string;
+  },
+  _onProcess: (proc: ChildProcess, containerName: string) => void,
+  _onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  throw new Error('container-runner.ts removed - runContainerAgent not implemented');
+}
+
+function writeTasksSnapshot(
+  _groupFolder: string,
+  _isMain: boolean,
+  _tasks: Array<{
+    id: string;
+    groupFolder: string;
+    prompt: string;
+    schedule_type: string;
+    schedule_value: string;
+    status: string;
+    next_run: string | null;
+  }>,
+): void {
+  // no-op stub
+}
+
+function writeGroupsSnapshot(
+  _groupFolder: string,
+  _isMain: boolean,
+  _availableGroups: AvailableGroup[],
+  _registeredJids: Set<string>,
+): void {
+  // no-op stub
+}
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -123,7 +173,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(): AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
