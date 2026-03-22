@@ -484,10 +484,9 @@ export async function setSession(
 }
 
 export async function deleteSession(groupFolder: string): Promise<void> {
-  await q(
-    'DELETE FROM conversation_sessions WHERE group_folder = $1',
-    [groupFolder],
-  );
+  await q('DELETE FROM conversation_sessions WHERE group_folder = $1', [
+    groupFolder,
+  ]);
 }
 
 export async function incrementSessionTurn(groupFolder: string): Promise<void> {
