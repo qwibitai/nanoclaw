@@ -474,7 +474,6 @@ export class WhatsAppChannel implements Channel {
 
             content = content + attachmentRef + voiceTranscript;
 
-
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content.trim()) continue;
 
