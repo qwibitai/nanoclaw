@@ -56,6 +56,13 @@ npm run format       # Auto-fix formatting
 
 CI runs on every pull request to `main` (format check → typecheck → tests). A pre-commit hook runs `prettier --write` automatically.
 
+## Contributing
+
+- Branch protection is enabled for `main` — all changes must go through a PR
+- PRs require review and approval from codeowners before merging
+- CI and Gitleaks checks must pass
+- When a PR is ready for review, enable auto-merge — it will merge automatically once approved
+
 Service management:
 ```bash
 # macOS (launchd)
