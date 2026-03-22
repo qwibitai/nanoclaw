@@ -269,30 +269,52 @@ export async function ensureValidOAuthCredentials(): Promise<
   }
 
   refreshInProgress = (async () => {
-    try {
-      const fresh = await refreshOAuthToken(creds.refreshToken);
+    const MAX_RETRIES = 3;
+    let lastErr: unknown;
 
-      // Write back to host credentials file
-      const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
-      const fileData = { claudeAiOauth: fresh };
-      fs.writeFileSync(credPath, JSON.stringify(fileData, null, 2), {
-        mode: 0o600,
-      });
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const fresh = await refreshOAuthToken(creds.refreshToken);
 
-      logger.info(
-        {
-          expiresIn: Math.round((fresh.expiresAt - Date.now()) / 1000 / 60),
-        },
-        'OAuth token refreshed successfully (expires in minutes)',
-      );
-      return fresh;
-    } catch (err) {
-      logger.error({ err }, 'OAuth token refresh failed');
-      throw err;
-    } finally {
-      refreshInProgress = null;
+        // Write back to host credentials file
+        const credPath = path.join(
+          os.homedir(),
+          '.claude',
+          '.credentials.json',
+        );
+        const fileData = { claudeAiOauth: fresh };
+        fs.writeFileSync(credPath, JSON.stringify(fileData, null, 2), {
+          mode: 0o600,
+        });
+
+        logger.info(
+          {
+            expiresIn: Math.round((fresh.expiresAt - Date.now()) / 1000 / 60),
+            attempt,
+          },
+          'OAuth token refreshed successfully (expires in minutes)',
+        );
+        return fresh;
+      } catch (err) {
+        lastErr = err;
+        logger.warn(
+          { err, attempt, maxRetries: MAX_RETRIES },
+          'OAuth token refresh attempt failed',
+        );
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, attempt * 2000));
+        }
+      }
     }
-  })();
+
+    logger.error(
+      { err: lastErr },
+      'OAuth token refresh failed after all retries',
+    );
+    throw lastErr;
+  })().finally(() => {
+    refreshInProgress = null;
+  });
 
   return refreshInProgress;
 }
@@ -316,6 +338,39 @@ export async function copyFreshCredentials(
     { mode: 0o600 },
   );
   return true;
+}
+
+/**
+ * Refresh the host OAuth token and propagate it to all per-group staged
+ * credential files in credentialsDir (e.g. data/credentials/).
+ * Running containers bind-mount these files read-only, so they pick up
+ * the new token on their next read without needing a restart.
+ */
+export async function refreshAllStagedCredentials(
+  credentialsDir: string,
+): Promise<OAuthCredentials | undefined> {
+  const creds = await ensureValidOAuthCredentials();
+  if (!creds) return undefined;
+
+  let dirs: string[] = [];
+  try {
+    dirs = fs.readdirSync(credentialsDir);
+  } catch {
+    return creds; // directory doesn't exist yet — nothing to update
+  }
+
+  for (const dir of dirs) {
+    const stagedPath = path.join(credentialsDir, dir, '.credentials.json');
+    if (fs.existsSync(stagedPath)) {
+      fs.writeFileSync(
+        stagedPath,
+        JSON.stringify({ claudeAiOauth: creds }, null, 2),
+        { mode: 0o600 },
+      );
+    }
+  }
+
+  return creds;
 }
 
 /** Exported for testing. */

@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -11,6 +12,7 @@ import {
 } from './config.js';
 import {
   ensureValidOAuthCredentials,
+  refreshAllStagedCredentials,
   startCredentialProxy,
 } from './credential-proxy.js';
 import './channels/index.js';
@@ -486,21 +488,49 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
-  // Proactively refresh OAuth token every 2 hours so it never expires —
-  // keeps both container agents and host CLI (ssh sessions) authenticated.
-  const OAUTH_REFRESH_INTERVAL = 2 * 60 * 60 * 1000;
+  // Proactively refresh OAuth token every 30 minutes so the refresh-token
+  // chain stays alive and access tokens never expire mid-run.
+  const OAUTH_REFRESH_INTERVAL = 30 * 60 * 1000;
+  let oauthFailCount = 0;
   const oauthRefreshTimer = setInterval(async () => {
     logger.info('Periodic OAuth token refresh check');
     try {
-      const creds = await ensureValidOAuthCredentials();
+      const creds = await refreshAllStagedCredentials(
+        path.join(DATA_DIR, 'credentials'),
+      );
       if (creds) {
         const expiresIn = Math.round(
           (creds.expiresAt - Date.now()) / 1000 / 60,
         );
         logger.info({ expiresIn }, 'OAuth token valid (expires in minutes)');
+        oauthFailCount = 0;
       }
     } catch (err) {
-      logger.error({ err }, 'Periodic OAuth refresh failed');
+      oauthFailCount++;
+      logger.error(
+        { err, failCount: oauthFailCount },
+        'Periodic OAuth refresh failed',
+      );
+
+      // Notify the main group so the user knows immediately
+      if (oauthFailCount <= 3) {
+        const mainGroup = Object.entries(registeredGroups).find(
+          ([, g]) => g.isMain,
+        );
+        if (mainGroup) {
+          const [jid] = mainGroup;
+          const channel = channels.find(
+            (c) => c.ownsJid(jid) && c.isConnected(),
+          );
+          if (channel) {
+            const msg =
+              oauthFailCount === 1
+                ? `⚠️ OAuth token refresh failed. Agent will stop working soon. Please run \`claude /login\` on the host to re-authenticate.`
+                : `⚠️ OAuth refresh attempt ${oauthFailCount}/3 failed. Run \`claude /login\` on the host.`;
+            channel.sendMessage(jid, msg).catch(() => {});
+          }
+        }
+      }
     }
   }, OAUTH_REFRESH_INTERVAL);
 
