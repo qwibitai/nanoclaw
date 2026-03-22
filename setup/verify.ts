@@ -11,7 +11,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
+import { INSTANCE_NAME, STORE_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import {
@@ -21,6 +21,13 @@ import {
   isRoot,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+const SERVICE_LABEL = INSTANCE_NAME
+  ? `com.nanoclaw-${INSTANCE_NAME}`
+  : 'com.nanoclaw';
+const SYSTEMD_SERVICE_NAME = INSTANCE_NAME
+  ? `nanoclaw-${INSTANCE_NAME}`
+  : 'nanoclaw';
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -36,9 +43,9 @@ export async function run(_args: string[]): Promise<void> {
   if (mgr === 'launchd') {
     try {
       const output = execSync('launchctl list', { encoding: 'utf-8' });
-      if (output.includes('com.nanoclaw')) {
+      if (output.includes(SERVICE_LABEL)) {
         // Check if it has a PID (actually running)
-        const line = output.split('\n').find((l) => l.includes('com.nanoclaw'));
+        const line = output.split('\n').find((l) => l.includes(SERVICE_LABEL));
         if (line) {
           const pidField = line.trim().split(/\s+/)[0];
           service = pidField !== '-' && pidField ? 'running' : 'stopped';
@@ -50,14 +57,14 @@ export async function run(_args: string[]): Promise<void> {
   } else if (mgr === 'systemd') {
     const prefix = isRoot() ? 'systemctl' : 'systemctl --user';
     try {
-      execSync(`${prefix} is-active nanoclaw`, { stdio: 'ignore' });
+      execSync(`${prefix} is-active ${SYSTEMD_SERVICE_NAME}`, { stdio: 'ignore' });
       service = 'running';
     } catch {
       try {
         const output = execSync(`${prefix} list-unit-files`, {
           encoding: 'utf-8',
         });
-        if (output.includes('nanoclaw')) {
+        if (output.includes(SYSTEMD_SERVICE_NAME)) {
           service = 'stopped';
         }
       } catch {
@@ -66,7 +73,10 @@ export async function run(_args: string[]): Promise<void> {
     }
   } else {
     // Check for nohup PID file
-    const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+    const pidName = INSTANCE_NAME
+      ? `nanoclaw-${INSTANCE_NAME}.pid`
+      : 'nanoclaw.pid';
+    const pidFile = path.join(projectRoot, pidName);
     if (fs.existsSync(pidFile)) {
       try {
         const raw = fs.readFileSync(pidFile, 'utf-8').trim();
