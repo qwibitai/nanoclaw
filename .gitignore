@@ -3,6 +3,7 @@ node_modules/
 .npm-cache/
 # Build output
 dist/
+src/build-info.json
 
 # Local data & auth
 store/

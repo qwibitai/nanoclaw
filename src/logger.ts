@@ -1,7 +1,10 @@
 import pino from 'pino';
 
+import { versionTag } from './build-info.js';
+
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
+  base: { version: versionTag },
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
