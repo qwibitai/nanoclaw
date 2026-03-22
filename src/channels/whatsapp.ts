@@ -104,6 +104,14 @@ function extractMessageText(msg: proto.IMessage | null | undefined): string {
     return `[Document: ${n.documentMessage.fileName || 'file'}]`;
   if (n.imageMessage) return '[Image]';
   if (n.videoMessage) return '[Video]';
+  if (n.contactMessage)
+    return `[Contact: ${n.contactMessage.displayName || 'unknown'}]`;
+  if (n.contactsArrayMessage) {
+    const names = (n.contactsArrayMessage.contacts || [])
+      .map((c) => c.displayName || 'unknown')
+      .join(', ');
+    return `[Contacts: ${names}]`;
+  }
   return '';
 }
 
@@ -287,10 +295,89 @@ export class WhatsAppChannel implements Channel {
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
               normalized.documentMessage?.caption ||
+              (normalized.contactMessage
+                ? `[Contact: ${normalized.contactMessage.displayName || 'unknown'}]`
+                : '') ||
+              (normalized.contactsArrayMessage?.contacts?.length
+                ? `[Contacts: ${(normalized.contactsArrayMessage.contacts || []).map((c) => c.displayName || 'unknown').join(', ')}]`
+                : '') ||
               '';
 
-            // Download media attachments and save to group folder so the agent can access them
+            // Handle contact messages (vcard data is inline, not downloadable media)
             let attachmentRef = '';
+            if (normalized.contactMessage?.vcard) {
+              const group = groups[chatJid];
+              try {
+                const groupDir = resolveGroupFolderPath(group.folder);
+                const attachDir = path.join(groupDir, 'attachments');
+                fs.mkdirSync(attachDir, { recursive: true });
+                const displayName =
+                  normalized.contactMessage.displayName || 'contact';
+                const filename = `${Date.now()}-${displayName.replace(/[^a-z0-9]/gi, '_')}.vcf`;
+                fs.writeFileSync(
+                  path.join(attachDir, filename),
+                  normalized.contactMessage.vcard,
+                );
+                storeAttachment({
+                  message_id: msg.key.id || '',
+                  chat_jid: chatJid,
+                  direction: 'inbound',
+                  category: 'received',
+                  file_path: path.join(groupDir, 'attachments', filename),
+                  file_name: filename,
+                  mime_type: 'text/vcard',
+                  file_size: Buffer.byteLength(normalized.contactMessage.vcard),
+                  created_at: new Date().toISOString(),
+                });
+                attachmentRef = `\n[Contact saved: /workspace/group/attachments/${filename}]`;
+                logger.info({ chatJid, filename }, 'Contact VCF saved');
+              } catch (err) {
+                logger.warn({ err, chatJid }, 'Failed to save contact VCF');
+              }
+            } else if (normalized.contactsArrayMessage?.contacts?.length) {
+              const group = groups[chatJid];
+              try {
+                const groupDir = resolveGroupFolderPath(group.folder);
+                const attachDir = path.join(groupDir, 'attachments');
+                fs.mkdirSync(attachDir, { recursive: true });
+                const refs: string[] = [];
+                for (const contact of normalized.contactsArrayMessage
+                  .contacts) {
+                  if (!contact.vcard) continue;
+                  const displayName = contact.displayName || 'contact';
+                  const filename = `${Date.now()}-${displayName.replace(/[^a-z0-9]/gi, '_')}.vcf`;
+                  fs.writeFileSync(
+                    path.join(attachDir, filename),
+                    contact.vcard,
+                  );
+                  storeAttachment({
+                    message_id: msg.key.id || '',
+                    chat_jid: chatJid,
+                    direction: 'inbound',
+                    category: 'received',
+                    file_path: path.join(groupDir, 'attachments', filename),
+                    file_name: filename,
+                    mime_type: 'text/vcard',
+                    file_size: Buffer.byteLength(contact.vcard),
+                    created_at: new Date().toISOString(),
+                  });
+                  refs.push(`/workspace/group/attachments/${filename}`);
+                }
+                if (refs.length)
+                  attachmentRef = `\n[Contacts saved: ${refs.join(', ')}]`;
+                logger.info(
+                  { chatJid, count: refs.length },
+                  'Contact VCFs saved',
+                );
+              } catch (err) {
+                logger.warn(
+                  { err, chatJid },
+                  'Failed to save contacts array VCF',
+                );
+              }
+            }
+
+            // Download media attachments and save to group folder so the agent can access them
             const mediaType = normalized.imageMessage
               ? 'image'
               : normalized.videoMessage
@@ -343,14 +430,14 @@ export class WhatsAppChannel implements Channel {
                         : mediaType === 'document'
                           ? 'Document'
                           : 'Audio';
-                  attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+                  attachmentRef += `\n[${label} saved: /workspace/group/attachments/${filename}]`;
 
                   // For PDFs, add pdf-reader usage hint
                   if (
                     normalized.documentMessage?.mimetype === 'application/pdf'
                   ) {
                     const sizeKB = Math.round(buffer.length / 1024);
-                    attachmentRef = `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
+                    attachmentRef += `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
                   }
                   logger.info(
                     { chatJid, filename, mediaType },
