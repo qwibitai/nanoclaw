@@ -49,12 +49,15 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamPath: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    lastUpstreamPath = '';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamPath = req.url || '/';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -120,12 +123,14 @@ describe('credential-proxy', () => {
     );
   });
 
-  it('OAuth mode does not inject Authorization when container omits it', async () => {
+  it('OAuth mode injects x-api-key for APIs that prefer it', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
 
-    // Post-exchange: container uses x-api-key only, no Authorization header
+    // Post-exchange: container sends x-api-key (temp key from exchange)
+    // Proxy replaces it with the real OAuth token for compatibility with
+    // APIs that expect x-api-key even in OAuth mode
     await makeRequest(
       proxyPort,
       {
@@ -139,7 +144,7 @@ describe('credential-proxy', () => {
       '{}',
     );
 
-    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('real-oauth-token');
     expect(lastUpstreamHeaders['authorization']).toBeUndefined();
   });
 
@@ -188,5 +193,28 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('preserves base URL path for third-party APIs (e.g., z.ai)', async () => {
+    // Simulate z.ai-style endpoint with sub-path
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api/anthropic`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    // Path should be /api/anthropic/v1/messages, not just /v1/messages
+    expect(lastUpstreamPath).toBe('/api/anthropic/v1/messages');
   });
 });

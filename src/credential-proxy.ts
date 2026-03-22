@@ -67,23 +67,33 @@ export function startCredentialProxy(
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
+          // OAuth mode: replace placeholder token with real one
+          // Handle both Authorization header and x-api-key header
           if (headers['authorization']) {
             delete headers['authorization'];
             if (oauthToken) {
               headers['authorization'] = `Bearer ${oauthToken}`;
             }
           }
+          // Also inject x-api-key for APIs that prefer it (like z.ai)
+          if (headers['x-api-key']) {
+            delete headers['x-api-key'];
+            if (oauthToken) {
+              headers['x-api-key'] = oauthToken;
+            }
+          }
         }
+
+        // Build the full path: prepend base URL pathname if present
+        const basePath = upstreamUrl.pathname.replace(/\/$/, '');
+        const requestPath = req.url || '/';
+        const fullPath = basePath ? `${basePath}${requestPath}` : requestPath;
 
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: fullPath,
             method: req.method,
             headers,
           } as RequestOptions,
