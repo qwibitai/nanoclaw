@@ -28,7 +28,9 @@ If part of your output is internal reasoning rather than something for the user,
 Here are the key findings from the research...
 ```
 
-Text inside `<internal>` tags is logged but not sent to the user. If you've already sent the key information via `send_message`, you can wrap the recap in `<internal>` to avoid sending it again.
+Text inside `<internal>` tags is logged but not sent to the user.
+
+*Important*: If you've already sent the key information via `send_message`, you MUST wrap your entire final output in `<internal>` tags to avoid sending a duplicate message. This applies to all contexts — group chats, scheduled tasks, and sub-agents.
 
 ### Sub-agents and teammates
 

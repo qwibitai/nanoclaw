@@ -205,8 +205,15 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+          const raw =
+            typeof streamedOutput.result === 'string'
+              ? streamedOutput.result
+              : JSON.stringify(streamedOutput.result);
+          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          if (text) {
+            await deps.sendMessage(task.chat_jid, text);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
