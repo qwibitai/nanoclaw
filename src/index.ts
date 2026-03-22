@@ -31,6 +31,12 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  createTask,
+  getTaskById,
+  updateTask,
+  getTaskRunLogs,
+  getRecentTaskRunLogs,
+  getRecentMessages,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -59,6 +65,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { buildPluginContext, loadPlugins, shutdownPlugins } from './plugin-loader.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -485,6 +492,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await shutdownPlugins();
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -595,6 +603,24 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Load host-side plugins (onStartup/onShutdown hooks)
+  const pluginCtx = buildPluginContext({
+    getRegisteredGroups: () => registeredGroups,
+    getSessions: () => sessions,
+    channels,
+    getQueueStatus: () => queue.getSnapshot(),
+    db: {
+      getAllTasks,
+      getTaskById,
+      createTask,
+      updateTask,
+      getTaskRunLogs,
+      getRecentTaskRunLogs,
+      getRecentMessages,
+    },
+  });
+  await loadPlugins(pluginCtx);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

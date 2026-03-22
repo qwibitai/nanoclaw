@@ -77,6 +77,11 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+/** A row returned from task_run_logs (includes auto-increment id). */
+export interface TaskRunLogRow extends TaskRunLog {
+  id: number;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {

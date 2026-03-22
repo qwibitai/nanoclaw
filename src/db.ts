@@ -10,6 +10,7 @@ import {
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
+  TaskRunLogRow,
 } from './types.js';
 
 let db: Database.Database;
@@ -494,6 +495,32 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export function getTaskRunLogs(taskId: string, limit: number): TaskRunLogRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM task_run_logs WHERE task_id = ? ORDER BY run_at DESC LIMIT ?`,
+    )
+    .all(taskId, limit) as TaskRunLogRow[];
+}
+
+export function getRecentTaskRunLogs(limit: number): TaskRunLogRow[] {
+  return db
+    .prepare(`SELECT * FROM task_run_logs ORDER BY run_at DESC LIMIT ?`)
+    .all(limit) as TaskRunLogRow[];
+}
+
+export function getRecentMessages(
+  chatJid: string,
+  limit: number,
+): import('./types.js').NewMessage[] {
+  return db
+    .prepare(
+      `SELECT * FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(chatJid, limit)
+    .reverse() as import('./types.js').NewMessage[];
 }
 
 // --- Router state accessors ---
