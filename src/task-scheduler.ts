@@ -2,7 +2,13 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import path from 'path';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -73,6 +79,7 @@ export interface SchedulerDependencies {
     proc: ChildProcess,
     containerName: string,
     groupFolder: string,
+    threadId?: string,
   ) => void;
   sendMessage: (
     jid: string,
@@ -159,8 +166,29 @@ async function runTask(
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
-  const sessionId =
+  let sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+
+  // Verify session file exists on disk before trying to resume
+  if (sessionId) {
+    const taskSessionDir = path.join(
+      DATA_DIR,
+      'sessions',
+      task.group_folder,
+      `task_${task.id}`,
+      '.claude',
+      'projects',
+      '-workspace-group',
+    );
+    const sessionFile = path.join(taskSessionDir, `${sessionId}.jsonl`);
+    if (!fs.existsSync(sessionFile)) {
+      logger.debug(
+        { taskId: task.id, sessionId },
+        'Task session file missing on disk, starting fresh',
+      );
+      sessionId = undefined;
+    }
+  }
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -168,28 +196,44 @@ async function runTask(
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const taskThreadId = `task_${task.id}`;
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
-      deps.queue.closeStdin(task.chat_jid);
+      deps.queue.closeStdin(task.chat_jid, taskThreadId);
     }, TASK_CLOSE_DELAY_MS);
   };
 
-  try {
+  const executeTask = async (sid: string | undefined) => {
+    result = null;
+    error = null;
+    capturedSessionId = undefined;
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+
     const output = await runContainerAgent(
       group,
       {
         prompt: task.prompt,
-        sessionId,
+        sessionId: sid,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        threadId: taskThreadId,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        deps.onProcess(
+          task.chat_jid,
+          proc,
+          containerName,
+          task.group_folder,
+          taskThreadId,
+        ),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.newSessionId) {
           capturedSessionId = streamedOutput.newSessionId;
@@ -206,7 +250,7 @@ async function runTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
+          deps.queue.notifyIdle(task.chat_jid, taskThreadId);
           scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === 'error') {
@@ -219,23 +263,32 @@ async function runTask(
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
-
-      // If session expired/invalid, clear it so next run uses a fresh session
-      if (
-        sessionId &&
-        output.error?.includes('No conversation found with session ID')
-      ) {
-        logger.warn(
-          { taskId: task.id },
-          'Task session expired, clearing for next run',
-        );
-        const currentSessions = deps.getSessions();
-        delete currentSessions[task.group_folder];
-        deleteSession(task.group_folder);
-      }
     } else if (output.result) {
       // Result was already forwarded to the user via the streaming callback above
       result = output.result;
+    }
+
+    return output;
+  };
+
+  try {
+    const output = await executeTask(sessionId);
+
+    // If session expired/invalid, clear it and retry with a fresh session
+    if (
+      sessionId &&
+      output.error?.includes('No conversation found with session ID')
+    ) {
+      logger.warn(
+        { taskId: task.id },
+        'Task session expired, retrying with fresh session',
+      );
+      const currentSessions = deps.getSessions();
+      delete currentSessions[task.group_folder];
+      deleteSession(task.group_folder);
+
+      // Retry once with no session (fresh conversation)
+      await executeTask(undefined);
     }
 
     logger.info(
@@ -263,7 +316,7 @@ async function runTask(
   const resultSummary = error
     ? `Error: ${error}`
     : result
-      ? result.slice(0, 200)
+      ? (result as string).slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
 }

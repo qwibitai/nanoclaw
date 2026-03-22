@@ -471,7 +471,7 @@ export class GroupQueue {
   }
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
-    const taskThreadId = `task:${task.id}`;
+    const taskThreadId = `task_${task.id}`;
 
     logger.debug(
       { groupJid, taskId: task.id, activeCount: this.activeCount + 1 },

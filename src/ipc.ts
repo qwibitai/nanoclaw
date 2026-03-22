@@ -13,6 +13,7 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import {
   createTask,
+  createThreadContext,
   deleteTask,
   getTaskById,
   getThreadContextByThreadId,
@@ -239,10 +240,20 @@ async function handleIpcMessage(
     }
     // Scheduled task send_message calls always go to main channel, never a thread
     if (data.isScheduled === 'true') {
-      await deps.sendChannelMessage(
+      const messageId = await deps.sendChannelMessage(
         data.chatJid as string,
         data.text as string,
       );
+      // Create thread context so Discord replies to this message are recognized
+      if (messageId) {
+        createThreadContext({
+          chatJid: data.chatJid as string,
+          threadId: null,
+          sessionId: null,
+          originMessageId: messageId,
+          source: 'scheduled_task',
+        });
+      }
     } else {
       await deps.sendMessage(data.chatJid as string, data.text as string);
     }

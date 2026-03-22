@@ -68,7 +68,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import './features/index.js';
-import { activatePrWatcher } from './pr-watcher.js';
+
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -201,8 +201,44 @@ async function processGroupMessages(
     }
   }
 
-  // Use thread-specific session if available
-  const sessionId = threadContext?.session_id || sessions[group.folder];
+  // Use thread-specific session if available.
+  // For new thread contexts (no session yet), start fresh — don't fall back
+  // to the group session, which belongs to a different conversation.
+  let sessionId = threadContext
+    ? threadContext.session_id || undefined
+    : sessions[group.folder];
+
+  // Verify the session's .jsonl file actually exists on disk before trying
+  // to resume. If the file is missing (container killed, dir not migrated),
+  // the SDK will fail with "No conversation found". Start fresh instead.
+  if (sessionId) {
+    const sessionDir = threadId
+      ? path.join(
+          DATA_DIR,
+          'sessions',
+          group.folder,
+          threadId,
+          '.claude',
+          'projects',
+          '-workspace-group',
+        )
+      : path.join(
+          DATA_DIR,
+          'sessions',
+          group.folder,
+          '.claude',
+          'projects',
+          '-workspace-group',
+        );
+    const sessionFile = path.join(sessionDir, `${sessionId}.jsonl`);
+    if (!fs.existsSync(sessionFile)) {
+      logger.debug(
+        { sessionId, sessionFile },
+        'Session file missing on disk, starting fresh',
+      );
+      sessionId = undefined;
+    }
+  }
 
   // Include recent conversation history (with bot messages) so the agent
   // has context even when session resume fails or a new container is spawned.
@@ -308,10 +344,9 @@ async function processGroupMessages(
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  // Clean up send target so future messages don't route to a stale thread
-  if (threadId) {
-    channel.setCurrentThreadContext?.(chatJid, threadId, null);
-  }
+  // Don't eagerly clear send target — let it persist so messages arriving
+  // between container completion and next container start still route to
+  // the correct thread. The next processGroupMessages call will overwrite it.
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, keep messages marked processed —
@@ -794,8 +829,14 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, threadId) =>
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        threadId,
+      ),
     sendMessage: async (jid, rawText, taskId?, sessionId?) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -822,30 +863,6 @@ async function main(): Promise<void> {
         }
       }
     },
-  });
-  activatePrWatcher({
-    registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
-    queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
-    sendMessage: async (jid, rawText) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send PR message');
-        return;
-      }
-      const text = formatOutbound(rawText);
-      // PR watcher results always go to the main channel, never a thread
-      if (text) {
-        if (channel.sendChannelMessage) {
-          await channel.sendChannelMessage(jid, text);
-        } else {
-          await channel.sendMessage(jid, text);
-        }
-      }
-    },
-    botGitHubUser: process.env.GIT_AUTHOR_NAME || undefined,
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {

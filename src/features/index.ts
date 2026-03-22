@@ -1,2 +1,2 @@
 // Optional features — imported for side effects (self-registration)
-import '../pr-watcher.js';
+// PR watcher removed from host process — use a scheduled task + container skill instead

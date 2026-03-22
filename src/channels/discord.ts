@@ -7,8 +7,10 @@ import {
 } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { migrateThreadDirs } from '../container-runner.js';
 import {
   createThreadContext,
+  getActiveThreadContexts,
   getThreadContextByThreadId,
   getThreadContextByOriginMessage,
   updateThreadContext,
@@ -47,6 +49,11 @@ function findSplitPoint(text: string, maxLength: number): number {
   return splitAt;
 }
 
+/** How often to check the gateway connection health (ms). */
+const HEARTBEAT_INTERVAL = 60_000;
+/** If the gateway ping exceeds this, consider the connection stale (ms). */
+const STALE_PING_THRESHOLD = 15_000;
+
 export class DiscordChannel implements Channel {
   name = 'discord';
 
@@ -62,6 +69,8 @@ export class DiscordChannel implements Channel {
   private activeConversation = new Set<string>();
   // Current send target: `{jid}:{threadId}` → ThreadContext (set by index.ts before streaming)
   private currentSendTarget = new Map<string, ThreadContext>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnecting = false;
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -133,10 +142,51 @@ export class DiscordChannel implements Channel {
           }
         }
 
-        // Replies in a bot-created thread are implicitly directed at the bot
-        // Check by looking up whether this Discord thread has a thread context
-        const isInBotThread =
+        // Replies in a bot-created thread are implicitly directed at the bot.
+        // Check by ThreadContext first; fall back to checking if the bot
+        // posted in the thread (handles expired/missing contexts).
+        let isInBotThread =
           isThread && !!getThreadContextByThreadId(message.channelId);
+        if (!isInBotThread && isThread && this.client?.user) {
+          const botId = this.client.user.id;
+          try {
+            const threadChannel = message.channel;
+            // Check if the bot has posted in this thread (starter message
+            // or any message). Covers threads where the context expired
+            // or was never created.
+            const starterMsg =
+              'fetchStarterMessage' in threadChannel
+                ? await (threadChannel as any)
+                    .fetchStarterMessage()
+                    .catch(() => null)
+                : null;
+            let botOriginId =
+              starterMsg?.author?.id === botId ? starterMsg.id : null;
+            if (!botOriginId) {
+              // Thread wasn't started by bot — check if bot posted in it
+              const recent = await threadChannel.messages.fetch({ limit: 10 });
+              const botMsg = recent.find((m: Message) => m.author.id === botId);
+              if (botMsg) botOriginId = botMsg.id;
+            }
+            if (botOriginId) {
+              isInBotThread = true;
+              // Recreate the missing ThreadContext so future messages are faster
+              const ctx = createThreadContext({
+                chatJid,
+                threadId: message.channelId,
+                sessionId: null,
+                originMessageId: botOriginId,
+                source: 'reply',
+              });
+              logger.debug(
+                { threadId: message.channelId, contextId: ctx.id },
+                'Recreated ThreadContext for bot thread',
+              );
+            }
+          } catch {
+            // Ignore — can't determine thread ownership
+          }
+        }
         if (isInBotThread && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
           this.activeConversation.add(chatJid);
@@ -203,7 +253,10 @@ export class DiscordChannel implements Channel {
             originMessageId: msgId,
             source: 'mention',
           });
-          this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
+          this.pendingTrigger.set(`${chatJid}:${ctx.id}`, {
+            message,
+            contextId: ctx.id,
+          });
           threadContextId = ctx.id;
         } else if (isInBotThread) {
           // Message in existing bot thread — look up by Discord thread channel ID
@@ -227,7 +280,10 @@ export class DiscordChannel implements Channel {
               source: 'reply',
             });
           }
-          this.pendingTrigger.set(chatJid, { message, contextId: ctx.id });
+          this.pendingTrigger.set(`${chatJid}:${ctx.id}`, {
+            message,
+            contextId: ctx.id,
+          });
           threadContextId = ctx.id;
         }
 
@@ -254,13 +310,20 @@ export class DiscordChannel implements Channel {
           }
         }
 
-        // Handle reply context — include who the user is replying to
+        // Handle reply context — include who the user is replying to.
+        // Insert AFTER trigger prefix so ^@Jarvis pattern still matches.
         if (repliedToMessage) {
           const replyAuthor =
             repliedToMessage.member?.displayName ||
             repliedToMessage.author.displayName ||
             repliedToMessage.author.username;
-          content = `[Reply to ${replyAuthor}] ${content}`;
+          const replyTag = `[Reply to ${replyAuthor}]`;
+          const triggerMatch = content.match(/^(@\S+\s*)/);
+          if (triggerMatch && TRIGGER_PATTERN.test(content.trim())) {
+            content = `${triggerMatch[1]}${replyTag} ${content.slice(triggerMatch[0].length)}`;
+          } else {
+            content = `${replyTag} ${content}`;
+          }
         }
 
         // Store chat metadata for discovery
@@ -312,6 +375,23 @@ export class DiscordChannel implements Channel {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
+    // Gateway lifecycle logging — helps diagnose silent disconnects
+    this.client.on(Events.ShardDisconnect, (event, shardId) => {
+      logger.warn(
+        { shardId, code: event.code, reason: event.reason },
+        'Discord shard disconnected',
+      );
+    });
+    this.client.on(Events.ShardReconnecting, (shardId) => {
+      logger.info({ shardId }, 'Discord shard reconnecting');
+    });
+    this.client.on(Events.ShardResume, (shardId, replayedEvents) => {
+      logger.info({ shardId, replayedEvents }, 'Discord shard resumed');
+    });
+    this.client.on(Events.ShardError, (err, shardId) => {
+      logger.error({ shardId, err: err.message }, 'Discord shard error');
+    });
+
     return new Promise<void>((resolve) => {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
@@ -322,6 +402,7 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
+        this.startHeartbeat();
         resolve();
       });
 
@@ -358,16 +439,37 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
 
-      // Step 1: If there's a pending trigger → create a new thread
-      const triggerInfo = this.pendingTrigger.get(jid);
-      if (triggerInfo) {
-        this.pendingTrigger.delete(jid);
+      // Step 1: If there's a pending trigger for the current context → create a new thread
+      let triggerInfo: { message: Message; contextId: number } | undefined;
+      let triggerKey: string | undefined;
+      for (const [key, ctx] of this.currentSendTarget) {
+        if (key.startsWith(`${jid}:`)) {
+          const ptKey = `${jid}:${ctx.id}`;
+          const pt = this.pendingTrigger.get(ptKey);
+          if (pt) {
+            triggerInfo = pt;
+            triggerKey = ptKey;
+          }
+          break;
+        }
+      }
+      if (triggerInfo && triggerKey) {
+        this.pendingTrigger.delete(triggerKey);
         try {
           const thread = await triggerInfo.message.startThread({
             name: text.slice(0, 100).replace(/\n/g, ' ') || 'Response',
           });
           // Update the thread context with the actual Discord thread ID
           updateThreadContext(triggerInfo.contextId, { threadId: thread.id });
+          // Migrate session/IPC dirs from pending-{id} to real thread ID
+          const group = this.opts.registeredGroups()[jid];
+          if (group) {
+            migrateThreadDirs(
+              group.folder,
+              `pending-${triggerInfo.contextId}`,
+              thread.id,
+            );
+          }
           // Update in-memory send target so subsequent streaming outputs go to this thread
           for (const [key, ctx] of this.currentSendTarget) {
             if (key.startsWith(`${jid}:`)) {
@@ -411,6 +513,30 @@ export class DiscordChannel implements Channel {
           break;
         }
       }
+
+      // Step 2.5: No in-memory target — check DB for recent thread context.
+      // Only attempt this for active conversations (not scheduled tasks/IPC)
+      // to avoid routing non-threaded output into a user's thread.
+      if (this.activeConversation.has(jid)) {
+        const recentCtx = getActiveThreadContexts(jid, 24);
+        if (recentCtx.length > 0 && recentCtx[0].thread_id) {
+          try {
+            const thread = await textChannel.threads.fetch(
+              recentCtx[0].thread_id,
+            );
+            if (thread) {
+              await this.sendChunked(thread, text);
+              logger.info(
+                { jid, threadId: recentCtx[0].thread_id, length: text.length },
+                'Discord message sent to thread (DB fallback)',
+              );
+              return;
+            }
+          } catch {
+            // Thread deleted, fall through
+          }
+        }
+      } // end activeConversation guard
 
       // Step 3: No trigger context (scheduled task, IPC, etc.) — send to main channel
       await this.sendChunked(textChannel, text);
@@ -517,7 +643,49 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  /**
+   * Periodically checks the Discord gateway connection.
+   * If the WebSocket ping is stale or the client reports not-ready,
+   * forces a reconnect by destroying and re-logging in.
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+
+    this.heartbeatTimer = setInterval(async () => {
+      if (!this.client || this.reconnecting) return;
+
+      const ws = this.client.ws;
+      const ping = ws.ping; // -1 if no heartbeat ACK received yet
+      const isReady = this.client.isReady();
+
+      if (isReady && ping >= 0 && ping < STALE_PING_THRESHOLD) {
+        // Connection looks healthy
+        return;
+      }
+
+      logger.warn(
+        { ping, isReady, status: ws.status },
+        'Discord gateway appears stale — forcing reconnect',
+      );
+
+      this.reconnecting = true;
+      try {
+        this.client.destroy();
+        await this.client.login(this.botToken);
+        logger.info('Discord gateway reconnected after stale detection');
+      } catch (err) {
+        logger.error({ err }, 'Discord gateway reconnect failed');
+      } finally {
+        this.reconnecting = false;
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
+
   async disconnect(): Promise<void> {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     if (this.client) {
       this.client.destroy();
       this.client = null;

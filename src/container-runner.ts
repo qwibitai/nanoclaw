@@ -130,6 +130,36 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+/**
+ * Rename session and IPC directories when a pending thread context
+ * resolves to a real Discord thread ID, so the session is preserved.
+ */
+export function migrateThreadDirs(
+  groupFolder: string,
+  oldThreadId: string,
+  newThreadId: string,
+): void {
+  const sessionOld = path.join(DATA_DIR, 'sessions', groupFolder, oldThreadId);
+  const sessionNew = path.join(DATA_DIR, 'sessions', groupFolder, newThreadId);
+  const ipcOld = path.join(DATA_DIR, 'ipc', groupFolder, oldThreadId);
+  const ipcNew = path.join(DATA_DIR, 'ipc', groupFolder, newThreadId);
+
+  for (const [src, dst] of [
+    [sessionOld, sessionNew],
+    [ipcOld, ipcNew],
+  ]) {
+    try {
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        fs.renameSync(src, dst);
+        logger.debug({ src, dst }, 'Migrated thread directory');
+      }
+    } catch (err) {
+      // Race between concurrent containers — safe to ignore
+      logger.debug({ src, dst, err }, 'Thread directory migration skipped');
+    }
+  }
+}
+
 export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -357,6 +387,7 @@ function buildContainerArgs(
     'GIT_AUTHOR_EMAIL',
     'GEMINI_API_KEY',
     'VERCEL_TOKEN',
+    'LINEAR_API_KEY',
   ]);
 
   // Inject GitHub credentials if configured (for gh CLI and git operations)
@@ -378,6 +409,9 @@ function buildContainerArgs(
   }
   if (secrets.VERCEL_TOKEN) {
     args.push('-e', `VERCEL_TOKEN=${secrets.VERCEL_TOKEN}`);
+  }
+  if (secrets.LINEAR_API_KEY) {
+    args.push('-e', `LINEAR_API_KEY=${secrets.LINEAR_API_KEY}`);
   }
 
   // Tag scheduled task containers so in-container send_message routes to main channel
@@ -430,7 +464,9 @@ export async function runContainerAgent(
 
   const mounts = buildVolumeMounts(group, input.isMain, input.threadId);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const threadSuffix = input.threadId ? `-${input.threadId.slice(0, 8)}` : '';
+  const threadSuffix = input.threadId
+    ? `-${input.threadId.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 8)}`
+    : '';
   const containerName = `nanoclaw-${safeName}${threadSuffix}-${Date.now()}`;
   const containerArgs = buildContainerArgs(
     mounts,
