@@ -62,9 +62,11 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Use Unicode-aware boundary: allow end-of-string or non-letter/number/underscore.
+// This fixes CJK names where \b doesn't work as expected.
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
-  'i',
+  `^@${escapeRegex(ASSISTANT_NAME)}(?=$|[^\\p{L}\\p{N}_])`,
+  'iu',
 );
 
 // Timezone for scheduled tasks (cron expressions, etc.)
