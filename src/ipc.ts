@@ -93,10 +93,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (data.type === 'image' && data.chatJid && data.filename) {
+              } else if (
+                data.type === 'image' &&
+                data.chatJid &&
+                data.filename
+              ) {
                 // Sanitize filename to prevent path traversal
-                if (data.filename.includes('/') || data.filename.includes('..')) {
-                  logger.warn({ filename: data.filename, sourceGroup }, 'Rejected image with unsafe filename');
+                if (
+                  data.filename.includes('/') ||
+                  data.filename.includes('..')
+                ) {
+                  logger.warn(
+                    { filename: data.filename, sourceGroup },
+                    'Rejected image with unsafe filename',
+                  );
                 } else {
                   const targetGroup = registeredGroups[data.chatJid];
                   if (
@@ -104,10 +114,22 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     (targetGroup && targetGroup.folder === sourceGroup)
                   ) {
                     const folder = targetGroup?.folder || sourceGroup;
-                    const absPath = path.join(GROUPS_DIR, folder, data.filename);
-                    await deps.sendImage(data.chatJid, absPath, data.caption || '');
+                    const absPath = path.join(
+                      GROUPS_DIR,
+                      folder,
+                      data.filename,
+                    );
+                    await deps.sendImage(
+                      data.chatJid,
+                      absPath,
+                      data.caption || '',
+                    );
                     logger.info(
-                      { chatJid: data.chatJid, sourceGroup, filename: data.filename },
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        filename: data.filename,
+                      },
                       'IPC image sent',
                     );
                   } else {

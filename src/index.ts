@@ -234,10 +234,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             ? result.result
             : JSON.stringify(result.result);
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const cleaned = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        const cleaned = raw
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
         // Strip self-prefix the agent may add (e.g. "Ghosty: hello" → "hello")
         const triggerName = group.trigger.replace(/^@/, '');
-        const prefixRe = new RegExp(`^(?:${ASSISTANT_NAME}|${triggerName}):\\s*`, 'i');
+        const prefixRe = new RegExp(
+          `^(?:${ASSISTANT_NAME}|${triggerName}):\\s*`,
+          'i',
+        );
         const text = cleaned.replace(prefixRe, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
         if (text) {

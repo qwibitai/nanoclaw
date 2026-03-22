@@ -92,7 +92,9 @@ export class WhatsAppChannel implements Channel {
     if (phoneNumber && !state.creds.registered) {
       setTimeout(async () => {
         try {
-          const code = await this.sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
+          const code = await this.sock.requestPairingCode(
+            phoneNumber.replace(/[^0-9]/g, ''),
+          );
           logger.info({ code }, `PAIRING CODE: ${code}`);
           const pairingFile = path.join(STORE_DIR, 'pairing-code.txt');
           fs.writeFileSync(pairingFile, code);
@@ -315,7 +317,11 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  async sendImage(jid: string, filePath: string, caption: string): Promise<void> {
+  async sendImage(
+    jid: string,
+    filePath: string,
+    caption: string,
+  ): Promise<void> {
     if (!this.connected) {
       this.outgoingQueue.push({ kind: 'image', jid, filePath, caption });
       logger.info({ jid, filePath }, 'WA disconnected, image queued');
@@ -450,11 +456,20 @@ export class WhatsAppChannel implements Channel {
         const item = this.outgoingQueue.shift()!;
         if (item.kind === 'image') {
           const buffer = fs.readFileSync(item.filePath);
-          await this.sock.sendMessage(item.jid, { image: buffer, caption: item.caption });
-          logger.info({ jid: item.jid, filePath: item.filePath }, 'Queued image sent');
+          await this.sock.sendMessage(item.jid, {
+            image: buffer,
+            caption: item.caption,
+          });
+          logger.info(
+            { jid: item.jid, filePath: item.filePath },
+            'Queued image sent',
+          );
         } else {
           await this.sock.sendMessage(item.jid, { text: item.text });
-          logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+          logger.info(
+            { jid: item.jid, length: item.text.length },
+            'Queued message sent',
+          );
         }
       }
     } finally {
