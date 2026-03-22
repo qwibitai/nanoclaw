@@ -3,7 +3,13 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  GROUPS_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -82,7 +88,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Strip self-prefix the agent may add (e.g. "Ghosty: hello")
+                  const triggerName = targetGroup?.trigger?.replace(/^@/, '') || '';
+                  const prefixRe = new RegExp(`^(?:${ASSISTANT_NAME}|${triggerName}):\\s*`, 'i');
+                  const cleanedText = data.text.replace(prefixRe, '').trim();
+                  await deps.sendMessage(data.chatJid, cleanedText || data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
