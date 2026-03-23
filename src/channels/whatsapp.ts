@@ -233,6 +233,29 @@ export class WhatsAppChannel implements Channel {
               normalized.videoMessage?.caption ||
               '';
 
+            // Prepend quoted message context when replying to a message
+            const contextInfo =
+              normalized.extendedTextMessage?.contextInfo ||
+              normalized.imageMessage?.contextInfo ||
+              normalized.videoMessage?.contextInfo;
+            const quoted = contextInfo?.quotedMessage;
+            if (quoted) {
+              const quotedNorm = normalizeMessageContent(quoted);
+              const quotedText =
+                quotedNorm?.conversation ||
+                quotedNorm?.extendedTextMessage?.text ||
+                quotedNorm?.imageMessage?.caption ||
+                quotedNorm?.videoMessage?.caption ||
+                '';
+              if (quotedText) {
+                const quotedParticipant = contextInfo.participant;
+                const quotedName = quotedParticipant
+                  ? quotedParticipant.replace(/@s\.whatsapp\.net$/, '')
+                  : 'unknown';
+                content = `> ${quotedName}: ${quotedText}\n\n${content}`;
+              }
+            }
+
             // Image attachment handling
             if (isImageMessage(msg)) {
               try {

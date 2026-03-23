@@ -490,6 +490,44 @@ describe('WhatsAppChannel', () => {
       );
     });
 
+    it('includes quoted message context in reply', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-quoted',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'My reply',
+              contextInfo: {
+                participant: '5559999@s.whatsapp.net',
+                quotedMessage: {
+                  conversation: 'Original message here',
+                },
+              },
+            },
+          },
+          pushName: 'Charlie',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '> 5559999: Original message here\n\nMy reply',
+        }),
+      );
+    });
+
     it('extracts caption from imageMessage', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
