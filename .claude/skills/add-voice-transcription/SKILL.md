@@ -1,94 +1,44 @@
 ---
 name: add-voice-transcription
-description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
+description: Add voice message transcription to NanoClaw using OpenAI Whisper API. Works with any channel (WhatsApp, Telegram, etc.).
 ---
 
 # Add Voice Transcription
 
-This skill adds automatic voice message transcription to NanoClaw's WhatsApp channel using OpenAI's Whisper API. When a voice note arrives, it is downloaded, transcribed, and delivered to the agent as `[Voice: <transcript>]`.
+Adds automatic voice/audio transcription via OpenAI's Whisper API. Runs inside the container as a media handler — intercepts voice/audio files, calls the API, and delivers the transcript to Claude as text. Channel-agnostic.
+
+Cost: ~$0.006 per minute of audio.
 
 ## Phase 1: Pre-flight
 
-### Check if already applied
-
-Check if `src/transcription.ts` exists. If it does, skip to Phase 3 (Configure). The code changes are already in place.
-
-### Ask the user
-
-Use `AskUserQuestion` to collect information:
-
-AskUserQuestion: Do you have an OpenAI API key for Whisper transcription?
-
-If yes, collect it now. If no, direct them to create one at https://platform.openai.com/api-keys.
-
-## Phase 2: Apply Code Changes
-
-**Prerequisite:** WhatsApp must be installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
-
-### Ensure WhatsApp fork remote
+Check if already applied:
 
 ```bash
-git remote -v
+test -f container/handlers/voice-openai.js && echo "Already applied" || echo "Not applied"
 ```
 
-If `whatsapp` is missing, add it:
+If already applied, skip to Phase 2 (Configure).
 
-```bash
-git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
-```
+## Phase 2: Apply
 
 ### Merge the skill branch
 
 ```bash
-git fetch whatsapp skill/voice-transcription
-git merge whatsapp/skill/voice-transcription || {
+git fetch upstream skill/voice-transcription
+git merge upstream/skill/voice-transcription || {
   git checkout --theirs package-lock.json
   git add package-lock.json
   git merge --continue
 }
 ```
 
-This merges in:
-- `src/transcription.ts` (voice transcription module using OpenAI Whisper)
-- Voice handling in `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
-- Transcription tests in `src/channels/whatsapp.test.ts`
-- `openai` npm dependency in `package.json`
-- `OPENAI_API_KEY` in `.env.example`
+### Configure API key
 
-If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
-
-### Validate code changes
-
-```bash
-npm install --legacy-peer-deps
-npm run build
-npx vitest run src/channels/whatsapp.test.ts
-```
-
-All tests must pass and build must be clean before proceeding.
-
-## Phase 3: Configure
-
-### Get OpenAI API key (if needed)
-
-If the user doesn't have an API key:
-
-> I need you to create an OpenAI API key:
->
-> 1. Go to https://platform.openai.com/api-keys
-> 2. Click "Create new secret key"
-> 3. Give it a name (e.g., "NanoClaw Transcription")
-> 4. Copy the key (starts with `sk-`)
->
-> Cost: ~$0.006 per minute of audio (~$0.003 per typical 30-second voice note)
-
-Wait for the user to provide the key.
-
-### Add to environment
+Ask the user for their OpenAI API key. If they don't have one, direct them to https://platform.openai.com/api-keys.
 
 Add to `.env`:
 
-```bash
+```
 OPENAI_API_KEY=<their-key>
 ```
 
@@ -98,51 +48,48 @@ Sync to container environment:
 mkdir -p data/env && cp .env data/env/env
 ```
 
-The container reads environment from `data/env/env`, not `.env` directly.
+Verify that `src/container-runner.ts` passes `OPENAI_API_KEY` into containers. Look for this in `buildContainerArgs()`:
+
+```typescript
+const envSecrets = readEnvFile(['OPENAI_API_KEY']);
+if (envSecrets.OPENAI_API_KEY) {
+  args.push('-e', `OPENAI_API_KEY=${envSecrets.OPENAI_API_KEY}`);
+}
+```
+
+If not present, add it alongside the other `-e` env flags.
 
 ### Build and restart
 
 ```bash
 npm run build
+./container/build.sh
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
 
-## Phase 4: Verify
-
-### Test with a voice note
+## Phase 3: Verify
 
 Tell the user:
 
-> Send a voice note in any registered WhatsApp chat. The agent should receive it as `[Voice: <transcript>]` and respond to its content.
+> Send a voice note in any registered chat. The agent should respond to the spoken content.
 
-### Check logs if needed
+### Check logs
 
 ```bash
-tail -f logs/nanoclaw.log | grep -i voice
+tail -f logs/nanoclaw.log
 ```
 
-Look for:
-- `Transcribed voice message` — successful transcription with character count
-- `OPENAI_API_KEY not set` — key missing from `.env`
-- `OpenAI transcription failed` — API error (check key validity, billing)
-- `Failed to download audio message` — media download issue
+In the container logs, look for:
+- `Content handler registered for type="voice" priority=50` — handler loaded
+- `[Voice transcript]:` — transcription succeeded
 
 ## Troubleshooting
 
-### Voice notes show "[Voice Message - transcription unavailable]"
-
-1. Check `OPENAI_API_KEY` is set in `.env` AND synced to `data/env/env`
+**Voice notes not transcribed**
+1. Check `OPENAI_API_KEY` is set in `.env` and synced to `data/env/env`
 2. Verify key works: `curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" | head -c 200`
 3. Check OpenAI billing — Whisper requires a funded account
 
-### Voice notes show "[Voice Message - transcription failed]"
-
-Check logs for the specific error. Common causes:
-- Network timeout — transient, will work on next message
-- Invalid API key — regenerate at https://platform.openai.com/api-keys
-- Rate limiting — wait and retry
-
-### Agent doesn't respond to voice notes
-
-Verify the chat is registered and the agent is running. Voice transcription only runs for registered groups.
+**Agent receives `[Voice message: media/...]` instead of transcript**
+The handler failed or wasn't loaded. Check container logs for errors.
