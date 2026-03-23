@@ -1,7 +1,7 @@
 ---
 name: image-gen
-description: Generate, edit, face-swap images, and text-to-speech using OpenAI and fal.ai
-allowed-tools: Bash(generate-image:*),Bash(face-swap:*),Bash(text-to-speech:*)
+description: Generate, edit, and face-swap images using OpenAI gpt-image-1 and fal.ai
+allowed-tools: Bash(generate-image:*),Bash(face-swap:*)
 ---
 
 # Image Generation, Editing & Face Swap
@@ -46,42 +46,12 @@ face-swap /workspace/group/attachments/img-FACE.jpg /workspace/group/attachments
 - Second argument: the photo where the face will be PLACED (target body/scene)
 - Takes ~10-20 seconds to process
 
-## text-to-speech (voice replies)
-
-When the user asks you to respond with voice, or when a voice reply feels natural (e.g. they sent a voice note), generate audio:
-
-```bash
-# Male voice (default)
-text-to-speech "Hola, aquí tienes tu resumen de hoy" male
-
-# Female voice
-text-to-speech "Hola, aquí tienes tu resumen de hoy" female
-```
-
-Choose male or female based on:
-- If the user asks for a specific gender voice → use that
-- If responding to a female user or the context calls for it → use female
-- Default → male
-
-Do NOT call the OpenAI TTS API directly — always use this script. When generating speech, ALWAYS write the text in Mexican Spanish with natural, casual expressions.
-
-Send as a native voice note:
-```
-mcp__nanoclaw__send_message({ text: "voice", audio_path: "/workspace/group/tts-123.ogg" })
-```
-
-**When to use voice:** Only when the user explicitly asks for audio, or when replying to a voice note and a voice reply feels natural. Default to text.
-
 ## Output & delivery
 
-All scripts save to `/workspace/group/` and print the path. Send results as native media:
+Both scripts save to `/workspace/group/` and print the path. Send the result as a native image:
 
 ```
-# Image
 mcp__nanoclaw__send_message({ text: "Here's your image!", image_path: "/workspace/group/generated-123.png" })
-
-# Voice note
-mcp__nanoclaw__send_message({ text: "voice", audio_path: "/workspace/group/tts-123.ogg" })
 ```
 
 ## Important
