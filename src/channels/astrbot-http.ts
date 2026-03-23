@@ -121,6 +121,13 @@ function ensureMainClaudeTemplate(folder: string): void {
   fs.copyFileSync(templatePath, destPath);
 }
 
+function ensureMainClaudeTemplateForGroup(
+  group: RegisteredGroup | undefined,
+): void {
+  if (!group?.isMain) return;
+  ensureMainClaudeTemplate(group.folder);
+}
+
 function validatePayload(payload: any): payload is AstrBotInboundPayload {
   return (
     payload &&
@@ -359,6 +366,14 @@ class AstrBotHttpChannel implements Channel {
             });
             return;
           }
+          try {
+            ensureMainClaudeTemplateForGroup(this.registeredGroups()[chatJid]);
+          } catch (err) {
+            logger.warn(
+              { chatJid, err },
+              'Failed to restore AstrBot main CLAUDE.md template after reset',
+            );
+          }
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -591,4 +606,5 @@ registerChannel('astrbot-http', (opts) => {
 export const _astrbotHttpInternals = {
   buildDiagPayload,
   ensureMainClaudeTemplate,
+  ensureMainClaudeTemplateForGroup,
 };
