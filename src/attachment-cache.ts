@@ -205,31 +205,6 @@ async function downloadCandidate(
   index: number,
 ): Promise<CachedAttachment | null> {
   const url = candidate.url;
-  const hashed = crypto
-    .createHash('sha1')
-    .update(url)
-    .digest('hex')
-    .slice(0, 12);
-  const existing = findExistingCachedFile(cacheDir, messageId, index, hashed);
-  if (existing) {
-    const stat = fs.statSync(existing.fullPath);
-    const detected = detectImageType(
-      fs.readFileSync(existing.fullPath),
-      existing.fileName,
-    );
-    return {
-      kind: 'image',
-      segment_type: candidate.segmentType,
-      original_url: url,
-      source_field: candidate.sourceField,
-      file_name: existing.fileName,
-      local_path: toWorkspacePath(existing.fullPath),
-      relative_path: path.posix.join('.attachments', existing.fileName),
-      mime_type: detected?.mimeType,
-      size_bytes: stat.size,
-      cached_at: stat.mtime.toISOString(),
-    };
-  }
 
   try {
     const response = await fetch(url);
@@ -256,8 +231,37 @@ async function downloadCandidate(
       response.headers.get('content-type') || undefined,
       url,
     );
+    const contentHash = crypto
+      .createHash('sha256')
+      .update(buffer)
+      .digest('hex')
+      .slice(0, 24);
+    const existing = findExistingCachedFile(cacheDir, contentHash);
+    if (existing) {
+      const now = new Date();
+      fs.utimesSync(existing.fullPath, now, now);
+      const stat = fs.statSync(existing.fullPath);
+      const existingDetected =
+        detectImageType(
+          fs.readFileSync(existing.fullPath),
+          existing.fileName,
+        ) || detected;
+      return {
+        kind: 'image',
+        segment_type: candidate.segmentType,
+        original_url: url,
+        source_field: candidate.sourceField,
+        file_name: existing.fileName,
+        local_path: toWorkspacePath(existing.fullPath),
+        relative_path: path.posix.join('.attachments', existing.fileName),
+        mime_type: existingDetected?.mimeType,
+        size_bytes: stat.size,
+        cached_at: stat.mtime.toISOString(),
+      };
+    }
+
     const ext = detected?.extension || getPreferredExtension(url);
-    const fileName = `${sanitizeFilePart(messageId)}-${index + 1}-${hashed}${ext}`;
+    const fileName = `${contentHash}${ext}`;
     const fullPath = path.join(cacheDir, fileName);
     fs.writeFileSync(fullPath, buffer);
     return {
@@ -327,10 +331,6 @@ function toWorkspacePath(fullPath: string): string {
   return `/workspace/group/${relative.slice(slashIndex + 1)}`;
 }
 
-function sanitizeFilePart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'attachment';
-}
-
 function getPreferredExtension(url: string): string {
   try {
     const parsed = new URL(url);
@@ -344,11 +344,9 @@ function getPreferredExtension(url: string): string {
 
 function findExistingCachedFile(
   cacheDir: string,
-  messageId: string,
-  index: number,
-  hashed: string,
+  contentHash: string,
 ): { fileName: string; fullPath: string } | null {
-  const prefix = `${sanitizeFilePart(messageId)}-${index + 1}-${hashed}`;
+  const prefix = `${contentHash}.`;
   for (const fileName of fs.readdirSync(cacheDir)) {
     if (!fileName.startsWith(prefix)) continue;
     const fullPath = path.join(cacheDir, fileName);
