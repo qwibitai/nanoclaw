@@ -163,6 +163,55 @@ describe('cacheAttachmentsForMessage', () => {
     expect(result.synthesizedContent).toBe('[User sent 1 image attachment]');
   });
 
+  it('deduplicates identical image bytes across different urls', async () => {
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
+    tempDirs.push(groupDir);
+
+    const imageBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'image/png' : null),
+        },
+        arrayBuffer: async () => imageBytes.buffer,
+      }),
+    );
+
+    const first = await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-6',
+      content: '',
+      metadata: {
+        segments: [{ type: 'image', url: 'https://example.com/photo-a.png' }],
+      },
+    });
+    const second = await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-7',
+      content: '',
+      metadata: {
+        segments: [
+          { type: 'image', url: 'https://cdn.example.org/photo-b.png' },
+        ],
+      },
+    });
+
+    const firstAttachment = (
+      first.metadata?.attachments as Array<Record<string, unknown>>
+    )[0];
+    const secondAttachment = (
+      second.metadata?.attachments as Array<Record<string, unknown>>
+    )[0];
+
+    expect(firstAttachment.file_name).toBe(secondAttachment.file_name);
+    expect(firstAttachment.local_path).toBe(secondAttachment.local_path);
+
+    const cacheDir = path.join(groupDir, '.attachments');
+    expect(fs.readdirSync(cacheDir)).toHaveLength(1);
+  });
+
   it('finds quoted images nested in arbitrary reply metadata branches', async () => {
     const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
     tempDirs.push(groupDir);
