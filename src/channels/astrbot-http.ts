@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { createHash } from 'crypto';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 
@@ -107,6 +109,16 @@ function makeMessageId(): string {
 function deriveFolder(chatJid: string): string {
   const hash = createHash('sha1').update(chatJid).digest('hex').slice(0, 12);
   return `astrbot_${hash}`;
+}
+
+function ensureMainClaudeTemplate(folder: string): void {
+  const templatePath = path.join(process.cwd(), 'groups', 'main', 'CLAUDE.md');
+  if (!fs.existsSync(templatePath)) return;
+
+  const destPath = path.join(resolveGroupFolderPath(folder), 'CLAUDE.md');
+  if (fs.existsSync(destPath)) return;
+
+  fs.copyFileSync(templatePath, destPath);
 }
 
 function validatePayload(payload: any): payload is AstrBotInboundPayload {
@@ -368,6 +380,14 @@ class AstrBotHttpChannel implements Channel {
         const folder = deriveFolder(chatJid);
         const name =
           ctl.group_name || ctl.sender_name || `AstrBot ${ctl.chat_id}`;
+        try {
+          ensureMainClaudeTemplate(folder);
+        } catch (err) {
+          logger.warn(
+            { chatJid, folder, err },
+            'Failed to copy AstrBot main CLAUDE.md template',
+          );
+        }
         this.setMainGroup(chatJid, {
           name,
           folder,
@@ -570,4 +590,5 @@ registerChannel('astrbot-http', (opts) => {
 
 export const _astrbotHttpInternals = {
   buildDiagPayload,
+  ensureMainClaudeTemplate,
 };
