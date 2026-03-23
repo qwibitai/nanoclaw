@@ -49,7 +49,7 @@ interface SessionsIndex {
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | SDKMessageContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -57,6 +57,30 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+const MAX_INLINE_IMAGES = parseInt(
+  process.env.NANOCLAW_MAX_INLINE_IMAGES || '3',
+  10,
+);
+const MAX_INLINE_IMAGE_BYTES = parseInt(
+  process.env.NANOCLAW_MAX_INLINE_IMAGE_BYTES || '5242880',
+  10,
+);
+
+interface SDKTextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+interface SDKImageContentBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+type SDKMessageContentBlock = SDKTextContentBlock | SDKImageContentBlock;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -67,10 +91,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | SDKMessageContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -115,6 +139,13 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+function getModelOverride(): string | undefined {
+  const raw = process.env.NANOCLAW_MODEL;
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
@@ -338,7 +369,7 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(buildUserContent(prompt));
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -389,45 +420,53 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
+  const modelOverride = getModelOverride();
+  if (modelOverride) {
+    log(`Using model override: ${modelOverride}`);
+  }
+
+  const options: any = {
+    cwd: '/workspace/group',
+    additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+    resume: sessionId,
+    resumeSessionAt: resumeAt,
+    systemPrompt: globalClaudeMd
+      ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      : undefined,
+    allowedTools: [
+      'Bash',
+      'Read', 'Write', 'Edit', 'Glob', 'Grep',
+      'WebSearch', 'WebFetch',
+      'Task', 'TaskOutput', 'TaskStop',
+      'TeamCreate', 'TeamDelete', 'SendMessage',
+      'TodoWrite', 'ToolSearch', 'Skill',
+      'NotebookEdit',
+      'mcp__nanoclaw__*'
+    ],
+    env: sdkEnv,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    settingSources: ['project', 'user'],
+    mcpServers: {
+      nanoclaw: {
+        command: 'node',
+        args: [mcpServerPath],
+        env: {
+          NANOCLAW_CHAT_JID: containerInput.chatJid,
+          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
         },
       },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-      },
-    }
+    },
+    hooks: {
+      PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+    },
+  };
+  if (modelOverride) options.model = modelOverride;
+
+  for await (const message of query({
+    prompt: stream,
+    options,
   })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
@@ -462,6 +501,178 @@ async function runQuery(
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
+}
+
+function buildUserContent(prompt: string): string | SDKMessageContentBlock[] {
+  const imageBlocks = loadInlineImageBlocks(prompt);
+  if (imageBlocks.length === 0) {
+    log('Sending user content as plain text (no inline image blocks)');
+    return prompt;
+  }
+
+  log(`Inlining ${imageBlocks.length} cached image attachment(s) into user message`);
+  const content: SDKMessageContentBlock[] = [{ type: 'text', text: prompt }, ...imageBlocks];
+  log(`Sending multimodal user content blocks: ${content.map((block) => block.type).join(',')}`);
+  return content;
+}
+
+function loadInlineImageBlocks(prompt: string): SDKImageContentBlock[] {
+  const attachments = extractAttachmentAttrs(prompt);
+  log(`Found ${attachments.length} attachment tag(s) in prompt`);
+  const blocks: SDKImageContentBlock[] = [];
+
+  for (const attachment of attachments) {
+    if (blocks.length >= MAX_INLINE_IMAGES) {
+      log(`Inline image limit reached (${MAX_INLINE_IMAGES}), skipping remaining attachments`);
+      break;
+    }
+    if (attachment.kind && attachment.kind !== 'image') {
+      log(`Skipping non-image attachment tag kind=${attachment.kind}`);
+      continue;
+    }
+    if (!attachment.local_path) {
+      log('Skipping attachment tag without local_path');
+      continue;
+    }
+
+    const mediaType = detectInlineMediaType(attachment.local_path, attachment.mime_type);
+    if (!mediaType.startsWith('image/')) {
+      log(`Skipping non-image attachment for multimodal input: ${attachment.local_path}`);
+      continue;
+    }
+
+    try {
+      const stat = fs.statSync(attachment.local_path);
+      if (stat.size > MAX_INLINE_IMAGE_BYTES) {
+        log(`Skipping oversized image attachment (${stat.size} bytes): ${attachment.local_path}`);
+        continue;
+      }
+
+      log(
+        `Preparing inline image block from ${attachment.local_path} (${stat.size} bytes, ${mediaType})`,
+      );
+      const data = fs.readFileSync(attachment.local_path).toString('base64');
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data,
+        },
+      });
+    } catch (err) {
+      log(`Failed to inline attachment ${attachment.local_path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  log(`Prepared ${blocks.length} inline image block(s)`);
+  return blocks;
+}
+
+function extractAttachmentAttrs(prompt: string): Array<Record<string, string>> {
+  const attachments: Array<Record<string, string>> = [];
+  const regex = /<attachment\b([^>]*)\/>/g;
+
+  for (const match of prompt.matchAll(regex)) {
+    const rawAttrs = match[1] || '';
+    const attrs: Record<string, string> = {};
+    const attrRegex = /(\w+)="([^"]*)"/g;
+    for (const attrMatch of rawAttrs.matchAll(attrRegex)) {
+      attrs[attrMatch[1]] = decodeXmlEntities(attrMatch[2] || '');
+    }
+    attachments.push(attrs);
+  }
+
+  if (attachments.length > 0) {
+    log(
+      `Attachment tag details: ${attachments
+        .map((attachment) =>
+          JSON.stringify({
+            kind: attachment.kind,
+            local_path: attachment.local_path,
+            mime_type: attachment.mime_type,
+            original_url: attachment.original_url,
+          }),
+        )
+        .join(' | ')}`,
+    );
+  }
+
+  return attachments;
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function guessMediaType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.bmp':
+      return 'image/bmp';
+    case '.svg':
+      return 'image/svg+xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function detectInlineMediaType(
+  filePath: string,
+  declaredMimeType?: string,
+): string {
+  if (declaredMimeType && declaredMimeType.startsWith('image/')) {
+    return declaredMimeType;
+  }
+  try {
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return 'image/jpeg';
+    }
+    if (
+      buffer.length >= 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    ) {
+      return 'image/png';
+    }
+    if (
+      buffer.length >= 12 &&
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    ) {
+      return 'image/webp';
+    }
+    if (
+      buffer.length >= 6 &&
+      (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' ||
+        buffer.subarray(0, 6).toString('ascii') === 'GIF89a')
+    ) {
+      return 'image/gif';
+    }
+  } catch (err) {
+    log(`Failed to sniff media type for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return guessMediaType(filePath);
 }
 
 async function main(): Promise<void> {

@@ -64,6 +64,7 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()], TZ);
     expect(result).toContain('<context timezone="UTC" />');
     expect(result).toContain('<message sender="Alice"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hello</message>');
     expect(result).toContain('Jan 1, 2024');
   });
@@ -86,6 +87,7 @@ describe('formatMessages', () => {
     const result = formatMessages(msgs, TZ);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hi</message>');
     expect(result).toContain('>hey</message>');
   });
@@ -120,6 +122,95 @@ describe('formatMessages', () => {
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('<context timezone="America/New_York" />');
+  });
+
+  it('renders structured metadata for astrbot messages', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          metadata: {
+            source: 'astrbot',
+            platform_name: 'aiocqhttp',
+            group_name: 'Test Group',
+            is_group: true,
+            reply: {
+              message_id: 'abc123',
+              sender_name: 'Bob',
+              content: 'quoted text',
+            },
+            attachments: [
+              {
+                kind: 'image',
+                local_path: '/workspace/group/.attachments/example.jpg',
+                original_url: 'https://example.com/example.jpg',
+                mime_type: 'image/jpeg',
+                size_bytes: 1234,
+              },
+            ],
+            segments: [
+              { type: 'reply', id: 'abc123' },
+              { type: 'text', text: 'hello' },
+            ],
+          },
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('<content>hello</content>');
+    expect(result).toContain('<source name="astrbot" />');
+    expect(result).toContain(
+      '<conversation group_name="Test Group" is_group="true" />',
+    );
+    expect(result).toContain(
+      '<reply_target message_id="abc123" sender_name="Bob">',
+    );
+    expect(result).toContain(
+      '<attachment kind="image" local_path="/workspace/group/.attachments/example.jpg" original_url="https://example.com/example.jpg" mime_type="image/jpeg" size_bytes="1234" />',
+    );
+    expect(result).toContain('<segment type="reply" id="abc123" />');
+  });
+
+  it('renders nested replies as context chain instead of the direct reply target', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          metadata: {
+            source: 'astrbot',
+            reply: {
+              message_id: 'direct-1',
+              sender_name: 'Bob',
+              content: 'directly replied message',
+              raw: {
+                quoted_message: {
+                  message_id: 'nested-1',
+                  sender_name: 'Carol',
+                  content: 'older nested quote',
+                  quoted_message: {
+                    message_id: 'nested-2',
+                    sender_name: 'Dave',
+                    content: 'deepest nested quote',
+                  },
+                },
+              },
+            },
+          },
+        }),
+      ],
+      TZ,
+    );
+
+    expect(result).toContain(
+      '<reply_target message_id="direct-1" sender_name="Bob">',
+    );
+    expect(result).toContain('<content>directly replied message</content>');
+    expect(result).toContain('<reply_context_chain>');
+    expect(result).toContain(
+      '<reply_context depth="1" message_id="nested-1" sender_name="Carol">',
+    );
+    expect(result).toContain(
+      '<reply_context depth="2" message_id="nested-2" sender_name="Dave">',
+    );
+    expect(result).not.toContain('quoted_message');
   });
 });
 

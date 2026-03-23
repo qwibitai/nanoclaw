@@ -6,8 +6,10 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getLatestMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  pruneContextOnlyMessages,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -225,6 +227,11 @@ describe('getMessagesSince', () => {
     );
     expect(msgs).toHaveLength(0);
   });
+
+  it('returns the latest stored timestamp for a chat', () => {
+    const latest = getLatestMessageTimestamp('group@g.us');
+    expect(latest).toBe('2024-01-01T00:00:04.000Z');
+  });
 });
 
 // --- getNewMessages ---
@@ -295,6 +302,78 @@ describe('getNewMessages', () => {
     const { messages, newTimestamp } = getNewMessages([], '', 'Andy');
     expect(messages).toHaveLength(0);
     expect(newTimestamp).toBe('');
+  });
+});
+
+describe('pruneContextOnlyMessages', () => {
+  beforeEach(() => {
+    storeChatMetadata('astrbot:test', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'ctx-1',
+      chat_jid: 'astrbot:test',
+      sender: 'alice',
+      sender_name: 'Alice',
+      content: 'one',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      metadata: { source: 'astrbot', context_only: true },
+    });
+    storeMessage({
+      id: 'ctx-2',
+      chat_jid: 'astrbot:test',
+      sender: 'bob',
+      sender_name: 'Bob',
+      content: 'two',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      metadata: { source: 'astrbot', context_only: true },
+    });
+    storeMessage({
+      id: 'ctx-3',
+      chat_jid: 'astrbot:test',
+      sender: 'carol',
+      sender_name: 'Carol',
+      content: 'three',
+      timestamp: '2024-01-01T00:00:03.000Z',
+      metadata: { source: 'astrbot', context_only: true },
+    });
+    storeMessage({
+      id: 'trigger-1',
+      chat_jid: 'astrbot:test',
+      sender: 'dave',
+      sender_name: 'Dave',
+      content: '@Andy hello',
+      timestamp: '2024-01-01T00:00:04.000Z',
+      metadata: { source: 'astrbot', is_at_or_wake_command: true },
+    });
+  });
+
+  it('keeps only the newest N context-only messages', () => {
+    const changes = pruneContextOnlyMessages('astrbot:test', 2);
+    expect(changes).toBe(1);
+
+    const msgs = getMessagesSince('astrbot:test', '', 'Andy');
+    expect(msgs.map((m) => m.id)).toEqual(['ctx-2', 'ctx-3', 'trigger-1']);
+  });
+
+  it('removes all context-only messages when max is zero', () => {
+    const changes = pruneContextOnlyMessages('astrbot:test', 0);
+    expect(changes).toBe(3);
+
+    const msgs = getMessagesSince('astrbot:test', '', 'Andy');
+    expect(msgs.map((m) => m.id)).toEqual(['trigger-1']);
+  });
+
+  it('does nothing when max is negative', () => {
+    const changes = pruneContextOnlyMessages('astrbot:test', -1);
+    expect(changes).toBe(0);
+
+    const msgs = getMessagesSince('astrbot:test', '', 'Andy');
+    expect(msgs.map((m) => m.id)).toEqual([
+      'ctx-1',
+      'ctx-2',
+      'ctx-3',
+      'trigger-1',
+    ]);
   });
 });
 

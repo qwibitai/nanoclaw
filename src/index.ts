@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ASTRBOT_CONTEXT_MAX_LENGTH,
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -30,19 +32,26 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getLatestMessageTimestamp,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  pruneContextOnlyMessages,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import {
+  isAstrBotWakeMessage,
+  isContextOnlyMessage,
+} from './astrbot-metadata.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -67,10 +76,25 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+let sessionGenerations: Record<string, number> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+function isMessageTrigger(
+  chatJid: string,
+  msg: NewMessage,
+  allowlistCfg: ReturnType<typeof loadSenderAllowlist>,
+): boolean {
+  if (isContextOnlyMessage(msg)) return false;
+
+  const hasExplicitTrigger =
+    TRIGGER_PATTERN.test(msg.content.trim()) || isAstrBotWakeMessage(msg);
+  if (!hasExplicitTrigger) return false;
+
+  return msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -92,6 +116,16 @@ function loadState(): void {
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+}
+
+function getSessionGeneration(groupFolder: string): number {
+  return sessionGenerations[groupFolder] || 0;
+}
+
+function bumpSessionGeneration(groupFolder: string): number {
+  const nextGeneration = getSessionGeneration(groupFolder) + 1;
+  sessionGenerations[groupFolder] = nextGeneration;
+  return nextGeneration;
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -116,6 +150,56 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+function setMainGroup(jid: string, group: RegisteredGroup): void {
+  // Demote any existing main group
+  for (const [existingJid, existingGroup] of Object.entries(registeredGroups)) {
+    if (existingGroup.isMain) {
+      registeredGroups[existingJid] = {
+        ...existingGroup,
+        isMain: false,
+      };
+      setRegisteredGroup(existingJid, registeredGroups[existingJid]);
+    }
+  }
+
+  // Ensure main group does not require trigger
+  const mainGroup: RegisteredGroup = {
+    ...group,
+    isMain: true,
+    requiresTrigger: false,
+  };
+
+  registerGroup(jid, mainGroup);
+}
+
+function resetGroupSession(jid: string): { ok: boolean; error?: string } {
+  const group = registeredGroups[jid];
+  if (!group) {
+    return { ok: false, error: 'Group not registered' };
+  }
+  const groupFolder = group.folder;
+  try {
+    bumpSessionGeneration(groupFolder);
+    queue.resetGroup(jid);
+    deleteSession(groupFolder);
+    delete sessions[groupFolder];
+    lastAgentTimestamp[jid] =
+      getLatestMessageTimestamp(jid) || new Date().toISOString();
+    saveState();
+    const claudeDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+    fs.rmSync(claudeDir, { recursive: true, force: true });
+    const groupSessionsDir = path.join(DATA_DIR, 'sessions', groupFolder);
+    fs.rmSync(groupSessionsDir, { recursive: true, force: true });
+    const groupIpcDir = resolveGroupIpcPath(groupFolder);
+    fs.rmSync(groupIpcDir, { recursive: true, force: true });
+    logger.info({ jid, groupFolder }, 'Reset session state');
+    return { ok: true };
+  } catch (err) {
+    logger.error({ err, jid, groupFolder }, 'Failed to reset session state');
+    return { ok: false, error: 'Failed to reset session state' };
+  }
 }
 
 /**
@@ -167,14 +251,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   if (missedMessages.length === 0) return true;
+  if (missedMessages.every((m) => isContextOnlyMessage(m))) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+    const hasTrigger = missedMessages.some((m) =>
+      isMessageTrigger(chatJid, m, allowlistCfg),
     );
     if (!hasTrigger) return true;
   }
@@ -272,6 +355,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
+  const sessionGeneration = getSessionGeneration(group.folder);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -301,7 +385,10 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (
+          output.newSessionId &&
+          getSessionGeneration(group.folder) === sessionGeneration
+        ) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -325,7 +412,10 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (
+      output.newSessionId &&
+      getSessionGeneration(group.folder) === sessionGeneration
+    ) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -393,17 +483,19 @@ async function startMessageLoop(): Promise<void> {
 
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const hasActionableMessage = groupMessages.some(
+            (m) => !isContextOnlyMessage(m),
+          );
+
+          if (!hasActionableMessage) continue;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+            const hasTrigger = groupMessages.some((m) =>
+              isMessageTrigger(chatJid, m, allowlistCfg),
             );
             if (!hasTrigger) continue;
           }
@@ -564,6 +656,13 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      if (
+        msg.chat_jid.startsWith('astrbot:') &&
+        isContextOnlyMessage(msg) &&
+        ASTRBOT_CONTEXT_MAX_LENGTH >= 0
+      ) {
+        pruneContextOnlyMessages(msg.chat_jid, ASTRBOT_CONTEXT_MAX_LENGTH);
+      }
     },
     onChatMetadata: (
       chatJid: string,
@@ -573,6 +672,10 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    registerGroup,
+    setMainGroup,
+    resetSession: resetGroupSession,
+    defaultTrigger: TRIGGER_PATTERN.source,
   };
 
   // Create and connect all registered channels.

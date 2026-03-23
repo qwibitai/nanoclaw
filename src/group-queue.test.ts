@@ -211,6 +211,26 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(countAfterMaxRetries);
   });
 
+  it('cancels scheduled retries when group is reset', async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    queue.resetGroup('group1@g.us');
+
+    await vi.advanceTimersByTimeAsync(100000);
+    expect(callCount).toBe(1);
+  });
+
   // --- Waiting groups get drained when slots free up ---
 
   it('drains waiting groups when active slots free up', async () => {
@@ -479,6 +499,75 @@ describe('GroupQueue', () => {
     expect(closeWrites).toHaveLength(1);
 
     resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('terminates the active process when group is reset', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    const proc = {
+      killed: false,
+      kill: vi.fn(() => {
+        proc.killed = true;
+        return true;
+      }),
+    } as any;
+
+    queue.registerProcess('group1@g.us', proc, 'container-1', 'test-group');
+    queue.resetGroup('group1@g.us');
+
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('does not reuse a reset container for follow-up messages', async () => {
+    const resolvers: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    const proc = {
+      killed: false,
+      kill: vi.fn(() => {
+        proc.killed = true;
+        return true;
+      }),
+    } as any;
+
+    queue.registerProcess('group1@g.us', proc, 'container-1', 'test-group');
+    queue.resetGroup('group1@g.us');
+
+    expect(queue.sendMessage('group1@g.us', 'hello after reset')).toBe(false);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(2);
+
+    for (const resolve of resolvers) {
+      resolve();
+    }
     await vi.advanceTimersByTimeAsync(10);
   });
 });
