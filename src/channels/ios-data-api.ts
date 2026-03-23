@@ -12,10 +12,9 @@ import { logger } from '../logger.js';
 import { getMessageHistory, getMessageHistoryAllIos, upsertDeviceToken } from '../db.js';
 import { runDailyNudge } from '../daily-nudge.js';
 import { sendPushToAll } from '../apns.js';
+import { getThisWeekEvents } from '../calendar-service.js';
 
-const SIGMA_DATA = path.join(process.env.HOME || '/Users/fambot', 'sigma-data');
 const SIGMA_REPO = path.join(process.env.HOME || '/Users/fambot', 'Projects', 'Sigma');
-const SCHEDULES_DIR = path.join(SIGMA_DATA, 'family', 'schedules');
 const INITIATIVES_DIR = path.join(SIGMA_REPO, 'initiatives');
 const IDEAS_NITS_FILE = path.join(SIGMA_REPO, 'ideas-and-nits.md');
 
@@ -579,129 +578,17 @@ function handleTestPush(req: http.IncomingMessage, res: http.ServerResponse): vo
 
 // MARK: - Calendar
 
-interface CalendarEvent {
-  id: string;
-  summary: string;
-  startDate: string;
-  endDate: string | null;
-  isAllDay: boolean;
-  description: string | null;
-}
-
-function handleGetCalendar(res: http.ServerResponse): void {
+async function handleGetCalendar(res: http.ServerResponse): Promise<void> {
   try {
-    const files = fs.readdirSync(SCHEDULES_DIR).filter((f) => f.endsWith('.ics'));
-    const allEvents: CalendarEvent[] = [];
+    const events = await getThisWeekEvents();
 
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(SCHEDULES_DIR, file), 'utf-8');
-      const events = parseICS(content);
-      allEvents.push(...events);
-      logger.debug({ file, count: events.length }, 'Parsed ICS file');
-    }
-
-    allEvents.sort((a, b) => a.startDate.localeCompare(b.startDate));
-
+    // Preserve the same response shape the iOS app expects
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ events: allEvents }));
+    res.end(JSON.stringify({ events }));
   } catch (err) {
-    logger.error({ err }, 'Failed to read calendar');
+    logger.error({ err }, 'Failed to get calendar events');
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Failed to read calendar' }));
-  }
-}
-
-function parseICS(content: string): CalendarEvent[] {
-  const unfolded = content
-    .replace(/\r\n /g, '')
-    .replace(/\r\n\t/g, '')
-    .replace(/\n /g, '')
-    .replace(/\n\t/g, '');
-
-  const lines = unfolded.split(/\r?\n/);
-  const events: CalendarEvent[] = [];
-
-  let inEvent = false;
-  let uid = '';
-  let summary = '';
-  let dtstart = '';
-  let dtend = '';
-  let description: string | null = null;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (trimmed === 'BEGIN:VEVENT') {
-      inEvent = true;
-      uid = '';
-      summary = '';
-      dtstart = '';
-      dtend = '';
-      description = null;
-      continue;
-    }
-
-    if (trimmed === 'END:VEVENT') {
-      inEvent = false;
-      const start = parseICSDate(dtstart);
-      if (start) {
-        const isAllDay = dtstart.includes('VALUE=DATE');
-        const end = parseICSDate(dtend);
-
-        events.push({
-          id: uid || `gen-${Date.now()}-${Math.random()}`,
-          summary: summary.replace(/\\,/g, ',').replace(/\\;/g, ';'),
-          startDate: start.toISOString(),
-          endDate: end ? end.toISOString() : null,
-          isAllDay,
-          description: description
-            ? description.replace(/\\n/g, '\n').replace(/\\,/g, ',').trim()
-            : null,
-        });
-      }
-      continue;
-    }
-
-    if (!inEvent) continue;
-
-    if (trimmed.startsWith('UID:')) uid = trimmed.slice(4);
-    else if (trimmed.startsWith('SUMMARY:')) summary = trimmed.slice(8);
-    else if (trimmed.startsWith('DTSTART')) dtstart = trimmed;
-    else if (trimmed.startsWith('DTEND')) dtend = trimmed;
-    else if (trimmed.startsWith('DESCRIPTION:')) description = trimmed.slice(12);
-  }
-
-  return events;
-}
-
-function parseICSDate(raw: string): Date | null {
-  if (!raw) return null;
-
-  const colonIdx = raw.lastIndexOf(':');
-  if (colonIdx === -1) return null;
-  const value = raw.slice(colonIdx + 1);
-
-  if (raw.includes('VALUE=DATE')) {
-    const y = parseInt(value.slice(0, 4));
-    const m = parseInt(value.slice(4, 6)) - 1;
-    const d = parseInt(value.slice(6, 8));
-    return new Date(y, m, d);
-  } else if (value.endsWith('Z')) {
-    const y = parseInt(value.slice(0, 4));
-    const m = parseInt(value.slice(4, 6)) - 1;
-    const d = parseInt(value.slice(6, 8));
-    const h = parseInt(value.slice(9, 11));
-    const min = parseInt(value.slice(11, 13));
-    const s = parseInt(value.slice(13, 15));
-    return new Date(Date.UTC(y, m, d, h, min, s));
-  } else {
-    const y = parseInt(value.slice(0, 4));
-    const m = parseInt(value.slice(4, 6)) - 1;
-    const d = parseInt(value.slice(6, 8));
-    const h = parseInt(value.slice(9, 11));
-    const min = parseInt(value.slice(11, 13));
-    const s = parseInt(value.slice(13, 15));
-    return new Date(y, m, d, h, min, s);
+    res.end(JSON.stringify({ error: 'Failed to get calendar events' }));
   }
 }
 
