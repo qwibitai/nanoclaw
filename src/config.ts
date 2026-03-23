@@ -53,6 +53,14 @@ export const CONTAINER_TIMEOUT = parseIntEnv(
   process.env.CONTAINER_TIMEOUT,
   1800000,
 );
+export const GOAL_TIMEOUT_DEFAULT = parseIntEnv(
+  process.env.GOAL_TIMEOUT_DEFAULT,
+  14400000,
+); // 4 hours
+export const GOAL_TIMEOUT_MAX = parseIntEnv(
+  process.env.GOAL_TIMEOUT_MAX,
+  86400000,
+); // 24 hours
 export const CONTAINER_MAX_OUTPUT_SIZE = parseIntEnv(
   process.env.CONTAINER_MAX_OUTPUT_SIZE,
   10485760,

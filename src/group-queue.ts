@@ -9,6 +9,8 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 
+export type ContainerPriority = 'interactive' | 'goal' | 'scheduled';
+
 interface QueuedTask {
   id: string;
   groupJid: string;
@@ -26,6 +28,12 @@ interface ThreadState {
   containerName: string | null;
   groupFolder: string | null;
   threadId: string;
+  groupJid: string;
+  priority: ContainerPriority;
+  paused: boolean;
+  pendingPause: boolean;
+  pausedAt: number | null;
+  goalTimeoutMs: number | undefined;
 }
 
 interface GroupState {
@@ -96,6 +104,12 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         threadId,
+        groupJid,
+        priority: 'interactive',
+        paused: false,
+        pendingPause: false,
+        pausedAt: null,
+        goalTimeoutMs: undefined,
       };
       this.threads.set(key, state);
     }
