@@ -16,6 +16,8 @@ const BASE_RETRY_MS = 5000;
 
 interface GroupState {
   active: boolean;
+  activeRunId: number | null;
+  nextRunId: number;
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
@@ -41,6 +43,8 @@ export class GroupQueue {
     if (!state) {
       state = {
         active: false,
+        activeRunId: null,
+        nextRunId: 0,
         idleWaiting: false,
         isTaskContainer: false,
         runningTaskId: null,
@@ -197,6 +201,8 @@ export class GroupQueue {
 
   resetGroup(groupJid: string): void {
     const state = this.getGroup(groupJid);
+    const proc = state.process;
+    const containerName = state.containerName;
 
     state.pendingMessages = false;
     state.pendingTasks = [];
@@ -209,12 +215,25 @@ export class GroupQueue {
 
     this.waitingGroups = this.waitingGroups.filter((jid) => jid !== groupJid);
 
-    if (state.process && !state.process.killed) {
+    if (state.active) {
+      state.active = false;
+      state.activeRunId = null;
+      state.idleWaiting = false;
+      state.isTaskContainer = false;
+      state.runningTaskId = null;
+      state.process = null;
+      state.containerName = null;
+      state.groupFolder = null;
+      this.activeCount = Math.max(0, this.activeCount - 1);
+      this.drainWaiting();
+    }
+
+    if (proc && !proc.killed) {
       logger.info(
-        { groupJid, containerName: state.containerName },
+        { groupJid, containerName },
         'Resetting group: terminating active container',
       );
-      state.process.kill('SIGTERM');
+      proc.kill('SIGTERM');
     }
   }
 
@@ -223,7 +242,9 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+    const runId = ++state.nextRunId;
     state.active = true;
+    state.activeRunId = runId;
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
@@ -247,7 +268,11 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      if (state.activeRunId !== runId) {
+        return;
+      }
       state.active = false;
+      state.activeRunId = null;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -258,7 +283,9 @@ export class GroupQueue {
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
+    const runId = ++state.nextRunId;
     state.active = true;
+    state.activeRunId = runId;
     state.idleWaiting = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
@@ -274,7 +301,11 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      if (state.activeRunId !== runId) {
+        return;
+      }
       state.active = false;
+      state.activeRunId = null;
       state.isTaskContainer = false;
       state.runningTaskId = null;
       state.process = null;
