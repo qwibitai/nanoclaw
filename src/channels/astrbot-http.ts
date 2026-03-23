@@ -31,8 +31,8 @@ interface AstrBotInboundPayload {
 }
 
 interface AstrBotControlPayload {
-  action: 'set_main' | 'status' | 'reset_session' | 'diag';
-  chat_id: string;
+  action: 'set_main' | 'reset_session' | 'diag';
+  chat_id?: string;
   umo?: string;
   group_name?: string;
   sender_name?: string;
@@ -333,25 +333,6 @@ class AstrBotHttpChannel implements Channel {
 
       if (req.url === '/astrbot/control') {
         const ctl = payload as AstrBotControlPayload;
-        if (ctl.action === 'status') {
-          const groups = this.registeredGroups();
-          const mainEntry = getMainGroupEntry(groups);
-          if (!mainEntry) {
-            sendJson(res, 200, { ok: true, main: null });
-            return;
-          }
-          const [jid, group] = mainEntry;
-          sendJson(res, 200, {
-            ok: true,
-            main: {
-              jid,
-              name: group.name,
-              folder: group.folder,
-              trigger: group.trigger,
-            },
-          });
-          return;
-        }
         if (ctl.action === 'reset_session') {
           if (typeof ctl.chat_id !== 'string') {
             sendJson(res, 400, { ok: false, error: 'Invalid control payload' });
