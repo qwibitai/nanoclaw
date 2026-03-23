@@ -401,6 +401,12 @@ function buildContainerArgs(
   if (process.env.OLLAMA_URL) {
     args.push('-e', `OLLAMA_URL=${process.env.OLLAMA_URL}`);
   }
+  if (process.env.PAPERCLIP_URL) {
+    args.push('-e', `PAPERCLIP_URL=${process.env.PAPERCLIP_URL}`);
+  }
+  if (process.env.PAPERCLIP_API_KEY) {
+    args.push('-e', `PAPERCLIP_API_KEY=${process.env.PAPERCLIP_API_KEY}`);
+  }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());

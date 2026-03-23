@@ -56,6 +56,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startPaperclipWebhookServer } from './paperclip-webhook.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -566,6 +567,16 @@ async function main(): Promise<void> {
     CREDENTIAL_PROXY_PORT,
     PROXY_BIND_HOST,
   );
+
+  // Start Paperclip webhook server if configured
+  if (process.env.PAPERCLIP_WEBHOOK_SECRET || process.env.PAPERCLIP_GROUP_FOLDER) {
+    const paperclipPort = parseInt(process.env.PAPERCLIP_WEBHOOK_PORT ?? '3102', 10);
+    startPaperclipWebhookServer(paperclipPort, {
+      storeMessage,
+      enqueueGroup: (jid) => queue.enqueueMessageCheck(jid),
+      registeredGroups: () => registeredGroups,
+    });
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
