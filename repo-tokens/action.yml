@@ -128,7 +128,7 @@ runs:
         # Generate SVG badge
         if badge_path:
             label_text = "tokens"
-            value_text = display
+            value_text = f"{display} · {pct}%"
             full_desc = f"{display} tokens, {pct}% of context window"
 
             cw = 7.0
