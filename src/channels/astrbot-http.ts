@@ -25,6 +25,7 @@ interface AstrBotInboundPayload {
   platform_name?: string;
   platform_id?: string;
   session_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface AstrBotControlPayload {
@@ -107,6 +108,42 @@ function validatePayload(payload: any): payload is AstrBotInboundPayload {
     typeof payload.chat_id === 'string' &&
     typeof payload.content === 'string'
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildAstrBotMetadata(
+  inbound: AstrBotInboundPayload,
+): Record<string, unknown> | undefined {
+  const metadata: Record<string, unknown> = isRecord(inbound.metadata)
+    ? { ...inbound.metadata }
+    : {};
+
+  metadata.source = 'astrbot';
+  if (inbound.umo) metadata.umo = inbound.umo;
+  if (inbound.platform_name) metadata.platform_name = inbound.platform_name;
+  if (inbound.platform_id) metadata.platform_id = inbound.platform_id;
+  if (inbound.session_id) metadata.session_id = inbound.session_id;
+  if (inbound.chat_id) metadata.chat_id = inbound.chat_id;
+  if (inbound.group_id) metadata.group_id = inbound.group_id;
+  if (inbound.group_name) metadata.group_name = inbound.group_name;
+  if (inbound.is_group !== undefined) metadata.is_group = inbound.is_group;
+
+  const senderProfile: Record<string, unknown> = isRecord(
+    metadata.sender_profile,
+  )
+    ? { ...metadata.sender_profile }
+    : {};
+  if (inbound.sender_nickname) senderProfile.nickname = inbound.sender_nickname;
+  if (inbound.sender_username) senderProfile.username = inbound.sender_username;
+  if (inbound.sender_card) senderProfile.card = inbound.sender_card;
+  if (Object.keys(senderProfile).length > 0) {
+    metadata.sender_profile = senderProfile;
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
 class AstrBotHttpChannel implements Channel {
@@ -290,6 +327,7 @@ class AstrBotHttpChannel implements Channel {
         timestamp,
         is_from_me: inbound.is_from_me || false,
         is_bot_message: inbound.is_bot || false,
+        metadata: buildAstrBotMetadata(inbound),
       };
 
       const groupName = inbound.group_name || inbound.group_id || senderName;
