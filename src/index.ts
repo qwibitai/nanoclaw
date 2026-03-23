@@ -6,6 +6,7 @@ import {
   CREDENTIAL_PROXY_PORT,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MAX_MESSAGE_CHARS,
   POLL_INTERVAL,
   SESSION_TTL_MS,
   SESSION_TURN_CAP,
@@ -64,7 +65,12 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
-import { canFaqShortCircuit, fetchPredefinedFaq, tryFaqShortCircuit } from './faq-shortcircuit.js';
+import { isRateLimited } from './rate-limiter.js';
+import {
+  canFaqShortCircuit,
+  fetchPredefinedFaq,
+  tryFaqShortCircuit,
+} from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -211,7 +217,63 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  // ── Rate limiting ────────────────────────────────────────────────────────────
+  // Sliding window: max 10 user messages per JID per minute (in-memory, no DB).
+  // Counts the new user messages in this batch; rejects the whole batch if over limit.
+  const newUserMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
+  if (isRateLimited(chatJid, newUserMessages.length)) {
+    logger.warn(
+      { chatJid, group: group.name, count: newUserMessages.length },
+      'Rate limit exceeded — dropping batch',
+    );
+    // Advance cursor so we don't retry these messages endlessly
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    await channel
+      .sendMessage(
+        chatJid,
+        'Trimiteți prea multe mesaje. Vă rugăm așteptați un minut înainte de a continua.',
+      )
+      .catch(() => {}); // best-effort warning, don't block
+    return true;
+  }
+
+  // ── Message length cap ───────────────────────────────────────────────────────
+  // Truncate any single message exceeding MAX_MESSAGE_CHARS to prevent
+  // prompt-stuffing and runaway token costs from large pastes.
+  let truncationCount = 0;
+  const cappedMessages = missedMessages.map((m) => {
+    if (
+      !m.is_from_me &&
+      !m.is_bot_message &&
+      m.content &&
+      m.content.length > MAX_MESSAGE_CHARS
+    ) {
+      truncationCount++;
+      return {
+        ...m,
+        content: m.content.slice(0, MAX_MESSAGE_CHARS) + '… [mesaj trunchiat]',
+      };
+    }
+    return m;
+  });
+  if (truncationCount > 0) {
+    logger.warn(
+      { chatJid, group: group.name, truncationCount },
+      'Message(s) truncated to MAX_MESSAGE_CHARS',
+    );
+    await channel
+      .sendMessage(
+        chatJid,
+        `ℹ️ Mesajul dvs. a fost trunchiat la ${MAX_MESSAGE_CHARS} de caractere. Vă rugăm trimiteți mesaje mai scurte.`,
+      )
+      .catch(() => {});
+  }
+
+  const prompt = formatMessages(cappedMessages, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -245,11 +307,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Saves the full container lifecycle cost for address/payment/parking queries.
   // canFaqShortCircuit gates the API fetch: booking-intent messages skip the
   // HTTP call entirely (avoids ~5ms localhost round-trip for every booking msg).
-  const faqData = canFaqShortCircuit(missedMessages)
+  const faqData = canFaqShortCircuit(cappedMessages)
     ? await fetchPredefinedFaq(group.folder)
     : null;
   if (faqData) {
-    const faqAnswer = tryFaqShortCircuit(missedMessages, faqData);
+    const faqAnswer = tryFaqShortCircuit(cappedMessages, faqData);
     if (faqAnswer) {
       try {
         await channel.sendMessage(chatJid, faqAnswer);

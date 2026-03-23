@@ -72,6 +72,14 @@ export const TRIGGER_PATTERN = new RegExp(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Safety: hard cap on inbound message length before it reaches the LLM.
+// Messages longer than this are truncated (with a note) to prevent prompt-stuffing
+// and runaway token costs from unusually large pastes.
+export const MAX_MESSAGE_CHARS = parseInt(
+  process.env.MAX_MESSAGE_CHARS || '2000',
+  10,
+);
+
 // Session lifecycle cost controls
 // TTL: sessions inactive longer than this are pruned at startup (reset context = cheaper next visit)
 export const SESSION_TTL_MS =
