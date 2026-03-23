@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
 import { getChannelFactory } from './registry.js';
 import { _astrbotHttpInternals } from './astrbot-http.js';
@@ -168,5 +170,50 @@ describe('astrbot http outbound delivery', () => {
         },
       },
     });
+  });
+});
+
+describe('astrbot main CLAUDE template', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('copies the main CLAUDE template into a missing astrbot main folder', () => {
+    const cwd = '/tmp/nanoclaw-project';
+    const folder = 'astrbot_demo';
+    const templatePath = path.join(cwd, 'groups', 'main', 'CLAUDE.md');
+    const destPath = path.join(process.cwd(), 'groups', folder, 'CLAUDE.md');
+
+    vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    vi.spyOn(fs, 'existsSync').mockImplementation(((targetPath: fs.PathLike) =>
+      targetPath === templatePath ? true : false) as typeof fs.existsSync);
+    const copyFileSync = vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
+      return undefined;
+    });
+
+    _astrbotHttpInternals.ensureMainClaudeTemplate(folder);
+
+    expect(copyFileSync).toHaveBeenCalledWith(templatePath, destPath);
+  });
+
+  it('does not overwrite an existing astrbot main CLAUDE file', () => {
+    const cwd = '/tmp/nanoclaw-project';
+    const folder = 'astrbot_demo';
+    const templatePath = path.join(cwd, 'groups', 'main', 'CLAUDE.md');
+    const destPath = path.join(process.cwd(), 'groups', folder, 'CLAUDE.md');
+
+    vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    vi.spyOn(fs, 'existsSync').mockImplementation(
+      ((targetPath: fs.PathLike) =>
+        targetPath === templatePath ||
+        targetPath === destPath) as typeof fs.existsSync,
+    );
+    const copyFileSync = vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
+      return undefined;
+    });
+
+    _astrbotHttpInternals.ensureMainClaudeTemplate(folder);
+
+    expect(copyFileSync).not.toHaveBeenCalled();
   });
 });
