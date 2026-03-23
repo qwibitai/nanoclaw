@@ -138,6 +138,15 @@ describe('formatMessages', () => {
               sender_name: 'Bob',
               content: 'quoted text',
             },
+            attachments: [
+              {
+                kind: 'image',
+                local_path: '/workspace/group/.attachments/example.jpg',
+                original_url: 'https://example.com/example.jpg',
+                mime_type: 'image/jpeg',
+                size_bytes: 1234,
+              },
+            ],
             segments: [
               { type: 'reply', id: 'abc123' },
               { type: 'text', text: 'hello' },
@@ -153,6 +162,9 @@ describe('formatMessages', () => {
       '<conversation group_name="Test Group" is_group="true" />',
     );
     expect(result).toContain('<reply message_id="abc123" sender_name="Bob">');
+    expect(result).toContain(
+      '<attachment kind="image" local_path="/workspace/group/.attachments/example.jpg" original_url="https://example.com/example.jpg" mime_type="image/jpeg" size_bytes="1234" />',
+    );
     expect(result).toContain('<segment type="reply" id="abc123" />');
   });
 });
