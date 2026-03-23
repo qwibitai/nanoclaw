@@ -22,6 +22,7 @@ import {
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { isImageMessage, processImage } from '../image.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
   Channel,
   OnInboundMessage,
@@ -248,6 +249,18 @@ export class WhatsAppChannel implements Channel {
                 }
               } catch (err) {
                 logger.warn({ err, jid: chatJid }, 'Image - download failed');
+              }
+            }
+
+            // Voice message transcription
+            if (isVoiceMessage(msg)) {
+              try {
+                const transcript = await transcribeAudioMessage(msg, this.sock);
+                if (transcript) {
+                  content = `[Voice: ${transcript}]`;
+                }
+              } catch (err) {
+                logger.warn({ err, jid: chatJid }, 'Voice transcription failed');
               }
             }
 
