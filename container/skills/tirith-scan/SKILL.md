@@ -26,5 +26,3 @@ If the action is "block", do NOT proceed with the URL or command.
 ## Auto-install
 
 Tirith is installed automatically on first use to `/home/node/.claude/bin/tirith` (persisted across container restarts). No manual setup needed.
-
-Tirith is already integrated in [Hermes Agent](https://github.com/NousResearch/hermes-agent/pull/1256) and [EurekaClaw](https://github.com/EurekaClaw/EurekaClaw/pull/1).
