@@ -704,6 +704,18 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  // =========================================================
+  // Priority / preemption tests
+  // =========================================================
+
+  it('findPreemptionTarget returns null when no containers exist', () => {
+    expect(queue.findPreemptionTarget()).toBeNull();
+  });
+
+  it('escalateToGoal does not throw on inactive thread', () => {
+    expect(() => queue.escalateToGoal('group1', 'thread1')).not.toThrow();
+  });
+
   it('closeStdin writes to thread-specific path', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;

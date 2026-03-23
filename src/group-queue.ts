@@ -52,6 +52,7 @@ export class GroupQueue {
   private threads = new Map<string, ThreadState>(); // keyed by {groupJid}:{threadId}
   private activeCount = 0;
   private waitingGroups: string[] = []; // groupJids waiting for a global slot
+  private pausedQueue: Array<{ groupJid: string; threadId: string }> = [];
   private processMessagesFn:
     | ((groupJid: string, threadId?: string) => Promise<boolean>)
     | null = null;
@@ -172,11 +173,16 @@ export class GroupQueue {
   /**
    * Main entry point: enqueue a message check for a specific thread.
    */
-  enqueueThreadMessageCheck(groupJid: string, threadId: string): void {
+  enqueueThreadMessageCheck(
+    groupJid: string,
+    threadId: string,
+    priority: ContainerPriority = 'interactive',
+  ): void {
     if (this.shuttingDown) return;
 
     const group = this.getGroup(groupJid);
     const thread = this.getThread(groupJid, threadId);
+    thread.priority = priority;
 
     if (thread.active) {
       group.pendingMessages.set(threadId, true);
@@ -200,6 +206,17 @@ export class GroupQueue {
     // Global cap
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
       group.pendingMessages.set(threadId, true);
+
+      // P0 interactive messages try to preempt lower-priority containers
+      if (priority === 'interactive') {
+        const target = this.findPreemptionTarget();
+        if (target) {
+          this.pauseContainer(target.groupJid, target.threadId);
+          // Don't add to waitingGroups — the slot will free when pause completes
+          return;
+        }
+      }
+
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
@@ -412,11 +429,12 @@ export class GroupQueue {
   private async withContainer(
     groupJid: string,
     threadId: string,
-    opts: { isTask: boolean; taskId?: string },
+    opts: { isTask: boolean; taskId?: string; priority?: ContainerPriority },
     fn: () => Promise<void>,
   ): Promise<void> {
     const group = this.getGroup(groupJid);
     const thread = this.getThread(groupJid, threadId);
+    thread.priority = opts.priority || 'interactive';
 
     thread.active = true;
     thread.idleWaiting = false;
@@ -430,15 +448,34 @@ export class GroupQueue {
     try {
       await fn();
     } finally {
+      // If the container was paused, the slot was already freed by
+      // handlePausedNotification — don't decrement again.
+      const wasPaused = thread.paused;
+
       thread.active = false;
       thread.isTaskContainer = false;
       thread.process = null;
       thread.containerName = null;
       thread.groupFolder = null;
+      thread.paused = false;
+      thread.pendingPause = false;
+      thread.pausedAt = null;
+      thread.priority = 'interactive';
+      thread.goalTimeoutMs = undefined;
+
       if (opts.taskId) group.runningTaskId = null;
-      group.activeThreadCount--;
-      this.activeCount--;
+
+      if (!wasPaused) {
+        group.activeThreadCount--;
+        this.activeCount--;
+      }
       this.writeStatus();
+
+      // Remove from paused queue if it was there
+      this.pausedQueue = this.pausedQueue.filter(
+        (p) => !(p.groupJid === groupJid && p.threadId === threadId),
+      );
+
       this.drainGroup(groupJid);
     }
   }
@@ -531,6 +568,157 @@ export class GroupQueue {
     }, delayMs).unref();
   }
 
+  /**
+   * Mark a container for deferred pause.
+   */
+  pauseContainer(groupJid: string, threadId: string): void {
+    const thread = this.getThread(groupJid, threadId);
+    if (!thread.active || !thread.groupFolder) return;
+
+    thread.pendingPause = true;
+
+    const inputDir = path.join(
+      DATA_DIR,
+      'ipc',
+      thread.groupFolder,
+      threadId,
+      'input',
+    );
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_pause'), '');
+      logger.info(
+        { groupJid, threadId, priority: thread.priority },
+        'container.preempted',
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Called when a container confirms it has paused (via IPC).
+   */
+  handlePausedNotification(groupJid: string, threadId: string): void {
+    const thread = this.getThread(groupJid, threadId);
+    const group = this.getGroup(groupJid);
+
+    if (!thread.active || thread.paused) return;
+
+    thread.paused = true;
+    thread.pendingPause = false;
+    thread.pausedAt = Date.now();
+
+    group.activeThreadCount--;
+    this.activeCount--;
+    this.writeStatus();
+
+    this.pausedQueue.push({ groupJid, threadId });
+
+    logger.info(
+      {
+        groupJid,
+        threadId,
+        priority: thread.priority,
+        activeCount: this.activeCount,
+      },
+      'container.paused',
+    );
+
+    this.drainGroup(groupJid);
+  }
+
+  /**
+   * Resume the longest-paused container if a slot is available.
+   */
+  resumeNextPaused(): void {
+    if (this.pausedQueue.length === 0) return;
+    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) return;
+
+    const { groupJid, threadId } = this.pausedQueue.shift()!;
+    const thread = this.getThread(groupJid, threadId);
+    const group = this.getGroup(groupJid);
+
+    if (!thread.paused || !thread.groupFolder) return;
+
+    const inputDir = path.join(
+      DATA_DIR,
+      'ipc',
+      thread.groupFolder,
+      threadId,
+      'input',
+    );
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_resume'), '');
+    } catch {
+      // ignore
+    }
+
+    thread.paused = false;
+    thread.pausedAt = null;
+
+    group.activeThreadCount++;
+    this.activeCount++;
+    this.writeStatus();
+
+    logger.info(
+      {
+        groupJid,
+        threadId,
+        priority: thread.priority,
+        activeCount: this.activeCount,
+      },
+      'container.resumed',
+    );
+  }
+
+  /**
+   * Find the best container to preempt for a higher-priority request.
+   */
+  findPreemptionTarget(): { groupJid: string; threadId: string } | null {
+    const PRIORITY_RANK: Record<ContainerPriority, number> = {
+      interactive: 0,
+      goal: 1,
+      scheduled: 2,
+    };
+
+    let bestTarget: {
+      groupJid: string;
+      threadId: string;
+      rank: number;
+    } | null = null;
+
+    for (const [_key, thread] of this.threads) {
+      if (!thread.active || thread.paused || thread.pendingPause) continue;
+      if (thread.priority === 'interactive') continue;
+
+      const rank = PRIORITY_RANK[thread.priority];
+      if (!bestTarget || rank > bestTarget.rank) {
+        bestTarget = {
+          groupJid: thread.groupJid,
+          threadId: thread.threadId,
+          rank,
+        };
+      }
+    }
+
+    return bestTarget
+      ? { groupJid: bestTarget.groupJid, threadId: bestTarget.threadId }
+      : null;
+  }
+
+  /**
+   * Escalate a running container from interactive to goal priority.
+   */
+  escalateToGoal(groupJid: string, threadId: string): void {
+    const thread = this.getThread(groupJid, threadId);
+    if (!thread.active) return;
+
+    thread.priority = 'goal';
+    logger.info({ groupJid, threadId }, 'goal.escalated');
+  }
+
   private drainGroup(groupJid: string): void {
     if (this.shuttingDown) return;
 
@@ -548,6 +736,15 @@ export class GroupQueue {
           'Unhandled error in runTask (drain)',
         ),
       );
+      return;
+    }
+
+    // Resume paused containers before starting new work from other groups
+    if (
+      this.pausedQueue.length > 0 &&
+      this.activeCount < MAX_CONCURRENT_CONTAINERS
+    ) {
+      this.resumeNextPaused();
       return;
     }
 
