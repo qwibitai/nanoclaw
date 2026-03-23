@@ -34,6 +34,76 @@ import { RegisteredGroup } from './types.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+/**
+ * Generate a skill index from SKILL.md frontmatter.
+ * Returns markdown listing all skills with their descriptions,
+ * telling the agent to read the full SKILL.md from /workspace/skills/.
+ */
+function generateSkillIndexForContainer(skillsDir: string): string {
+  const skills: { name: string; description: string; dirName: string }[] = [];
+
+  for (const entry of fs.readdirSync(skillsDir)) {
+    const entryPath = path.join(skillsDir, entry);
+    if (!fs.statSync(entryPath).isDirectory()) continue;
+    const skillFile = path.join(entryPath, 'SKILL.md');
+    if (!fs.existsSync(skillFile)) continue;
+
+    const content = fs.readFileSync(skillFile, 'utf-8');
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) continue;
+
+    let name = '';
+    let description = '';
+    let currentKey = '';
+    for (const line of fmMatch[1].split('\n')) {
+      if (/^\s/.test(line) && currentKey) {
+        if (currentKey === 'description') description += ' ' + line.trim();
+        continue;
+      }
+      const kv = line.match(/^(\w[\w-]*):\s*>?\s*(.*)/);
+      if (kv) {
+        currentKey = kv[1];
+        if (currentKey === 'name') name = kv[2].trim();
+        if (currentKey === 'description') description = kv[2].trim();
+      }
+    }
+
+    if (name && description) {
+      skills.push({ name, description, dirName: entry });
+    }
+  }
+
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+
+  const lines = [
+    '# Available Skills',
+    '',
+    'Before acting on a task, check if a skill applies. To use a skill,',
+    'read its full instructions first:',
+    '',
+    '```',
+    'Read /workspace/skills/<skill-dir>/SKILL.md',
+    '```',
+    '',
+    'Then follow the skill instructions exactly.',
+    '',
+  ];
+
+  for (const skill of skills) {
+    lines.push(
+      `- **${skill.name}** (\`${skill.dirName}/\`): ${skill.description}`,
+    );
+  }
+
+  lines.push('');
+  lines.push(
+    'Always read the full SKILL.md before proceeding — this index only shows summaries.',
+  );
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -145,22 +215,52 @@ function buildVolumeMounts(
     JSON.stringify({ env: settingsEnv }, null, 2) + '\n',
   );
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
+  // Lazy-load skills: instead of copying all skill content into .claude/skills/
+  // (which the SDK auto-loads into the system prompt), generate a lightweight
+  // index skill that tells the agent which skills exist and how to read them.
+  // Full skill files are mounted read-only at /workspace/skills/ for on-demand access.
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
+  // Clean out old skills to avoid stale auto-discovered SKILL.md files
+  if (fs.existsSync(skillsDst)) {
+    fs.rmSync(skillsDst, { recursive: true });
+  }
+  fs.mkdirSync(skillsDst, { recursive: true });
+
   if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
+    // Generate and write the index as the only auto-discovered skill
+    const indexContent = generateSkillIndexForContainer(skillsSrc);
+    const indexDir = path.join(skillsDst, '_skill-index');
+    fs.mkdirSync(indexDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(indexDir, 'SKILL.md'),
+      [
+        '---',
+        'name: skill-index',
+        'description: >',
+        '  Index of all available skills. Always check this before acting.',
+        '  Read the full skill file from /workspace/skills/<dir>/SKILL.md before proceeding.',
+        '---',
+        '',
+        indexContent,
+      ].join('\n'),
+    );
   }
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Mount full skills directory read-only so agents can read individual
+  // SKILL.md files on demand (referenced by the skill index)
+  if (fs.existsSync(skillsSrc)) {
+    mounts.push({
+      hostPath: skillsSrc,
+      containerPath: '/workspace/skills',
+      readonly: true,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
