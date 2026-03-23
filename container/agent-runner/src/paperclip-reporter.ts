@@ -76,7 +76,7 @@ try {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: comment }),
+      body: JSON.stringify({ body: comment }),
     },
   );
 
