@@ -525,7 +525,13 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 5000,
       status: 'success',
-      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
+      result: {
+        exitCode: 0,
+        stdout: 'ok',
+        stderr: null,
+        durationMs: 5000,
+        completedAt: '2024-01-01T00:00:00.000Z',
+      },
       error: null,
     });
     logTaskRun({
@@ -533,7 +539,13 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 6000,
       status: 'success',
-      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
+      result: {
+        exitCode: 0,
+        stdout: 'ok',
+        stderr: null,
+        durationMs: 5000,
+        completedAt: '2024-01-01T00:00:00.000Z',
+      },
       error: null,
     });
 
@@ -568,7 +580,13 @@ describe('getTaskHealthSummary', () => {
       run_at: oldDate,
       duration_ms: 5000,
       status: 'success',
-      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
+      result: {
+        exitCode: 0,
+        stdout: 'ok',
+        stderr: null,
+        durationMs: 5000,
+        completedAt: '2024-01-01T00:00:00.000Z',
+      },
       error: null,
     });
 
@@ -582,7 +600,13 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 400000,
       status: 'success',
-      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
+      result: {
+        exitCode: 0,
+        stdout: 'ok',
+        stderr: null,
+        durationMs: 5000,
+        completedAt: '2024-01-01T00:00:00.000Z',
+      },
       error: null,
     });
 
@@ -598,7 +622,13 @@ describe('getTaskHealthSummary', () => {
       run_at: new Date().toISOString(),
       duration_ms: 5000,
       status: 'success',
-      result: { exitCode: 0, stdout: 'ok', stderr: null, durationMs: 5000, completedAt: '2024-01-01T00:00:00.000Z' },
+      result: {
+        exitCode: 0,
+        stdout: 'ok',
+        stderr: null,
+        durationMs: 5000,
+        completedAt: '2024-01-01T00:00:00.000Z',
+      },
       error: null,
     });
 
@@ -611,7 +641,9 @@ describe('getTaskHealthSummary', () => {
 
 describe('parseTaskRunResult', () => {
   it('returns null for null values', () => {
-    expect(parseTaskRunResult({ result_json: null, result_legacy: null })).toBeNull();
+    expect(
+      parseTaskRunResult({ result_json: null, result_legacy: null }),
+    ).toBeNull();
   });
 
   it('returns null for undefined values', () => {

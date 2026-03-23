@@ -399,9 +399,7 @@ describe('agency-hq-dispatcher', () => {
         }),
       );
       // PUT in-progress fails
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({}, false, 500),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}, false, 500));
 
       const deps = makeMockDeps();
       await dispatchReadyTasks(deps);
@@ -462,9 +460,7 @@ describe('agency-hq-dispatcher', () => {
         }),
       );
       // PUT in-progress fails again
-      fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({}, false, 500),
-      );
+      fetchMock.mockResolvedValueOnce(mockFetchResponse({}, false, 500));
 
       const deps = makeMockDeps();
       await dispatchReadyTasks(deps);
@@ -545,7 +541,10 @@ describe('agency-hq-dispatcher', () => {
       const callback = enqueueTask.mock.calls[0][2] as () => Promise<void>;
       // GET task for context merge
       fetchMock.mockResolvedValueOnce(
-        mockFetchResponse({ success: true, data: { id: 't-recover', context: {} } }),
+        mockFetchResponse({
+          success: true,
+          data: { id: 't-recover', context: {} },
+        }),
       );
       // PUT result
       fetchMock.mockResolvedValueOnce(mockFetchResponse({}));

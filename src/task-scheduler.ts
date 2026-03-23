@@ -269,6 +269,9 @@ export async function runScheduledTask(
 export function startSchedulerLoop(deps: SchedulerDependencies): void {
   logger.info('SQLite polling loop started for locally-scheduled tasks');
 
+  let consecutiveErrors = 0;
+  const MAX_SCHEDULER_BACKOFF_MS = 5 * 60_000; // 5 minutes
+
   const poll = () => {
     try {
       const dueTasks = getDueTasks();
@@ -278,8 +281,19 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           await runScheduledTask(task, deps);
         });
       }
+      consecutiveErrors = 0;
     } catch (err) {
-      logger.error({ err }, 'Error in SQLite scheduler polling loop');
+      consecutiveErrors++;
+      const backoffMs = Math.min(
+        SCHEDULER_POLL_INTERVAL * Math.pow(2, consecutiveErrors),
+        MAX_SCHEDULER_BACKOFF_MS,
+      );
+      logger.error(
+        { err, consecutiveErrors, nextPollMs: backoffMs },
+        'Error in SQLite scheduler polling loop',
+      );
+      setTimeout(poll, backoffMs);
+      return;
     }
     setTimeout(poll, SCHEDULER_POLL_INTERVAL);
   };

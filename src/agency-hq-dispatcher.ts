@@ -1,7 +1,4 @@
-import {
-  DISPATCH_LOOP_INTERVAL,
-  STALL_DETECTOR_INTERVAL,
-} from './config.js';
+import { DISPATCH_LOOP_INTERVAL, STALL_DETECTOR_INTERVAL } from './config.js';
 import {
   dispatchReadyTasks,
   dispatchRetryCount,
@@ -10,10 +7,7 @@ import {
   findCeoJid,
   buildPrompt,
 } from './dispatch-loop.js';
-import {
-  detectStalledTasks,
-  dispatchTime,
-} from './stall-detector.js';
+import { detectStalledTasks, dispatchTime } from './stall-detector.js';
 import { logger } from './logger.js';
 import type { SchedulerDependencies } from './task-scheduler.js';
 

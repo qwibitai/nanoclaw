@@ -82,12 +82,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  // Advance cursor in-memory so the piping path in startMessageLoop won't
+  // re-fetch these messages. DON'T persist yet — if the process crashes
+  // before the agent finishes, the on-disk cursor stays at the old value
+  // and recoverPendingMessages() will re-discover these messages on restart.
   const previousCursor = state.lastAgentTimestamp[chatJid] || '';
   state.lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
 
   log.info({ messageCount: missedMessages.length }, 'Processing messages');
 
@@ -161,6 +162,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       log.warn(
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      saveState(); // Persist the advanced cursor — output was delivered
       return true;
     }
     // Roll back cursor so retries can re-process these messages
@@ -170,6 +172,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // Persist the cursor now that processing succeeded
+  saveState();
   return true;
 }
 

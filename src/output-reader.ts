@@ -82,10 +82,7 @@ export function pollOutput(
         while (
           (startIdx = state.parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
         ) {
-          const endIdx = state.parseBuffer.indexOf(
-            OUTPUT_END_MARKER,
-            startIdx,
-          );
+          const endIdx = state.parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
           if (endIdx === -1) break;
 
           const jsonStr = state.parseBuffer

@@ -12,6 +12,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const MAX_BACKOFF_MS = 5 * 60_000; // 5 minutes
 
 interface GroupState {
   active: boolean;
@@ -266,7 +267,10 @@ export class GroupQueue {
       return;
     }
 
-    const delayMs = BASE_RETRY_MS * Math.pow(2, state.retryCount - 1);
+    const delayMs = Math.min(
+      BASE_RETRY_MS * Math.pow(2, state.retryCount - 1),
+      MAX_BACKOFF_MS,
+    );
     logger.info(
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',

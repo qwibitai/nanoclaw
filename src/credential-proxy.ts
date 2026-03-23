@@ -111,7 +111,12 @@ export function startCredentialProxy(
               } as RequestOptions,
               (upRes) => {
                 res.writeHead(upRes.statusCode!, upRes.headers);
-                upRes.pipe(res);
+                upRes.pipe(res).on('error', (err) => {
+                  logger.error(
+                    { err, url: req.url },
+                    'Credential proxy response pipe error',
+                  );
+                });
               },
             );
 
@@ -164,6 +169,7 @@ function forwardRequest(
   body: Buffer,
   secrets: Record<string, string>,
 ): void {
+  if (res.headersSent) return; // Guard against double-write from race with .then() path
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
@@ -206,7 +212,12 @@ function forwardRequest(
     } as RequestOptions,
     (upRes) => {
       res.writeHead(upRes.statusCode!, upRes.headers);
-      upRes.pipe(res);
+      upRes.pipe(res).on('error', (err) => {
+        logger.error(
+          { err, url: req.url },
+          'Credential proxy response pipe error',
+        );
+      });
     },
   );
 

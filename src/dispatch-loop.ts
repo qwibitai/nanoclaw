@@ -198,7 +198,14 @@ export async function dispatchReadyTasks(
         continue;
       }
 
-      const dispatched = await dispatchTask(task, target.jid, target.folder, deps, isStopping, log);
+      const dispatched = await dispatchTask(
+        task,
+        target.jid,
+        target.folder,
+        deps,
+        isStopping,
+        log,
+      );
 
       // On failure, apply exponential backoff before the next retry:
       //   Failure 1 (retries now 1) → skip 1 tick
@@ -206,7 +213,8 @@ export async function dispatchReadyTasks(
       //   Failure 3+ will be caught by the retries >= 3 check on the next tick
       if (!dispatched) {
         const currentRetries = dispatchRetryCount.get(task.id) ?? 0;
-        const skipTicks = currentRetries === 1 ? 1 : currentRetries === 2 ? 3 : 0;
+        const skipTicks =
+          currentRetries === 1 ? 1 : currentRetries === 2 ? 3 : 0;
         if (skipTicks > 0) {
           dispatchSkipTicks.set(task.id, skipTicks);
           log.info(
@@ -239,7 +247,10 @@ async function dispatchTask(
   const count = (dispatchRetryCount.get(task.id) ?? 0) + 1;
   dispatchRetryCount.set(task.id, count);
 
-  log.info({ taskId: task.id, attempt: count, targetFolder }, 'Dispatching ready task');
+  log.info(
+    { taskId: task.id, attempt: count, targetFolder },
+    'Dispatching ready task',
+  );
 
   // Mark in-progress in Agency HQ before enqueuing
   try {

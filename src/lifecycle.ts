@@ -50,10 +50,7 @@ import {
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import {
-  startUptimeMonitor,
-  stopUptimeMonitor,
-} from './uptime-monitor.js';
+import { startUptimeMonitor, stopUptimeMonitor } from './uptime-monitor.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { connectWithBackoff, shouldSkipChannel } from './circuit-breaker.js';
