@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# Outlook CLI — wraps Microsoft Graph API
+# Requires OUTLOOK_ACCESS_TOKEN to be set in the container environment.
+# If you get 401 errors, run: npx tsx scripts/outlook-auth.ts
+
+set -euo pipefail
+
+BASE="https://graph.microsoft.com/v1.0"
+TOKEN="${OUTLOOK_ACCESS_TOKEN:-}"
+
+if [ -z "$TOKEN" ]; then
+  echo '{"error":"OUTLOOK_ACCESS_TOKEN not set. Run: npx tsx scripts/outlook-auth.ts on the host."}' >&2
+  exit 1
+fi
+
+_get() {
+  curl -sf \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json" \
+    "${BASE}${1}"
+}
+
+_post() {
+  curl -sf -X POST \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -d "${2}" \
+    "${BASE}${1}"
+}
+
+_patch() {
+  curl -sf -X PATCH \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -d "${2}" \
+    "${BASE}${1}"
+}
+
+_delete() {
+  curl -sf -X DELETE \
+    -H "Authorization: Bearer $TOKEN" \
+    "${BASE}${1}" && echo '{"status":"deleted"}'
+}
+
+CMD="${1:-}"
+shift || true
+
+case "$CMD" in
+
+  # ── Email ──────────────────────────────────────────────────────────────
+
+  emails)
+    COUNT="${1:-20}"
+    _get "/me/mailFolders/inbox/messages?\$top=${COUNT}&\$orderby=receivedDateTime+desc&\$select=id,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview"
+    ;;
+
+  email)
+    ID="${1:?Usage: outlook email <message_id>}"
+    _get "/me/messages/${ID}?\$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,isRead,hasAttachments"
+    ;;
+
+  search-emails)
+    QUERY="${1:?Usage: outlook search-emails <query>}"
+    _get "/me/messages?\$search=\"${QUERY}\"&\$top=20&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview"
+    ;;
+
+  folders)
+    _get "/me/mailFolders?\$select=id,displayName,totalItemCount,unreadItemCount"
+    ;;
+
+  folder-emails)
+    FOLDER="${1:?Usage: outlook folder-emails <folder_id> [count]}"
+    COUNT="${2:-20}"
+    _get "/me/mailFolders/${FOLDER}/messages?\$top=${COUNT}&\$orderby=receivedDateTime+desc&\$select=id,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview"
+    ;;
+
+  send)
+    TO="${1:?Usage: outlook send <to_email> <subject> <body>}"
+    SUBJECT="${2:?}"
+    BODY_TEXT="${3:?}"
+    PAYLOAD=$(python3 -c "
+import json,sys
+to,subject,body=sys.argv[1],sys.argv[2],sys.argv[3]
+print(json.dumps({'message':{'subject':subject,'body':{'contentType':'Text','content':body},'toRecipients':[{'emailAddress':{'address':to}}]}}))
+" "$TO" "$SUBJECT" "$BODY_TEXT")
+    _post "/me/sendMail" "$PAYLOAD"
+    echo '{"status":"sent"}'
+    ;;
+
+  reply)
+    ID="${1:?Usage: outlook reply <message_id> <body>}"
+    BODY_TEXT="${2:?}"
+    PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'comment':sys.argv[1]}))" "$BODY_TEXT")
+    _post "/me/messages/${ID}/reply" "$PAYLOAD"
+    echo '{"status":"replied"}'
+    ;;
+
+  reply-all)
+    ID="${1:?Usage: outlook reply-all <message_id> <body>}"
+    BODY_TEXT="${2:?}"
+    PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'comment':sys.argv[1]}))" "$BODY_TEXT")
+    _post "/me/messages/${ID}/replyAll" "$PAYLOAD"
+    echo '{"status":"replied-all"}'
+    ;;
+
+  forward)
+    ID="${1:?Usage: outlook forward <message_id> <to_email> [comment]}"
+    TO="${2:?}"
+    COMMENT="${3:-}"
+    PAYLOAD=$(python3 -c "
+import json,sys
+to,comment=sys.argv[1],sys.argv[2]
+data={'toRecipients':[{'emailAddress':{'address':to}}]}
+if comment: data['comment']=comment
+print(json.dumps(data))
+" "$TO" "$COMMENT")
+    _post "/me/messages/${ID}/forward" "$PAYLOAD"
+    echo '{"status":"forwarded"}'
+    ;;
+
+  mark-read)
+    ID="${1:?Usage: outlook mark-read <message_id>}"
+    _patch "/me/messages/${ID}" '{"isRead":true}'
+    ;;
+
+  # ── Calendar ───────────────────────────────────────────────────────────
+
+  calendar)
+    DAYS="${1:-7}"
+    START=$(python3 -c "from datetime import datetime,timezone,timedelta; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+    END=$(python3 -c "from datetime import datetime,timezone,timedelta; d=int('${DAYS}'); print((datetime.now(timezone.utc)+timedelta(days=d)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+    _get "/me/calendarView?startDateTime=${START}&endDateTime=${END}&\$orderby=start/dateTime&\$select=id,subject,start,end,location,bodyPreview,organizer,isAllDay,isCancelled,attendees&\$top=50"
+    ;;
+
+  calendar-range)
+    START="${1:?Usage: outlook calendar-range <start_iso> <end_iso>}"
+    END="${2:?}"
+    _get "/me/calendarView?startDateTime=${START}&endDateTime=${END}&\$orderby=start/dateTime&\$select=id,subject,start,end,location,bodyPreview,organizer,isAllDay,isCancelled,attendees&\$top=100"
+    ;;
+
+  event)
+    ID="${1:?Usage: outlook event <event_id>}"
+    _get "/me/events/${ID}"
+    ;;
+
+  create-event)
+    SUBJECT="${1:?Usage: outlook create-event <subject> <start_iso> <end_iso> [location] [body]}"
+    START="${2:?}"
+    END="${3:?}"
+    LOCATION="${4:-}"
+    BODY_TEXT="${5:-}"
+    PAYLOAD=$(python3 -c "
+import json,sys
+subject,start,end,loc,body=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4],sys.argv[5]
+event={'subject':subject,'start':{'dateTime':start,'timeZone':'UTC'},'end':{'dateTime':end,'timeZone':'UTC'}}
+if loc: event['location']={'displayName':loc}
+if body: event['body']={'contentType':'Text','content':body}
+print(json.dumps(event))
+" "$SUBJECT" "$START" "$END" "$LOCATION" "$BODY_TEXT")
+    _post "/me/events" "$PAYLOAD"
+    ;;
+
+  update-event)
+    ID="${1:?Usage: outlook update-event <event_id> <json_patch>}"
+    PATCH="${2:?}"
+    _patch "/me/events/${ID}" "$PATCH"
+    ;;
+
+  delete-event)
+    ID="${1:?Usage: outlook delete-event <event_id>}"
+    _delete "/me/events/${ID}"
+    ;;
+
+  calendars)
+    _get "/me/calendars?\$select=id,name,isDefaultCalendar,canEdit"
+    ;;
+
+  # ── Me ─────────────────────────────────────────────────────────────────
+
+  me)
+    _get "/me?\$select=displayName,mail,userPrincipalName,jobTitle,department"
+    ;;
+
+  *)
+    cat >&2 <<'EOF'
+Usage: outlook <command> [args]
+
+Email:
+  emails [count]                          List inbox (default 20)
+  email <id>                              Get full email by ID
+  search-emails <query>                   Search emails
+  folders                                 List mail folders
+  folder-emails <folder_id> [count]       Emails from a specific folder
+  send <to> <subject> <body>              Send email
+  reply <message_id> <body>               Reply to email
+  reply-all <message_id> <body>           Reply all
+  forward <message_id> <to> [comment]     Forward email
+  mark-read <message_id>                  Mark as read
+
+Calendar:
+  calendar [days]                         Upcoming events (default 7 days)
+  calendar-range <start_iso> <end_iso>    Events in a date range
+  event <id>                              Get event details
+  calendars                               List calendars
+  create-event <subject> <start_iso> <end_iso> [location] [body]
+  update-event <event_id> <json_patch>    PATCH an event
+  delete-event <event_id>                 Delete an event
+
+Account:
+  me                                      Current user info
+
+Dates use ISO 8601 format: 2026-03-20T14:00:00Z
+EOF
+    exit 1
+    ;;
+esac

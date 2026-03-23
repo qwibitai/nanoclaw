@@ -26,8 +26,10 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { getOutlookAccessToken } from './outlook-token.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -163,6 +165,22 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount tool scripts from container/skills/ onto PATH so agents can call them directly
+  const skillBins: Array<{ skill: string; bin: string }> = [
+    { skill: 'basecamp', bin: 'basecamp' },
+    { skill: 'outlook', bin: 'outlook' },
+  ];
+  for (const { skill, bin } of skillBins) {
+    const hostBin = path.join(process.cwd(), 'container', 'skills', skill, bin);
+    if (fs.existsSync(hostBin)) {
+      mounts.push({
+        hostPath: hostBin,
+        containerPath: `/usr/local/bin/${bin}`,
+        readonly: true,
+      });
+    }
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -215,6 +233,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  extraEnv: Record<string, string> = {},
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -240,6 +259,27 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Inject Basecamp credentials so the bc skill can make API calls
+  const basecampKeys = [
+    'BASECAMP_CLIENT_ID',
+    'BASECAMP_CLIENT_SECRET',
+    'BASECAMP_ACCOUNT_ID',
+    'BASECAMP_ACCESS_TOKEN',
+    'BASECAMP_REFRESH_TOKEN',
+    'BASECAMP_TOKEN_EXPIRES_AT',
+  ];
+  const basecampEnv = readEnvFile(basecampKeys);
+  for (const key of basecampKeys) {
+    if (basecampEnv[key]) {
+      args.push('-e', `${key}=${basecampEnv[key]}`);
+    }
+  }
+
+  // Inject extra env vars (e.g. refreshed Outlook access token)
+  for (const [key, value] of Object.entries(extraEnv)) {
+    args.push('-e', `${key}=${value}`);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -278,7 +318,15 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+
+  // Refresh Outlook token before spawn so the container sees a valid token
+  const extraEnv: Record<string, string> = {};
+  const outlookToken = await getOutlookAccessToken();
+  if (outlookToken) {
+    extraEnv['OUTLOOK_ACCESS_TOKEN'] = outlookToken;
+  }
+
+  const containerArgs = buildContainerArgs(mounts, containerName, extraEnv);
 
   logger.debug(
     {
