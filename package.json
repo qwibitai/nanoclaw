@@ -30,6 +30,7 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "yaml": "^2.8.2",
+    "googleapis": "^144.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
