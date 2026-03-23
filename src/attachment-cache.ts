@@ -55,6 +55,11 @@ interface AttachmentCandidate {
   sourceField: string;
 }
 
+interface DetectedImageType {
+  mimeType: string;
+  extension: string;
+}
+
 export async function cacheAttachmentsForMessage(input: {
   groupDir: string;
   metadata?: Record<string, unknown>;
@@ -181,20 +186,22 @@ async function downloadCandidate(
     .update(url)
     .digest('hex')
     .slice(0, 12);
-  const ext = getPreferredExtension(url);
-  const fileName = `${sanitizeFilePart(messageId)}-${index + 1}-${hashed}${ext}`;
-  const fullPath = path.join(cacheDir, fileName);
-
-  if (fs.existsSync(fullPath)) {
-    const stat = fs.statSync(fullPath);
+  const existing = findExistingCachedFile(cacheDir, messageId, index, hashed);
+  if (existing) {
+    const stat = fs.statSync(existing.fullPath);
+    const detected = detectImageType(
+      fs.readFileSync(existing.fullPath),
+      existing.fileName,
+    );
     return {
       kind: 'image',
       segment_type: candidate.segmentType,
       original_url: url,
       source_field: candidate.sourceField,
-      file_name: fileName,
-      local_path: toWorkspacePath(fullPath),
-      relative_path: path.posix.join('.attachments', fileName),
+      file_name: existing.fileName,
+      local_path: toWorkspacePath(existing.fullPath),
+      relative_path: path.posix.join('.attachments', existing.fileName),
+      mime_type: detected?.mimeType,
       size_bytes: stat.size,
       cached_at: stat.mtime.toISOString(),
     };
@@ -210,7 +217,6 @@ async function downloadCandidate(
       return null;
     }
 
-    const contentType = response.headers.get('content-type') || undefined;
     const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.length > ATTACHMENT_MAX_FILE_BYTES) {
       logger.warn(
@@ -220,6 +226,15 @@ async function downloadCandidate(
       return null;
     }
 
+    const detected = detectImageType(
+      buffer,
+      undefined,
+      response.headers.get('content-type') || undefined,
+      url,
+    );
+    const ext = detected?.extension || getPreferredExtension(url);
+    const fileName = `${sanitizeFilePart(messageId)}-${index + 1}-${hashed}${ext}`;
+    const fullPath = path.join(cacheDir, fileName);
     fs.writeFileSync(fullPath, buffer);
     return {
       kind: 'image',
@@ -229,7 +244,7 @@ async function downloadCandidate(
       file_name: fileName,
       local_path: toWorkspacePath(fullPath),
       relative_path: path.posix.join('.attachments', fileName),
-      mime_type: contentType,
+      mime_type: detected?.mimeType,
       size_bytes: buffer.length,
       cached_at: new Date().toISOString(),
     };
@@ -301,6 +316,125 @@ function getPreferredExtension(url: string): string {
     // ignore parse failures and fall back
   }
   return '.img';
+}
+
+function findExistingCachedFile(
+  cacheDir: string,
+  messageId: string,
+  index: number,
+  hashed: string,
+): { fileName: string; fullPath: string } | null {
+  const prefix = `${sanitizeFilePart(messageId)}-${index + 1}-${hashed}`;
+  for (const fileName of fs.readdirSync(cacheDir)) {
+    if (!fileName.startsWith(prefix)) continue;
+    const fullPath = path.join(cacheDir, fileName);
+    if (fs.statSync(fullPath).isFile()) {
+      return { fileName, fullPath };
+    }
+  }
+  return null;
+}
+
+function detectImageType(
+  buffer: Buffer,
+  fileName?: string,
+  contentType?: string,
+  sourceUrl?: string,
+): DetectedImageType | null {
+  const normalizedHeader = normalizeImageContentType(contentType);
+  if (normalizedHeader) return normalizedHeader;
+
+  if (buffer.length >= 3) {
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return { mimeType: 'image/jpeg', extension: '.jpg' };
+    }
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return { mimeType: 'image/png', extension: '.png' };
+  }
+  if (
+    buffer.length >= 6 &&
+    buffer.subarray(0, 6).toString('ascii') === 'GIF87a'
+  ) {
+    return { mimeType: 'image/gif', extension: '.gif' };
+  }
+  if (
+    buffer.length >= 6 &&
+    buffer.subarray(0, 6).toString('ascii') === 'GIF89a'
+  ) {
+    return { mimeType: 'image/gif', extension: '.gif' };
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return { mimeType: 'image/webp', extension: '.webp' };
+  }
+  if (buffer.length >= 2 && buffer.subarray(0, 2).toString('ascii') === 'BM') {
+    return { mimeType: 'image/bmp', extension: '.bmp' };
+  }
+
+  const byName = normalizeImageContentType(
+    guessMimeTypeFromName(fileName || sourceUrl || ''),
+  );
+  if (byName) return byName;
+
+  return null;
+}
+
+function guessMimeTypeFromName(value: string): string | undefined {
+  const ext = path.extname(value).toLowerCase();
+  switch (ext) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.bmp':
+      return 'image/bmp';
+    case '.svg':
+      return 'image/svg+xml';
+    default:
+      return undefined;
+  }
+}
+
+function normalizeImageContentType(
+  value?: string,
+): DetectedImageType | null {
+  if (!value) return null;
+  const normalized = value.split(';')[0].trim().toLowerCase();
+  switch (normalized) {
+    case 'image/jpeg':
+      return { mimeType: 'image/jpeg', extension: '.jpg' };
+    case 'image/png':
+      return { mimeType: 'image/png', extension: '.png' };
+    case 'image/gif':
+      return { mimeType: 'image/gif', extension: '.gif' };
+    case 'image/webp':
+      return { mimeType: 'image/webp', extension: '.webp' };
+    case 'image/bmp':
+      return { mimeType: 'image/bmp', extension: '.bmp' };
+    case 'image/svg+xml':
+      return { mimeType: 'image/svg+xml', extension: '.svg' };
+    default:
+      return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
