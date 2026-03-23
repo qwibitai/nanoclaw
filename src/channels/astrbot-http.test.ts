@@ -216,4 +216,43 @@ describe('astrbot main CLAUDE template', () => {
 
     expect(copyFileSync).not.toHaveBeenCalled();
   });
+
+  it('restores the main CLAUDE template for existing main groups after reset', () => {
+    const cwd = '/tmp/nanoclaw-project';
+    const group = {
+      folder: 'astrbot_demo',
+      isMain: true,
+    } as any;
+    const templatePath = path.join(cwd, 'groups', 'main', 'CLAUDE.md');
+    const destPath = path.join(
+      process.cwd(),
+      'groups',
+      group.folder,
+      'CLAUDE.md',
+    );
+
+    vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    vi.spyOn(fs, 'existsSync').mockImplementation(((targetPath: fs.PathLike) =>
+      targetPath === templatePath ? true : false) as typeof fs.existsSync);
+    const copyFileSync = vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
+      return undefined;
+    });
+
+    _astrbotHttpInternals.ensureMainClaudeTemplateForGroup(group);
+
+    expect(copyFileSync).toHaveBeenCalledWith(templatePath, destPath);
+  });
+
+  it('does not restore the main CLAUDE template for non-main groups after reset', () => {
+    const copyFileSync = vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
+      return undefined;
+    });
+
+    _astrbotHttpInternals.ensureMainClaudeTemplateForGroup({
+      folder: 'astrbot_demo',
+      isMain: false,
+    } as any);
+
+    expect(copyFileSync).not.toHaveBeenCalled();
+  });
 });
