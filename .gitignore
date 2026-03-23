@@ -14,13 +14,17 @@ groups/*
 !groups/main/
 !groups/global/
 !groups/investment/
+!groups/bar/
 groups/main/*
 groups/global/*
 groups/investment/*
+groups/bar/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 !groups/investment/CLAUDE.md
 !groups/investment/MEMORY.md
+!groups/bar/CLAUDE.md
+!groups/bar/MEMORY.md
 
 # Secrets
 *.keys.json
