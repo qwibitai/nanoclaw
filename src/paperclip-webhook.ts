@@ -83,7 +83,9 @@ export function startPaperclipWebhookServer(
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       // Respond immediately — processing is fire and forget
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}');
+      res
+        .writeHead(200, { 'Content-Type': 'application/json' })
+        .end('{"ok":true}');
 
       (async () => {
         let body: HeartbeatPayload;
@@ -131,11 +133,8 @@ export function startPaperclipWebhookServer(
         const issueId =
           (issue.issueId as string | undefined) ?? context?.issueId ?? '';
         const title =
-          (issue.title as string | undefined) ??
-          context?.title ??
-          '(no title)';
-        const body2 =
-          (issue.body as string | undefined) ?? context?.body ?? '';
+          (issue.title as string | undefined) ?? context?.title ?? '(no title)';
+        const body2 = (issue.body as string | undefined) ?? context?.body ?? '';
         const rawLabels = (issue.labels ?? context?.labels ?? []) as string[];
         const labels = rawLabels.join(', ');
 
@@ -148,7 +147,10 @@ export function startPaperclipWebhookServer(
           '',
           `To post a comment back: node /app/dist/paperclip-reporter.js ${runId} "<comment>"`,
         ];
-        const taskText = lines.filter((l) => l !== null).join('\n').trim();
+        const taskText = lines
+          .filter((l) => l !== null)
+          .join('\n')
+          .trim();
 
         const now = new Date().toISOString();
         deps.storeMessage({
@@ -163,7 +165,10 @@ export function startPaperclipWebhookServer(
         });
 
         deps.enqueueGroup(chatJid);
-        logger.info({ runId, issueId, chatJid }, 'Paperclip task routed to group');
+        logger.info(
+          { runId, issueId, chatJid },
+          'Paperclip task routed to group',
+        );
       })();
     });
   });

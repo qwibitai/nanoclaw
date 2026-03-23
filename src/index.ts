@@ -569,8 +569,14 @@ async function main(): Promise<void> {
   );
 
   // Start Paperclip webhook server if configured
-  if (process.env.PAPERCLIP_WEBHOOK_SECRET || process.env.PAPERCLIP_GROUP_FOLDER) {
-    const paperclipPort = parseInt(process.env.PAPERCLIP_WEBHOOK_PORT ?? '3102', 10);
+  if (
+    process.env.PAPERCLIP_WEBHOOK_SECRET ||
+    process.env.PAPERCLIP_GROUP_FOLDER
+  ) {
+    const paperclipPort = parseInt(
+      process.env.PAPERCLIP_WEBHOOK_PORT ?? '3102',
+      10,
+    );
     startPaperclipWebhookServer(paperclipPort, {
       storeMessage,
       enqueueGroup: (jid) => queue.enqueueMessageCheck(jid),
