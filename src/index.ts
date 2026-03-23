@@ -193,9 +193,11 @@ async function processGroupMessages(
     chat_jid: m.chat_jid,
   }));
 
-  // For non-main groups, check if trigger is required and present
+  // For non-main groups, check if trigger is required and present.
+  // Thread messages (ctx-* threadId) skip this — they're already in a bot thread.
   const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-  if (needsTrigger) {
+  const isThreadContext = threadId !== undefined && threadId.startsWith('ctx-');
+  if (needsTrigger && !isThreadContext) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
