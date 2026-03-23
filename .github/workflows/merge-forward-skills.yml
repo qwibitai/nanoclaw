@@ -127,7 +127,8 @@ jobs:
               repo: context.repo.repo,
               title: `Merge-forward failed for ${failed.length} skill branch(es) after ${sha}`,
               body,
-              labels: ['skill-maintenance']
+              labels: ['skill-maintenance'],
+              assignees: ['copilot']
             });
 
       - name: Notify channel forks

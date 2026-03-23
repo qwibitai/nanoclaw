@@ -6,7 +6,7 @@ on:
     types: [upstream-main-updated]
   # Fallback: run on a schedule in case dispatch isn't configured
   schedule:
-    - cron: '0 */6 * * *'  # every 6 hours
+    - cron: '0 */12 * * *'  # every 6 hours
   # Also run when fork's main is pushed directly
   push:
     branches: [main]
@@ -180,7 +180,8 @@ jobs:
                 'git push',
                 '```',
               ].join('\n'),
-              labels: ['upstream-sync']
+              labels: ['upstream-sync'],
+              assignees: ['copilot']
             });
 
       - name: Open issue for failed skill merges
@@ -210,5 +211,6 @@ jobs:
               repo: context.repo.repo,
               title: `Merge-forward failed for ${failed.length} skill branch(es)`,
               body,
-              labels: ['skill-maintenance']
+              labels: ['skill-maintenance'],
+              assignees: ['copilot']
             });
