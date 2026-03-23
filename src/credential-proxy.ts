@@ -45,22 +45,31 @@ export function startCredentialProxy(
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {
+    const PROXY_TIMEOUT_MS = 30000;
+    // Only forward these headers to the upstream API — prevents header injection
+    const ALLOWED_HEADERS = new Set([
+      'content-type',
+      'accept',
+      'x-api-key',
+      'authorization',
+      'anthropic-version',
+      'anthropic-beta',
+    ]);
+
     const server = createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
-        const headers: Record<string, string | number | string[] | undefined> =
-          {
-            ...(req.headers as Record<string, string>),
-            host: upstreamUrl.host,
-            'content-length': body.length,
-          };
 
-        // Strip hop-by-hop headers that must not be forwarded by proxies
-        delete headers['connection'];
-        delete headers['keep-alive'];
-        delete headers['transfer-encoding'];
+        // Build headers from an explicit allowlist (prevents header injection)
+        const headers: Record<string, string | number | string[] | undefined> =
+          { host: upstreamUrl.host, 'content-length': body.length };
+        for (const [key, val] of Object.entries(req.headers)) {
+          if (ALLOWED_HEADERS.has(key.toLowerCase()) && val !== undefined) {
+            headers[key.toLowerCase()] = val as string | string[];
+          }
+        }
 
         if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
@@ -86,12 +95,22 @@ export function startCredentialProxy(
             path: req.url,
             method: req.method,
             headers,
+            timeout: PROXY_TIMEOUT_MS,
           } as RequestOptions,
           (upRes) => {
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
           },
         );
+
+        upstream.on('timeout', () => {
+          logger.error({ url: req.url }, 'Credential proxy upstream timeout');
+          upstream.destroy();
+          if (!res.headersSent) {
+            res.writeHead(504);
+            res.end('Gateway Timeout');
+          }
+        });
 
         upstream.on('error', (err) => {
           logger.error(

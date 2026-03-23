@@ -53,6 +53,13 @@ describe('escapeXml', () => {
   it('handles empty string', () => {
     expect(escapeXml('')).toBe('');
   });
+
+  it('handles non-string input safely (runtime guard)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(escapeXml(null as any)).toBe('');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(escapeXml(undefined as any)).toBe('');
+  });
 });
 
 // --- formatMessages ---

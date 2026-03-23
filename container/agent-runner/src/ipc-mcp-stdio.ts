@@ -20,6 +20,13 @@ const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
+// Rate-limit: prevent a single container session from flooding the task queue
+const MAX_TASKS_PER_SESSION = 100;
+let tasksCreatedThisSession = 0;
+
+// Valid JID pattern: alphanumerics, dots, hyphens, @, colons (covers WA, Telegram, Discord)
+const JID_PATTERN = /^[\w.@:\-]+$/;
+
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
@@ -127,9 +134,28 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       }
     }
 
+    // Rate limit: prevent task flooding
+    if (tasksCreatedThisSession >= MAX_TASKS_PER_SESSION) {
+      return {
+        content: [{ type: 'text' as const, text: `Task limit reached (${MAX_TASKS_PER_SESSION} tasks per session). Cannot create more tasks.` }],
+        isError: true,
+      };
+    }
+
+    // Validate target_group_jid format if provided
+    if (args.target_group_jid !== undefined) {
+      if (!JID_PATTERN.test(args.target_group_jid)) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid target_group_jid format: "${args.target_group_jid}"` }],
+          isError: true,
+        };
+      }
+    }
+
     // Non-main groups can only schedule for themselves
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
+    tasksCreatedThisSession++;
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const data = {

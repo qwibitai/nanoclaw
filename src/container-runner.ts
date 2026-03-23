@@ -347,6 +347,14 @@ export async function runContainerAgent(
       // Stream-parse for output markers
       if (onOutput) {
         parseBuffer += chunk;
+        // Guard against unbounded growth if OUTPUT_END never arrives
+        if (parseBuffer.length > CONTAINER_MAX_OUTPUT_SIZE * 2) {
+          logger.warn(
+            { group: group.name, size: parseBuffer.length },
+            'parseBuffer exceeded limit — clearing to prevent memory leak',
+          );
+          parseBuffer = '';
+        }
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
