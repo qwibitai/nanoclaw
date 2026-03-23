@@ -25,6 +25,10 @@ groups/bar/*
 !groups/investment/MEMORY.md
 !groups/bar/CLAUDE.md
 !groups/bar/MEMORY.md
+!groups/tech/
+groups/tech/*
+!groups/tech/CLAUDE.md
+!groups/tech/MEMORY.md
 
 # Secrets
 *.keys.json
