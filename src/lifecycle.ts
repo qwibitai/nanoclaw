@@ -179,16 +179,23 @@ export async function initApp(): Promise<void> {
   const skillServer = await initSkillRegistry();
 
   // Graceful shutdown handlers
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info({ signal }, 'Shutdown signal received');
-    shutdownSkillRegistry();
-    proxyServer.close();
-    if (skillServer) skillServer.close();
-    stopUptimeMonitor();
-    await stopAgencyHqSubsystems();
-    stopHostExecWatcher();
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
+    try {
+      shutdownSkillRegistry();
+      proxyServer.close();
+      if (skillServer) skillServer.close();
+      stopUptimeMonitor();
+      await stopAgencyHqSubsystems();
+      stopHostExecWatcher();
+      await queue.shutdown(10000);
+      for (const ch of channels) await ch.disconnect();
+    } catch (err) {
+      logger.error({ err }, 'Error during shutdown cleanup');
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
