@@ -89,6 +89,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: send a native image with caption.
   sendImage?(jid: string, filePath: string, caption: string): Promise<void>;
+  // Optional: react to a message with an emoji.
+  sendReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.

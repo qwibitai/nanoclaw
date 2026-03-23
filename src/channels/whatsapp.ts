@@ -285,6 +285,41 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+
+    // Receive reactions from other users
+    this.sock.ev.on('messages.reaction', (reactions) => {
+      for (const { key, reaction } of reactions) {
+        try {
+          const rawJid = key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
+
+          const emoji = reaction.text || '';
+          // Empty text means reaction was removed — skip
+          if (!emoji) continue;
+
+          const chatJid = rawJid; // reactions don't use LID JIDs
+          const groups = this.opts.registeredGroups();
+          if (!groups[chatJid]) continue;
+
+          const senderName = reaction.key?.participant?.split('@')[0] || 'unknown';
+          const reactedMsgId = reaction.key?.id || '';
+          const timestamp = new Date().toISOString();
+
+          this.opts.onMessage(chatJid, {
+            id: `reaction-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            chat_jid: chatJid,
+            sender: reaction.key?.participant || '',
+            sender_name: senderName,
+            content: `[Reaction: ${emoji} on message ${reactedMsgId} by ${senderName}]`,
+            timestamp,
+            is_from_me: false,
+            is_bot_message: false,
+          });
+        } catch (err) {
+          logger.error({ err }, 'Error processing reaction');
+        }
+      }
+    });
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -348,6 +383,25 @@ export class WhatsAppChannel implements Channel {
   async disconnect(): Promise<void> {
     this.connected = false;
     this.sock?.end(undefined);
+  }
+
+  async sendReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ jid, messageId, emoji }, 'WA disconnected, reaction dropped');
+      return;
+    }
+    try {
+      await this.sock.sendMessage(jid, {
+        react: { text: emoji, key: { remoteJid: jid, id: messageId } },
+      });
+      logger.info({ jid, messageId, emoji }, 'Reaction sent');
+    } catch (err) {
+      logger.warn({ jid, messageId, emoji, err }, 'Failed to send reaction');
+    }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
