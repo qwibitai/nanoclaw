@@ -1,7 +1,6 @@
-# Review Stats
-
-- Total entries: 0
-- Total reviewed: 0
-- Total pruned: 0
-- Current streak: 0
-- Last review date: never
+## Review Stats
+- total_entries: 66
+- total_reviewed: 0
+- total_pruned: 0
+- streak: 0
+- last_review: never
