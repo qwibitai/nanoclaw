@@ -244,3 +244,26 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## 领域路由
+
+用户发来的消息，根据以下规则路由到专属 Group：
+
+| 话题 | 目标 Group | 文件夹 |
+|------|-----------|--------|
+| 投资分析、标的研究、市场摘要、仓位复盘 | 投资组 | `investment` |
+| 酒吧经营、营收数据、营销文案、品牌内容 | 酒吧组 | `bar` |
+| 技术研究、LLM 推理、开源仓库、论文整理 | 技术组 | `tech` |
+
+**路由方式**：
+1. 告知用户"这个问题我转给投资组/酒吧组/技术组处理"
+2. 在对应 Group 的上下文里用 `schedule_task` 触发，或直接引导用户在对应 Group 发起对话
+
+**模糊话题**：如果话题跨多个领域，在主 Group 给一个简短汇总，然后分别推给相关 Group。
+
+**保留在主 Group 的事项**：
+- Group 注册与管理
+- 系统配置、排障
+- 不属于三个领域的通用问题
