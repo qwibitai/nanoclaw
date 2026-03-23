@@ -89,7 +89,21 @@ function renderMessageMetadata(
 
   const reply = takeObject(remainder, 'reply');
   if (reply) {
-    lines.push(renderStructuredBlock('reply', reply));
+    const { replyTarget, replyContextChain } = splitReplyMetadata(reply);
+    lines.push(renderStructuredBlock('reply_target', replyTarget));
+    if (replyContextChain.length > 0) {
+      const renderedContextChain = replyContextChain
+        .map((context, index) =>
+          renderStructuredBlock('reply_context', {
+            depth: index + 1,
+            ...context,
+          }),
+        )
+        .join('\n');
+      lines.push(
+        `<reply_context_chain>\n${renderedContextChain}\n</reply_context_chain>`,
+      );
+    }
   }
 
   const attachments = takeArray(remainder, 'attachments');
@@ -160,6 +174,209 @@ function renderStructuredBlock(
   }
   lines.push(`</${tagName}>`);
   return lines.join('\n');
+}
+
+function splitReplyMetadata(reply: Record<string, unknown>): {
+  replyTarget: Record<string, unknown>;
+  replyContextChain: Record<string, unknown>[];
+} {
+  const replyTarget = cloneRecord(reply);
+  const replyContextChain = collectNestedReplyContexts(replyTarget.raw);
+
+  if (isRecord(replyTarget.raw)) {
+    const sanitizedRaw = stripNestedReplyReferences(replyTarget.raw);
+    if (Object.keys(sanitizedRaw).length > 0) {
+      replyTarget.raw = sanitizedRaw;
+    } else {
+      delete replyTarget.raw;
+    }
+  }
+
+  return { replyTarget, replyContextChain };
+}
+
+function collectNestedReplyContexts(value: unknown): Record<string, unknown>[] {
+  const contexts: Record<string, unknown>[] = [];
+  collectNestedReplyContextsInto(value, contexts);
+  return contexts;
+}
+
+function collectNestedReplyContextsInto(
+  value: unknown,
+  contexts: Record<string, unknown>[],
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectNestedReplyContextsInto(item, contexts);
+    }
+    return;
+  }
+  if (!isRecord(value)) return;
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (isReplyLikeKey(key) && isRecord(nested)) {
+      const normalized = normalizeReplyContext(nested);
+      if (normalized) contexts.push(normalized);
+      collectNestedReplyContextsInto(nested, contexts);
+      continue;
+    }
+    if (key === 'segments' && Array.isArray(nested)) {
+      for (const segment of nested) {
+        if (!isRecord(segment)) continue;
+        if (isReplyLikeSegment(segment)) {
+          const normalized = normalizeReplyContext(segment);
+          if (normalized) contexts.push(normalized);
+        }
+        collectNestedReplyContextsInto(segment, contexts);
+      }
+      continue;
+    }
+    collectNestedReplyContextsInto(nested, contexts);
+  }
+}
+
+function stripNestedReplyReferences(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (isReplyLikeKey(key)) continue;
+
+    if (key === 'segments' && Array.isArray(nested)) {
+      const keptSegments = nested.flatMap((segment) => {
+        if (!isRecord(segment) || isReplyLikeSegment(segment)) return [];
+        return [stripNestedStructuredValue(segment)];
+      });
+      if (keptSegments.length > 0) sanitized[key] = keptSegments;
+      continue;
+    }
+
+    if (isRecord(nested)) {
+      const stripped = stripNestedReplyReferences(nested);
+      if (Object.keys(stripped).length > 0) sanitized[key] = stripped;
+      continue;
+    }
+
+    if (Array.isArray(nested)) {
+      const keptItems = nested.flatMap((item) => {
+        if (isRecord(item)) {
+          const stripped = stripNestedReplyReferences(item);
+          return Object.keys(stripped).length > 0 ? [stripped] : [];
+        }
+        return [item];
+      });
+      if (keptItems.length > 0) sanitized[key] = keptItems;
+      continue;
+    }
+
+    if (nested !== null && nested !== undefined) {
+      sanitized[key] = nested;
+    }
+  }
+
+  return sanitized;
+}
+
+function stripNestedStructuredValue(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return stripNestedReplyReferences(value);
+}
+
+function normalizeReplyContext(
+  value: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const context: Record<string, unknown> = {};
+
+  const messageId = pickString(value, [
+    'message_id',
+    'id',
+    'message_seq',
+    'msg_id',
+  ]);
+  if (messageId) context.message_id = messageId;
+
+  const senderId = pickString(value, ['sender_id', 'user_id']);
+  if (senderId) context.sender_id = senderId;
+
+  const senderName = pickString(value, [
+    'sender_name',
+    'nickname',
+    'name',
+    'card',
+  ]);
+  if (senderName) context.sender_name = senderName;
+
+  const timestamp = pickPrimitive(value, ['timestamp', 'time', 'time_seconds']);
+  if (timestamp !== undefined) context.timestamp = timestamp;
+
+  const content = takeNestedText(value);
+  if (content) context.content = content;
+
+  return Object.keys(context).length > 0 ? context : null;
+}
+
+function pickString(
+  value: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate) return candidate;
+  }
+  return undefined;
+}
+
+function pickPrimitive(
+  value: Record<string, unknown>,
+  keys: string[],
+): string | number | boolean | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (
+      typeof candidate === 'string' ||
+      typeof candidate === 'number' ||
+      typeof candidate === 'boolean'
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  const clone: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    if (Array.isArray(nested)) {
+      clone[key] = nested.map((item) =>
+        isRecord(item) ? cloneRecord(item) : item,
+      );
+      continue;
+    }
+    clone[key] = isRecord(nested) ? cloneRecord(nested) : nested;
+  }
+  return clone;
+}
+
+function isReplyLikeKey(key: string): boolean {
+  return [
+    'reply',
+    'quote',
+    'reply_to',
+    'quoted_message',
+    'reply_message',
+    'message_reference',
+    'source_message',
+  ].includes(key);
+}
+
+function isReplyLikeSegment(segment: Record<string, unknown>): boolean {
+  const type = segment.type;
+  return (
+    typeof type === 'string' &&
+    ['reply', 'quote', 'reference', 'source'].includes(type)
+  );
 }
 
 function renderSelfClosingTag(
