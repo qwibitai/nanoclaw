@@ -93,6 +93,24 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add model column to scheduled_tasks (per-task model override)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add enable_agent_teams column to scheduled_tasks
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN enable_agent_teams INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -368,8 +386,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at, model, enable_agent_teams)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -382,6 +400,8 @@ export function createTask(
     task.next_run,
     task.status,
     task.created_at,
+    task.model || null,
+    task.enable_agent_teams || 0,
   );
 }
 

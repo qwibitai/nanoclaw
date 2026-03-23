@@ -30,6 +30,9 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  model?: string; // Claude model alias: 'sonnet' (default), 'opus', 'haiku', or full model ID
+  enableAgentTeams?: boolean; // Enable agent teams/swarms (default: false)
+  idleTimeout?: number; // Per-group idle timeout in ms (default: IDLE_TIMEOUT from config)
 }
 
 export interface RegisteredGroup {
@@ -66,6 +69,8 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
+  model?: string; // Per-task model override (e.g., 'opus' for research tasks)
+  enable_agent_teams?: number; // 1 to enable agent teams for this task
 }
 
 export interface TaskRunLog {

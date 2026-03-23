@@ -42,6 +42,8 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string; // Claude model alias or full ID (default: 'sonnet')
+  enableAgentTeams?: boolean; // Enable agent teams/swarms (default: false)
 }
 
 export interface ContainerOutput {
@@ -123,29 +125,25 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Write settings.json on every container start so env vars reflect current config
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+  const settingsEnv: Record<string, string> = {
+    // Load CLAUDE.md from additional mounted directories
+    // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Enable Claude's memory feature (persists user preferences between sessions)
+    // https://code.claude.com/docs/en/memory#manage-auto-memory
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
+  // Only enable agent teams when explicitly requested via container env
+  // (ENABLE_AGENT_TEAMS=1 is set by buildContainerArgs when input.enableAgentTeams is true)
+  if (group.containerConfig?.enableAgentTeams) {
+    settingsEnv.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
   }
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify({ env: settingsEnv }, null, 2) + '\n',
+  );
 
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
@@ -216,11 +214,22 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  input?: ContainerInput,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass model selection to the container (default: sonnet)
+  if (input?.model) {
+    args.push('-e', `MODEL=${input.model}`);
+  }
+
+  // Only enable agent teams when explicitly requested
+  if (input?.enableAgentTeams) {
+    args.push('-e', 'ENABLE_AGENT_TEAMS=1');
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -305,7 +314,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, input);
 
   logger.debug(
     {

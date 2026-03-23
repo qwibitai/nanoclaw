@@ -169,6 +169,10 @@ async function runTask(
   };
 
   try {
+    // Per-task model and teams override, falling back to group config
+    const taskModel = task.model || group.containerConfig?.model;
+    const taskEnableTeams = task.enable_agent_teams === 1 || group.containerConfig?.enableAgentTeams;
+
     const output = await runContainerAgent(
       group,
       {
@@ -179,6 +183,8 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        model: taskModel,
+        enableAgentTeams: taskEnableTeams,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

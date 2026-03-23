@@ -389,9 +389,31 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Build allowed tools list — agent teams only when explicitly enabled
+  const allowedTools = [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    'mcp__nanoclaw__*',
+    'mcp__mcpvault__*',
+    'mcp__content-registry__*'
+  ];
+  if (process.env.ENABLE_AGENT_TEAMS === '1') {
+    allowedTools.push('TeamCreate', 'TeamDelete', 'SendMessage');
+    log('Agent teams enabled');
+  }
+
+  // Model selection: read from MODEL env var (default: sonnet)
+  const model = process.env.MODEL || 'claude-sonnet-4-6';
+  log(`Using model: ${model}`);
+
   for await (const message of query({
     prompt: stream,
     options: {
+      model,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -399,18 +421,7 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-        'mcp__mcpvault__*',
-        'mcp__content-registry__*'
-      ],
+      allowedTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
