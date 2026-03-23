@@ -301,7 +301,8 @@ export class WhatsAppChannel implements Channel {
           const groups = this.opts.registeredGroups();
           if (!groups[chatJid]) continue;
 
-          const senderName = reaction.key?.participant?.split('@')[0] || 'unknown';
+          const senderName =
+            reaction.key?.participant?.split('@')[0] || 'unknown';
           const reactedMsgId = reaction.key?.id || '';
           const timestamp = new Date().toISOString();
 
@@ -391,7 +392,10 @@ export class WhatsAppChannel implements Channel {
     emoji: string,
   ): Promise<void> {
     if (!this.connected) {
-      logger.warn({ jid, messageId, emoji }, 'WA disconnected, reaction dropped');
+      logger.warn(
+        { jid, messageId, emoji },
+        'WA disconnected, reaction dropped',
+      );
       return;
     }
     try {
