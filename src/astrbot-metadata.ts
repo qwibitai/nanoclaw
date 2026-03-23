@@ -15,5 +15,7 @@ export function isContextOnlyMessage(msg: NewMessage): boolean {
 
 export function isAstrBotWakeMessage(msg: NewMessage): boolean {
   const metadata = getMetadata(msg);
-  return metadata?.source === 'astrbot' && metadata?.is_at_or_wake_command === true;
+  return (
+    metadata?.source === 'astrbot' && metadata?.is_at_or_wake_command === true
+  );
 }
