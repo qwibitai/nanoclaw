@@ -6,6 +6,7 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getLatestMessageTimestamp,
   getMessagesSince,
   getNewMessages,
   getTaskById,
@@ -224,6 +225,11 @@ describe('getMessagesSince', () => {
       'Andy',
     );
     expect(msgs).toHaveLength(0);
+  });
+
+  it('returns the latest stored timestamp for a chat', () => {
+    const latest = getLatestMessageTimestamp('group@g.us');
+    expect(latest).toBe('2024-01-01T00:00:04.000Z');
   });
 });
 
