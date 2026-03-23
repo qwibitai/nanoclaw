@@ -116,32 +116,68 @@ function cloneRecord(
 function extractAttachmentCandidates(
   metadata: Record<string, unknown>,
 ): AttachmentCandidate[] {
-  const segments = Array.isArray(metadata.segments) ? metadata.segments : [];
   const results: AttachmentCandidate[] = [];
   const seen = new Set<string>();
 
-  for (const rawSegment of segments) {
-    if (!isRecord(rawSegment)) continue;
-    const segmentType = stringOr(rawSegment.type, 'unknown').toLowerCase();
-    if (!isImageLikeSegment(segmentType, rawSegment)) continue;
-
-    for (const field of ['url', 'image', 'file', 'path', 'data']) {
-      const rawValue = rawSegment[field];
-      const url = extractUrl(rawValue);
-      if (!url) continue;
-      const dedupeKey = `${segmentType}:${field}:${url}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      results.push({
-        kind: 'image',
-        segmentType,
-        url,
-        sourceField: field,
-      });
-    }
-  }
+  visitCandidateSource(metadata.segments, results, seen);
+  visitCandidateSource(metadata.reply, results, seen);
 
   return results;
+}
+
+function visitCandidateSource(
+  value: unknown,
+  results: AttachmentCandidate[],
+  seen: Set<string>,
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      visitCandidateSource(item, results, seen);
+    }
+    return;
+  }
+  if (!isRecord(value)) return;
+
+  maybeCollectImageCandidate(value, results, seen);
+
+  for (const key of [
+    'segments',
+    'segment',
+    'reply',
+    'raw',
+    'message',
+    'messages',
+    'message_chain',
+    'raw_message',
+  ]) {
+    if (key in value) {
+      visitCandidateSource(value[key], results, seen);
+    }
+  }
+}
+
+function maybeCollectImageCandidate(
+  segment: Record<string, unknown>,
+  results: AttachmentCandidate[],
+  seen: Set<string>,
+): void {
+  const segmentType = stringOr(segment.type, 'unknown').toLowerCase();
+  if (!isImageLikeSegment(segmentType, segment)) return;
+
+  for (const field of ['url', 'image', 'file', 'path', 'data']) {
+    const rawValue = segment[field];
+    const url = extractUrl(rawValue);
+    if (!url) continue;
+    const dedupeKey = `${segmentType}:${field}:${url}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    results.push({
+      kind: 'image',
+      segmentType,
+      url,
+      sourceField: field,
+    });
+  }
 }
 
 function isImageLikeSegment(
