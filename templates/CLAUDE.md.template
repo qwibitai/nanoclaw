@@ -1,0 +1,30 @@
+# [Paper Title] — Agent Instructions
+
+## What This Is
+[One paragraph describing the paper, its argument, and its contribution.]
+
+## How To Build
+- Compile: `make` or `latexmk -pdf main` (from draft/ for research-project layout)
+- Clean: `make clean` or `latexmk -C`
+- Watch: `make watch` or `latexmk -pdf -pvc main`
+
+## Project Structure
+- main.tex — document root, imports sections
+- sections/ — one .tex file per major section
+- figures/ — all figures (PDF, PNG)
+- tables/ — standalone table files if needed
+- refs.bib — Better BibTeX auto-export (do not edit manually)
+
+## Writing Conventions
+- [Describe citation style: \cite, \citet, \citep, etc.]
+- [Describe any formatting conventions]
+- [List key terms or definitions]
+
+## Current Analytical Goals
+See vault Projects/[name]/PROJECT.md for current focus and next steps.
+
+## Constraints
+- Never edit refs.bib directly — it's auto-exported by Better BibTeX
+- Never modify raw data files
+- Use [CITE: author year description] for papers not yet in the .bib
+- Commit to agent/* branches only, never to main

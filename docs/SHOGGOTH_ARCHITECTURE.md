@@ -105,13 +105,13 @@ Full skill files are maintained separately. Summary of each:
 
 **Idea Capture** — When the researcher shares a substantive thought, capture it as a lightweight note in Ideas/ (title + 2-4 sentences + optional project links, no boilerplate frontmatter). After capturing, offer to escalate to a research investigation. Never escalate without confirmation.
 
-**Daily Briefing** — Scheduled weekday mornings. Read `_meta/` and all project STATUS.md files. Write a briefing to Briefings/ with urgent items, active project status, recent captures, and a suggested focus. Be specific, not vague.
+**Daily Briefing** — Scheduled weekday mornings. Read `_meta/` and all project `PROJECT.md` files. Write a briefing to Briefings/ with urgent items, active project status, recent captures, and a suggested focus. Be specific, not vague.
 
 **Research Investigation (Swarm)** — On explicit confirmation only. Spawn sub-agents for literature search, conceptual framing, and methodology. Synthesize into a single Ideas/ note with literature landscape, theoretical framing, possible approaches, and next steps.
 
 **Literature Monitoring** — Scheduled weekly. Search Semantic Scholar and OpenAlex for recent papers matching researcher interests. Index in the content registry. Write a tiered reading list (Must-Read / Should-Read / Skim) to Literature/.
 
-**Project Status** — When asked about a specific project. Read STATUS.md and CONTEXT.md, search vault for recent mentions, summarize. Update STATUS.md if the researcher provides new information (append, never overwrite).
+**Project Status** — When asked about a specific project. Read the project's `PROJECT.md`, search vault for recent mentions, summarize. Update the Status section of `PROJECT.md` if the researcher provides new information (append, never overwrite).
 
 ### 2. Researcher Context (`_meta/`)
 
@@ -121,7 +121,7 @@ Three markdown files giving agents persistent memory of who the researcher is:
 - `top-of-mind.md` — Current priorities, updated frequently
 - `preferences.md` — Communication style, formatting, accumulated corrections
 
-Per-project context in `Projects/<n>/CONTEXT.md`. Agents read `_meta/` but never overwrite it.
+Per-project context lives in `Projects/<n>/PROJECT.md` (single file per project — see Vault Structure below). Agents read `_meta/` but never overwrite it.
 
 ### 3. MCP-Vault (installed package)
 
@@ -167,23 +167,66 @@ vault/
 │   ├── researcher-profile.md
 │   ├── top-of-mind.md
 │   └── preferences.md
-├── Briefings/
-├── Projects/
+├── briefings/
+├── projects/
 │   ├── <project>/
-│   │   ├── STATUS.md
-│   │   └── CONTEXT.md
+│   │   ├── PROJECT.md          ← single source of truth
+│   │   └── (working docs)      ← optional, ad-hoc
 │   └── _registry.md
-├── Ideas/
-├── Literature/
+├── ideas/
+├── literature/
 │   ├── Weekly-YYYY-WNN.md
 │   ├── Queue.md
 │   └── Notes/
-├── Tasks/
-├── Career/
-└── Archive/
+├── tasks/
+├── career/
+└── archive/
 ```
 
-**Conventions:** Agent-written files in dedicated directories. Shared workspaces (Projects/, Ideas/) for both human and agent. `_meta/` is researcher-written only. Idea notes are minimal. The filesystem provides dates and status — don't duplicate in frontmatter.
+**Conventions:** Agent-written files in dedicated directories. Shared workspaces (projects/, ideas/) for both human and agent. `_meta/` is researcher-written only. Idea notes are minimal. The filesystem provides dates and status — don't duplicate in frontmatter.
+
+### Project file structure (flat, single-file)
+
+Each project has one authoritative file: `PROJECT.md`. This replaces the previous multi-file layout (STATUS.md, CONTEXT.md, decision-log.md, project-overview.md). The goal is to reduce cognitive load — when you open a project folder, there's one file to read, not four.
+
+**PROJECT.md template:**
+
+```markdown
+---
+phase: <current phase>
+priority: <high | medium | low>
+last_updated: <YYYY-MM-DD>
+---
+
+# <Project Name>
+
+<1-3 sentence description of what the project is and why it matters.>
+
+## Status
+
+<Current focus, blockers, next steps. This is the section the agent reads
+for briefings and updates when the researcher provides new information.
+Keep it current — this is the fast-changing part of the file.>
+
+## Context
+
+<Collaborators, technical stack, key repos/files, important links.
+Stable reference information. Changes rarely.>
+
+## Key Decisions
+
+<Lightweight decision log, newest first. Only log decisions that
+actually matter — not every small choice. Agent appends new entries
+at the top when decisions are made in conversation.>
+```
+
+Additional working documents (analysis notes, draft outlines, etc.) can live alongside PROJECT.md in the project folder. The agent treats PROJECT.md as the canonical source; everything else is supplementary.
+
+**Agent behavior with PROJECT.md:**
+- Daily briefing reads the Status section of every project's PROJECT.md
+- When the researcher provides status updates, the agent updates the Status section (append, never overwrite the whole file)
+- Key Decisions entries are appended at the top of that section
+- The agent never touches the Context section unless the researcher explicitly asks
 
 ---
 

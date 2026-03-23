@@ -59,15 +59,11 @@ describe('ContentRegistry', () => {
     it('creates extension and table', async () => {
       mockQuery.mockResolvedValue({ rows: [] });
       await registry.initSchema();
-      const calls = mockQuery.mock.calls.map(
-        (c: unknown[]) => c[0] as string,
+      const calls = mockQuery.mock.calls.map((c: unknown[]) => c[0] as string);
+      expect(calls.some((s: string) => s.includes('CREATE EXTENSION'))).toBe(
+        true,
       );
-      expect(
-        calls.some((s: string) => s.includes('CREATE EXTENSION')),
-      ).toBe(true);
-      expect(
-        calls.some((s: string) => s.includes('CREATE TABLE')),
-      ).toBe(true);
+      expect(calls.some((s: string) => s.includes('CREATE TABLE'))).toBe(true);
     });
   });
 
@@ -138,10 +134,7 @@ describe('ContentRegistry', () => {
         ],
       });
 
-      const results = await registry.searchRegistry(
-        'content moderation',
-        5,
-      );
+      const results = await registry.searchRegistry('content moderation', 5);
       expect(results).toHaveLength(1);
       expect(results[0]).toEqual({
         id: 1,

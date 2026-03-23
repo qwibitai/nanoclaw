@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+
+# LaTeX build artifacts
+draft/*.aux
+draft/*.bbl
+draft/*.blg
+draft/*.fdb_latexmk
+draft/*.fls
+draft/*.log
+draft/*.out
+draft/*.synctex.gz
+draft/*.toc
+draft/*.lof
+draft/*.lot
+draft/*.run.xml
+draft/*-blx.bib
+
+# Data (keep structure, not large files)
+data/*.csv
+data/*.parquet
+data/*.json.gz
+
+# OS
+.DS_Store
+
+# Editor
+*~
+\#*\#
+.#*

@@ -150,10 +150,7 @@ export class ContentRegistry {
     return result;
   }
 
-  async searchRegistry(
-    query: string,
-    limit = 10,
-  ): Promise<CatalogEntry[]> {
+  async searchRegistry(query: string, limit = 10): Promise<CatalogEntry[]> {
     const embedding = await this.embed(query);
     const res = await this.pool.query(
       `SELECT id, title, authors, venue, year, summary,
@@ -203,37 +200,33 @@ export class ContentRegistry {
 
   async importZoteroBib(bibContent: string): Promise<IndexResult> {
     const entries = bibtexParse.entries(bibContent);
-    const papers: Paper[] = entries.map(
-      (entry: Record<string, unknown>) => {
-        const fields = entry as {
-          key: string;
-          TITLE?: string;
-          AUTHOR?: string;
-          JOURNAL?: string;
-          BOOKTITLE?: string;
-          YEAR?: string;
-          ABSTRACT?: string;
-          DOI?: string;
-          URL?: string;
-        };
-        const authors = (fields.AUTHOR || '')
-          .split(' and ')
-          .map((a: string) => a.trim())
-          .filter(Boolean);
-        return {
-          source: 'zotero' as const,
-          sourceId: `zotero:${fields.key}`,
-          title: fields.TITLE || '',
-          authors,
-          venue: fields.JOURNAL || fields.BOOKTITLE || '',
-          year: parseInt(fields.YEAR || '0', 10),
-          abstract: fields.ABSTRACT || '',
-          url: fields.DOI
-            ? `https://doi.org/${fields.DOI}`
-            : fields.URL || '',
-        };
-      },
-    );
+    const papers: Paper[] = entries.map((entry: Record<string, unknown>) => {
+      const fields = entry as {
+        key: string;
+        TITLE?: string;
+        AUTHOR?: string;
+        JOURNAL?: string;
+        BOOKTITLE?: string;
+        YEAR?: string;
+        ABSTRACT?: string;
+        DOI?: string;
+        URL?: string;
+      };
+      const authors = (fields.AUTHOR || '')
+        .split(' and ')
+        .map((a: string) => a.trim())
+        .filter(Boolean);
+      return {
+        source: 'zotero' as const,
+        sourceId: `zotero:${fields.key}`,
+        title: fields.TITLE || '',
+        authors,
+        venue: fields.JOURNAL || fields.BOOKTITLE || '',
+        year: parseInt(fields.YEAR || '0', 10),
+        abstract: fields.ABSTRACT || '',
+        url: fields.DOI ? `https://doi.org/${fields.DOI}` : fields.URL || '',
+      };
+    });
 
     return this.indexPapers(papers.filter((p) => p.title));
   }

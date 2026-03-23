@@ -53,6 +53,21 @@ The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
 - `update_task` — update an existing task
 - `register_group` — register a new chat/group (main only)
 
+The MCP-Vault server exposes these tools (via `mcp__mcpvault__*` prefix):
+- `read_note` — read a note from the Obsidian vault
+- `write_note` — write/create a note in the vault
+- `patch_note` — patch/update part of a note
+- `read_multiple_notes` — batch read multiple notes
+- `search_notes` — full-text search across the vault
+- `list_directory` — list vault directory contents
+- `get_vault_stats` — vault activity and statistics
+- `update_frontmatter` — modify YAML frontmatter on a note
+
+The Content Registry MCP server exposes these tools (via `mcp__content-registry__*` prefix):
+- `search_papers` — search academic literature (Semantic Scholar, OpenAlex)
+- `get_paper_details` — fetch full metadata for a paper
+- `add_to_queue` — add a paper to the reading queue
+
 ### 4. Container skills (Bash tools)
 
 Check for executable tools in the container:

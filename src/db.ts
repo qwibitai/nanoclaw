@@ -95,9 +95,7 @@ function createSchema(database: Database.Database): void {
 
   // Add model column to scheduled_tasks (per-task model override)
   try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`,
-    );
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
   } catch {
     /* column already exists */
   }
