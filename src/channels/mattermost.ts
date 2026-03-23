@@ -2,18 +2,7 @@ import { TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnChatMetadata,
-  OnInboundMessage,
-  RegisteredGroup,
-} from '../types.js';
-
-export interface MattermostChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+import { Channel } from '../types.js';
 
 interface MattermostPost {
   id: string;
@@ -48,14 +37,14 @@ interface MattermostChannelInfo {
 export class MattermostChannel implements Channel {
   name = 'mattermost';
 
-  private opts: MattermostChannelOpts;
+  private opts: ChannelOpts;
   private baseUrl: string;
   private botToken: string;
   private lastPostTimes: Map<string, number> = new Map();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private botUserId: string | null = null;
 
-  constructor(baseUrl: string, botToken: string, opts: MattermostChannelOpts) {
+  constructor(baseUrl: string, botToken: string, opts: ChannelOpts) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.botToken = botToken;
     this.opts = opts;
