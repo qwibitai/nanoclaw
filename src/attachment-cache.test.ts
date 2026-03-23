@@ -162,4 +162,53 @@ describe('cacheAttachmentsForMessage', () => {
     );
     expect(result.synthesizedContent).toBe('[User sent 1 image attachment]');
   });
+
+  it('finds quoted images nested in arbitrary reply metadata branches', async () => {
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
+    tempDirs.push(groupDir);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'image/png' : null),
+        },
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+      }),
+    );
+
+    const result = await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-5',
+      content: 'please inspect the quote',
+      metadata: {
+        source: 'astrbot',
+        reply: {
+          message_id: 'quoted-2',
+          raw: {
+            quoted_message: {
+              elements: [
+                {
+                  type: 'image',
+                  data: {
+                    src: 'https://example.com/nested-quote.png',
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const attachments = result.metadata?.attachments as
+      | Array<Record<string, unknown>>
+      | undefined;
+    expect(attachments).toHaveLength(1);
+    expect(attachments?.[0].original_url).toBe(
+      'https://example.com/nested-quote.png',
+    );
+    expect(result.synthesizedContent).toBeUndefined();
+  });
 });
