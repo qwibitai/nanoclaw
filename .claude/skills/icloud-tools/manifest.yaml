@@ -1,0 +1,27 @@
+skill: icloud-tools
+version: 1.1.0
+description: "iCloud productivity tools via CalDAV/CardDAV/IMAP/SMTP"
+core_version: 1.2.4
+adds:
+  - container/icloud-tools/package.json
+  - container/icloud-tools/tsconfig.json
+  - container/icloud-tools/src/server.ts
+  - container/icloud-tools/src/auth.ts
+  - container/icloud-tools/src/types.ts
+  - container/icloud-tools/src/modules/calendar.ts
+  - container/icloud-tools/src/modules/contacts.ts
+  - container/icloud-tools/src/modules/mail.ts
+  - container/icloud-tools/src/modules/notes.ts
+modifies:
+  - container/Dockerfile
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - ICLOUD_EMAIL
+    - ICLOUD_APP_PASSWORD
+    - ICLOUD_SENDER_EMAIL
+conflicts: []
+depends: []
+test: "npx vitest run --config .claude/skills/icloud-tools/vitest.config.ts .claude/skills/icloud-tools/tests/icloud-tools.test.ts"
