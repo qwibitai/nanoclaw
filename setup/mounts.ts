@@ -10,21 +10,23 @@ import { logger } from '../src/logger.js';
 import { isRoot } from './platform.js';
 import { emitStatus } from './status.js';
 
-function parseArgs(args: string[]): { empty: boolean; json: string } {
+function parseArgs(args: string[]): { empty: boolean; json: string; force: boolean } {
   let empty = false;
   let json = '';
+  let force = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--empty') empty = true;
+    if (args[i] === '--force') force = true;
     if (args[i] === '--json' && args[i + 1]) {
       json = args[i + 1];
       i++;
     }
   }
-  return { empty, json };
+  return { empty, json, force };
 }
 
 export async function run(args: string[]): Promise<void> {
-  const { empty, json } = parseArgs(args);
+  const { empty, json, force } = parseArgs(args);
   const homeDir = os.homedir();
   const configDir = path.join(homeDir, '.config', 'nanoclaw');
   const configFile = path.join(configDir, 'mount-allowlist.json');
@@ -37,7 +39,7 @@ export async function run(args: string[]): Promise<void> {
 
   fs.mkdirSync(configDir, { recursive: true });
 
-  if (fs.existsSync(configFile)) {
+  if (fs.existsSync(configFile) && !force) {
     logger.info(
       { configFile },
       'Mount allowlist already exists — skipping (use --force to overwrite)',
