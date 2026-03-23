@@ -48,6 +48,31 @@ if [ -d "$NANOCLAW_DIR/.git" ]; then
                 echo "$TIMESTAMP | FAIL | nanoclaw | Build failed: ${BUILD_OUT:0:200}" >> "$LOG"
             fi
         fi
+
+  # --- atlas-host-executor restart (if host/ or infra/ changed) ---
+  HOST_CHANGED=$(git diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- host/ infra/ 2>/dev/null)
+  if [ -n "$HOST_CHANGED" ]; then
+    echo "$TIMESTAMP | RESTART | atlas-host-executor | host/ or infra/ changed, restarting" >> "$LOG"
+    sudo /usr/bin/systemctl restart atlas-host-executor.service
+    sleep 3
+    if systemctl is-active --quiet atlas-host-executor.service; then
+      echo "$TIMESTAMP | RESTART | atlas-host-executor | service restarted successfully" >> "$LOG"
+    else
+      echo "$TIMESTAMP | FAIL | atlas-host-executor | service failed to start after restart" >> "$LOG"
+    fi
+  fi
+  # --- atlas-mission-control restart (if infra/atlas-mission-control.service changed) ---
+  MC_CHANGED=$(git diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- infra/atlas-mission-control.service 2>/dev/null)
+  if [ -n "$MC_CHANGED" ]; then
+    echo "$TIMESTAMP | RESTART | atlas-mission-control | infra changed, restarting" >> "$LOG"
+    sudo /usr/bin/systemctl restart atlas-mission-control.service
+    sleep 3
+    if systemctl is-active --quiet atlas-mission-control.service; then
+      echo "$TIMESTAMP | RESTART | atlas-mission-control | service restarted successfully" >> "$LOG"
+    else
+      echo "$TIMESTAMP | FAIL | atlas-mission-control | service failed to start after restart" >> "$LOG"
+    fi
+  fi
     fi
 fi
 
@@ -117,31 +142,3 @@ if [ -d /home/atlas/projects/crownscape ]; then
     shopt -u nullglob
 fi
 
-
-# --- atlas-host-executor restart (if host/ or infra/ changed) ---
-HOST_CHANGED=$(git -C "$NANOCLAW_DIR" diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- host/ infra/ 2>/dev/null)
-if [ -n "$HOST_CHANGED" ]; then
-  log "host/ or infra/ changed — restarting atlas-host-executor.service"
-  sudo /usr/bin/systemctl restart atlas-host-executor.service
-  sleep 3
-  if systemctl is-active --quiet atlas-host-executor.service; then
-    log "atlas-host-executor restart: OK"
-  else
-    log "atlas-host-executor restart: FAILED"
-  fi
-else
-  log "host/ and infra/ unchanged — skipping atlas-host-executor restart"
-fi
-
-# --- atlas-mission-control restart (if infra/atlas-mission-control.service changed) ---
-MC_CHANGED=$(git -C "$NANOCLAW_DIR" diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- infra/atlas-mission-control.service 2>/dev/null)
-if [ -n "$MC_CHANGED" ]; then
-  log "infra/atlas-mission-control.service changed — restarting atlas-mission-control.service"
-  sudo /usr/bin/systemctl restart atlas-mission-control.service
-  sleep 3
-  if systemctl is-active --quiet atlas-mission-control.service; then
-    log "atlas-mission-control restart: OK"
-  else
-    log "atlas-mission-control restart: FAILED"
-  fi
-fi
