@@ -6,10 +6,10 @@
 #
 # Exit codes 0/1/2 from tirith are valid verdicts — JSON is returned as-is.
 # Only fail-open on actual spawn/install errors.
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-bash "$SCRIPT_DIR/install.sh" 2>/dev/null
+bash "$SCRIPT_DIR/install.sh" 2>/dev/null || true
 
 TIRITH="/home/node/.claude/bin/tirith"
 if [ ! -x "$TIRITH" ]; then
