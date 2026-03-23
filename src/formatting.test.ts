@@ -123,6 +123,38 @@ describe('formatMessages', () => {
     expect(result).toContain('PM');
     expect(result).toContain('<context timezone="America/New_York" />');
   });
+
+  it('renders structured metadata for astrbot messages', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          metadata: {
+            source: 'astrbot',
+            platform_name: 'aiocqhttp',
+            group_name: 'Test Group',
+            is_group: true,
+            reply: {
+              message_id: 'abc123',
+              sender_name: 'Bob',
+              content: 'quoted text',
+            },
+            segments: [
+              { type: 'reply', id: 'abc123' },
+              { type: 'text', text: 'hello' },
+            ],
+          },
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('<content>hello</content>');
+    expect(result).toContain('<source name="astrbot" />');
+    expect(result).toContain(
+      '<conversation group_name="Test Group" is_group="true" />',
+    );
+    expect(result).toContain('<reply message_id="abc123" sender_name="Bob">');
+    expect(result).toContain('<segment type="reply" id="abc123" />');
+  });
 });
 
 // --- TRIGGER_PATTERN ---
