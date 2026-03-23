@@ -104,11 +104,14 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 export interface ContainerInput {
   prompt: string;
+  images?: { data: string; mediaType: string; name?: string }[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  priority?: 'interactive' | 'goal' | 'scheduled';
+  goalTimeoutMs?: number;
   assistantName?: string;
   threadId?: string;
   debugQuery?: {
@@ -357,6 +360,8 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   isScheduledTask?: boolean,
+  priority?: string,
+  goalTimeoutMs?: number,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -418,6 +423,12 @@ function buildContainerArgs(
   if (isScheduledTask) {
     args.push('-e', 'NANOCLAW_SCHEDULED_TASK=1');
   }
+  if (priority) {
+    args.push('-e', `CONTAINER_PRIORITY=${priority}`);
+  }
+  if (goalTimeoutMs) {
+    args.push('-e', `GOAL_TIMEOUT_MS=${goalTimeoutMs}`);
+  }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -472,6 +483,8 @@ export async function runContainerAgent(
     mounts,
     containerName,
     input.isScheduledTask,
+    input.priority,
+    input.goalTimeoutMs,
   );
 
   logger.debug(
@@ -610,7 +623,10 @@ export async function runContainerAgent(
 
     let timedOut = false;
     let hadStreamingOutput = false;
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    const configTimeout =
+      input.goalTimeoutMs ||
+      group.containerConfig?.timeout ||
+      CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);

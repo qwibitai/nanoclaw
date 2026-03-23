@@ -53,6 +53,12 @@ export interface IpcDeps {
     queryId: string,
     question: string,
   ) => void;
+  /** Optional: escalate a container to goal priority */
+  onEscalateToGoal?: (groupFolder: string, threadId: string) => void;
+  /** Optional: container confirmed it has paused */
+  onContainerPaused?: (groupFolder: string, threadId: string) => void;
+  /** Optional: container confirmed it has resumed */
+  onContainerResumed?: (groupFolder: string, threadId: string) => void;
 }
 
 type ExternalIpcHandler = (
@@ -433,6 +439,22 @@ async function processQueueFile(
           isMain,
           deps,
         );
+      break;
+    case 'escalate_to_goal':
+      if (deps.onEscalateToGoal && data.groupFolder) {
+        deps.onEscalateToGoal(sourceGroup, threadId || 'default');
+        logger.info({ sourceGroup, threadId }, 'goal.escalated via IPC');
+      }
+      break;
+    case 'paused':
+      if (deps.onContainerPaused) {
+        deps.onContainerPaused(sourceGroup, threadId || 'default');
+      }
+      break;
+    case 'resumed':
+      if (deps.onContainerResumed) {
+        deps.onContainerResumed(sourceGroup, threadId || 'default');
+      }
       break;
     default: {
       const externalHandler = externalIpcHandlers.get(data.type as string);
