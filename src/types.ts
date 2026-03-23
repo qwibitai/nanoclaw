@@ -98,7 +98,11 @@ export interface Channel {
   /** Channel-specific formatting rules, injected into prompts at runtime. */
   formattingInstructions?: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    threadContextId?: number,
+  ): Promise<void>;
   /** Always sends to the main channel, never a thread. Use for scheduled tasks and system announcements.
    *  Falls back to sendMessage for channels that don't implement thread routing.
    *  Returns the platform message ID if available (used for thread context tracking). */
