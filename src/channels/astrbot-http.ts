@@ -31,7 +31,7 @@ interface AstrBotInboundPayload {
 }
 
 interface AstrBotControlPayload {
-  action: 'set_main' | 'status' | 'reset_session';
+  action: 'set_main' | 'status' | 'reset_session' | 'diag';
   chat_id: string;
   umo?: string;
   group_name?: string;
@@ -130,6 +130,77 @@ function makeOutboundHeaders(token?: string): Record<string, string> {
     headers.Authorization = `Bearer ${token}`;
   }
   return headers;
+}
+
+function getMainGroupEntry(
+  groups: Record<string, RegisteredGroup>,
+): [string, RegisteredGroup] | undefined {
+  return Object.entries(groups).find(([, group]) => group.isMain);
+}
+
+function getModelDiagnostics(): Record<string, unknown> {
+  const env = readEnvFile([
+    'NANOCLAW_MODEL',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
+  const model = process.env.NANOCLAW_MODEL || env.NANOCLAW_MODEL || null;
+  const anthropicBaseUrl =
+    process.env.ANTHROPIC_BASE_URL ||
+    env.ANTHROPIC_BASE_URL ||
+    'https://api.anthropic.com';
+  const hasApiKey = !!(process.env.ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY);
+  const hasOauthToken = !!(
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    process.env.ANTHROPIC_AUTH_TOKEN ||
+    env.CLAUDE_CODE_OAUTH_TOKEN ||
+    env.ANTHROPIC_AUTH_TOKEN
+  );
+
+  return {
+    model,
+    anthropicBaseUrl,
+    authMode: hasApiKey ? 'api-key' : 'oauth',
+    apiKeyConfigured: hasApiKey,
+    oauthConfigured: hasOauthToken,
+  };
+}
+
+function buildDiagPayload(
+  groups: Record<string, RegisteredGroup>,
+  connected: boolean,
+  config: AstrBotConfig,
+): Record<string, unknown> {
+  const mainEntry = getMainGroupEntry(groups);
+  return {
+    ok: true,
+    main: mainEntry
+      ? {
+          jid: mainEntry[0],
+          name: mainEntry[1].name,
+          folder: mainEntry[1].folder,
+          trigger: mainEntry[1].trigger,
+        }
+      : null,
+    diag: {
+      channel: {
+        connected,
+        listenHost: config.listenHost,
+        listenPort: config.listenPort,
+        tokenConfigured: !!config.token,
+      },
+      openapi: {
+        apiBase: config.apiBase,
+        apiKeyConfigured: !!config.apiKey,
+      },
+      sessions: {
+        registeredCount: Object.keys(groups).length,
+      },
+      model: getModelDiagnostics(),
+    },
+  };
 }
 
 function buildAstrBotMetadata(
@@ -264,7 +335,7 @@ class AstrBotHttpChannel implements Channel {
         const ctl = payload as AstrBotControlPayload;
         if (ctl.action === 'status') {
           const groups = this.registeredGroups();
-          const mainEntry = Object.entries(groups).find(([, g]) => g.isMain);
+          const mainEntry = getMainGroupEntry(groups);
           if (!mainEntry) {
             sendJson(res, 200, { ok: true, main: null });
             return;
@@ -296,6 +367,15 @@ class AstrBotHttpChannel implements Channel {
             return;
           }
           sendJson(res, 200, { ok: true });
+          return;
+        }
+        if (ctl.action === 'diag') {
+          const groups = this.registeredGroups();
+          sendJson(
+            res,
+            200,
+            buildDiagPayload(groups, this.connected, this.config),
+          );
           return;
         }
         if (ctl.action !== 'set_main' || typeof ctl.chat_id !== 'string') {
@@ -412,7 +492,9 @@ class AstrBotHttpChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const umo = this.umoByJid.get(jid);
-    const chatId = jid.startsWith('astrbot:') ? jid.slice('astrbot:'.length) : jid;
+    const chatId = jid.startsWith('astrbot:')
+      ? jid.slice('astrbot:'.length)
+      : jid;
     if (!chatId) {
       logger.warn({ jid }, 'AstrBot chat id missing for jid, cannot send');
       return;
@@ -445,11 +527,16 @@ class AstrBotHttpChannel implements Channel {
     }
 
     if (!umo) {
-      logger.warn({ jid }, 'AstrBot UMO missing for jid, cannot use OpenAPI fallback');
+      logger.warn(
+        { jid },
+        'AstrBot UMO missing for jid, cannot use OpenAPI fallback',
+      );
       return;
     }
     if (!this.config.apiKey) {
-      logger.warn('ASTRBOT_API_KEY not set; cannot use AstrBot OpenAPI fallback');
+      logger.warn(
+        'ASTRBOT_API_KEY not set; cannot use AstrBot OpenAPI fallback',
+      );
       return;
     }
 
@@ -499,3 +586,7 @@ registerChannel('astrbot-http', (opts) => {
     opts.defaultTrigger,
   );
 });
+
+export const _astrbotHttpInternals = {
+  buildDiagPayload,
+};
