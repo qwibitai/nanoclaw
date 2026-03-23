@@ -19,8 +19,15 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface ImageAttachment {
+  data: string;  // base64
+  mediaType: string; // e.g. "image/png"
+  name?: string;
+}
+
 interface ContainerInput {
   prompt: string;
+  images?: ImageAttachment[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
@@ -51,16 +58,23 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_INPUT_PAUSE_SENTINEL = path.join(IPC_INPUT_DIR, '_pause');
+const IPC_INPUT_RESUME_SENTINEL = path.join(IPC_INPUT_DIR, '_resume');
 const IPC_POLL_MS = 500;
+const IPC_PAUSE_POLL_MS = 5000;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -71,10 +85,22 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(text: string, images?: ImageAttachment[]): void {
+    let content: string | ContentBlock[];
+    if (images && images.length > 0) {
+      content = [
+        { type: 'text', text },
+        ...images.map((img) => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+        })),
+      ];
+    } else {
+      content = text;
+    }
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -119,6 +145,21 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+function writeIpcStatus(status: 'paused' | 'resumed'): void {
+  const queueDir = '/workspace/ipc/queue';
+  try {
+    fs.mkdirSync(queueDir, { recursive: true });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const filepath = path.join(queueDir, filename);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ type: status, timestamp: new Date().toISOString() }));
+    fs.renameSync(tempPath, filepath);
+    log(`Wrote IPC status: ${status}`);
+  } catch (err) {
+    log(`Failed to write IPC status: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
@@ -477,16 +518,53 @@ function drainIpcInput(): string[] {
 }
 
 /**
+ * Check for _pause sentinel. If found, enter pause loop.
+ * Returns true if close was requested during pause.
+ */
+async function checkAndHandlePause(): Promise<boolean> {
+  if (!fs.existsSync(IPC_INPUT_PAUSE_SENTINEL)) return false;
+
+  try { fs.unlinkSync(IPC_INPUT_PAUSE_SENTINEL); } catch { /* ignore */ }
+  log('Pause sentinel detected, entering pause mode');
+  writeIpcStatus('paused');
+
+  // Sleep loop until _resume or _close
+  while (true) {
+    await new Promise(resolve => setTimeout(resolve, IPC_PAUSE_POLL_MS));
+
+    if (shouldClose()) {
+      log('Close sentinel during pause, exiting');
+      return true;
+    }
+
+    if (fs.existsSync(IPC_INPUT_RESUME_SENTINEL)) {
+      try { fs.unlinkSync(IPC_INPUT_RESUME_SENTINEL); } catch { /* ignore */ }
+      log('Resume sentinel detected, resuming');
+      writeIpcStatus('resumed');
+      return false;
+    }
+  }
+}
+
+/**
  * Wait for a new IPC message or _close sentinel.
  * Returns the messages as a single string, or null if _close.
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
-    const poll = () => {
+    const poll = async () => {
       if (shouldClose()) {
         resolve(null);
         return;
       }
+
+      // Check for pause sentinel between turns
+      const closedDuringPause = await checkAndHandlePause();
+      if (closedDuringPause) {
+        resolve(null);
+        return;
+      }
+
       const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(messages.join('\n'));
@@ -509,11 +587,12 @@ async function runQuery(
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
+  images: ImageAttachment[] | undefined,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; leftoverMessages: string[] }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(prompt, images);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -680,6 +759,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Prevent EPIPE from crashing the process when SDK subprocess exits.
+  // The SDK spawns a CLI subprocess; if it dies mid-write, the stdin pipe
+  // emits an unhandled 'error' event that would otherwise crash Node.
+  process.stdout.on('error', () => {});
+  process.stderr.on('error', () => {});
+  process.on('uncaughtException', (err) => {
+    if ('code' in err && (err as NodeJS.ErrnoException).code === 'EPIPE') {
+      log('Caught EPIPE — SDK subprocess exited, continuing');
+      return; // Swallow EPIPE, let the query catch block handle the error
+    }
+    // Re-throw non-EPIPE errors
+    throw err;
+  });
+
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
@@ -706,24 +799,32 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  // Images are only sent with the first query, not follow-ups
+  let initialImages = containerInput.images;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       let queryResult: Awaited<ReturnType<typeof runQuery>>;
       try {
-        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, initialImages, sdkEnv, resumeAt);
       } catch (queryErr) {
         const msg = queryErr instanceof Error ? queryErr.message : String(queryErr);
-        if (msg.includes('No conversation found with session ID') && sessionId) {
-          log(`Session ${sessionId} expired — retrying with fresh session`);
+        const isStaleSession = msg.includes('No conversation found with session ID');
+        const isProcessCrash = msg.includes('exited with code') || msg.includes('EPIPE');
+        if ((isStaleSession || isProcessCrash) && sessionId) {
+          log(`Session error (${isStaleSession ? 'stale' : 'crash'}) — retrying with fresh session`);
           sessionId = undefined;
           resumeAt = undefined;
-          queryResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+          initialImages = containerInput.images; // Re-include images on retry
+          queryResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, initialImages, sdkEnv, undefined);
         } else {
           throw queryErr;
         }
       }
+
+      // Clear images after first query — don't resend on follow-ups
+      initialImages = undefined;
 
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;

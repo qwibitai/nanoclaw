@@ -453,6 +453,29 @@ server.tool(
   },
 );
 
+server.tool(
+  'escalate_to_goal',
+  `Escalate the current conversation to a long-running autonomous goal. Use this when you determine the task requires extended autonomous work (research, multi-step implementation, etc.). This:
+- Removes the idle timeout so the container runs until completion
+- Lowers priority so interactive messages from users aren't blocked
+- Signals to the host that this is a long-running task
+
+Only call this once per conversation. Do not call for quick tasks.`,
+  {},
+  async () => {
+    writeIpcFile(QUEUE_DIR, {
+      type: 'escalate_to_goal',
+      groupFolder,
+      chatJid,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [{ type: 'text' as const, text: 'Escalated to autonomous goal mode. Idle timeout removed, priority lowered.' }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
