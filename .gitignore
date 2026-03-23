@@ -13,10 +13,14 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/investment/
 groups/main/*
 groups/global/*
+groups/investment/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/investment/CLAUDE.md
+!groups/investment/MEMORY.md
 
 # Secrets
 *.keys.json
