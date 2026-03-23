@@ -48,6 +48,11 @@ interface CacheResult {
   synthesizedContent?: string;
 }
 
+interface CachePolicy {
+  ttlHours: number;
+  maxBytes: number;
+}
+
 interface AttachmentCandidate {
   kind: 'image';
   segmentType: string;
@@ -74,6 +79,7 @@ export async function cacheAttachmentsForMessage(input: {
 
   const cacheDir = path.join(input.groupDir, '.attachments');
   fs.mkdirSync(cacheDir, { recursive: true });
+  const cachePolicy = resolveCachePolicy(metadata);
 
   const attachments: CachedAttachment[] = [];
   for (const [index, candidate] of candidates.entries()) {
@@ -86,7 +92,7 @@ export async function cacheAttachmentsForMessage(input: {
     if (cached) attachments.push(cached);
   }
 
-  pruneAttachmentCache(cacheDir);
+  pruneAttachmentCache(cacheDir, cachePolicy);
 
   if (attachments.length === 0) {
     return { metadata };
@@ -111,6 +117,22 @@ function cloneRecord(
   } catch {
     return { ...value };
   }
+}
+
+function resolveCachePolicy(metadata: Record<string, unknown>): CachePolicy {
+  const defaultTtlHours = ATTACHMENT_CACHE_TTL_HOURS;
+  const defaultMaxBytes = ATTACHMENT_CACHE_MAX_BYTES;
+  const policy = isRecord(metadata.attachment_cache_policy)
+    ? metadata.attachment_cache_policy
+    : null;
+
+  const ttlHours = numberOr(policy?.ttl_hours, defaultTtlHours);
+  const maxBytes = numberOr(policy?.max_bytes, defaultMaxBytes);
+
+  return {
+    ttlHours,
+    maxBytes,
+  };
 }
 
 function extractAttachmentCandidates(
@@ -282,11 +304,11 @@ async function downloadCandidate(
   }
 }
 
-function pruneAttachmentCache(cacheDir: string): void {
+function pruneAttachmentCache(cacheDir: string, policy: CachePolicy): void {
   if (!fs.existsSync(cacheDir)) return;
 
   const now = Date.now();
-  const ttlMs = ATTACHMENT_CACHE_TTL_HOURS * 60 * 60 * 1000;
+  const ttlMs = policy.ttlHours < 0 ? -1 : policy.ttlHours * 60 * 60 * 1000;
   const entries = fs
     .readdirSync(cacheDir)
     .map((name) => {
@@ -298,7 +320,7 @@ function pruneAttachmentCache(cacheDir: string): void {
     .sort((a, b) => a.stat.mtimeMs - b.stat.mtimeMs);
 
   for (const entry of entries) {
-    if (now - entry.stat.mtimeMs <= ttlMs) continue;
+    if (ttlMs < 0 || now - entry.stat.mtimeMs <= ttlMs) continue;
     fs.rmSync(entry.fullPath, { force: true });
   }
 
@@ -314,7 +336,7 @@ function pruneAttachmentCache(cacheDir: string): void {
 
   let totalBytes = survivors.reduce((sum, entry) => sum + entry.stat.size, 0);
   for (const entry of survivors) {
-    if (totalBytes <= ATTACHMENT_CACHE_MAX_BYTES) break;
+    if (policy.maxBytes < 0 || totalBytes <= policy.maxBytes) break;
     fs.rmSync(entry.fullPath, { force: true });
     totalBytes -= entry.stat.size;
   }
@@ -463,4 +485,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringOr(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
