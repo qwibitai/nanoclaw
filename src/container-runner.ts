@@ -62,6 +62,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  input?: ContainerInput,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -135,9 +136,8 @@ function buildVolumeMounts(
     // https://code.claude.com/docs/en/memory#manage-auto-memory
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
   };
-  // Only enable agent teams when explicitly requested via container env
-  // (ENABLE_AGENT_TEAMS=1 is set by buildContainerArgs when input.enableAgentTeams is true)
-  if (group.containerConfig?.enableAgentTeams) {
+  // Only enable agent teams when explicitly requested (per-invocation or group config)
+  if (input?.enableAgentTeams || group.containerConfig?.enableAgentTeams) {
     settingsEnv.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
   }
   fs.writeFileSync(
@@ -311,7 +311,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName, input);
