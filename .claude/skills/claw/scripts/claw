@@ -167,7 +167,12 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 dbg("output sentinel found, terminating container")
                 done.set()
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        dbg("graceful stop timed out, force killing container")
+                        proc.kill()
                 except ProcessLookupError:
                     pass
                 return
@@ -197,6 +202,8 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         stdout,
         re.DOTALL,
     )
+    success = False
+
     if match:
         try:
             data = json.loads(match.group(1))
@@ -206,6 +213,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 session_id = data.get("newSessionId") or data.get("sessionId")
                 if session_id:
                     print(f"\n[session: {session_id}]", file=sys.stderr)
+                success = True
             else:
                 print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
                 sys.exit(1)
@@ -214,6 +222,9 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
     else:
         # No structured output — print raw stdout
         print(stdout)
+
+    if success:
+        return
 
     if proc.returncode not in (0, None):
         sys.exit(proc.returncode)
