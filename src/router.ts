@@ -87,6 +87,16 @@ function renderMessageMetadata(
     );
   }
 
+  const senderPermissions = takeObject(remainder, 'sender_permissions');
+  if (senderPermissions) {
+    lines.push(
+      renderSelfClosingTag(
+        'sender_permissions',
+        objectAttrs(senderPermissions),
+      ),
+    );
+  }
+
   const reply = takeObject(remainder, 'reply');
   if (reply) {
     lines.push(renderStructuredBlock('reply', reply));

@@ -133,6 +133,13 @@ describe('formatMessages', () => {
             platform_name: 'aiocqhttp',
             group_name: 'Test Group',
             is_group: true,
+            sender_permissions: {
+              astrbot_role: 'admin',
+              is_astrbot_admin: true,
+              platform_role: 'owner',
+              is_platform_owner: true,
+              is_platform_admin: true,
+            },
             reply: {
               message_id: 'abc123',
               sender_name: 'Bob',
@@ -151,6 +158,9 @@ describe('formatMessages', () => {
     expect(result).toContain('<source name="astrbot" />');
     expect(result).toContain(
       '<conversation group_name="Test Group" is_group="true" />',
+    );
+    expect(result).toContain(
+      '<sender_permissions astrbot_role="admin" is_astrbot_admin="true" platform_role="owner" is_platform_owner="true" is_platform_admin="true" />',
     );
     expect(result).toContain('<reply message_id="abc123" sender_name="Bob">');
     expect(result).toContain('<segment type="reply" id="abc123" />');
