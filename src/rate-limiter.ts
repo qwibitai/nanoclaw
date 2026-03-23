@@ -9,7 +9,14 @@
 const WINDOW_MS = 60_000; // 1 minute sliding window
 const MAX_MESSAGES = 10; // max user messages per JID per window
 
-/** Map<jid, timestamp[]> — timestamps of user messages within the window */
+/**
+ * Map<jid, timestamp[]> — timestamps of user messages within the window.
+ *
+ * Keyed by chatJid, not by individual sender. This is intentional:
+ * booking-bot customer traffic is exclusively 1:1 DMs on dedicated business
+ * numbers, so chatJid === customer JID for every booking interaction.
+ * There is no multi-sender group chat scenario in the customer-facing path.
+ */
 const windows = new Map<string, number[]>();
 
 /**
@@ -24,7 +31,10 @@ const windows = new Map<string, number[]>();
  *
  * Call AFTER filtering to real user messages (not bot/from_me).
  */
-export function isRateLimited(jid: string, messageTimestamps: number[]): boolean {
+export function isRateLimited(
+  jid: string,
+  messageTimestamps: number[],
+): boolean {
   const now = Date.now();
   const cutoff = now - WINDOW_MS;
 

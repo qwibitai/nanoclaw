@@ -653,6 +653,12 @@ function ensureContainerSystemRunning(): void {
  *
  * Folder convention: customer's phone number (e.g. "40723164661").
  * Each customer gets their own Claude session via this unique folder.
+ *
+ * Scope note: booking-bot customer traffic is always 1:1 DMs on dedicated
+ * business numbers (hasOwnNumber: true). WhatsApp group chats on the business
+ * number are staff/operator coordination — not customer-facing. This means
+ * chatJid === customer JID for all booking interactions, which is why
+ * per-chatJid rate limiting and session isolation are both correct here.
  */
 function autoRegisterCustomerDM(jid: string, sessionFolder: string): void {
   const phone = jid.split('@')[0].split(':')[0];
