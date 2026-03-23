@@ -289,7 +289,13 @@ function buildContainerArgs(
   }
 
   // AWS SES: pass credentials to container (email sending)
-  const sesEnv = readEnvFile(['SES_REGION', 'SES_KEY', 'SES_SECRET', 'SES_FROM_EMAIL', 'SES_FROM_NAME']);
+  const sesEnv = readEnvFile([
+    'SES_REGION',
+    'SES_KEY',
+    'SES_SECRET',
+    'SES_FROM_EMAIL',
+    'SES_FROM_NAME',
+  ]);
   if (sesEnv.SES_KEY) {
     args.push('-e', `SES_REGION=${sesEnv.SES_REGION || 'us-east-2'}`);
     args.push('-e', `SES_KEY=${sesEnv.SES_KEY}`);
