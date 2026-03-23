@@ -54,7 +54,7 @@ When the user asks you to respond with voice, or when a voice reply feels natura
 text-to-speech "Hola, aquí tienes tu resumen de hoy"
 ```
 
-**IMPORTANT:** Do NOT pass a second argument to text-to-speech. Always use the default voice (onyx). When generating speech, ALWAYS write the text in Mexican Spanish with natural, casual Mexican expressions.
+The voice is hardcoded to onyx. Do NOT try to change it or pass extra arguments. Do NOT call the OpenAI TTS API directly — always use this script. When generating speech, ALWAYS write the text in Mexican Spanish with natural, casual expressions.
 
 Send as a native voice note:
 ```
