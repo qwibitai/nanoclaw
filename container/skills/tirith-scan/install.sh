@@ -1,6 +1,6 @@
 #!/bin/bash
 # Auto-install tirith to the persisted container path.
-# SHA-256 checksum verified. Cosign verification when available.
+# SHA-256 checksum verified.
 set -euo pipefail
 
 TIRITH_DIR="/home/node/.claude/bin"
