@@ -27,6 +27,7 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -258,6 +259,11 @@ async function buildContainerArgs(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
     );
+  }
+
+  const envSecrets = readEnvFile(['OPENAI_API_KEY']);
+  if (envSecrets.OPENAI_API_KEY) {
+    args.push('-e', `OPENAI_API_KEY=${envSecrets.OPENAI_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution
