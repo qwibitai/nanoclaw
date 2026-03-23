@@ -219,11 +219,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // ── Rate limiting ────────────────────────────────────────────────────────────
   // Sliding window: max 10 user messages per JID per minute (in-memory, no DB).
-  // Counts the new user messages in this batch; rejects the whole batch if over limit.
+  // Pass actual message timestamps so historical backlogs (startup recovery,
+  // trigger accumulation) don't count — only messages sent in the last 60s do.
   const newUserMessages = missedMessages.filter(
     (m) => !m.is_from_me && !m.is_bot_message,
   );
-  if (isRateLimited(chatJid, newUserMessages.length)) {
+  const userMessageTimestamps = newUserMessages.map((m) =>
+    new Date(m.timestamp).getTime(),
+  );
+  if (isRateLimited(chatJid, userMessageTimestamps)) {
     logger.warn(
       { chatJid, group: group.name, count: newUserMessages.length },
       'Rate limit exceeded — dropping batch',

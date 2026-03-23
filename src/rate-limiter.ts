@@ -13,21 +13,29 @@ const MAX_MESSAGES = 10; // max user messages per JID per window
 const windows = new Map<string, number[]>();
 
 /**
- * Records `count` new messages from `jid` and returns true if the JID has
- * exceeded the rate limit.
+ * Records message timestamps for `jid` and returns true if the JID has
+ * exceeded the rate limit within the sliding window.
  *
- * Call AFTER confirming the messages are real user messages (not bot/from_me).
- * `count` lets callers record a batch of messages in one call.
+ * Accepts actual message timestamps (epoch ms) instead of a synthetic count.
+ * This prevents false-positives when processGroupMessages is called with a
+ * historical backlog (e.g. startup recovery after a restart): messages sent
+ * hours ago have timestamps outside the 60s window and are not counted.
+ * Only messages genuinely sent within the last minute accumulate toward the cap.
+ *
+ * Call AFTER filtering to real user messages (not bot/from_me).
  */
-export function isRateLimited(jid: string, count: number = 1): boolean {
+export function isRateLimited(jid: string, messageTimestamps: number[]): boolean {
   const now = Date.now();
   const cutoff = now - WINDOW_MS;
 
   // Evict timestamps outside the sliding window
   const prev = (windows.get(jid) ?? []).filter((ts) => ts > cutoff);
 
-  // Record `count` new message timestamps
-  const next = [...prev, ...Array<number>(count).fill(now)];
+  // Only count messages whose own timestamp falls within the window.
+  // Historical messages from backlogs (restart recovery, trigger accumulation)
+  // are outside the window and correctly contribute 0 to the rate limit.
+  const inWindow = messageTimestamps.filter((ts) => ts > cutoff);
+  const next = [...prev, ...inWindow];
   windows.set(jid, next);
 
   return next.length > MAX_MESSAGES;
