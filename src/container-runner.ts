@@ -58,25 +58,41 @@ interface VolumeMount {
 }
 
 /**
- * Rewrite hook command paths from Windows (laptop) to Linux (container).
- * Host settings.json uses paths like "python C:/Users/ttle0/.atlas/hooks/foo.py"
- * Container needs "python3 /home/node/.atlas/hooks/foo.py"
+ * Rewrite hook command paths from host (laptop or VPS) to container paths.
+ * Host settings.json may use:
+ *   Windows: "python C:/Users/ttle0/.atlas/hooks/foo.py"
+ *   Linux:   "python3 /home/atlas/.atlas/hooks/foo.py"
+ * Container needs: "python3 /home/node/.atlas/hooks/foo.py"
  */
 function rewriteHookCommand(command: string): string {
-  // Replace Windows-style atlas hook paths with container paths.
-  // Matches: python <any-windows-path>/.atlas/hooks/<file>
   return command
+    // Normalize python → python3 (container has python3, not python)
+    .replace(/^python\s/, 'python3 ')
+    // Windows paths: C:/Users/xxx/.atlas/hooks/ → /home/node/.atlas/hooks/
     .replace(
-      /python\s+[A-Za-z]:\/[^"'\s]*\/\.atlas\/hooks\//g,
-      'python3 /home/node/.atlas/hooks/',
+      /[A-Za-z]:\/[^"'\s]*\/\.atlas\/hooks\//g,
+      '/home/node/.atlas/hooks/',
     )
     .replace(
-      /python\s+[A-Za-z]:\/[^"'\s]*\/\.atlas\/lib\//g,
-      'python3 /home/node/.atlas/lib/',
+      /[A-Za-z]:\/[^"'\s]*\/\.atlas\/lib\//g,
+      '/home/node/.atlas/lib/',
     )
     .replace(
-      /python\s+[A-Za-z]:\/[^"'\s]*\/\.claude\//g,
-      'python3 /home/node/.claude/',
+      /[A-Za-z]:\/[^"'\s]*\/\.claude\//g,
+      '/home/node/.claude/',
+    )
+    // Linux host paths: /home/<user>/.atlas/hooks/ → /home/node/.atlas/hooks/
+    .replace(
+      /\/home\/[^/]+\/\.atlas\/hooks\//g,
+      '/home/node/.atlas/hooks/',
+    )
+    .replace(
+      /\/home\/[^/]+\/\.atlas\/lib\//g,
+      '/home/node/.atlas/lib/',
+    )
+    .replace(
+      /\/home\/[^/]+\/\.claude\//g,
+      '/home/node/.claude/',
     );
 }
 
