@@ -437,7 +437,7 @@ def process_task(task_path: Path) -> None:
         head_before = get_head_hash(project_dir)
 
         # Build claude command
-        cmd = ["claude", "-p", "--dangerously-skip-permissions", "--model", model]
+        cmd = ["claude", "-p", "--dangerously-skip-permissions", "--model", model, "-n", f"{entity}:{prompt[:40]}"]
 
         # Tier 1: read-only (no code modifications)
         if tier == 1:
