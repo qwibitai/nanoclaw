@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -54,6 +55,125 @@ interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+}
+
+/**
+ * Rewrite hook command paths from Windows (laptop) to Linux (container).
+ * Host settings.json uses paths like "python C:/Users/ttle0/.atlas/hooks/foo.py"
+ * Container needs "python3 /home/node/.atlas/hooks/foo.py"
+ */
+function rewriteHookCommand(command: string): string {
+  // Replace Windows-style atlas hook paths with container paths.
+  // Matches: python <any-windows-path>/.atlas/hooks/<file>
+  return command
+    .replace(
+      /python\s+[A-Za-z]:\/[^"'\s]*\/\.atlas\/hooks\//g,
+      'python3 /home/node/.atlas/hooks/',
+    )
+    .replace(
+      /python\s+[A-Za-z]:\/[^"'\s]*\/\.atlas\/lib\//g,
+      'python3 /home/node/.atlas/lib/',
+    )
+    .replace(
+      /python\s+[A-Za-z]:\/[^"'\s]*\/\.claude\//g,
+      'python3 /home/node/.claude/',
+    );
+}
+
+/**
+ * Generate container settings.json with enforcement hooks and env vars.
+ * Reads host ~/.claude/settings.json, rewrites paths for Linux container,
+ * merges with required NanoClaw env vars. Regenerates when host settings change.
+ */
+function writeContainerSettings(settingsFile: string): void {
+  const hostSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+
+  // Required env vars for containers
+  const containerEnv = {
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
+
+  // If no host settings, write minimal config
+  if (!fs.existsSync(hostSettingsPath)) {
+    if (!fs.existsSync(settingsFile)) {
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify({ env: containerEnv }, null, 2) + '\n',
+      );
+    }
+    return;
+  }
+
+  // Check if host settings changed since last write
+  const hostMtime = fs.statSync(hostSettingsPath).mtimeMs.toString();
+  const markerFile = settingsFile + '.source-mtime';
+  const cachedMtime = fs.existsSync(markerFile)
+    ? fs.readFileSync(markerFile, 'utf-8').trim()
+    : '';
+
+  if (cachedMtime === hostMtime && fs.existsSync(settingsFile)) {
+    return; // Host settings unchanged, skip regeneration
+  }
+
+  try {
+    const hostSettings = JSON.parse(
+      fs.readFileSync(hostSettingsPath, 'utf-8'),
+    );
+
+    // Deep-clone hooks and rewrite all command paths
+    const containerHooks: Record<string, unknown[]> = {};
+    if (hostSettings.hooks && typeof hostSettings.hooks === 'object') {
+      for (const [event, entries] of Object.entries(hostSettings.hooks)) {
+        containerHooks[event] = (entries as Array<Record<string, unknown>>).map(
+          (entry) => ({
+            ...entry,
+            hooks: (
+              (entry.hooks as Array<Record<string, unknown>>) || []
+            ).map((hook) => ({
+              ...hook,
+              command:
+                typeof hook.command === 'string'
+                  ? rewriteHookCommand(hook.command)
+                  : hook.command,
+            })),
+          }),
+        );
+      }
+    }
+
+    // Build container settings: hooks + merged env vars (no statusLine/spinnerVerbs/outputStyle)
+    const containerSettings: Record<string, unknown> = {
+      hooks: containerHooks,
+      env: {
+        ...(hostSettings.env || {}),
+        ...containerEnv,
+      },
+    };
+
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify(containerSettings, null, 2) + '\n',
+    );
+    fs.writeFileSync(markerFile, hostMtime);
+
+    logger.info(
+      { settingsFile, hookEvents: Object.keys(containerHooks) },
+      'Generated container settings.json with enforcement hooks',
+    );
+  } catch (err) {
+    logger.warn(
+      { error: err, hostSettingsPath },
+      'Failed to read host settings, writing minimal container config',
+    );
+    if (!fs.existsSync(settingsFile)) {
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify({ env: containerEnv }, null, 2) + '\n',
+      );
+    }
+  }
 }
 
 function buildVolumeMounts(
@@ -113,6 +233,18 @@ function buildVolumeMounts(
     }
   }
 
+  // Mount ~/.atlas into the container so enforcement hooks can access
+  // state files, agents, lib, and other Atlas infrastructure.
+  // Hooks use Path.home() / ".atlas" which resolves to /home/node/.atlas in container.
+  const atlasDir = path.join(os.homedir(), '.atlas');
+  if (fs.existsSync(atlasDir)) {
+    mounts.push({
+      hostPath: atlasDir,
+      containerPath: '/home/node/.atlas',
+      readonly: false,
+    });
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -122,29 +254,12 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+
+  // Generate settings.json with enforcement hooks.
+  // Reads host settings.json, rewrites Windows paths to container Linux paths,
+  // and merges with required env vars. Regenerated when host settings change.
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
+  writeContainerSettings(settingsFile);
 
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
