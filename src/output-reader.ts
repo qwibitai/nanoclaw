@@ -5,13 +5,14 @@
 import fs from 'fs';
 
 import type { ContainerOutput } from './container-runner.js';
+import { OUTPUT_POLL_INTERVAL } from './config.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 export const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 export const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-// Polling interval for reading output file (ms)
-export const OUTPUT_POLL_INTERVAL = 250;
+// Re-export for consumers that import from here
+export { OUTPUT_POLL_INTERVAL };
 
 export interface OutputReaderState {
   stdout: string;
