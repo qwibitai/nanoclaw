@@ -405,7 +405,10 @@ function buildContainerArgs(
     args.push('-e', `PAPERCLIP_URL=${process.env.PAPERCLIP_URL}`);
   }
   if (process.env.PAPERCLIP_AGENT_JWT_SECRET) {
-    args.push('-e', `PAPERCLIP_AGENT_JWT_SECRET=${process.env.PAPERCLIP_AGENT_JWT_SECRET}`);
+    args.push(
+      '-e',
+      `PAPERCLIP_AGENT_JWT_SECRET=${process.env.PAPERCLIP_AGENT_JWT_SECRET}`,
+    );
   }
   if (process.env.PAPERCLIP_AGENT_ID) {
     args.push('-e', `PAPERCLIP_AGENT_ID=${process.env.PAPERCLIP_AGENT_ID}`);

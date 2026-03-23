@@ -39,13 +39,14 @@ interface HeartbeatPayload {
 
 function base64url(data: Buffer | string): string {
   const buf = typeof data === 'string' ? Buffer.from(data) : data;
-  return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return buf
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
 }
 
-function makeJwt(
-  secret: string,
-  claims: Record<string, unknown>,
-): string {
+function makeJwt(secret: string, claims: Record<string, unknown>): string {
   const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = base64url(JSON.stringify(claims));
   const sig = base64url(
