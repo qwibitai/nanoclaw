@@ -409,6 +409,21 @@ export function getMessagesSince(
   return rows.map(parseStoredMessageRow);
 }
 
+export function getLatestMessageTimestamp(chatJid: string): string | null {
+  const row = db
+    .prepare(
+      `
+      SELECT timestamp
+      FROM messages
+      WHERE chat_jid = ?
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `,
+    )
+    .get(chatJid) as { timestamp: string } | undefined;
+  return row?.timestamp || null;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {

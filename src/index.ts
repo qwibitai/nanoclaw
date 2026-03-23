@@ -31,6 +31,7 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getLatestMessageTimestamp,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
@@ -164,7 +165,9 @@ function resetGroupSession(jid: string): { ok: boolean; error?: string } {
     queue.resetGroup(jid);
     deleteSession(groupFolder);
     delete sessions[groupFolder];
-    delete lastAgentTimestamp[groupFolder];
+    lastAgentTimestamp[jid] =
+      getLatestMessageTimestamp(jid) || new Date().toISOString();
+    saveState();
     const claudeDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
     fs.rmSync(claudeDir, { recursive: true, force: true });
     const groupSessionsDir = path.join(DATA_DIR, 'sessions', groupFolder);
