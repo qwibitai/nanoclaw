@@ -44,6 +44,10 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import {
+  isAstrBotWakeMessage,
+  isContextOnlyMessage,
+} from './astrbot-metadata.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -75,6 +79,20 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+function isMessageTrigger(
+  chatJid: string,
+  msg: NewMessage,
+  allowlistCfg: ReturnType<typeof loadSenderAllowlist>,
+): boolean {
+  if (isContextOnlyMessage(msg)) return false;
+
+  const hasExplicitTrigger =
+    TRIGGER_PATTERN.test(msg.content.trim()) || isAstrBotWakeMessage(msg);
+  if (!hasExplicitTrigger) return false;
+
+  return msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -231,14 +249,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   if (missedMessages.length === 0) return true;
+  if (missedMessages.every((m) => isContextOnlyMessage(m))) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+    const hasTrigger = missedMessages.some((m) =>
+      isMessageTrigger(chatJid, m, allowlistCfg),
     );
     if (!hasTrigger) return true;
   }
@@ -464,17 +481,19 @@ async function startMessageLoop(): Promise<void> {
 
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const hasActionableMessage = groupMessages.some(
+            (m) => !isContextOnlyMessage(m),
+          );
+
+          if (!hasActionableMessage) continue;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+            const hasTrigger = groupMessages.some((m) =>
+              isMessageTrigger(chatJid, m, allowlistCfg),
             );
             if (!hasTrigger) continue;
           }
