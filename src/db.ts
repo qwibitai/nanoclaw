@@ -313,6 +313,45 @@ export function storeMessageDirect(msg: {
   );
 }
 
+export function pruneContextOnlyMessages(
+  chatJid: string,
+  maxMessages: number,
+): number {
+  if (maxMessages < 0) return 0;
+
+  if (maxMessages === 0) {
+    const result = db
+      .prepare(
+        `
+        DELETE FROM messages
+        WHERE chat_jid = ?
+          AND is_bot_message = 0
+          AND metadata LIKE ?
+      `,
+      )
+      .run(chatJid, '%"context_only":true%');
+    return result.changes;
+  }
+
+  const result = db
+    .prepare(
+      `
+      DELETE FROM messages
+      WHERE rowid IN (
+        SELECT rowid
+        FROM messages
+        WHERE chat_jid = ?
+          AND is_bot_message = 0
+          AND metadata LIKE ?
+        ORDER BY timestamp DESC
+        LIMIT -1 OFFSET ?
+      )
+    `,
+    )
+    .run(chatJid, '%"context_only":true%', maxMessages);
+  return result.changes;
+}
+
 function parseStoredMessageRow(row: Record<string, unknown>): NewMessage {
   const metadataRaw = typeof row.metadata === 'string' ? row.metadata : null;
   let metadata: Record<string, unknown> | undefined;

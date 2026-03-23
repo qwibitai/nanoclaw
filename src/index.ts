@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ASTRBOT_CONTEXT_MAX_LENGTH,
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
@@ -35,6 +36,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  pruneContextOnlyMessages,
   getRouterState,
   initDatabase,
   deleteSession,
@@ -654,6 +656,13 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      if (
+        msg.chat_jid.startsWith('astrbot:') &&
+        isContextOnlyMessage(msg) &&
+        ASTRBOT_CONTEXT_MAX_LENGTH >= 0
+      ) {
+        pruneContextOnlyMessages(msg.chat_jid, ASTRBOT_CONTEXT_MAX_LENGTH);
+      }
     },
     onChatMetadata: (
       chatJid: string,
