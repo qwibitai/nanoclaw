@@ -212,6 +212,83 @@ describe('cacheAttachmentsForMessage', () => {
     expect(fs.readdirSync(cacheDir)).toHaveLength(1);
   });
 
+  it('applies per-message attachment cache max-bytes policy from metadata', async () => {
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
+    tempDirs.push(groupDir);
+
+    const imageBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'image/png' : null),
+        },
+        arrayBuffer: async () => imageBytes.buffer,
+      }),
+    );
+
+    await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-8',
+      content: '',
+      metadata: {
+        attachment_cache_policy: { max_bytes: 16, ttl_hours: -1 },
+        segments: [{ type: 'image', url: 'https://example.com/one.png' }],
+      },
+    });
+    await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-9',
+      content: '',
+      metadata: {
+        attachment_cache_policy: { max_bytes: 8, ttl_hours: -1 },
+        segments: [{ type: 'image', url: 'https://example.com/two.png?x=1' }],
+      },
+    });
+
+    const cacheDir = path.join(groupDir, '.attachments');
+    expect(fs.readdirSync(cacheDir)).toHaveLength(1);
+  });
+
+  it('applies per-message attachment cache ttl policy from metadata', async () => {
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
+    tempDirs.push(groupDir);
+
+    const cacheDir = path.join(groupDir, '.attachments');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const staleFile = path.join(cacheDir, 'stale.png');
+    fs.writeFileSync(staleFile, Buffer.from([1, 2, 3]));
+    const oldDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(staleFile, oldDate, oldDate);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'image/png' : null),
+        },
+        arrayBuffer: async () =>
+          Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 8, 7, 6]).buffer,
+      }),
+    );
+
+    await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-10',
+      content: '',
+      metadata: {
+        attachment_cache_policy: { max_bytes: -1, ttl_hours: 24 },
+        segments: [{ type: 'image', url: 'https://example.com/fresh.png' }],
+      },
+    });
+
+    const files = fs.readdirSync(cacheDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).not.toBe('stale.png');
+  });
+
   it('finds quoted images nested in arbitrary reply metadata branches', async () => {
     const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
     tempDirs.push(groupDir);
