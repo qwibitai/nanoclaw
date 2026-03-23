@@ -117,6 +117,13 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
+function getModelOverride(): string | undefined {
+  const raw = process.env.NANOCLAW_MODEL;
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
   const projectDir = path.dirname(transcriptPath);
   const indexPath = path.join(projectDir, 'sessions-index.json');
@@ -389,45 +396,53 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
+  const modelOverride = getModelOverride();
+  if (modelOverride) {
+    log(`Using model override: ${modelOverride}`);
+  }
+
+  const options: any = {
+    cwd: '/workspace/group',
+    additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+    resume: sessionId,
+    resumeSessionAt: resumeAt,
+    systemPrompt: globalClaudeMd
+      ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      : undefined,
+    allowedTools: [
+      'Bash',
+      'Read', 'Write', 'Edit', 'Glob', 'Grep',
+      'WebSearch', 'WebFetch',
+      'Task', 'TaskOutput', 'TaskStop',
+      'TeamCreate', 'TeamDelete', 'SendMessage',
+      'TodoWrite', 'ToolSearch', 'Skill',
+      'NotebookEdit',
+      'mcp__nanoclaw__*'
+    ],
+    env: sdkEnv,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    settingSources: ['project', 'user'],
+    mcpServers: {
+      nanoclaw: {
+        command: 'node',
+        args: [mcpServerPath],
+        env: {
+          NANOCLAW_CHAT_JID: containerInput.chatJid,
+          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
         },
       },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-      },
-    }
+    },
+    hooks: {
+      PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+    },
+  };
+  if (modelOverride) options.model = modelOverride;
+
+  for await (const message of query({
+    prompt: stream,
+    options,
   })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;

@@ -10,3 +10,6 @@
 // telegram
 
 // whatsapp
+
+// astrbot http bridge
+import './astrbot-http.js';

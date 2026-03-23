@@ -9,6 +9,10 @@ export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  registerGroup: (jid: string, group: RegisteredGroup) => void;
+  setMainGroup: (jid: string, group: RegisteredGroup) => void;
+  resetSession: (jid: string) => { ok: boolean; error?: string };
+  defaultTrigger: string;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;

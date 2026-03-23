@@ -64,6 +64,7 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()], TZ);
     expect(result).toContain('<context timezone="UTC" />');
     expect(result).toContain('<message sender="Alice"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hello</message>');
     expect(result).toContain('Jan 1, 2024');
   });
@@ -86,6 +87,7 @@ describe('formatMessages', () => {
     const result = formatMessages(msgs, TZ);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
+    expect(result).toContain('sender_id="123@s.whatsapp.net"');
     expect(result).toContain('>hi</message>');
     expect(result).toContain('>hey</message>');
   });
@@ -120,6 +122,48 @@ describe('formatMessages', () => {
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('<context timezone="America/New_York" />');
+  });
+
+  it('renders structured metadata for astrbot messages', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          metadata: {
+            source: 'astrbot',
+            platform_name: 'aiocqhttp',
+            group_name: 'Test Group',
+            is_group: true,
+            sender_permissions: {
+              astrbot_role: 'admin',
+              is_astrbot_admin: true,
+              platform_role: 'owner',
+              is_platform_owner: true,
+              is_platform_admin: true,
+            },
+            reply: {
+              message_id: 'abc123',
+              sender_name: 'Bob',
+              content: 'quoted text',
+            },
+            segments: [
+              { type: 'reply', id: 'abc123' },
+              { type: 'text', text: 'hello' },
+            ],
+          },
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('<content>hello</content>');
+    expect(result).toContain('<source name="astrbot" />');
+    expect(result).toContain(
+      '<conversation group_name="Test Group" is_group="true" />',
+    );
+    expect(result).toContain(
+      '<sender_permissions astrbot_role="admin" is_astrbot_admin="true" platform_role="owner" is_platform_owner="true" is_platform_admin="true" />',
+    );
+    expect(result).toContain('<reply message_id="abc123" sender_name="Bob">');
+    expect(result).toContain('<segment type="reply" id="abc123" />');
   });
 });
 
