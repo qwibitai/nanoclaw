@@ -1,0 +1,343 @@
+# NanoClaw Host Orchestrator Security Policy
+#
+# This policy protects the host Node.js process that orchestrates agent
+# containers. The host is trusted code, but a compromised npm dependency
+# could read secrets, exfiltrate data, or pivot to internal networks.
+#
+# Key differences from the container agent policy:
+#   - Allows .env reading (host needs secrets for credential proxy)
+#   - Denies code modification at runtime (src/, dist/, container/)
+#   - Allows broad HTTPS (channel APIs added dynamically)
+#   - Only allows node + docker as child processes (no shells, no dev tools)
+#   - No timeouts (long-running service, not ephemeral container)
+#
+# Rule evaluation: First match wins. Order matters within each section.
+
+version: 1
+name: nanoclaw-host
+description: |
+  Security policy for the NanoClaw host orchestrator process.
+  Limits filesystem, network, and command access to only what the
+  orchestrator needs at runtime. Defense-in-depth against supply chain attacks.
+
+# =============================================================================
+# FILE OPERATION RULES
+# =============================================================================
+
+file_rules:
+  # ---------------------------------------------------------------------------
+  # Project root — read access to source, config, and .env
+  # The host needs to read its own config and environment secrets.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-project-read
+    description: Read access to project root
+    paths:
+      - "${PROJECT_ROOT}"
+      - "${PROJECT_ROOT}/**"
+    operations: [read, open, stat, list, readlink]
+    decision: allow
+
+  - name: allow-env-read
+    description: Host needs .env for credential proxy and channel secrets
+    paths:
+      - "${PROJECT_ROOT}/.env"
+      - "${PROJECT_ROOT}/.env.*"
+    operations: [read, open, stat]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Writable directories — only runtime data, not code
+  # ---------------------------------------------------------------------------
+
+  - name: allow-store-write
+    description: SQLite database and persistent state
+    paths:
+      - "${PROJECT_ROOT}/store"
+      - "${PROJECT_ROOT}/store/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename, delete]
+    decision: allow
+
+  - name: allow-groups-write
+    description: Per-group logs and memory
+    paths:
+      - "${PROJECT_ROOT}/groups"
+      - "${PROJECT_ROOT}/groups/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: allow
+
+  - name: allow-data-write
+    description: IPC messages, sessions, and runtime data
+    paths:
+      - "${PROJECT_ROOT}/data"
+      - "${PROJECT_ROOT}/data/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: allow
+
+  - name: allow-logs-write
+    description: Application and agentsh logs
+    paths:
+      - "${PROJECT_ROOT}/logs"
+      - "${PROJECT_ROOT}/logs/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename, delete]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Deny code modification at runtime
+  # A compromised dependency should not be able to modify source code,
+  # build output, container definitions, or package manifests.
+  # ---------------------------------------------------------------------------
+
+  - name: deny-src-write
+    description: Source code is read-only at runtime
+    paths:
+      - "${PROJECT_ROOT}/src/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: deny
+
+  - name: deny-dist-write
+    description: Build output is read-only at runtime
+    paths:
+      - "${PROJECT_ROOT}/dist/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: deny
+
+  - name: deny-container-write
+    description: Container definitions are read-only at runtime
+    paths:
+      - "${PROJECT_ROOT}/container/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: deny
+
+  - name: deny-package-write
+    description: Package manifests are read-only at runtime
+    paths:
+      - "${PROJECT_ROOT}/package.json"
+      - "${PROJECT_ROOT}/package-lock.json"
+    operations: [write, create, mkdir, chmod, rename, delete]
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # User config — nanoclaw config directory
+  # ---------------------------------------------------------------------------
+
+  - name: allow-config-read
+    description: Read nanoclaw user config
+    paths:
+      - "${HOME}/.config/nanoclaw"
+      - "${HOME}/.config/nanoclaw/**"
+    operations: [read, open, stat, list, readlink]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # System paths — read-only
+  # ---------------------------------------------------------------------------
+
+  - name: allow-system-read
+    description: Read system binaries, libraries, and Node.js
+    paths:
+      - "/usr/**"
+      - "/lib/**"
+      - "/lib64/**"
+      - "/bin/**"
+      - "/sbin/**"
+      - "/opt/**"
+    operations: [read, open, stat, list, readlink]
+    decision: allow
+
+  - name: allow-etc-safe-read
+    description: Read safe system config (DNS, TLS, timezone)
+    paths:
+      - "/etc/hosts"
+      - "/etc/hostname"
+      - "/etc/resolv.conf"
+      - "/etc/ssl/**"
+      - "/etc/ca-certificates/**"
+      - "/etc/localtime"
+      - "/etc/timezone"
+      - "/etc/mime.types"
+      - "/etc/protocols"
+      - "/etc/services"
+      - "/etc/nsswitch.conf"
+      - "/etc/os-release"
+    operations: [read, open, stat, list]
+    decision: allow
+
+  - name: allow-tmp
+    description: Temp directories for Node.js and docker
+    paths:
+      - "/tmp"
+      - "/tmp/**"
+      - "/var/tmp/**"
+    operations: ["*"]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Deny sensitive paths
+  # ---------------------------------------------------------------------------
+
+  - name: deny-ssh
+    description: Block SSH key access
+    paths:
+      - "${HOME}/.ssh/**"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-cloud-credentials
+    description: Block cloud provider credentials
+    paths:
+      - "${HOME}/.aws/**"
+      - "${HOME}/.gcloud/**"
+      - "${HOME}/.azure/**"
+      - "${HOME}/.kube/**"
+      - "${HOME}/.config/gcloud/**"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-gnupg
+    description: Block GPG keyring
+    paths:
+      - "${HOME}/.gnupg/**"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-system-sensitive
+    description: Block password files and kernel interfaces
+    paths:
+      - "/etc/shadow"
+      - "/etc/gshadow"
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/**"
+      - "/etc/security/**"
+      - "/proc/**"
+      - "/sys/**"
+    operations: ["*"]
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # Default deny
+  # ---------------------------------------------------------------------------
+
+  - name: default-deny-files
+    description: Deny all other file operations
+    paths:
+      - "**"
+    operations: ["*"]
+    decision: deny
+
+# =============================================================================
+# NETWORK OPERATION RULES
+# =============================================================================
+
+network_rules:
+  # ---------------------------------------------------------------------------
+  # Localhost — credential proxy and other local services bind here
+  # ---------------------------------------------------------------------------
+
+  - name: allow-localhost
+    description: Allow localhost connections (credential proxy, local services)
+    cidrs:
+      - "127.0.0.1/32"
+      - "::1/128"
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Block dangerous destinations BEFORE broad allow rules
+  # ---------------------------------------------------------------------------
+
+  - name: block-metadata-services
+    description: Block cloud metadata services (SSRF protection)
+    cidrs:
+      - "169.254.169.254/32"
+      - "100.100.100.200/32"
+      - "fd00:ec2::254/128"
+    decision: deny
+
+  - name: block-private-networks
+    description: Block private/internal networks (except localhost)
+    cidrs:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+      - "169.254.0.0/16"
+      - "fc00::/7"
+      - "fe80::/10"
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # Channel APIs — allow broad HTTPS
+  # Channels (Discord, Telegram, Slack, WhatsApp, Gmail) are added dynamically
+  # so we can't enumerate all domains. Allow all HTTPS after blocking private
+  # networks and metadata services.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-https
+    description: Allow HTTPS for channel APIs and external services
+    ports: [443]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Default deny — block non-HTTPS, raw TCP, etc.
+  # ---------------------------------------------------------------------------
+
+  - name: default-deny-network
+    description: Deny all other network connections
+    domains:
+      - "*"
+    decision: deny
+
+# =============================================================================
+# COMMAND RULES
+# =============================================================================
+# Very restrictive — the host only needs node (to run itself) and docker
+# (to spawn agent containers). No shells, dev tools, or package managers.
+
+command_rules:
+  - name: allow-node
+    description: Node.js runtime
+    commands:
+      - node
+      - tsx
+    decision: allow
+
+  - name: allow-docker
+    description: Container runtime for spawning agent containers
+    commands:
+      - docker
+      - podman
+    decision: allow
+
+  - name: allow-agentsh
+    description: agentsh tooling
+    commands:
+      - agentsh
+    decision: allow
+
+  - name: default-deny-commands
+    description: Deny all other commands (no shells, no dev tools)
+    commands:
+      - "*"
+    decision: deny
+
+# =============================================================================
+# RESOURCE LIMITS
+# =============================================================================
+# No timeouts — this is a persistent service, not an ephemeral container.
+
+resource_limits:
+  command_timeout: 0   # No timeout — long-running service
+  session_timeout: 0   # No session timeout
+  idle_timeout: 0      # No idle timeout — service waits for messages
+
+# =============================================================================
+# AUDIT
+# =============================================================================
+
+audit:
+  log_allowed: false
+  log_denied: true
+  log_approved: true
+  include_stdout: false
+  include_stderr: true
+  include_file_content: false
+  retention_days: 7

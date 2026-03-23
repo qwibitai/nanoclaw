@@ -1,0 +1,49 @@
+# agentsh Configuration for NanoClaw Host Orchestrator
+# Defense-in-depth: limits what the host process can access even if a
+# dependency is compromised (supply chain attack mitigation).
+#
+# Key differences from container config:
+#   - No DLP proxy (host is trusted code, not adversarial agent)
+#   - No threat feeds (host connects to known API endpoints only)
+#   - Port 18082 (avoids conflict with container's 18080/18081)
+#   - detect_project_root: true (paths use ${PROJECT_ROOT})
+
+server:
+  http:
+    addr: "127.0.0.1:18082"
+
+auth:
+  type: "none"  # Local single-user, no external access
+
+logging:
+  level: "info"
+  format: "json"
+  output: "${PROJECT_ROOT}/logs/agentsh-host.log"
+  rotation:
+    max_size_mb: 50
+    max_age_days: 7
+    max_backups: 3
+    compress: true
+
+audit:
+  enabled: true
+  output: "${PROJECT_ROOT}/logs/agentsh-host-audit.jsonl"
+  rotation:
+    max_size_mb: 100
+    max_age_days: 7
+    max_backups: 3
+    compress: true
+
+policies:
+  dir: "${PROJECT_ROOT}/host/agentsh/policies"
+  default: "nanoclaw-host"
+  detect_project_root: true
+
+health:
+  path: "/health"
+  readiness_path: "/ready"
+
+development:
+  debug: false
+  disable_auth: true
+  disable_policy: false

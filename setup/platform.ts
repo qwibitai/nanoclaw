@@ -115,6 +115,18 @@ export function commandExists(name: string): boolean {
   }
 }
 
+export function hasAgentsh(): boolean {
+  return commandExists('agentsh');
+}
+
+export function getAgentshPath(): string | null {
+  try {
+    return execSync('command -v agentsh', { encoding: 'utf-8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
 export function getNodeVersion(): string | null {
   try {
     const version = execSync('node --version', { encoding: 'utf-8' }).trim();
