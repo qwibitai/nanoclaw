@@ -83,8 +83,6 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let messageLoopRunning = false;
 
-// In-memory map: message key → thread context ID (populated by onMessage, consumed by message loop)
-const messageThreadContext = new Map<string, number>();
 // In-memory map: message key → image attachments (populated by onMessage, consumed by processGroupMessages)
 const messageImages = new Map<
   string,
@@ -640,15 +638,11 @@ async function startMessageLoop(): Promise<void> {
             }
           }
 
-          // Determine thread context from the triggering message
+          // Determine thread context from the triggering message (read from DB-persisted field)
           let threadId: string | undefined;
           for (const msg of [...groupMessages].reverse()) {
-            const ctxKey = `${msg.id}:${msg.chat_jid}`;
-            const ctxId = messageThreadContext.get(ctxKey);
-            if (ctxId) {
-              messageThreadContext.delete(ctxKey);
-              const ctx = getThreadContextById(ctxId);
-              threadId = `ctx-${ctxId}`;
+            if (msg.thread_context_id) {
+              threadId = `ctx-${msg.thread_context_id}`;
               break;
             }
           }
@@ -869,12 +863,6 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
-      if (msg.thread_context_id) {
-        messageThreadContext.set(
-          `${msg.id}:${msg.chat_jid}`,
-          msg.thread_context_id,
-        );
-      }
       if (msg.images?.length) {
         messageImages.set(`${msg.id}:${msg.chat_jid}`, msg.images);
       }
