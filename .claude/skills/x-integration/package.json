@@ -1,0 +1,19 @@
+{
+  "name": "@nanoclaw/x-integration",
+  "version": "1.0.0",
+  "description": "X (Twitter) integration skill for NanoClaw",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "skill-x-social": "github:baijunjie/skill-x-social"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
