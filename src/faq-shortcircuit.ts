@@ -63,8 +63,11 @@ export async function fetchPredefinedFaq(
     );
 
     if (!res.ok) {
-      // 404 = tenant not found (non-booking group) — cache null so we don't hammer the API
-      faqCache.set(groupFolder, { data: null, expiresAt: now + CACHE_TTL_MS });
+      if (res.status === 404) {
+        // Permanent: tenant not found (non-booking group) — cache for full TTL
+        faqCache.set(groupFolder, { data: null, expiresAt: now + CACHE_TTL_MS });
+      }
+      // Transient errors (5xx, 401, 403): don't cache — retry on next message
       return null;
     }
 
@@ -186,6 +189,21 @@ function buildAnswer(key: keyof FaqData, data: FaqData): string {
     case 'parking':
       return `🚗 Parcare: ${data.parking}`;
   }
+}
+
+/**
+ * Returns true if the message batch is eligible for FAQ short-circuit lookup.
+ * Checks structural conditions (single short message, no booking intent) without
+ * needing faqData — call this BEFORE fetching FAQ from the API to skip the HTTP
+ * round-trip entirely for booking-intent messages.
+ */
+export function canFaqShortCircuit(messages: NewMessage[]): boolean {
+  const userMessages = messages.filter((m) => !m.is_from_me && !m.is_bot_message);
+  if (userMessages.length !== 1) return false;
+  const raw = userMessages[0].content;
+  if (!raw || raw.length > 300) return false;
+  const norm = normalize(raw);
+  return !BOOKING_INTENT.some((re) => re.test(norm));
 }
 
 /**

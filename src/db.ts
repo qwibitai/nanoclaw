@@ -509,6 +509,24 @@ export async function getSessionTurnCount(
 }
 
 /**
+ * Returns true if the session's updated_at is older than ttlMs.
+ * Used for runtime TTL checks without a full prune sweep.
+ * Returns true (expired) when the session is missing from DB.
+ */
+export async function isSessionExpired(
+  groupFolder: string,
+  ttlMs: number,
+): Promise<boolean> {
+  const cutoff = new Date(Date.now() - ttlMs);
+  const row = await qOne<{ updated_at: Date }>(
+    'SELECT updated_at FROM conversation_sessions WHERE group_folder = $1',
+    [groupFolder],
+  );
+  if (!row) return true;
+  return new Date(row.updated_at) < cutoff;
+}
+
+/**
  * Deletes all sessions older than ttlMs and returns their group folder names.
  * Called at startup to prune stale sessions before loading state into memory.
  */

@@ -44,6 +44,7 @@ import {
   getSessionTurnCount,
   incrementSessionTurn,
   initDatabase,
+  isSessionExpired,
   pruneExpiredSessions,
   setRegisteredGroup,
   setRouterState,
@@ -63,7 +64,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
-import { fetchPredefinedFaq, tryFaqShortCircuit } from './faq-shortcircuit.js';
+import { canFaqShortCircuit, fetchPredefinedFaq, tryFaqShortCircuit } from './faq-shortcircuit.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -242,8 +243,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // FAQ short-circuit — answer static questions without spawning a container.
   // Saves the full container lifecycle cost for address/payment/parking queries.
-  // Predefined FAQ is fetched from the booking API with a 5-min in-memory cache.
-  const faqData = await fetchPredefinedFaq(group.folder);
+  // canFaqShortCircuit gates the API fetch: booking-intent messages skip the
+  // HTTP call entirely (avoids ~5ms localhost round-trip for every booking msg).
+  const faqData = canFaqShortCircuit(missedMessages)
+    ? await fetchPredefinedFaq(group.folder)
+    : null;
   if (faqData) {
     const faqAnswer = tryFaqShortCircuit(missedMessages, faqData);
     if (faqAnswer) {
@@ -332,6 +336,21 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // Runtime TTL check — pruneExpiredSessions only fires at startup, so a session
+  // loaded into memory at boot can outlive SESSION_TTL_MS during continuous uptime.
+  // Check DB updated_at here and evict if stale before any container start.
+  if (sessions[group.folder]) {
+    const expired = await isSessionExpired(group.folder, SESSION_TTL_MS);
+    if (expired) {
+      logger.info(
+        { group: group.name },
+        'Session TTL expired at runtime — resetting context',
+      );
+      await deleteSession(group.folder);
+      delete sessions[group.folder];
+    }
+  }
 
   // Turn cap check — reset session after SESSION_TURN_CAP container runs to
   // prevent runaway token costs from unbounded context growth.
