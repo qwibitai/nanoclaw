@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# face-swap: swap a face from one image onto another using fal.ai
+# Usage: face-swap /path/to/face.jpg /path/to/target.jpg
+set -euo pipefail
+
+FACE_IMAGE="${1:?Usage: face-swap /path/to/face.jpg /path/to/target.jpg}"
+TARGET_IMAGE="${2:?Usage: face-swap /path/to/face.jpg /path/to/target.jpg}"
+OUTPUT_DIR="/workspace/group"
+OUTPUT_FILE="${OUTPUT_DIR}/faceswap-$(date +%s%3N).png"
+
+if [[ -z "${FAL_KEY:-}" ]]; then
+  echo "ERROR: FAL_KEY not set" >&2
+  exit 1
+fi
+
+# Convert images to base64 data URIs
+FACE_B64=$(python3 -c "
+import base64, sys, mimetypes
+path = sys.argv[1]
+mime = mimetypes.guess_type(path)[0] or 'image/jpeg'
+with open(path, 'rb') as f:
+    print(f'data:{mime};base64,' + base64.b64encode(f.read()).decode())
+" "$FACE_IMAGE")
+
+TARGET_B64=$(python3 -c "
+import base64, sys, mimetypes
+path = sys.argv[1]
+mime = mimetypes.guess_type(path)[0] or 'image/jpeg'
+with open(path, 'rb') as f:
+    print(f'data:{mime};base64,' + base64.b64encode(f.read()).decode())
+" "$TARGET_IMAGE")
+
+# Submit face swap request to fal.ai
+PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'swap_image_url': sys.argv[1],
+    'target_image_url': sys.argv[2]
+}))
+" "$FACE_B64" "$TARGET_B64")
+
+RESPONSE=$(curl -sS -X POST "https://queue.fal.run/fal-ai/face-swap" \
+  -H "Authorization: Key $FAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD")
+
+# Check for error
+ERROR=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'detail' in d:
+    print(d['detail'] if isinstance(d['detail'], str) else json.dumps(d['detail']))
+elif 'error' in d:
+    print(d['error'])
+" <<< "$RESPONSE" 2>/dev/null || true)
+
+if [[ -n "$ERROR" ]]; then
+  echo "ERROR: fal.ai: $ERROR" >&2
+  exit 1
+fi
+
+# fal queue returns a request_id — poll for result
+REQUEST_ID=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('request_id', ''))
+" <<< "$RESPONSE")
+
+if [[ -n "$REQUEST_ID" ]]; then
+  # Poll for completion
+  for i in $(seq 1 60); do
+    sleep 2
+    STATUS_RESPONSE=$(curl -sS "https://queue.fal.run/fal-ai/face-swap/requests/$REQUEST_ID/status" \
+      -H "Authorization: Key $FAL_KEY")
+    STATUS=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('status', ''))
+" <<< "$STATUS_RESPONSE")
+    if [[ "$STATUS" == "COMPLETED" ]]; then
+      RESPONSE=$(curl -sS "https://queue.fal.run/fal-ai/face-swap/requests/$REQUEST_ID" \
+        -H "Authorization: Key $FAL_KEY")
+      break
+    elif [[ "$STATUS" == "FAILED" ]]; then
+      echo "ERROR: fal.ai face swap failed" >&2
+      exit 1
+    fi
+  done
+fi
+
+# Download result image
+IMAGE_URL=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+img = d.get('image', d.get('output', {}))
+if isinstance(img, dict):
+    print(img.get('url', ''))
+elif isinstance(img, str):
+    print(img)
+else:
+    print('')
+" <<< "$RESPONSE")
+
+if [[ -z "$IMAGE_URL" ]]; then
+  echo "ERROR: No image URL in response" >&2
+  echo "Response: $RESPONSE" >&2
+  exit 1
+fi
+
+curl -sS -o "$OUTPUT_FILE" "$IMAGE_URL"
+
+# Track via IPC (non-fatal)
+{
+  IPC_DIR="/workspace/ipc/messages"
+  mkdir -p "$IPC_DIR"
+  TRACK_FILE="${IPC_DIR}/imgtrack-$(date +%s%3N).json"
+  python3 -c "
+import json, sys
+json.dump({
+    'type': 'track_image_gen',
+    'gen_type': 'face_swap',
+    'prompt': 'face-swap',
+    'model': 'fal-ai/face-swap',
+    'cost_usd': 0.05
+}, open(sys.argv[1], 'w'))
+" "$TRACK_FILE"
+} || true
+
+echo "$OUTPUT_FILE"

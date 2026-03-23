@@ -1,52 +1,61 @@
 ---
 name: image-gen
-description: Generate or edit images using OpenAI's gpt-image-1 model
-allowed-tools: Bash(generate-image:*)
+description: Generate, edit, or face-swap images using OpenAI gpt-image-1 and fal.ai
+allowed-tools: Bash(generate-image:*),Bash(face-swap:*)
 ---
 
-# Image Generation & Editing
+# Image Generation, Editing & Face Swap
 
-ALWAYS use the `generate-image` script for ANY image generation or editing request. Do NOT call the OpenAI API directly or use any other method. The script handles authentication, error handling, and file management.
+You have TWO image tools. Choose the right one:
 
-## Generate from text
+| Tool | When to use |
+|------|-------------|
+| `generate-image` | Create images from text, edit/modify photos, combine elements, change styles, add/remove objects |
+| `face-swap` | Put someone's FACE onto another person's body/photo. Use ONLY when the user wants to preserve a specific person's face identity |
+
+## Decision guide
+
+- "Ponme en la playa" → `generate-image` (creative edit, face identity doesn't need to be exact)
+- "Pon MI CARA en esta foto" / "swap faces" / "quiero verme como X" → `face-swap` (face identity must be preserved)
+- "Hazme un logo" / "genera una imagen de..." → `generate-image` (text-to-image)
+- "Cambia el fondo" / "quita esto" → `generate-image` (image editing)
+
+## generate-image
 
 ```bash
+# Text to image
 generate-image "a cat floating in space, photorealistic"
-```
 
-## Edit an existing image
-
-When the user sends a photo and wants it modified, pass the attachment path:
-
-```bash
+# Edit with one image
 generate-image "put this person on a tropical beach" /workspace/group/attachments/img-1234.jpg
-```
 
-## Combine multiple images
-
-When the user wants to combine elements from multiple photos (e.g. "put the person from photo 1 into photo 2", "replace the brand in this photo with my product"), pass all images:
-
-```bash
+# Combine multiple images
 generate-image "put the person from the first image into the scene of the second image" /workspace/group/attachments/img-1234.jpg /workspace/group/attachments/img-5678.jpg
 ```
 
-Up to 10 source images are supported. The images can come from different messages — look through the conversation history for `[Image: attachments/img-xxx.jpg]` references to find all relevant attachment paths.
+Up to 10 source images supported. Find attachment paths from `[Image: attachments/img-xxx.jpg]` in the conversation.
 
-## Output
+## face-swap
 
-The script saves to `/workspace/group/generated-<timestamp>.png` and prints the path.
+```bash
+# Swap the face from photo 1 onto the person in photo 2
+face-swap /workspace/group/attachments/img-FACE.jpg /workspace/group/attachments/img-TARGET.jpg
+```
 
-## Sending the result to the user
+- First argument: the photo with the FACE to use (source face)
+- Second argument: the photo where the face will be PLACED (target body/scene)
+- Takes ~10-20 seconds to process
 
-After generating, send it as a native image:
+## Output & delivery
+
+Both scripts save to `/workspace/group/` and print the path. Send the result as a native image:
 
 ```
-mcp__nanoclaw__send_message({ text: "Here's your image!", image_path: "/workspace/group/generated-123.png" })
+mcp__nanoclaw__send_message({ text: "Here's your image!", image_path: "/workspace/group/faceswap-123.png" })
 ```
 
 ## Important
 
-- The script uses `gpt-image-1` which supports BOTH generation and editing
-- Do NOT fall back to dall-e-2 or dall-e-3 — always use this script
-- Do NOT call curl or the OpenAI API yourself — use the script
-- JPEG input is supported for editing (no need to convert to PNG)
+- Do NOT call curl or APIs directly — always use these scripts
+- JPEG input is supported (no need to convert to PNG)
+- Do NOT fall back to dall-e-2 or dall-e-3

@@ -261,6 +261,12 @@ function buildContainerArgs(
     args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
   }
 
+  // fal.ai: pass API key to container (face swap)
+  const falKey = readEnvFile(['FAL_KEY']).FAL_KEY;
+  if (falKey) {
+    args.push('-e', `FAL_KEY=${falKey}`);
+  }
+
   // Smatch MCP: pass credentials to container
   const smatchEnv = readEnvFile(['SMATCH_MONGODB_URI', 'SMATCH_CLUB_ID']);
   if (smatchEnv.SMATCH_MONGODB_URI) {
