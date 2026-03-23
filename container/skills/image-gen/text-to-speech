@@ -1,89 +1,39 @@
 #!/usr/bin/env bash
-# text-to-speech: convert text to audio using Amazon Polly (es-MX)
+# text-to-speech: convert text to audio using OpenAI TTS API
 # Usage: text-to-speech "text to speak" [voice]
-# Voices: Andres (male, default), Mia (female) — both Mexican Spanish neural
+# Voices: alloy, echo, fable, onyx, nova, shimmer (default: onyx)
 set -euo pipefail
 
 TEXT="${1:?Usage: text-to-speech \"text to speak\" [voice]}"
-VOICE="${2:-Andres}"
+VOICE="${2:-onyx}"
 OUTPUT_DIR="/workspace/group"
 OUTPUT_FILE="${OUTPUT_DIR}/tts-$(date +%s%3N).ogg"
 
-if [[ -z "${AWS_BEDROCK_ACCESS_KEY_ID:-}" ]]; then
-  echo "ERROR: AWS_BEDROCK_ACCESS_KEY_ID not set" >&2
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "ERROR: OPENAI_API_KEY not set" >&2
   exit 1
 fi
 
-# Polly has a 3000 char limit per request
-if [[ ${#TEXT} -gt 3000 ]]; then
-  TEXT="${TEXT:0:3000}"
+RESPONSE_CODE=$(curl -sS -w "%{http_code}" -o "$OUTPUT_FILE" \
+  -X POST "https://api.openai.com/v1/audio/speech" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c "
+import json, sys
+print(json.dumps({
+    'model': 'tts-1',
+    'input': sys.argv[1],
+    'voice': sys.argv[2],
+    'response_format': 'opus'
+}))
+" "$TEXT" "$VOICE")")
+
+if [[ "$RESPONSE_CODE" != "200" ]]; then
+  ERROR=$(cat "$OUTPUT_FILE" 2>/dev/null || echo "HTTP $RESPONSE_CODE")
+  rm -f "$OUTPUT_FILE"
+  echo "ERROR: OpenAI TTS: $ERROR" >&2
+  exit 1
 fi
-
-# Use AWS CLI-style signing via python (no boto3 needed)
-python3 -c "
-import hashlib, hmac, datetime, urllib.request, urllib.parse, sys, os, json
-
-key_id = os.environ['AWS_BEDROCK_ACCESS_KEY_ID']
-secret = os.environ['AWS_BEDROCK_SECRET_ACCESS_KEY']
-region = os.environ.get('AWS_BEDROCK_REGION', 'us-east-1')
-text = sys.argv[1]
-voice = sys.argv[2]
-output = sys.argv[3]
-
-# AWS Signature V4
-service = 'polly'
-host = f'polly.{region}.amazonaws.com'
-endpoint = f'https://{host}/v1/speech'
-method = 'POST'
-content_type = 'application/json'
-
-t = datetime.datetime.utcnow()
-amz_date = t.strftime('%Y%m%dT%H%M%SZ')
-date_stamp = t.strftime('%Y%m%d')
-
-payload = json.dumps({
-    'Text': text,
-    'OutputFormat': 'ogg_vorbis',
-    'VoiceId': voice,
-    'Engine': 'neural'
-})
-
-def sign(key, msg):
-    return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
-
-def get_signature_key(key, date, region, service):
-    k = sign(('AWS4' + key).encode('utf-8'), date)
-    k = sign(k, region)
-    k = sign(k, service)
-    return sign(k, 'aws4_request')
-
-payload_hash = hashlib.sha256(payload.encode('utf-8')).hexdigest()
-canonical_headers = f'content-type:{content_type}\nhost:{host}\nx-amz-date:{amz_date}\n'
-signed_headers = 'content-type;host;x-amz-date'
-canonical_request = f'{method}\n/v1/speech\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}'
-
-credential_scope = f'{date_stamp}/{region}/{service}/aws4_request'
-string_to_sign = f'AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode(\"utf-8\")).hexdigest()}'
-
-signing_key = get_signature_key(secret, date_stamp, region, service)
-signature = hmac.new(signing_key, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
-
-auth_header = f'AWS4-HMAC-SHA256 Credential={key_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}'
-
-req = urllib.request.Request(endpoint, data=payload.encode('utf-8'), headers={
-    'Content-Type': content_type,
-    'X-Amz-Date': amz_date,
-    'Authorization': auth_header,
-})
-
-try:
-    with urllib.request.urlopen(req) as resp:
-        with open(output, 'wb') as f:
-            f.write(resp.read())
-except urllib.error.HTTPError as e:
-    print(f'ERROR: Polly API: {e.code} {e.read().decode()}', file=sys.stderr)
-    sys.exit(1)
-" "$TEXT" "$VOICE" "$OUTPUT_FILE"
 
 # Track via IPC (non-fatal)
 {
@@ -96,8 +46,8 @@ json.dump({
     'type': 'track_image_gen',
     'gen_type': 'tts',
     'prompt': sys.argv[1][:100],
-    'model': 'polly-neural',
-    'cost_usd': 0.004
+    'model': 'openai-tts-1',
+    'cost_usd': 0.015
 }, open(sys.argv[2], 'w'))
 " "$TEXT" "$TRACK_FILE"
 } || true
