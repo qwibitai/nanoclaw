@@ -65,7 +65,7 @@ describe('formatMessages', () => {
     expect(result).toContain('<context timezone="UTC" />');
     expect(result).toContain('<message sender="Alice"');
     expect(result).toContain('>hello</message>');
-    expect(result).toContain('Jan 1, 2024');
+    expect(result).toContain('Mon, Jan 1, 2024');
   });
 
   it('formats multiple messages', () => {
