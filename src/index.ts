@@ -197,6 +197,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Per-group idle timeout, falling back to global default
+  const groupIdleTimeout = group.containerConfig?.idleTimeout || IDLE_TIMEOUT;
+
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
@@ -205,7 +208,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Idle timeout, closing container stdin',
       );
       queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
+    }, groupIdleTimeout);
   };
 
   await channel.setTyping?.(chatJid, true);

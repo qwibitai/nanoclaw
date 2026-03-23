@@ -155,7 +155,7 @@ async function runTask(
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
   // After the task produces a result, close the container promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
+  // Tasks are single-turn — no need to wait IDLE_TIMEOUT for the
   // query loop to time out. A short delay handles any final MCP calls.
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -171,7 +171,8 @@ async function runTask(
   try {
     // Per-task model and teams override, falling back to group config
     const taskModel = task.model || group.containerConfig?.model;
-    const taskEnableTeams = task.enable_agent_teams === 1 || group.containerConfig?.enableAgentTeams;
+    const taskEnableTeams =
+      task.enable_agent_teams === 1 || group.containerConfig?.enableAgentTeams;
 
     const output = await runContainerAgent(
       group,
