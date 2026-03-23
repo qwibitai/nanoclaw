@@ -68,7 +68,7 @@ RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\
 # Install AFTER all npm/build commands and entrypoint creation
 # ---------------------------------------------------------------------------
 
-ARG AGENTSH_TAG=v0.16.3
+ARG AGENTSH_TAG=v0.16.6
 RUN set -eux; \
     version="${AGENTSH_TAG#v}"; \
     arch="$(dpkg --print-architecture)"; \
