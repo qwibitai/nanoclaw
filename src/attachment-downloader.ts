@@ -139,7 +139,24 @@ export async function downloadAttachment(
     const dir = path.join(ATTACHMENTS_DIR, req.groupFolder, safeMessageId);
     fs.mkdirSync(dir, { recursive: true });
 
-    const localPath = path.join(dir, safeFilename);
+    // Deduplicate filenames within the same message directory.
+    // Multiple attachments can share the same name (e.g. Discord screenshots
+    // all named "image.png"). Without this, concurrent downloads overwrite
+    // each other and only the last one survives.
+    let actualFilename = safeFilename;
+    let localPath = path.join(dir, actualFilename);
+    if (fs.existsSync(localPath)) {
+      const ext = path.extname(safeFilename);
+      const base = ext
+        ? safeFilename.slice(0, -ext.length)
+        : safeFilename;
+      let counter = 1;
+      do {
+        actualFilename = `${base}_${counter}${ext}`;
+        localPath = path.join(dir, actualFilename);
+        counter++;
+      } while (fs.existsSync(localPath));
+    }
     fs.writeFileSync(localPath, buffer);
 
     // Ensure container user (uid 1000) can read the file
@@ -154,7 +171,7 @@ export async function downloadAttachment(
 
     logger.info(
       {
-        filename: safeFilename,
+        filename: actualFilename,
         size: buffer.length,
         mimeType: req.mimeType,
         group: req.groupFolder,
@@ -163,7 +180,7 @@ export async function downloadAttachment(
     );
 
     return {
-      filename: safeFilename,
+      filename: actualFilename,
       mimeType: req.mimeType,
       localPath,
       size: buffer.length,

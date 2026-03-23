@@ -38,6 +38,13 @@ import { transformTablesInText } from '../table-renderer.js';
 
 const execAsync = promisify(exec);
 
+function describeAttachment(mimeType: string, filename: string): string {
+  if (mimeType.startsWith('image/')) return `[Image: ${filename}]`;
+  if (mimeType.startsWith('video/')) return `[Video: ${filename}]`;
+  if (mimeType.startsWith('audio/')) return `[Audio: ${filename}]`;
+  return `[File: ${filename}]`;
+}
+
 export class DiscordChannel implements Channel {
   name = 'discord';
 
@@ -185,22 +192,11 @@ export class DiscordChannel implements Channel {
       // Handle attachments — download files and add text placeholders
       const downloadedAttachments: Attachment[] = [];
       if (message.attachments.size > 0) {
-        const attachmentDescriptions: string[] = [];
+        const attValues = [...message.attachments.values()];
         const downloads = await Promise.all(
-          [...message.attachments.values()].map(async (att) => {
+          attValues.map(async (att) => {
             const contentType = att.contentType || '';
             const name = att.name || 'file';
-            // Text placeholder (always added for context)
-            if (contentType.startsWith('image/')) {
-              attachmentDescriptions.push(`[Image: ${name}]`);
-            } else if (contentType.startsWith('video/')) {
-              attachmentDescriptions.push(`[Video: ${name}]`);
-            } else if (contentType.startsWith('audio/')) {
-              attachmentDescriptions.push(`[Audio: ${name}]`);
-            } else {
-              attachmentDescriptions.push(`[File: ${name}]`);
-            }
-            // Download for vision/document support (skips audio internally)
             if (att.url && group) {
               return downloadAttachment({
                 messageId: msgId,
@@ -219,8 +215,24 @@ export class DiscordChannel implements Channel {
             return null;
           }),
         );
-        for (const dl of downloads) {
-          if (dl) downloadedAttachments.push(dl);
+        const attachmentDescriptions: string[] = [];
+        for (let i = 0; i < attValues.length; i++) {
+          const dl = downloads[i];
+          if (dl) {
+            downloadedAttachments.push(dl);
+            attachmentDescriptions.push(
+              describeAttachment(dl.mimeType, dl.filename),
+            );
+          } else {
+            // Download skipped (audio, oversized, no group/URL)
+            const att = attValues[i];
+            attachmentDescriptions.push(
+              describeAttachment(
+                att.contentType || '',
+                att.name || 'file',
+              ),
+            );
+          }
         }
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
