@@ -92,6 +92,19 @@ function renderMessageMetadata(
     lines.push(renderStructuredBlock('reply', reply));
   }
 
+  const attachments = takeArray(remainder, 'attachments');
+  if (attachments.length > 0) {
+    const renderedAttachments = attachments
+      .map((attachment) => {
+        if (!isRecord(attachment)) {
+          return `<attachment>${escapeXml(JSON.stringify(attachment))}</attachment>`;
+        }
+        return renderStructuredBlock('attachment', attachment);
+      })
+      .join('\n');
+    lines.push(`<attachments>\n${renderedAttachments}\n</attachments>`);
+  }
+
   const segments = takeArray(remainder, 'segments');
   if (segments.length > 0) {
     const renderedSegments = segments

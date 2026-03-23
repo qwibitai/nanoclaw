@@ -1,7 +1,9 @@
 import { createHash } from 'crypto';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 
+import { cacheAttachmentsForMessage } from '../attachment-cache.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, RegisteredGroup } from '../types.js';
 import { registerChannel } from './registry.js';
@@ -349,6 +351,28 @@ class AstrBotHttpChannel implements Channel {
           added_at: new Date().toISOString(),
           requiresTrigger: inbound.is_group ?? false,
         });
+      }
+
+      const groupFolder =
+        this.registeredGroups()[chatJid]?.folder || deriveFolder(chatJid);
+      try {
+        const cacheResult = await cacheAttachmentsForMessage({
+          groupDir: resolveGroupFolderPath(groupFolder),
+          metadata: msg.metadata,
+          messageId: msg.id,
+          content: msg.content,
+        });
+        if (cacheResult.metadata) {
+          msg.metadata = cacheResult.metadata;
+        }
+        if (cacheResult.synthesizedContent) {
+          msg.content = cacheResult.synthesizedContent;
+        }
+      } catch (err) {
+        logger.warn(
+          { err, chatJid, messageId: msg.id },
+          'Attachment caching failed',
+        );
       }
 
       this.onMessage(chatJid, msg);
