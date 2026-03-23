@@ -19,6 +19,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import {
+  buildAllowedTools,
+  buildContainerSecurityRules,
+  loadSecurityPolicy,
+  readKillswitch,
+} from './security-policy.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -146,6 +152,9 @@ async function runTask(
     })),
   );
 
+  const policy = loadSecurityPolicy();
+  if (!readKillswitch(policy, task.group_folder).canRun) return;
+
   let result: string | null = null;
   let error: string | null = null;
 
@@ -179,6 +188,9 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        senderTrusted: false,
+        securityRules: buildContainerSecurityRules(policy),
+        allowedTools: buildAllowedTools(policy),
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

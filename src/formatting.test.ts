@@ -201,6 +201,34 @@ describe('formatOutbound', () => {
       formatOutbound('<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
   });
+
+  it('strips markdown images (exfiltration vector)', () => {
+    expect(formatOutbound('Check this ![img](https://evil.com/data)')).toBe(
+      'Check this [image removed]',
+    );
+  });
+
+  it('strips multiple markdown images', () => {
+    expect(formatOutbound('A ![a](http://x) B ![b](http://y) C')).toBe(
+      'A [image removed] B [image removed] C',
+    );
+  });
+
+  it('preserves normal text unchanged', () => {
+    expect(formatOutbound('Just plain text here')).toBe('Just plain text here');
+  });
+
+  it('strips HTML img tags (exfiltration vector)', () => {
+    expect(formatOutbound('Check <img src="https://evil.com/data"> this')).toBe(
+      'Check [image removed] this',
+    );
+  });
+
+  it('preserves normal markdown links (not images)', () => {
+    expect(formatOutbound('See [docs](https://example.com)')).toBe(
+      'See [docs](https://example.com)',
+    );
+  });
 });
 
 // --- Trigger gating with requiresTrigger flag ---

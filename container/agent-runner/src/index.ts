@@ -19,6 +19,27 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface ContainerSecurityRules {
+  bash: {
+    blocked: string[];
+    blockedEnvVars: string[];
+    blockedUrls: string[];
+  };
+  webfetch: {
+    httpsOnly: boolean;
+    blockedNetworks: string[];
+    blockedUrls: string[];
+    blockSecretValues: boolean;
+  };
+  write: {
+    blocked: string[];
+    trustRequired: string[];
+  };
+  tools: {
+    blockedUntrusted: string[];
+  };
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -27,6 +48,9 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  senderTrusted?: boolean;
+  securityRules?: ContainerSecurityRules;
+  allowedTools?: string[];
 }
 
 interface ContainerOutput {
@@ -92,6 +116,104 @@ class MessageStream {
       this.waiting = null;
     }
   }
+}
+
+/**
+ * Build canUseTool from serialized security rules.
+ * Falls back to deny-all if rules are missing (fail-closed).
+ */
+function buildCanUseTool(input: ContainerInput) {
+  const deny = (msg: string) => ({ behavior: 'deny' as const, message: msg });
+  const allow = () => ({ behavior: 'allow' as const });
+
+  return async (toolName: string, toolInput: Record<string, unknown>, _options: unknown) => {
+    const rules = input.securityRules;
+    if (!rules) return deny('Security rules not provided — deny by default.');
+
+    // --- BASH GUARDS ---
+    if (toolName === 'Bash') {
+      const cmd = String(toolInput.command || '');
+
+      for (const pattern of rules.bash.blocked) {
+        if (new RegExp(pattern).test(cmd)) {
+          return deny('Command blocked by security policy.');
+        }
+      }
+
+      // Block $VAR and ${VAR} references for configured secret env vars
+      if (rules.bash.blockedEnvVars.length > 0) {
+        const envPattern = rules.bash.blockedEnvVars
+          .map((v) => `\\$\\{?${v}\\}?`)
+          .join('|');
+        if (new RegExp(envPattern, 'i').test(cmd)) {
+          return deny('Referencing secret environment variables is blocked.');
+        }
+      }
+
+      for (const pattern of rules.bash.blockedUrls) {
+        if (new RegExp(pattern, 'i').test(cmd)) {
+          return deny('URL pattern blocked by security policy.');
+        }
+      }
+    }
+
+    // --- WEBFETCH GUARDS ---
+    if (toolName === 'WebFetch') {
+      const url = String(toolInput.url || '');
+
+      if (rules.webfetch.httpsOnly && url && !/^https:\/\//i.test(url)) {
+        return deny('WebFetch only allows https:// URLs.');
+      }
+
+      for (const pattern of rules.webfetch.blockedNetworks) {
+        if (new RegExp(pattern, 'i').test(url)) {
+          return deny('WebFetch blocked: private/internal address.');
+        }
+      }
+
+      for (const pattern of rules.webfetch.blockedUrls) {
+        if (new RegExp(pattern, 'i').test(url)) {
+          return deny('URL blocked by security policy.');
+        }
+      }
+
+      // Block URLs containing secret env var values
+      if (rules.webfetch.blockSecretValues && rules.bash.blockedEnvVars.length > 0) {
+        const secretValues = rules.bash.blockedEnvVars
+          .map((name) => process.env[name])
+          .filter((v): v is string => !!v && v.length > 10);
+        if (secretValues.some((s) => url.includes(s))) {
+          return deny('URL contains a secret credential.');
+        }
+      }
+    }
+
+    // --- WRITE/EDIT GUARDS ---
+    if (toolName === 'Write' || toolName === 'Edit') {
+      const filePath = String(toolInput.file_path || toolInput.path || '');
+
+      for (const pattern of rules.write.blocked) {
+        if (new RegExp(pattern, 'i').test(filePath)) {
+          return deny('Writing to this path is blocked by security policy.');
+        }
+      }
+
+      if (!input.senderTrusted) {
+        for (const pattern of rules.write.trustRequired) {
+          if (new RegExp(pattern).test(filePath)) {
+            return deny('Modifying this path requires owner authorization.');
+          }
+        }
+      }
+    }
+
+    // --- UNTRUSTED SENDER GUARDS ---
+    if (!input.senderTrusted && rules.tools.blockedUntrusted.includes(toolName)) {
+      return deny('This tool requires owner authorization.');
+    }
+
+    return allow();
+  };
 }
 
 async function readStdin(): Promise<string> {
@@ -399,7 +521,7 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
+      allowedTools: containerInput.allowedTools || [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
         'WebSearch', 'WebFetch',
@@ -407,7 +529,7 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -424,6 +546,7 @@ async function runQuery(
           },
         },
       },
+      canUseTool: buildCanUseTool(containerInput),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },

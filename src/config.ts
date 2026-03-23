@@ -71,3 +71,11 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Security policy: stored OUTSIDE project root, never mounted into containers
+export const SECURITY_POLICY_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'security-policy.json',
+);
