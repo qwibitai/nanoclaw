@@ -119,8 +119,7 @@ function extractAttachmentCandidates(
   const results: AttachmentCandidate[] = [];
   const seen = new Set<string>();
 
-  visitCandidateSource(metadata.segments, results, seen);
-  visitCandidateSource(metadata.reply, results, seen);
+  visitCandidateSource(metadata, results, seen);
 
   return results;
 }
@@ -140,19 +139,8 @@ function visitCandidateSource(
 
   maybeCollectImageCandidate(value, results, seen);
 
-  for (const key of [
-    'segments',
-    'segment',
-    'reply',
-    'raw',
-    'message',
-    'messages',
-    'message_chain',
-    'raw_message',
-  ]) {
-    if (key in value) {
-      visitCandidateSource(value[key], results, seen);
-    }
+  for (const nested of Object.values(value)) {
+    visitCandidateSource(nested, results, seen);
   }
 }
 
@@ -164,11 +152,11 @@ function maybeCollectImageCandidate(
   const segmentType = stringOr(segment.type, 'unknown').toLowerCase();
   if (!isImageLikeSegment(segmentType, segment)) return;
 
-  for (const field of ['url', 'image', 'file', 'path', 'data']) {
+  for (const field of ['url', 'image', 'file', 'path', 'data', 'src']) {
     const rawValue = segment[field];
     const url = extractUrl(rawValue);
     if (!url) continue;
-    const dedupeKey = `${segmentType}:${field}:${url}`;
+    const dedupeKey = `image:${url}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     results.push({
@@ -450,9 +438,7 @@ function guessMimeTypeFromName(value: string): string | undefined {
   }
 }
 
-function normalizeImageContentType(
-  value?: string,
-): DetectedImageType | null {
+function normalizeImageContentType(value?: string): DetectedImageType | null {
   if (!value) return null;
   const normalized = value.split(';')[0].trim().toLowerCase();
   switch (normalized) {
