@@ -14,6 +14,6 @@
 ## 宏观笔记
 - macro-notes.md
 
-## 高频模板
-- 剧本模板：trade-playbook skill
-- 市场摘要：market-brief skill
+## 高频模板（待实现）
+- 剧本模板：trade-playbook skill（计划中，container/skills/ 暂未安装）
+- 市场摘要：market-brief skill（计划中，container/skills/ 暂未安装）
