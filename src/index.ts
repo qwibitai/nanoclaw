@@ -9,7 +9,10 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { startCredentialProxy } from './credential-proxy.js';
+import {
+  startCredentialProxy,
+  startProviderProxies,
+} from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -481,11 +484,15 @@ async function main(): Promise<void> {
     CREDENTIAL_PROXY_PORT,
     PROXY_BIND_HOST,
   );
+  // Start additional provider proxies (OpenRouter, OpenAI, Gemini, Moonshot)
+  // Only starts proxies for providers with an API key configured in .env
+  const providerProxyServers = await startProviderProxies(PROXY_BIND_HOST);
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    for (const s of providerProxyServers) s.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

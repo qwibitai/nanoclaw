@@ -30,6 +30,33 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  /**
+   * Backbone LLM provider for the agent container (must be Anthropic-API-compatible).
+   * - 'anthropic' (default): Direct Anthropic API or Claude Pro OAuth
+   * - 'openrouter': Route via OpenRouter — supports all Claude models plus model
+   *   redundancy/cheaper pricing. Requires OPENROUTER_API_KEY in .env.
+   */
+  apiProvider?: 'anthropic' | 'openrouter';
+  /**
+   * Model name to pass to the agent SDK.
+   * - Anthropic: 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'
+   * - OpenRouter: 'anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-5', etc.
+   * Defaults to the SDK's built-in default when omitted.
+   */
+  model?: string;
+  /**
+   * Secondary AI provider proxies to expose inside this container.
+   * The agent can call these APIs from Bash/tools using the injected env vars:
+   *   NANOCLAW_OPENAI_URL + NANOCLAW_OPENAI_API_KEY
+   *   NANOCLAW_GEMINI_URL + NANOCLAW_GEMINI_API_KEY
+   *   NANOCLAW_MOONSHOT_URL + NANOCLAW_MOONSHOT_API_KEY
+   * Real API keys are never exposed — the credential proxy injects them.
+   */
+  enableSecondaryApis?: {
+    openai?: boolean;
+    gemini?: boolean;
+    moonshot?: boolean;
+  };
 }
 
 export interface RegisteredGroup {

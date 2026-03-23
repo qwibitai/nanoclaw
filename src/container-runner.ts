@@ -12,8 +12,12 @@ import {
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
+  GEMINI_PROXY_PORT,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MOONSHOT_PROXY_PORT,
+  OPENAI_PROXY_PORT,
+  OPENROUTER_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -215,27 +219,78 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  group: RegisteredGroup,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  // ── Backbone provider selection ───────────────────────────────────────────
+  // Default: Anthropic direct (port 3001).
+  // Override: OpenRouter (port 3002) — supports all Claude models via
+  // Anthropic-compatible API, useful for cost savings or provider redundancy.
+  const apiProvider = group.containerConfig?.apiProvider ?? 'anthropic';
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
+  if (apiProvider === 'openrouter') {
+    // Point the SDK at the OpenRouter proxy. OpenRouter always uses API key
+    // auth, so inject a placeholder regardless of the host's auth mode.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENROUTER_PROXY_PORT}`,
+    );
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // Default Anthropic proxy
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
+  }
+
+  // ── Model selection ────────────────────────────────────────────────────────
+  // Passed to the SDK's model option. Examples:
+  //   Anthropic:   'claude-opus-4-6', 'claude-sonnet-4-6'
+  //   OpenRouter:  'anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-5'
+  if (group.containerConfig?.model) {
+    args.push('-e', `NANOCLAW_MODEL=${group.containerConfig.model}`);
+  }
+
+  // ── Secondary API proxies ─────────────────────────────────────────────────
+  // Expose additional provider proxies for tool-level calls from within
+  // the agent (e.g. `curl $NANOCLAW_OPENAI_URL/chat/completions`).
+  // The credential proxy injects the real API key; containers never see it.
+  const secondary = group.containerConfig?.enableSecondaryApis;
+  if (secondary?.openai) {
+    args.push(
+      '-e',
+      `NANOCLAW_OPENAI_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}/v1`,
+    );
+    args.push('-e', 'NANOCLAW_OPENAI_API_KEY=proxy-injected');
+  }
+  if (secondary?.gemini) {
+    args.push(
+      '-e',
+      `NANOCLAW_GEMINI_URL=http://${CONTAINER_HOST_GATEWAY}:${GEMINI_PROXY_PORT}`,
+    );
+    args.push('-e', 'NANOCLAW_GEMINI_API_KEY=proxy-injected');
+  }
+  if (secondary?.moonshot) {
+    args.push(
+      '-e',
+      `NANOCLAW_MOONSHOT_URL=http://${CONTAINER_HOST_GATEWAY}:${MOONSHOT_PROXY_PORT}/v1`,
+    );
+    args.push('-e', 'NANOCLAW_MOONSHOT_API_KEY=proxy-injected');
   }
 
   // Runtime-specific args for host gateway resolution
@@ -278,7 +333,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group);
 
   logger.debug(
     {

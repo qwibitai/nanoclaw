@@ -389,6 +389,10 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Model override: set by the host per group via NANOCLAW_MODEL env var.
+  // Examples — Anthropic: 'claude-opus-4-6'  OpenRouter: 'anthropic/claude-opus-4-5'
+  const model = process.env.NANOCLAW_MODEL || undefined;
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -396,6 +400,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      ...(model ? { model } : {}),
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
