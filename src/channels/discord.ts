@@ -60,7 +60,8 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
-  // Pending triggers: chatJid → { message, contextId } for creating Discord thread on first response
+  // Pending triggers: chatJid:contextId → { message, contextId } for creating Discord thread
+  // on first response. Unique key per context prevents rapid @mentions from overwriting each other.
   private pendingTrigger = new Map<
     string,
     { message: Message; contextId: number }

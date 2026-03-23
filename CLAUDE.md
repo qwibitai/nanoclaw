@@ -22,6 +22,13 @@ Single Node.js process with channel-based messaging (Discord). Messages route to
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 
+## GitHub Repository
+
+The canonical repo is **Zxela/nanoclaw** — always target this for PRs and pushes.
+- Local clone remote `origin` → `https://github.com/Zxela/nanoclaw.git`
+- `zxela-claude/nanoclaw` is a fork — do NOT open PRs there
+- Always run `gh pr create --repo zxela/nanoclaw` (or omit `--repo` only if `origin` is set correctly)
+
 ## Development
 
 Run commands directly — don't tell the user to run them.
