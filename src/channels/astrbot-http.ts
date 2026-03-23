@@ -46,6 +46,12 @@ interface AstrBotConfig {
   apiKey?: string;
 }
 
+interface AstrBotOutboundPayload {
+  chat_id: string;
+  umo?: string;
+  text: string;
+}
+
 function getConfig(): AstrBotConfig {
   const env = readEnvFile([
     'ASTRBOT_HTTP_HOST',
@@ -114,6 +120,16 @@ function validatePayload(payload: any): payload is AstrBotInboundPayload {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function makeOutboundHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 function buildAstrBotMetadata(
@@ -396,30 +412,62 @@ class AstrBotHttpChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const umo = this.umoByJid.get(jid);
-    if (!umo) {
-      logger.warn({ jid }, 'AstrBot UMO missing for jid, cannot send');
-      return;
-    }
-    if (!this.config.apiKey) {
-      logger.warn('ASTRBOT_API_KEY not set; cannot send outbound message');
+    const chatId = jid.startsWith('astrbot:') ? jid.slice('astrbot:'.length) : jid;
+    if (!chatId) {
+      logger.warn({ jid }, 'AstrBot chat id missing for jid, cannot send');
       return;
     }
 
-    const url = `${this.config.apiBase}/api/v1/im/message`;
-    const res = await fetch(url, {
+    const outboundPayload: AstrBotOutboundPayload = {
+      chat_id: chatId,
+      umo,
+      text,
+    };
+    const outboundUrl = `${this.config.apiBase}/api/plug/nanoclaw_bridge/outbound`;
+    const outboundRes = await fetch(outboundUrl, {
+      method: 'POST',
+      headers: makeOutboundHeaders(this.config.token),
+      body: JSON.stringify(outboundPayload),
+    }).catch((err) => {
+      logger.warn({ err, jid }, 'AstrBot plugin outbound request failed');
+      return null;
+    });
+
+    if (outboundRes?.ok) {
+      return;
+    }
+    if (outboundRes) {
+      const errText = await outboundRes.text().catch(() => '');
+      logger.warn(
+        { status: outboundRes.status, body: errText, jid },
+        'AstrBot plugin outbound rejected message, falling back to OpenAPI',
+      );
+    }
+
+    if (!umo) {
+      logger.warn({ jid }, 'AstrBot UMO missing for jid, cannot use OpenAPI fallback');
+      return;
+    }
+    if (!this.config.apiKey) {
+      logger.warn('ASTRBOT_API_KEY not set; cannot use AstrBot OpenAPI fallback');
+      return;
+    }
+
+    const fallbackUrl = `${this.config.apiBase}/api/v1/im/message`;
+    const fallbackRes = await fetch(fallbackUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        ...makeOutboundHeaders(),
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify({ umo, message: text }),
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
+    if (!fallbackRes.ok) {
+      const errText = await fallbackRes.text().catch(() => '');
       logger.warn(
-        { status: res.status, body: errText },
-        'AstrBot outbound message failed',
+        { status: fallbackRes.status, body: errText },
+        'AstrBot outbound OpenAPI fallback failed',
       );
     }
   }
