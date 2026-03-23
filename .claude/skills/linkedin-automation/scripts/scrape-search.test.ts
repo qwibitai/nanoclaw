@@ -27,7 +27,7 @@ vi.mock('../lib/browser.js', () => {
       timeouts: { navigation: 30000 },
       delays: { afterPageLoad: 0 },
       selectors: {
-        searchResultsList: 'li.reusable-search__result-container',
+        searchResultsList: '[data-chameleon-result-urn]',
         nextPageBtn: 'button[aria-label="Next"]',
       },
     },
@@ -96,7 +96,7 @@ function makeMockContext(page: ReturnType<typeof makeMockPage>) {
   };
 }
 
-async function runSearch(input: { query: string; maxLeads?: number; campaign?: string }) {
+async function runSearch(input: { query: string; maxLeads?: number; campaign?: string; connectionsOnly?: boolean }) {
   if (!state.runScriptCb) throw new Error('runScript callback was never captured');
   return state.runScriptCb(input) as Promise<{
     success: boolean;
@@ -146,7 +146,7 @@ describe('input validation', () => {
 describe('primary selector works', () => {
   it('finds results with primary selector and does not probe fallbacks', async () => {
     const page = makeMockPage({
-      'li.reusable-search__result-container': 2,
+      '[data-chameleon-result-urn]': 2,
     });
     state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
 
@@ -155,16 +155,15 @@ describe('primary selector works', () => {
     expect(result.success).toBe(true);
     expect(result.data?.count).toBe(2);
 
-    // waitForSelector should not have been called with fallback selectors
+    // Primary found results — waitForSelector should not have been called at all
     const waitCalls = (page.waitForSelector as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[0],
     );
-    expect(waitCalls).not.toContain('li[class*="reusable-search"]');
-    expect(waitCalls).not.toContain('div[data-view-name="search-entity-result-item"]');
+    expect(waitCalls).toHaveLength(0);
   });
 
   it('calls upsertLead for each found result with source=Search and status=New', async () => {
-    const page = makeMockPage({ 'li.reusable-search__result-container': 3 });
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 3 });
     state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
 
     await runSearch({ query: 'engineer', maxLeads: 3 });
@@ -259,7 +258,7 @@ describe('all selectors return 0 results', () => {
 
 describe('daily limit enforcement', () => {
   it('stops processing results when checkLimit returns false', async () => {
-    const page = makeMockPage({ 'li.reusable-search__result-container': 5 });
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 5 });
     state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
 
     // Limit reached on first check
@@ -274,12 +273,50 @@ describe('daily limit enforcement', () => {
 
   it('respects maxLeads cap — stops after saving maxLeads results', async () => {
     // Return more elements than maxLeads
-    const page = makeMockPage({ 'li.reusable-search__result-container': 10 });
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 10 });
     state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
 
     await runSearch({ query: 'engineer', maxLeads: 3 });
 
     expect(state.upsertLeadMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ── connectionsOnly parameter ─────────────────────────────────────────────
+
+describe('connectionsOnly parameter', () => {
+  it('sets status=Connected (not New) when connectionsOnly is true', async () => {
+    // Regression: ISSUE-002 — connectionsOnly status path had no test coverage
+    // Found by /qa on 2026-03-23
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 2 });
+    state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
+
+    await runSearch({ query: 'engineer', maxLeads: 2, connectionsOnly: true });
+
+    expect(state.upsertLeadMock).toHaveBeenCalledTimes(2);
+    for (const call of (state.upsertLeadMock as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[0]).toMatchObject({ status: 'Connected' });
+    }
+  });
+
+  it('includes network filter in URL when connectionsOnly is true', async () => {
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 1 });
+    state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
+
+    await runSearch({ query: 'designer', maxLeads: 1, connectionsOnly: true });
+
+    const gotoUrl = (page.goto as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(gotoUrl).toContain('network=%5B%22F%22%5D');
+  });
+
+  it('does NOT include network filter when connectionsOnly is false or absent', async () => {
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 1 });
+    state.getBrowserContextMock!.mockResolvedValue(makeMockContext(page));
+
+    await runSearch({ query: 'designer', maxLeads: 1 });
+
+    const gotoUrl = (page.goto as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(gotoUrl).not.toContain('network=');
   });
 });
 
@@ -296,7 +333,7 @@ describe('browser context cleanup', () => {
   });
 
   it('closes browser context after successful scrape', async () => {
-    const page = makeMockPage({ 'li.reusable-search__result-container': 1 });
+    const page = makeMockPage({ '[data-chameleon-result-urn]': 1 });
     const mockContext = makeMockContext(page);
     state.getBrowserContextMock!.mockResolvedValue(mockContext);
 
