@@ -267,6 +267,14 @@ function buildContainerArgs(
     args.push('-e', `FAL_KEY=${falKey}`);
   }
 
+  // AWS: pass credentials to container (Polly TTS)
+  const awsEnv = readEnvFile(['AWS_BEDROCK_ACCESS_KEY_ID', 'AWS_BEDROCK_SECRET_ACCESS_KEY', 'AWS_BEDROCK_REGION']);
+  if (awsEnv.AWS_BEDROCK_ACCESS_KEY_ID) {
+    args.push('-e', `AWS_BEDROCK_ACCESS_KEY_ID=${awsEnv.AWS_BEDROCK_ACCESS_KEY_ID}`);
+    args.push('-e', `AWS_BEDROCK_SECRET_ACCESS_KEY=${awsEnv.AWS_BEDROCK_SECRET_ACCESS_KEY}`);
+    args.push('-e', `AWS_BEDROCK_REGION=${awsEnv.AWS_BEDROCK_REGION || 'us-east-1'}`);
+  }
+
   // Smatch MCP: pass credentials to container
   const smatchEnv = readEnvFile(['SMATCH_MONGODB_URI', 'SMATCH_CLUB_ID']);
   if (smatchEnv.SMATCH_MONGODB_URI) {
