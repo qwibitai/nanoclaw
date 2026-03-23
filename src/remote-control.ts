@@ -111,13 +111,19 @@ export async function startRemoteControl(
   try {
     proc = spawn('claude', ['remote-control', '--name', 'NanoClaw Remote'], {
       cwd,
-      stdio: ['ignore', stdoutFd, stderrFd],
+      stdio: ['pipe', stdoutFd, stderrFd],
       detached: true,
     });
   } catch (err: any) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
     return { ok: false, error: `Failed to start: ${err.message}` };
+  }
+
+  // Auto-accept the "Enable Remote Control?" prompt
+  if (proc.stdin) {
+    proc.stdin.write('y\n');
+    proc.stdin.end();
   }
 
   // Close FDs in the parent — the child inherited copies

@@ -59,7 +59,7 @@ export function readonlyMountArgs(
 
 /** Returns the shell command to stop a container by name. */
 export function stopContainer(name: string): string {
-  return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
+  return `${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`;
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
@@ -96,7 +96,9 @@ export function ensureContainerRuntimeRunning(): void {
     console.error(
       '╚════════════════════════════════════════════════════════════════╝\n',
     );
-    throw new Error('Container runtime is required but failed to start');
+    throw new Error('Container runtime is required but failed to start', {
+      cause: err,
+    });
   }
 }
 
