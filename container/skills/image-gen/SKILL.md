@@ -51,10 +51,19 @@ face-swap /workspace/group/attachments/img-FACE.jpg /workspace/group/attachments
 When the user asks you to respond with voice, or when a voice reply feels natural (e.g. they sent a voice note), generate audio:
 
 ```bash
-text-to-speech "Hola, aquí tienes tu resumen de hoy"
+# Male voice (default)
+text-to-speech "Hola, aquí tienes tu resumen de hoy" male
+
+# Female voice
+text-to-speech "Hola, aquí tienes tu resumen de hoy" female
 ```
 
-The voice is hardcoded to onyx. Do NOT try to change it or pass extra arguments. Do NOT call the OpenAI TTS API directly — always use this script. When generating speech, ALWAYS write the text in Mexican Spanish with natural, casual expressions.
+Choose male or female based on:
+- If the user asks for a specific gender voice → use that
+- If responding to a female user or the context calls for it → use female
+- Default → male
+
+Do NOT call the OpenAI TTS API directly — always use this script. When generating speech, ALWAYS write the text in Mexican Spanish with natural, casual expressions.
 
 Send as a native voice note:
 ```

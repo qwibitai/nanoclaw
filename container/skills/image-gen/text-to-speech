@@ -4,8 +4,13 @@
 # Voices: alloy, echo, fable, onyx, nova, shimmer (default: onyx)
 set -euo pipefail
 
-TEXT="${1:?Usage: text-to-speech \"text to speak\"}"
-VOICE="onyx"
+TEXT="${1:?Usage: text-to-speech \"text\" \"male|female\"}"
+GENDER="${2:-male}"
+if [[ "$GENDER" == "female" ]]; then
+  VOICE="nova"
+else
+  VOICE="onyx"
+fi
 OUTPUT_DIR="/workspace/group"
 OUTPUT_FILE="${OUTPUT_DIR}/tts-$(date +%s%3N).ogg"
 
@@ -21,7 +26,7 @@ RESPONSE_CODE=$(curl -sS -w "%{http_code}" -o "$OUTPUT_FILE" \
   -d "$(python3 -c "
 import json, sys
 print(json.dumps({
-    'model': 'tts-1',
+    'model': 'tts-1-hd',
     'input': sys.argv[1],
     'voice': sys.argv[2],
     'response_format': 'opus'
