@@ -119,4 +119,47 @@ describe('cacheAttachmentsForMessage', () => {
     const cacheDir = path.join(groupDir, '.attachments');
     expect(fs.readdirSync(cacheDir)[0]).toMatch(/\.jpg$/);
   });
+
+  it('downloads image segments nested inside reply metadata', async () => {
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-cache-'));
+    tempDirs.push(groupDir);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'image/png' : null),
+        },
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+      }),
+    );
+
+    const result = await cacheAttachmentsForMessage({
+      groupDir,
+      messageId: 'msg-4',
+      content: '',
+      metadata: {
+        reply: {
+          message_id: 'quoted-1',
+          sender_name: 'Bob',
+          segments: [
+            {
+              type: 'image',
+              image: { url: 'https://example.com/replied.png' },
+            },
+          ],
+        },
+      },
+    });
+
+    const attachments = result.metadata?.attachments as
+      | Array<Record<string, unknown>>
+      | undefined;
+    expect(attachments).toHaveLength(1);
+    expect(attachments?.[0].original_url).toBe(
+      'https://example.com/replied.png',
+    );
+    expect(result.synthesizedContent).toBe('[User sent 1 image attachment]');
+  });
 });
