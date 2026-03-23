@@ -216,10 +216,6 @@ export class DiscordChannel implements Channel {
           }
         }
 
-        // If already in bot thread and message explicitly mentions bot, ensure activeConversation is set
-        if (isInBotThread && TRIGGER_PATTERN.test(content)) {
-        }
-
         // Direct reply to a bot message outside a thread — treat as directed at the bot
         if (
           !isInBotThread &&
