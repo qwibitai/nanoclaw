@@ -72,6 +72,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
+- **Security scanning** - Built-in [Tirith](https://github.com/sheeki03/tirith) skill scans URLs and commands for homograph attacks, pipe-to-shell, terminal injection, and more (also integrated in [Hermes Agent](https://github.com/NousResearch/hermes-agent/pull/1256))
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
