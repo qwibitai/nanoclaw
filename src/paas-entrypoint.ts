@@ -52,9 +52,7 @@ async function main() {
             }
           }
         } else if (parsed.type === 'result') {
-          const usage = parsed.usage as
-            | Record<string, number>
-            | undefined;
+          const usage = parsed.usage as Record<string, number> | undefined;
           server.pushEvent('chat.final', {
             sessionKey,
             runId,

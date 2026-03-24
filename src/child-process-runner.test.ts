@@ -83,7 +83,14 @@ describe('ChildProcessRunner', () => {
     });
     expect(spawnMock).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--model', 'claude-sonnet-4-20250514', '--output-format', 'stream-json', '--dangerously-skip-permissions'],
+      [
+        '-p',
+        '--model',
+        'claude-sonnet-4-20250514',
+        '--output-format',
+        'stream-json',
+        '--dangerously-skip-permissions',
+      ],
       expect.anything(),
     );
     await runner.killAll();
