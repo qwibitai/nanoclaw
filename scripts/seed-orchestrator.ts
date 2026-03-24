@@ -42,8 +42,13 @@ Read these files and summarize what you find:
 6. Audit logs: /workspace/extra/atlas-state/audit/ (each entity subfolder, today's file)
 7. Entity profiles: /workspace/extra/atlas-entities/ (read entity-profile.md for each)
 8. Agent performance: /workspace/extra/atlas-state/agent-performance/ (if exists)
+9. Evolution log: /workspace/extra/atlas-state/evolution-log.jsonl (all entries since last retro — check /workspace/extra/atlas-state/state/last-retro-marker.json for cutoff, or use last 7 days if no marker)
+10. Session count: /workspace/extra/atlas-state/hook-health/session-start.jsonl (count entries in last 7 days — this is how many CEO sessions happened)
+11. System health: /workspace/extra/atlas-state/state/system-health.json (check for CRITICAL or WARNING status)
 
 If a file doesn't exist, note it briefly and move on. Don't error out.
+
+*Quiet-log check:* Compare session count (item 10) vs evolution log entries (item 9). If 5+ sessions happened but 0 friction events were logged, flag it: "Evolution log silent during N sessions — possible logging failure." This is important because a broken stop hook produces zero friction events, making everything look healthy when enforcement is actually dead.
 
 *Step 3: Produce the digest*
 
@@ -63,6 +68,11 @@ Sessions: {n} | Autonomous: {n} | Errors: {n}
 
 *Graduation*
 Milestone: {current} | Progress: {key metric}
+
+*Evolution*
+{n} friction events since last retro ({n} MAJOR, {n} MINOR) | {quiet-log warning if applicable}
+{If 3+ events share a theme: "Recurring: {theme} ({n} times) — graduation candidate"}
+{If system-health.json shows CRITICAL: "System health: CRITICAL — {detail}"}
 
 *Quota*
 {n} invocations | {weighted} weighted | {status}
