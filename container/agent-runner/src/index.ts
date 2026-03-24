@@ -92,53 +92,32 @@ const IPC_POLL_MS = 500;
 const IPC_PAUSE_POLL_MS = 5000;
 
 /**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
+ * Yields exactly one SDKUserMessage then returns.
+ * Uses AsyncGenerator (not a plain string) so the SDK treats it as streaming
+ * mode, which keeps isSingleUserTurn = false and allows agent teams.
  */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string, images?: ImageAttachment[]): boolean {
-    if (this.done) return false;
-    let content: string | ContentBlock[];
-    if (images && images.length > 0) {
-      content = [
-        { type: 'text', text },
-        ...images.map((img) => ({
-          type: 'image' as const,
-          source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
-        })),
-      ];
-    } else {
-      content = text;
-    }
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-    return true;
+async function* singleMessageIterable(
+  text: string,
+  images?: ImageAttachment[],
+): AsyncGenerator<SDKUserMessage> {
+  let content: string | ContentBlock[];
+  if (images && images.length > 0) {
+    content = [
+      { type: 'text', text },
+      ...images.map((img) => ({
+        type: 'image' as const,
+        source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+      })),
+    ];
+  } else {
+    content = text;
   }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>(r => { this.waiting = r; });
-      this.waiting = null;
-    }
-  }
+  yield {
+    type: 'user',
+    message: { role: 'user', content },
+    parent_tool_use_id: null,
+    session_id: '',
+  } as SDKUserMessage;
 }
 
 async function readStdin(): Promise<string> {
