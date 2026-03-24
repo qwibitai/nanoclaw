@@ -84,15 +84,16 @@ describe('ensureContainerRuntimeRunning', () => {
     expect(logger.info).toHaveBeenCalledWith('Container runtime started');
   });
 
-  it('throws when both status and start fail', () => {
+  it('returns false (degraded mode) when both status and start fail', () => {
+    // Skip retries in test to avoid 5-minute busy-wait
+    process.env.CONTAINER_MAX_RETRIES = '0';
     mockExecSync.mockImplementation(() => {
       throw new Error('failed');
     });
 
-    expect(() => ensureContainerRuntimeRunning()).toThrow(
-      'Container runtime is required but failed to start',
-    );
-    expect(logger.error).toHaveBeenCalled();
+    const result = ensureContainerRuntimeRunning();
+    expect(result).toBe(false);
+    delete process.env.CONTAINER_MAX_RETRIES;
   });
 });
 

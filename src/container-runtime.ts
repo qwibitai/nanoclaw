@@ -89,9 +89,9 @@ export function ensureContainerRuntimeRunning(): boolean {
     return true;
   }
 
-  // Retry every 10 seconds for up to 5 minutes
-  const RETRY_INTERVAL = 10000;
-  const MAX_RETRIES = 30; // 5 minutes
+  // Retry every 10 seconds for up to 5 minutes (0 retries in test via env)
+  const RETRY_INTERVAL = parseInt(process.env.CONTAINER_RETRY_INTERVAL || '10000', 10);
+  const MAX_RETRIES = parseInt(process.env.CONTAINER_MAX_RETRIES || '30', 10);
   let attempt = 0;
 
   logger.warn('Container runtime not available, retrying...');
