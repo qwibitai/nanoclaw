@@ -89,6 +89,8 @@ function setupLaunchd(
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
         <string>${nodePath}</string>
         <string>${projectRoot}/dist/index.js</string>
     </array>
@@ -104,6 +106,8 @@ function setupLaunchd(
         <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
         <key>HOME</key>
         <string>${homeDir}</string>
+        <key>ASSISTANT_NAME</key>
+        <string>${process.env.ASSISTANT_NAME || 'Clawdio'}</string>
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -246,6 +250,7 @@ RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=ASSISTANT_NAME=${process.env.ASSISTANT_NAME || 'Clawdio'}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 

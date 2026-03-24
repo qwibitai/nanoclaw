@@ -709,6 +709,33 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
+  private mimeFromExtension(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const map: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.csv': 'text/csv',
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      '.json': 'application/json',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.mp4': 'video/mp4',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.docx':
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xlsx':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.pptx':
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.zip': 'application/zip',
+    };
+    return map[ext] ?? 'application/octet-stream';
+  }
+
   async sendDocument(
     jid: string,
     filePath: string,
@@ -720,7 +747,7 @@ export class WhatsAppChannel implements Channel {
     const buffer = fs.readFileSync(filePath);
     const result = await this.sock.sendMessage(jid, {
       document: buffer,
-      mimetype: mimeType ?? 'application/octet-stream',
+      mimetype: mimeType ?? this.mimeFromExtension(filePath),
       fileName: fileName ?? path.basename(filePath),
       caption: caption ?? '',
     });
