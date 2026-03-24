@@ -263,6 +263,52 @@ describe('CLAUDE.md template copy', () => {
   let tmpDir: string;
   let groupsDir: string;
 
+  // Replicates register.ts template copy + name update logic
+  function simulateRegister(
+    folder: string,
+    isMain: boolean,
+    assistantName = 'Andy',
+  ): void {
+    const folderDir = path.join(groupsDir, folder);
+    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+
+    // Template copy (register.ts lines 119-138)
+    const dest = path.join(folderDir, 'CLAUDE.md');
+    if (!fs.existsSync(dest)) {
+      const templatePath = isMain
+        ? path.join(groupsDir, 'main', 'CLAUDE.md')
+        : path.join(groupsDir, 'global', 'CLAUDE.md');
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, dest);
+      }
+    }
+
+    // Name update across all groups (register.ts lines 140-165)
+    if (assistantName !== 'Andy') {
+      const mdFiles = fs
+        .readdirSync(groupsDir)
+        .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
+        .filter((f) => fs.existsSync(f));
+
+      for (const mdFile of mdFiles) {
+        let content = fs.readFileSync(mdFile, 'utf-8');
+        content = content.replace(/^# Andy$/m, `# ${assistantName}`);
+        content = content.replace(
+          /You are Andy/g,
+          `You are ${assistantName}`,
+        );
+        fs.writeFileSync(mdFile, content);
+      }
+    }
+  }
+
+  function readGroupMd(folder: string): string {
+    return fs.readFileSync(
+      path.join(groupsDir, folder, 'CLAUDE.md'),
+      'utf-8',
+    );
+  }
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-register-test-'));
     groupsDir = path.join(tmpDir, 'groups');
@@ -283,123 +329,101 @@ describe('CLAUDE.md template copy', () => {
   });
 
   it('copies global template for non-main group', () => {
-    const folder = 'telegram_dev-team';
-    const folderDir = path.join(groupsDir, folder);
-    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+    simulateRegister('telegram_dev-team', false);
 
-    const dest = path.join(folderDir, 'CLAUDE.md');
-    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
-
-    // Replicate register.ts logic: copy template if dest doesn't exist
-    if (!fs.existsSync(dest)) {
-      if (fs.existsSync(templatePath)) {
-        fs.copyFileSync(templatePath, dest);
-      }
-    }
-
-    expect(fs.existsSync(dest)).toBe(true);
-    expect(fs.readFileSync(dest, 'utf-8')).toContain('You are Andy');
-    // Should NOT contain main-specific content
-    expect(fs.readFileSync(dest, 'utf-8')).not.toContain('Admin Context');
+    const content = readGroupMd('telegram_dev-team');
+    expect(content).toContain('You are Andy');
+    expect(content).not.toContain('Admin Context');
   });
 
   it('copies main template for main group', () => {
-    const folder = 'whatsapp_main';
-    const folderDir = path.join(groupsDir, folder);
-    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+    simulateRegister('whatsapp_main', true);
 
-    const dest = path.join(folderDir, 'CLAUDE.md');
-    const isMain = true;
-    const templatePath = isMain
-      ? path.join(groupsDir, 'main', 'CLAUDE.md')
-      : path.join(groupsDir, 'global', 'CLAUDE.md');
-
-    if (!fs.existsSync(dest)) {
-      if (fs.existsSync(templatePath)) {
-        fs.copyFileSync(templatePath, dest);
-      }
-    }
-
-    expect(fs.existsSync(dest)).toBe(true);
-    expect(fs.readFileSync(dest, 'utf-8')).toContain('Admin Context');
+    expect(readGroupMd('whatsapp_main')).toContain('Admin Context');
   });
 
-  it('does not overwrite existing CLAUDE.md', () => {
-    const folder = 'slack_main';
-    const folderDir = path.join(groupsDir, folder);
-    fs.mkdirSync(folderDir, { recursive: true });
+  it('each channel can have its own main with admin context', () => {
+    simulateRegister('whatsapp_main', true);
+    simulateRegister('telegram_main', true);
+    simulateRegister('slack_main', true);
+    simulateRegister('discord_main', true);
 
-    const dest = path.join(folderDir, 'CLAUDE.md');
-    fs.writeFileSync(dest, '# Custom\n\nUser-modified content.');
-
-    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
-    if (!fs.existsSync(dest)) {
-      if (fs.existsSync(templatePath)) {
-        fs.copyFileSync(templatePath, dest);
-      }
+    for (const folder of [
+      'whatsapp_main',
+      'telegram_main',
+      'slack_main',
+      'discord_main',
+    ]) {
+      const content = readGroupMd(folder);
+      expect(content).toContain('Admin Context');
+      expect(content).toContain('You are Andy');
     }
-
-    expect(fs.readFileSync(dest, 'utf-8')).toContain('User-modified content');
-    expect(fs.readFileSync(dest, 'utf-8')).not.toContain('You are Andy');
   });
 
-  it('updates name in all groups/*/CLAUDE.md files', () => {
-    // Create a few group folders with CLAUDE.md
-    for (const folder of ['whatsapp_main', 'telegram_friends']) {
-      const dir = path.join(groupsDir, folder);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(
-        path.join(dir, 'CLAUDE.md'),
-        '# Andy\n\nYou are Andy, a personal assistant.',
-      );
+  it('non-main groups across channels get global template', () => {
+    simulateRegister('whatsapp_main', true);
+    simulateRegister('telegram_friends', false);
+    simulateRegister('slack_engineering', false);
+    simulateRegister('discord_general', false);
+
+    expect(readGroupMd('whatsapp_main')).toContain('Admin Context');
+    for (const folder of [
+      'telegram_friends',
+      'slack_engineering',
+      'discord_general',
+    ]) {
+      const content = readGroupMd(folder);
+      expect(content).toContain('You are Andy');
+      expect(content).not.toContain('Admin Context');
     }
+  });
 
-    const assistantName = 'Luna';
+  it('custom name propagates to all channels and groups', () => {
+    // Register multiple channels, last one sets custom name
+    simulateRegister('whatsapp_main', true);
+    simulateRegister('telegram_main', true);
+    simulateRegister('slack_devs', false);
+    // Final registration triggers name update across all
+    simulateRegister('discord_main', true, 'Luna');
 
-    // Replicate register.ts glob logic
-    const mdFiles = fs
-      .readdirSync(groupsDir)
-      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
-      .filter((f) => fs.existsSync(f));
-
-    for (const mdFile of mdFiles) {
-      let content = fs.readFileSync(mdFile, 'utf-8');
-      content = content.replace(/^# Andy$/m, `# ${assistantName}`);
-      content = content.replace(/You are Andy/g, `You are ${assistantName}`);
-      fs.writeFileSync(mdFile, content);
-    }
-
-    // All CLAUDE.md files should be updated, including templates and groups
-    for (const folder of ['main', 'global', 'whatsapp_main', 'telegram_friends']) {
-      const content = fs.readFileSync(
-        path.join(groupsDir, folder, 'CLAUDE.md'),
-        'utf-8',
-      );
+    for (const folder of [
+      'main',
+      'global',
+      'whatsapp_main',
+      'telegram_main',
+      'slack_devs',
+      'discord_main',
+    ]) {
+      const content = readGroupMd(folder);
       expect(content).toContain('# Luna');
       expect(content).toContain('You are Luna');
       expect(content).not.toContain('Andy');
     }
   });
 
-  it('handles missing template gracefully', () => {
-    // Remove templates
+  it('does not overwrite user-modified CLAUDE.md', () => {
+    simulateRegister('slack_main', true);
+    // User customizes the file
+    fs.writeFileSync(
+      path.join(groupsDir, 'slack_main', 'CLAUDE.md'),
+      '# Custom\n\nUser-modified content.',
+    );
+    // Re-registering same folder (e.g. re-running /add-slack)
+    simulateRegister('slack_main', true);
+
+    const content = readGroupMd('slack_main');
+    expect(content).toContain('User-modified content');
+    expect(content).not.toContain('Admin Context');
+  });
+
+  it('handles missing templates gracefully', () => {
     fs.unlinkSync(path.join(groupsDir, 'global', 'CLAUDE.md'));
     fs.unlinkSync(path.join(groupsDir, 'main', 'CLAUDE.md'));
 
-    const folder = 'discord_general';
-    const folderDir = path.join(groupsDir, folder);
-    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+    simulateRegister('discord_general', false);
 
-    const dest = path.join(folderDir, 'CLAUDE.md');
-    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
-
-    if (!fs.existsSync(dest)) {
-      if (fs.existsSync(templatePath)) {
-        fs.copyFileSync(templatePath, dest);
-      }
-    }
-
-    // No crash, no file created
-    expect(fs.existsSync(dest)).toBe(false);
+    expect(
+      fs.existsSync(path.join(groupsDir, 'discord_general', 'CLAUDE.md')),
+    ).toBe(false);
   });
 });
