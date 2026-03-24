@@ -116,38 +116,26 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
-  // Create or upgrade CLAUDE.md in the group folder from the appropriate template.
+  // Create CLAUDE.md in the new group folder from template if it doesn't exist.
   // The agent runs with CWD=/workspace/group and loads CLAUDE.md from there.
+  // Never overwrite an existing CLAUDE.md — users customize these extensively
+  // (persona, workspace structure, communication rules, family context, etc.)
+  // and a stock template replacement would destroy that work.
   const groupClaudeMdPath = path.join(
     projectRoot,
     'groups',
     parsed.folder,
     'CLAUDE.md',
   );
-  const mainTemplatePath = path.join(projectRoot, 'groups', 'main', 'CLAUDE.md');
-  const globalTemplatePath = path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
-  const templatePath = parsed.isMain ? mainTemplatePath : globalTemplatePath;
-  const fileExists = fs.existsSync(groupClaudeMdPath);
-
-  // Promotion case: group was registered as non-main (got global template)
-  // and is now being re-registered as main. Replace with main template.
-  const needsPromotion =
-    parsed.isMain &&
-    fileExists &&
-    !fs.readFileSync(groupClaudeMdPath, 'utf-8').includes('## Admin Context');
-
-  if (!fileExists || needsPromotion) {
+  if (!fs.existsSync(groupClaudeMdPath)) {
+    const templatePath = parsed.isMain
+      ? path.join(projectRoot, 'groups', 'main', 'CLAUDE.md')
+      : path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
     if (fs.existsSync(templatePath)) {
       fs.copyFileSync(templatePath, groupClaudeMdPath);
       logger.info(
-        {
-          file: groupClaudeMdPath,
-          template: templatePath,
-          promoted: needsPromotion,
-        },
-        needsPromotion
-          ? 'Promoted CLAUDE.md to main template'
-          : 'Created CLAUDE.md from template',
+        { file: groupClaudeMdPath, template: templatePath },
+        'Created CLAUDE.md from template',
       );
     }
   }
