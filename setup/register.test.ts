@@ -272,24 +272,18 @@ describe('CLAUDE.md template copy', () => {
     const folderDir = path.join(groupsDir, folder);
     fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
 
-    // Template copy + promotion (register.ts lines 119-148)
+    // Template copy — never overwrite existing (register.ts lines 119-135)
     const dest = path.join(folderDir, 'CLAUDE.md');
-    const templatePath = isMain
-      ? path.join(groupsDir, 'main', 'CLAUDE.md')
-      : path.join(groupsDir, 'global', 'CLAUDE.md');
-    const fileExists = fs.existsSync(dest);
-    const needsPromotion =
-      isMain &&
-      fileExists &&
-      !fs.readFileSync(dest, 'utf-8').includes('## Admin Context');
-
-    if (!fileExists || needsPromotion) {
+    if (!fs.existsSync(dest)) {
+      const templatePath = isMain
+        ? path.join(groupsDir, 'main', 'CLAUDE.md')
+        : path.join(groupsDir, 'global', 'CLAUDE.md');
       if (fs.existsSync(templatePath)) {
         fs.copyFileSync(templatePath, dest);
       }
     }
 
-    // Name update across all groups (register.ts lines 150-175)
+    // Name update across all groups (register.ts lines 140-165)
     if (assistantName !== 'Andy') {
       const mdFiles = fs
         .readdirSync(groupsDir)
@@ -407,66 +401,54 @@ describe('CLAUDE.md template copy', () => {
     }
   });
 
-  it('does not overwrite main CLAUDE.md that already has admin context', () => {
+  it('never overwrites existing CLAUDE.md on re-registration', () => {
     simulateRegister('slack_main', true);
-    // User appends custom content to the main template
+    // User customizes the file extensively (persona, workspace, rules)
     const mdPath = path.join(groupsDir, 'slack_main', 'CLAUDE.md');
-    fs.appendFileSync(mdPath, '\n\n## My Custom Section\n\nUser notes here.');
+    fs.writeFileSync(
+      mdPath,
+      '# Gambi\n\nCustom persona with workspace rules and family context.',
+    );
     // Re-registering same folder (e.g. re-running /add-slack)
     simulateRegister('slack_main', true);
 
     const content = readGroupMd('slack_main');
-    // Preserved: has both admin context AND user additions
-    expect(content).toContain('Admin Context');
-    expect(content).toContain('My Custom Section');
+    expect(content).toContain('Custom persona');
+    expect(content).not.toContain('Admin Context');
   });
 
-  it('does not overwrite non-main CLAUDE.md on re-registration', () => {
-    simulateRegister('telegram_friends', false);
-    // User customizes the file
-    const mdPath = path.join(groupsDir, 'telegram_friends', 'CLAUDE.md');
-    fs.writeFileSync(mdPath, '# Custom\n\nUser-modified content.');
-    // Re-registering same folder as non-main
-    simulateRegister('telegram_friends', false);
+  it('never overwrites when non-main becomes main (isMain changes)', () => {
+    // User registers a family group as non-main
+    simulateRegister('whatsapp_casa', false);
+    // User extensively customizes it (PARA system, task management, etc.)
+    const mdPath = path.join(groupsDir, 'whatsapp_casa', 'CLAUDE.md');
+    fs.writeFileSync(
+      mdPath,
+      '# Casa\n\nFamily group with PARA system, task management, shopping lists.',
+    );
+    // Later, user promotes to main (no trigger required) — CLAUDE.md must be preserved
+    simulateRegister('whatsapp_casa', true);
 
-    const content = readGroupMd('telegram_friends');
-    expect(content).toContain('User-modified content');
+    const content = readGroupMd('whatsapp_casa');
+    expect(content).toContain('PARA system');
+    expect(content).not.toContain('Admin Context');
   });
 
-  it('promotes non-main group to main when re-registered with isMain', () => {
-    // Initially registered as non-main (gets global template)
-    simulateRegister('telegram_main', false);
-    expect(readGroupMd('telegram_main')).not.toContain('Admin Context');
-
-    // User switches this channel to main
-    simulateRegister('telegram_main', true);
-    expect(readGroupMd('telegram_main')).toContain('Admin Context');
-  });
-
-  it('promotes across channels — WhatsApp non-main to Telegram main', () => {
-    // Start with WhatsApp as main, Telegram as non-main
+  it('preserves custom CLAUDE.md across channels when changing main', () => {
+    // Real-world scenario: WhatsApp main + customized Discord research channel
     simulateRegister('whatsapp_main', true);
-    simulateRegister('telegram_control', false);
+    simulateRegister('discord_main', false);
+    const discordPath = path.join(groupsDir, 'discord_main', 'CLAUDE.md');
+    fs.writeFileSync(
+      discordPath,
+      '# Gambi HQ — Research Assistant\n\nResearch workflows for Laura and Ethan.',
+    );
 
+    // Discord becomes main too — custom content must survive
+    simulateRegister('discord_main', true);
+    expect(readGroupMd('discord_main')).toContain('Research Assistant');
+    // WhatsApp main also untouched
     expect(readGroupMd('whatsapp_main')).toContain('Admin Context');
-    expect(readGroupMd('telegram_control')).not.toContain('Admin Context');
-
-    // User decides Telegram should be the new main
-    simulateRegister('telegram_control', true);
-    expect(readGroupMd('telegram_control')).toContain('Admin Context');
-  });
-
-  it('promotion updates assistant name in promoted file', () => {
-    // Register as non-main with default name
-    simulateRegister('slack_ops', false);
-    expect(readGroupMd('slack_ops')).toContain('You are Andy');
-
-    // Promote to main with custom name
-    simulateRegister('slack_ops', true, 'Nova');
-    const content = readGroupMd('slack_ops');
-    expect(content).toContain('Admin Context');
-    expect(content).toContain('You are Nova');
-    expect(content).not.toContain('Andy');
   });
 
   it('handles missing templates gracefully', () => {
