@@ -466,6 +466,9 @@ export function startWebUI(
           rejectAuth(res);
           return;
         }
+        // For auth-exempt routes with no auth, pass true so route
+        // handlers don't reject. The route itself enforces its own rules.
+        const effectiveAuth = authResult || true;
         return handleRoute(
           pathname,
           req.method || 'GET',
@@ -473,7 +476,7 @@ export function startWebUI(
           req,
           res,
           routeDeps,
-          authResult,
+          effectiveAuth,
         );
       })
       .then((handled) => {
