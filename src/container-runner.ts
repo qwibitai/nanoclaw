@@ -26,7 +26,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, WebAccessConfig } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -42,6 +42,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  webAccess?: WebAccessConfig;
 }
 
 export interface ContainerOutput {
