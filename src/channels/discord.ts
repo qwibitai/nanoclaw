@@ -227,10 +227,7 @@ export class DiscordChannel implements Channel {
             // Download skipped (audio, oversized, no group/URL)
             const att = attValues[i];
             attachmentDescriptions.push(
-              describeAttachment(
-                att.contentType || '',
-                att.name || 'file',
-              ),
+              describeAttachment(att.contentType || '', att.name || 'file'),
             );
           }
         }

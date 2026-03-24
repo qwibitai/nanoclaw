@@ -147,9 +147,7 @@ export async function downloadAttachment(
     let localPath = path.join(dir, actualFilename);
     if (fs.existsSync(localPath)) {
       const ext = path.extname(safeFilename);
-      const base = ext
-        ? safeFilename.slice(0, -ext.length)
-        : safeFilename;
+      const base = ext ? safeFilename.slice(0, -ext.length) : safeFilename;
       let counter = 1;
       do {
         actualFilename = `${base}_${counter}${ext}`;
