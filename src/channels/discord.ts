@@ -441,6 +441,60 @@ export class DiscordChannel implements Channel {
     }
   }
 
+  /**
+   * Resolve the send target for a message: pendingTrigger → existing thread → channel fallback.
+   * If a pendingTrigger is found, creates a new Discord thread and returns it.
+   */
+  private async resolveThreadTarget(
+    jid: string,
+    textChannel: TextChannel,
+    threadContextId: number | undefined,
+    threadNameHint: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{
+    target: any;
+    kind: 'new-thread' | 'existing-thread' | 'channel';
+  }> {
+    // Step 1: If there's a pending trigger → create a new thread
+    if (threadContextId !== undefined) {
+      const triggerInfo = this.pendingTrigger.get(threadContextId);
+      if (triggerInfo) {
+        this.pendingTrigger.delete(threadContextId);
+        try {
+          const thread = await triggerInfo.message.startThread({
+            name:
+              threadNameHint.slice(0, 100).replace(/\n/g, ' ') || 'Response',
+          });
+          updateThreadContext(threadContextId, { threadId: thread.id });
+          const sendKey = `${jid}:ctx-${threadContextId}`;
+          const ctx = this.currentSendTarget.get(sendKey);
+          if (ctx) ctx.thread_id = thread.id;
+          return { target: thread, kind: 'new-thread' };
+        } catch (err) {
+          logger.warn(
+            { jid, err },
+            'Failed to create thread, falling back to channel',
+          );
+        }
+      }
+    }
+
+    // Step 2: Check currentSendTarget for an existing thread
+    if (threadContextId !== undefined) {
+      const sendKey = `${jid}:ctx-${threadContextId}`;
+      const ctx = this.currentSendTarget.get(sendKey);
+      if (ctx?.thread_id) {
+        const thread =
+          textChannel.threads.cache.get(ctx.thread_id) ??
+          (await textChannel.threads.fetch(ctx.thread_id).catch(() => null));
+        if (thread) return { target: thread, kind: 'existing-thread' };
+      }
+    }
+
+    // Step 3: channel fallback
+    return { target: textChannel, kind: 'channel' };
+  }
+
   async sendMessage(
     jid: string,
     text: string,
@@ -461,75 +515,27 @@ export class DiscordChannel implements Channel {
       }
 
       const textChannel = channel as TextChannel;
+      const { target, kind } = await this.resolveThreadTarget(
+        jid,
+        textChannel,
+        threadContextId,
+        text,
+      );
+      await this.sendChunked(target, text);
 
-      // Step 1: If there's a pending trigger for this context → create a new thread
-      if (threadContextId !== undefined) {
-        const triggerInfo = this.pendingTrigger.get(threadContextId);
-        if (triggerInfo) {
-          this.pendingTrigger.delete(threadContextId);
-          try {
-            const thread = await triggerInfo.message.startThread({
-              name: text.slice(0, 100).replace(/\n/g, ' ') || 'Response',
-            });
-            // Update the thread context with the actual Discord thread ID
-            updateThreadContext(threadContextId, { threadId: thread.id });
-            // Update in-memory send target so subsequent streaming outputs go to this thread
-            const sendKey = `${jid}:ctx-${threadContextId}`;
-            const ctx = this.currentSendTarget.get(sendKey);
-            if (ctx) {
-              ctx.thread_id = thread.id;
-            }
-            await this.sendChunked(thread, text);
-            logger.info(
-              {
-                jid,
-                threadId: thread.id,
-                threadContextId,
-                length: text.length,
-              },
-              'Discord message sent to new thread',
-            );
-            return;
-          } catch (err) {
-            logger.warn(
-              { jid, err },
-              'Failed to create thread, falling back to channel',
-            );
-          }
-        }
-      }
-
-      // Step 2: If there's a currentSendTarget for this context → send to that thread
-      if (threadContextId !== undefined) {
-        const sendKey = `${jid}:ctx-${threadContextId}`;
-        const ctx = this.currentSendTarget.get(sendKey);
-        if (ctx?.thread_id) {
-          try {
-            const thread = await textChannel.threads.fetch(ctx.thread_id);
-            if (thread) {
-              await this.sendChunked(thread, text);
-              logger.info(
-                {
-                  jid,
-                  threadId: ctx.thread_id,
-                  threadContextId,
-                  length: text.length,
-                },
-                'Discord message sent to existing thread',
-              );
-              return;
-            }
-          } catch {
-            // Thread deleted, fall through
-          }
-        }
-      }
-
-      // Step 3: No thread context (scheduled task, IPC, etc.) — send to main channel
-      await this.sendChunked(textChannel, text);
+      const logMessages = {
+        'new-thread': 'Discord message sent to new thread',
+        'existing-thread': 'Discord message sent to existing thread',
+        channel: 'Discord message sent to channel',
+      } as const;
       logger.info(
-        { jid, length: text.length },
-        'Discord message sent to channel',
+        {
+          jid,
+          ...(kind !== 'channel' ? { threadId: target.id } : {}),
+          ...(threadContextId !== undefined ? { threadContextId } : {}),
+          length: text.length,
+        },
+        logMessages[kind],
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
@@ -584,6 +590,7 @@ export class DiscordChannel implements Channel {
     jid: string,
     files: FileAttachment[],
     caption?: string,
+    threadContextId?: number,
   ): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
@@ -600,22 +607,12 @@ export class DiscordChannel implements Channel {
       }
 
       const textChannel = channel as TextChannel;
-
-      // Send to active thread from currentSendTarget if one exists, otherwise to channel
-      let target: { send: (options: object) => Promise<unknown> } = textChannel;
-      for (const [key, ctx] of this.currentSendTarget) {
-        if (key.startsWith(`${jid}:`)) {
-          if (ctx.thread_id) {
-            try {
-              const thread = await textChannel.threads.fetch(ctx.thread_id);
-              if (thread) target = thread;
-            } catch {
-              // Thread deleted, fall through to channel
-            }
-          }
-          break;
-        }
-      }
+      const { target } = await this.resolveThreadTarget(
+        jid,
+        textChannel,
+        threadContextId,
+        caption || '',
+      );
 
       await target.send({
         content: caption || undefined,

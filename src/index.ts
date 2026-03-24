@@ -923,10 +923,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, threadContextId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, threadContextId);
     },
     sendChannelMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -938,14 +938,14 @@ async function main(): Promise<void> {
         return undefined;
       }
     },
-    sendFile: (jid, files, caption) => {
+    sendFile: (jid, files, caption, threadContextId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (!channel.sendFile)
         throw new Error(
           `Channel ${channel.name} does not support file sending`,
         );
-      return channel.sendFile(jid, files, caption);
+      return channel.sendFile(jid, files, caption, threadContextId);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
@@ -962,15 +962,6 @@ async function main(): Promise<void> {
     onTasksChanged: () => {
       // Tasks are now read via IPC request-response (list_tasks handler).
       // No snapshot propagation needed.
-    },
-    setThreadContext: (jid: string, threadId: string) => {
-      const channel = findChannel(channels, jid);
-      if (channel) {
-        const ctx = getThreadContextByThreadId(threadId);
-        if (ctx) {
-          channel.setCurrentThreadContext?.(jid, threadId, ctx);
-        }
-      }
     },
     onDebugQuery: (sourceGroup, queryId, question) => {
       sendDebugQuery(

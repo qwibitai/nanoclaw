@@ -125,6 +125,7 @@ export interface Channel {
     jid: string,
     files: FileAttachment[],
     caption?: string,
+    threadContextId?: number,
   ): Promise<void>;
 }
 

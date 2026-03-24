@@ -17,15 +17,25 @@ import {
   deleteTask,
   getAllTasks,
   getTaskById,
-  getThreadContextByThreadId,
   updateTask,
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+/** Parse numeric thread context ID from "ctx-{id}" format, or undefined. */
+function parseCtxId(threadId: string | undefined): number | undefined {
+  if (!threadId?.startsWith('ctx-')) return undefined;
+  const n = parseInt(threadId.slice(4), 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    threadContextId?: number,
+  ) => Promise<void>;
   sendChannelMessage: (
     jid: string,
     text: string,
@@ -34,6 +44,7 @@ export interface IpcDeps {
     jid: string,
     files: Array<{ path: string; name: string }>,
     caption?: string,
+    threadContextId?: number,
   ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
@@ -46,8 +57,6 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
-  /** Optional: set thread context on a channel before sending a threaded IPC message */
-  setThreadContext?: (jid: string, threadId: string) => void;
   /** Optional: handle debug queries from external tools (e.g., /ask-agent skill) */
   onDebugQuery?: (
     sourceGroup: string,
@@ -238,13 +247,6 @@ async function handleIpcMessage(
 
   const targetGroup = registeredGroups[data.chatJid as string];
   if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
-    // Set thread context on the channel before sending if this is a threaded message
-    if (threadId && deps.setThreadContext) {
-      const ctx = getThreadContextByThreadId(threadId);
-      if (ctx) {
-        deps.setThreadContext(data.chatJid as string, threadId);
-      }
-    }
     // Scheduled task send_message calls always go to main channel, never a thread
     if (data.isScheduled === 'true') {
       const messageId = await deps.sendChannelMessage(
@@ -262,7 +264,11 @@ async function handleIpcMessage(
         });
       }
     } else {
-      await deps.sendMessage(data.chatJid as string, data.text as string);
+      await deps.sendMessage(
+        data.chatJid as string,
+        data.text as string,
+        parseCtxId(threadId),
+      );
     }
     logger.info(
       { chatJid: data.chatJid, sourceGroup, threadId },
@@ -372,6 +378,7 @@ async function handleIpcFiles(
       data.chatJid as string,
       resolvedFiles,
       data.caption as string | undefined,
+      parseCtxId(threadId),
     );
     logger.info(
       {
