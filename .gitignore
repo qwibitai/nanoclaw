@@ -52,3 +52,4 @@ __pycache__/
 .nanoclaw/
 
 agents-sdk-docs
+.context/
