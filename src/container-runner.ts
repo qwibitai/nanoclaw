@@ -49,6 +49,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Path to the container log file, when available (for scope expansion detection) */
+  logPath?: string;
 }
 
 interface VolumeMount {
@@ -717,6 +719,7 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          logPath: logFile,
         });
         return;
       }
@@ -732,6 +735,7 @@ export async function runContainerAgent(
             status: 'success',
             result: null,
             newSessionId,
+            logPath: logFile,
           });
         });
         return;
@@ -766,7 +770,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        resolve(output);
+        resolve({ ...output, logPath: logFile });
       } catch (err) {
         logger.error(
           {
@@ -782,6 +786,7 @@ export async function runContainerAgent(
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          logPath: logFile,
         });
       }
     });
