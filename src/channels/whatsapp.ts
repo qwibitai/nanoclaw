@@ -19,7 +19,12 @@ import {
   GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getRegisteredGroup,
+  setLastGroupSync,
+  updateChatName,
+} from '../db.js';
 import { isImageMessage, processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
@@ -423,13 +428,18 @@ export class WhatsAppChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    // Prefix bot messages with assistant name so users know who's speaking.
-    // On a shared number, prefix is also needed in DMs (including self-chat)
-    // to distinguish bot output from user messages.
-    // Skip only when the assistant has its own dedicated phone number.
+    // Prefix bot messages so users know who's speaking.
+    // Use the group's trigger as display name (e.g. "@mobi" → "mobi:"),
+    // falling back to the global ASSISTANT_NAME.
+    // Skip prefix when the assistant has its own dedicated phone number.
+    let displayName = ASSISTANT_NAME;
+    const group = getRegisteredGroup(jid);
+    if (group?.trigger) {
+      displayName = group.trigger.replace(/^@/, '');
+    }
     const prefixed = ASSISTANT_HAS_OWN_NUMBER
       ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+      : `${displayName}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ kind: 'text', jid, text: prefixed });
