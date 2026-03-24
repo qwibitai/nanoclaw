@@ -426,7 +426,11 @@ async function processQueueFile(
       );
       break;
     case 'list_tasks': {
-      const requestId = data.requestId as string;
+      // Sanitize requestId to prevent path traversal (defense-in-depth)
+      const requestId = ((data.requestId as string) || '').replace(
+        /[^a-zA-Z0-9_-]/g,
+        '',
+      );
       if (!requestId) break;
 
       const allTasks = getAllTasks();

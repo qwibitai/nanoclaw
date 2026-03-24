@@ -622,7 +622,11 @@ async function runQuery(
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      if (!stream.push(text)) {
+        log('Stream ended, stopping IPC poll');
+        ipcPolling = false;
+        return;
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -786,6 +790,10 @@ async function main(): Promise<void> {
     if ('code' in err && (err as NodeJS.ErrnoException).code === 'EPIPE') {
       log('Caught EPIPE — SDK subprocess exited, continuing');
       return; // Swallow EPIPE, let the query catch block handle the error
+    }
+    if (err.message?.includes('ProcessTransport is not ready')) {
+      log('Caught ProcessTransport error — SDK subprocess exited, continuing');
+      return; // Same root cause as EPIPE — transport dead after subprocess exit
     }
     // Re-throw non-EPIPE errors
     throw err;
