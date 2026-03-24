@@ -18,6 +18,17 @@ When the researcher asks to draft, revise, or extend a section:
 - "Extend the methods to cover [new approach]"
 - "Write up the results from [analysis]"
 
+## Finding the Project
+
+Paper projects are mounted at `/workspace/extra/<project-name>`. For example, `discontinuous-machines` is at `/workspace/extra/discontinuous-machines`.
+
+When the researcher names a project (e.g., "Draft the introduction for discontinuous-machines"), `cd` into the corresponding mount before doing anything else:
+```
+cd /workspace/extra/<project-name>
+```
+
+If the project name is ambiguous, list `/workspace/extra/` to see available mounts.
+
 ## Before Writing
 
 Do all of this before writing a single line of LaTeX.
@@ -29,7 +40,9 @@ Do all of this before writing a single line of LaTeX.
    - `mcp__mcpvault__read_note` on `_meta/preferences.md` — writing style preferences
    - `mcp__mcpvault__read_note` on the project's `PROJECT.md` in `projects/<name>/` — current status and goals
 
-3. **Read existing manuscript sections** to match style, voice, and argument flow. Never write in isolation — your draft must connect to what comes before and after. Read at minimum the sections immediately adjacent to what you're drafting.
+3. **Read the existing manuscript** to match style, voice, and argument flow. Never write in isolation — your draft must connect to what comes before and after.
+   - **Split layout** (has `sections/` directory): Read at minimum the sections immediately adjacent to what you're drafting.
+   - **Monolithic layout** (all content in `main.tex`): Read `main.tex` for full manuscript context. All sections are in this one file — edit the relevant `\section{}` directly.
 
 4. **Read refs.bib** to know which citation keys are available. The .bib file is at the project root for paper-only projects, or at `draft/refs.bib` for research-project layouts.
 
@@ -51,7 +64,7 @@ Do all of this before writing a single line of LaTeX.
 
 - **Be specific.** Replace "the literature suggests" with `\citet{smith2024} find that...` Replace "recent work" with specific citations. Replace "significant" with effect sizes or concrete descriptions.
 
-- **LaTeX conventions.** Write in the project's LaTeX style. Use `\input{}` for sections. Use the project's citation command style (`\cite`, `\citet`, `\citep` — check existing files).
+- **LaTeX conventions.** Write in the project's LaTeX style. For split-section projects, use `\input{}` for sections. For monolithic projects, edit within the existing file structure. Use the project's citation command style (`\cite`, `\citet`, `\citep` — check existing files).
 
 - **No preamble or wrappers.** Don't add `\begin{document}`, package imports, or section numbering unless the existing files use them. Write content that drops into the existing structure.
 
@@ -71,8 +84,9 @@ Do all of this before writing a single line of LaTeX.
 
 4. Commit with a descriptive message:
    ```
-   git add draft/sections/<file>.tex   # research-project layout
-   git add sections/<file>.tex          # paper-only layout
+   git add draft/sections/<file>.tex   # split research-project layout
+   git add sections/<file>.tex          # split paper-only layout
+   git add draft/main.tex              # monolithic layout
    git commit -m "draft: <what was written and why>"
    ```
 

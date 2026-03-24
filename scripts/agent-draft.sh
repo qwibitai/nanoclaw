@@ -64,6 +64,9 @@ if [ -d "draft/sections" ]; then
 elif [ -d "sections" ]; then
   LAYOUT="paper-only"
   TEX_ROOT="."
+elif [ -f "draft/main.tex" ]; then
+  LAYOUT="research-project-monolithic"
+  TEX_ROOT="draft"
 else
   LAYOUT="unknown"
   TEX_ROOT="."
@@ -73,35 +76,40 @@ echo "Detected layout: $LAYOUT (tex root: $TEX_ROOT)"
 echo ""
 
 # Build the prompt
-PROMPT="You are drafting a section of an academic paper. Follow the paper-drafting skill exactly.
+TODAY=$(date +%Y%m%d)
+PROMPT=$(cat <<PROMPT_EOF
+You are drafting a section of an academic paper. Follow the paper-drafting skill exactly.
 
 ## Setup
 
 1. Read CLAUDE.md in this project root for project-specific instructions.
 2. Read vault context:
-   - Read $VAULT_DIR/_meta/researcher-profile.md
-   - Read $VAULT_DIR/_meta/preferences.md
-   - Read $VAULT_DIR/projects/$PROJECT_NAME/PROJECT.md (if it exists)
-3. Read existing manuscript sections in $TEX_ROOT/sections/ to match style.
-4. Read $TEX_ROOT/refs.bib for available citation keys.
+   - Read ${VAULT_DIR}/_meta/researcher-profile.md
+   - Read ${VAULT_DIR}/_meta/preferences.md
+   - Read ${VAULT_DIR}/projects/${PROJECT_NAME}/PROJECT.md (if it exists)
+3. Read the existing manuscript to match style and argument flow.
+   - If ${TEX_ROOT}/sections/ exists, read each section file there.
+   - Otherwise, read ${TEX_ROOT}/main.tex — the full manuscript is in one file.
+4. Read ${TEX_ROOT}/refs.bib for available citation keys.
 
 ## Git workflow
 
-- Create branch: git checkout -b agent/<descriptive-name>-$(date +%Y%m%d)
+- Create branch: git checkout -b agent/draft-${TODAY}
 - Commit your work with descriptive messages
-- Push the branch: git push -u origin <branch-name>
+- Push the branch: git push -u origin agent/draft-${TODAY}
 - NEVER merge to main
 
 ## Your task
 
-$INSTRUCTION
+${INSTRUCTION}
 
 ## After writing
 
-Report: what you wrote, which citations you used (especially [CITE:] placeholders), what needs the researcher's judgment, and the branch name."
+Report: what you wrote, which citations you used (especially [CITE:] placeholders), what needs the researcher's judgment, and the branch name.
+PROMPT_EOF
+)
 
 # Run Claude Code
-claude -p \
+echo "$PROMPT" | claude -p \
   --allowedTools "Read,Write,Edit,Glob,Grep,Bash(git:*),Bash(latexmk:*),Bash(make:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(zotero-cli:*),mcp__*" \
-  "$PROMPT" \
   2>&1 | tee "$LOG_DIR/draft_${PROJECT_NAME}_${TIMESTAMP}.log"
