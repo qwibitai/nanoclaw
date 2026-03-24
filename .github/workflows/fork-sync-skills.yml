@@ -67,8 +67,13 @@ jobs:
             AUTO_RESOLVABLE=true
             for f in $CONFLICTED; do
               case "$f" in
-                package-lock.json|package.json|repo-tokens/badge.svg)
+                package-lock.json|package.json|repo-tokens/badge.svg|.github/workflows/*)
                   git checkout --theirs "$f"
+                  git add "$f"
+                  ;;
+                .env.example)
+                  # Keep fork's channel-specific env vars
+                  git checkout --ours "$f"
                   git add "$f"
                   ;;
                 *)
