@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, describe, it, expect, beforeEach } from 'vitest';
 
 import Database from 'better-sqlite3';
 
@@ -6,7 +9,7 @@ import Database from 'better-sqlite3';
  * Tests for the register step.
  *
  * Verifies: parameterized SQL (no injection), file templating,
- * apostrophe in names, .env updates.
+ * apostrophe in names, .env updates, CLAUDE.md template copy.
  */
 
 function createTestDb(): Database.Database {
@@ -253,5 +256,150 @@ describe('file templating', () => {
     }
 
     expect(envContent).toContain('ASSISTANT_NAME="Nova"');
+  });
+});
+
+describe('CLAUDE.md template copy', () => {
+  let tmpDir: string;
+  let groupsDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-register-test-'));
+    groupsDir = path.join(tmpDir, 'groups');
+    fs.mkdirSync(path.join(groupsDir, 'main'), { recursive: true });
+    fs.mkdirSync(path.join(groupsDir, 'global'), { recursive: true });
+    fs.writeFileSync(
+      path.join(groupsDir, 'main', 'CLAUDE.md'),
+      '# Andy\n\nYou are Andy, a personal assistant.\n\n## Admin Context\n\nThis is the **main channel**.',
+    );
+    fs.writeFileSync(
+      path.join(groupsDir, 'global', 'CLAUDE.md'),
+      '# Andy\n\nYou are Andy, a personal assistant.',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('copies global template for non-main group', () => {
+    const folder = 'telegram_dev-team';
+    const folderDir = path.join(groupsDir, folder);
+    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+
+    const dest = path.join(folderDir, 'CLAUDE.md');
+    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
+
+    // Replicate register.ts logic: copy template if dest doesn't exist
+    if (!fs.existsSync(dest)) {
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, dest);
+      }
+    }
+
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(fs.readFileSync(dest, 'utf-8')).toContain('You are Andy');
+    // Should NOT contain main-specific content
+    expect(fs.readFileSync(dest, 'utf-8')).not.toContain('Admin Context');
+  });
+
+  it('copies main template for main group', () => {
+    const folder = 'whatsapp_main';
+    const folderDir = path.join(groupsDir, folder);
+    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+
+    const dest = path.join(folderDir, 'CLAUDE.md');
+    const isMain = true;
+    const templatePath = isMain
+      ? path.join(groupsDir, 'main', 'CLAUDE.md')
+      : path.join(groupsDir, 'global', 'CLAUDE.md');
+
+    if (!fs.existsSync(dest)) {
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, dest);
+      }
+    }
+
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(fs.readFileSync(dest, 'utf-8')).toContain('Admin Context');
+  });
+
+  it('does not overwrite existing CLAUDE.md', () => {
+    const folder = 'slack_main';
+    const folderDir = path.join(groupsDir, folder);
+    fs.mkdirSync(folderDir, { recursive: true });
+
+    const dest = path.join(folderDir, 'CLAUDE.md');
+    fs.writeFileSync(dest, '# Custom\n\nUser-modified content.');
+
+    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
+    if (!fs.existsSync(dest)) {
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, dest);
+      }
+    }
+
+    expect(fs.readFileSync(dest, 'utf-8')).toContain('User-modified content');
+    expect(fs.readFileSync(dest, 'utf-8')).not.toContain('You are Andy');
+  });
+
+  it('updates name in all groups/*/CLAUDE.md files', () => {
+    // Create a few group folders with CLAUDE.md
+    for (const folder of ['whatsapp_main', 'telegram_friends']) {
+      const dir = path.join(groupsDir, folder);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'CLAUDE.md'),
+        '# Andy\n\nYou are Andy, a personal assistant.',
+      );
+    }
+
+    const assistantName = 'Luna';
+
+    // Replicate register.ts glob logic
+    const mdFiles = fs
+      .readdirSync(groupsDir)
+      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
+      .filter((f) => fs.existsSync(f));
+
+    for (const mdFile of mdFiles) {
+      let content = fs.readFileSync(mdFile, 'utf-8');
+      content = content.replace(/^# Andy$/m, `# ${assistantName}`);
+      content = content.replace(/You are Andy/g, `You are ${assistantName}`);
+      fs.writeFileSync(mdFile, content);
+    }
+
+    // All CLAUDE.md files should be updated, including templates and groups
+    for (const folder of ['main', 'global', 'whatsapp_main', 'telegram_friends']) {
+      const content = fs.readFileSync(
+        path.join(groupsDir, folder, 'CLAUDE.md'),
+        'utf-8',
+      );
+      expect(content).toContain('# Luna');
+      expect(content).toContain('You are Luna');
+      expect(content).not.toContain('Andy');
+    }
+  });
+
+  it('handles missing template gracefully', () => {
+    // Remove templates
+    fs.unlinkSync(path.join(groupsDir, 'global', 'CLAUDE.md'));
+    fs.unlinkSync(path.join(groupsDir, 'main', 'CLAUDE.md'));
+
+    const folder = 'discord_general';
+    const folderDir = path.join(groupsDir, folder);
+    fs.mkdirSync(path.join(folderDir, 'logs'), { recursive: true });
+
+    const dest = path.join(folderDir, 'CLAUDE.md');
+    const templatePath = path.join(groupsDir, 'global', 'CLAUDE.md');
+
+    if (!fs.existsSync(dest)) {
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, dest);
+      }
+    }
+
+    // No crash, no file created
+    expect(fs.existsSync(dest)).toBe(false);
   });
 });
