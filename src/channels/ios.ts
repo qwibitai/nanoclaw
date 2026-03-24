@@ -2,6 +2,7 @@ import http from 'http';
 
 import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { getPublicHealthStatus } from '../health.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -83,8 +84,10 @@ export class IosChannel implements Channel {
     // from malicious websites on the home network.
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', channel: 'ios' }));
+      const health = getPublicHealthStatus();
+      const code = health.status === 'ok' ? 200 : 503;
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(health));
       return;
     }
 

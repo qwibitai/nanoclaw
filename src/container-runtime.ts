@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 
+import { setContainerStatus } from './health.js';
 import { logger } from './logger.js';
 
 /** The container runtime binary name. */
@@ -62,42 +63,72 @@ export function stopContainer(name: string): string {
   return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
 }
 
-/** Ensure the container runtime is running, starting it if needed. */
-export function ensureContainerRuntimeRunning(): void {
+/** Check if the container runtime is reachable right now. */
+function isRuntimeReachable(): boolean {
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} info`, {
       stdio: 'pipe',
       timeout: 10000,
     });
-    logger.debug('Container runtime already running');
-  } catch (err) {
-    logger.error({ err }, 'Failed to reach container runtime');
-    console.error(
-      '\n╔════════════════════════════════════════════════════════════════╗',
-    );
-    console.error(
-      '║  FATAL: Container runtime failed to start                      ║',
-    );
-    console.error(
-      '║                                                                ║',
-    );
-    console.error(
-      '║  Agents cannot run without a container runtime. To fix:        ║',
-    );
-    console.error(
-      '║  1. Ensure Docker is installed and running                     ║',
-    );
-    console.error(
-      '║  2. Run: docker info                                           ║',
-    );
-    console.error(
-      '║  3. Restart NanoClaw                                           ║',
-    );
-    console.error(
-      '╚════════════════════════════════════════════════════════════════╝\n',
-    );
-    throw new Error('Container runtime is required but failed to start');
+    return true;
+  } catch {
+    return false;
   }
+}
+
+/**
+ * Ensure the container runtime is running, with retries.
+ * Returns true if available, false if entering degraded mode.
+ */
+export function ensureContainerRuntimeRunning(): boolean {
+  if (isRuntimeReachable()) {
+    logger.debug('Container runtime already running');
+    setContainerStatus(true, CONTAINER_RUNTIME_BIN);
+    return true;
+  }
+
+  // Retry every 10 seconds for up to 5 minutes
+  const RETRY_INTERVAL = 10000;
+  const MAX_RETRIES = 30; // 5 minutes
+  let attempt = 0;
+
+  logger.warn('Container runtime not available, retrying...');
+
+  while (attempt < MAX_RETRIES) {
+    attempt++;
+    // Synchronous sleep (acceptable during startup only)
+    const start = Date.now();
+    while (Date.now() - start < RETRY_INTERVAL) {
+      // busy wait — only runs at startup before event loop matters
+    }
+
+    if (isRuntimeReachable()) {
+      logger.info(
+        { attempt },
+        'Container runtime became available after retry',
+      );
+      setContainerStatus(true, CONTAINER_RUNTIME_BIN);
+      return true;
+    }
+    logger.warn({ attempt, maxRetries: MAX_RETRIES }, 'Container runtime still unavailable');
+  }
+
+  // Degraded mode — start without container support
+  logger.error(
+    'Container runtime unavailable after 5 minutes — starting in degraded mode',
+  );
+  setContainerStatus(false, CONTAINER_RUNTIME_BIN);
+
+  // Start background polling to detect when runtime comes back
+  const pollInterval = setInterval(() => {
+    if (isRuntimeReachable()) {
+      logger.info('Container runtime recovered — exiting degraded mode');
+      setContainerStatus(true, CONTAINER_RUNTIME_BIN);
+      clearInterval(pollInterval);
+    }
+  }, 30000);
+
+  return false;
 }
 
 /** Kill orphaned NanoClaw containers from previous runs. */

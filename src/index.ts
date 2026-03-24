@@ -58,9 +58,19 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import http from 'http';
+
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startDailyNudgeCron } from './daily-nudge.js';
 import { startICloudPolling } from './icloud-calendar.js';
+import {
+  getHealthStatus,
+  recordMessageProcessed,
+  setContainerStatus,
+  setShuttingDown,
+  startHealthChecks,
+  stopHealthChecks,
+} from './health.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -228,6 +238,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        recordMessageProcessed();
 
         // Persist bot response so /api/messages can serve full history
         storeMessageDirect({
@@ -480,13 +491,14 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+function ensureContainerSystemRunning(): boolean {
+  const available = ensureContainerRuntimeRunning();
+  if (available) cleanupOrphans();
+  return available;
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  const containerReady = ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -498,13 +510,45 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Internal health HTTP endpoint (localhost only)
+  const healthServer = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/health') {
+      const status = getHealthStatus();
+      const code = status.status === 'ok' ? 200 : 503;
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(status));
+    } else {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  });
+  healthServer.listen(9090, '127.0.0.1', () => {
+    logger.info('Health endpoint listening on http://127.0.0.1:9090/health');
+  });
+
+  // Start periodic health checks
+  startHealthChecks();
+
   // Graceful shutdown handlers
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
+    if (shuttingDown) return; // Prevent double shutdown
+    shuttingDown = true;
+    setShuttingDown();
+    logger.info({ signal }, 'Shutdown signal received, draining...');
+
+    stopHealthChecks();
+    healthServer.close();
     proxyServer.close();
-    await queue.shutdown(10000);
+
+    // Drain in-flight work (25s max — must be less than launchd ExitTimeOut of 30s)
+    await queue.shutdown(25000);
     for (const ch of channels) await ch.disconnect();
-    process.exit(0);
+
+    // Exit 0 for SIGTERM (launchd stop), 1 for health-triggered restart
+    const exitCode = signal === 'SIGTERM' ? 0 : 1;
+    logger.info({ signal, exitCode }, 'Shutdown complete');
+    process.exit(exitCode);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
