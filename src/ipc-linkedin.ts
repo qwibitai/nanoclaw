@@ -178,10 +178,21 @@ async function runLinkedInScript(
 export async function handleLinkedInIpc(
   data: { type: string; requestId?: string; [key: string]: unknown },
   sourceGroup: string,
-  _isMain: boolean,
+  isMain: boolean,
   dataDir: string,
 ): Promise<boolean> {
   if (!LI_TASK_TYPES.has(data.type)) return false;
+
+  if (!isMain) {
+    const requestId =
+      (data.requestId as string | undefined) || `li-${Date.now()}`;
+    const resultsDir = path.join(dataDir, 'ipc', sourceGroup, 'li_results');
+    writeResult(resultsDir, requestId, {
+      success: false,
+      message: 'LinkedIn automation is only available from the main group.',
+    });
+    return true;
+  }
 
   const requestId =
     (data.requestId as string | undefined) || `li-${Date.now()}`;

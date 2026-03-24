@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 
 // Hoist mocks before any imports
 const fsMocks = vi.hoisted(() => ({
-  existsSync: vi.fn<[string], boolean>(),
+  existsSync: vi.fn<(s: string) => boolean>(),
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
   renameSync: vi.fn(),
@@ -56,6 +56,25 @@ beforeEach(() => {
   spawnMock.mockImplementation(() =>
     makeFakeProc('{"success":true,"message":"ok"}'),
   );
+});
+
+// ── isMain guard ───────────────────────────────────────────────────────────
+
+describe('isMain guard', () => {
+  it('returns true and writes error result when isMain is false', async () => {
+    const result = await handleLinkedInIpc(
+      { type: 'li_connect', requestId: 'req-guard' },
+      'other-group',
+      false,
+      '/data',
+    );
+    expect(result).toBe(true);
+    expect(fsMocks.writeFileSync).toHaveBeenCalled();
+    const written = writtenResult() as { success: boolean; message: string };
+    expect(written.success).toBe(false);
+    expect(written.message).toMatch(/main group/i);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
 });
 
 // ── Task type routing ──────────────────────────────────────────────────────

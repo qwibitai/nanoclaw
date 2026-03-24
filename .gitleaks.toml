@@ -1,0 +1,10 @@
+title = "NanoClaw gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+paths = [
+  ".env.example",
+]
