@@ -42,6 +42,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      chmodSync: vi.fn(),
     },
   };
 });
@@ -86,6 +87,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import fs from 'fs';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -178,6 +180,66 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  it('chmods IPC directories when running as root', async () => {
+    const originalGetuid = process.getuid;
+    process.getuid = () => 0;
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-chmod',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    for (const sub of ['messages', 'tasks', 'input']) {
+      expect(fs.chmodSync).toHaveBeenCalledWith(
+        expect.stringContaining(`/ipc/test-group/${sub}`),
+        0o777,
+      );
+    }
+
+    process.getuid = originalGetuid;
+  });
+
+  it('skips chmod on IPC directories when not root', async () => {
+    const originalGetuid = process.getuid;
+    process.getuid = () => 1000;
+    (fs.chmodSync as ReturnType<typeof vi.fn>).mockClear();
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-nochmod',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(fs.chmodSync).not.toHaveBeenCalled();
+
+    process.getuid = originalGetuid;
   });
 
   it('normal exit after output resolves as success', async () => {
