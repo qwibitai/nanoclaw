@@ -31,7 +31,9 @@ function writeEnvKey(key: string, value: string): void {
   }
 
   const lines = content.split('\n');
-  const idx = lines.findIndex((l) => l.startsWith(`${key}=`) || l.startsWith(`${key} =`));
+  const idx = lines.findIndex(
+    (l) => l.startsWith(`${key}=`) || l.startsWith(`${key} =`),
+  );
   const newLine = `${key}=${value}`;
   if (idx >= 0) {
     lines[idx] = newLine;
@@ -52,7 +54,12 @@ function writeEnvKey(key: string, value: string): void {
 export async function getOutlookAccessToken(): Promise<string | null> {
   const env = readEnvFile([...OUTLOOK_KEYS]);
 
-  if (!env.OUTLOOK_CLIENT_ID || !env.OUTLOOK_TENANT_ID || !env.OUTLOOK_CLIENT_SECRET || !env.OUTLOOK_REFRESH_TOKEN) {
+  if (
+    !env.OUTLOOK_CLIENT_ID ||
+    !env.OUTLOOK_TENANT_ID ||
+    !env.OUTLOOK_CLIENT_SECRET ||
+    !env.OUTLOOK_REFRESH_TOKEN
+  ) {
     return null; // Outlook not configured
   }
 
@@ -83,7 +90,10 @@ export async function getOutlookAccessToken(): Promise<string | null> {
 
     if (!res.ok) {
       const text = await res.text();
-      logger.warn({ status: res.status, body: text }, 'Outlook token refresh failed');
+      logger.warn(
+        { status: res.status, body: text },
+        'Outlook token refresh failed',
+      );
       // Return existing token as fallback (may be expired, container will see 401)
       return env.OUTLOOK_ACCESS_TOKEN ?? null;
     }
@@ -95,7 +105,10 @@ export async function getOutlookAccessToken(): Promise<string | null> {
     };
 
     writeEnvKey('OUTLOOK_ACCESS_TOKEN', data.access_token);
-    writeEnvKey('OUTLOOK_TOKEN_EXPIRES_AT', String(now + (data.expires_in ?? 3600)));
+    writeEnvKey(
+      'OUTLOOK_TOKEN_EXPIRES_AT',
+      String(now + (data.expires_in ?? 3600)),
+    );
     if (data.refresh_token) {
       writeEnvKey('OUTLOOK_REFRESH_TOKEN', data.refresh_token);
     }
