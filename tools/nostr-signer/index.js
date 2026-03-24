@@ -15,6 +15,7 @@ import { existsSync, unlinkSync } from 'fs';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { decode as decodeNsec } from 'nostr-tools/nip19';
 import { unwrapEvent as nip17Unwrap, wrapManyEvents as nip17WrapMany } from 'nostr-tools/nip17';
+import * as nip44 from 'nostr-tools/nip44';
 
 // --- Load key from kernel keyring ---
 let secretKeyHex;
@@ -87,6 +88,32 @@ function handleRequest(data) {
         return JSON.stringify({ events });
       } catch (err) {
         return JSON.stringify({ error: `Wrap failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip44_encrypt') {
+      const p = req.params || {};
+      if (!p.plaintext) return JSON.stringify({ error: 'Missing required field: plaintext' });
+      if (!p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: peer_pubkey' });
+      try {
+        const convKey = nip44.v2.utils.getConversationKey(secretKeyHex, p.peer_pubkey);
+        const ciphertext = nip44.v2.encrypt(p.plaintext, convKey);
+        return JSON.stringify({ result: ciphertext, error: null });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: `nip44_encrypt failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip44_decrypt') {
+      const p = req.params || {};
+      if (!p.ciphertext) return JSON.stringify({ error: 'Missing required field: ciphertext' });
+      if (!p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: peer_pubkey' });
+      try {
+        const convKey = nip44.v2.utils.getConversationKey(secretKeyHex, p.peer_pubkey);
+        const plaintext = nip44.v2.decrypt(p.ciphertext, convKey);
+        return JSON.stringify({ result: plaintext, error: null });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: `nip44_decrypt failed: ${err.message}` });
       }
     }
 

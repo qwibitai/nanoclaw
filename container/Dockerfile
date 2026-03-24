@@ -26,6 +26,9 @@ RUN apt-get update && apt-get install -y \
     git \
     imagemagick \
     socat \
+    pandoc \
+    python3-odf \
+    python3-openpyxl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -33,7 +36,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser, claude-code, and bitwarden CLI globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code @bitwarden/cli
+RUN npm install -g agent-browser @anthropic-ai/claude-code @bitwarden/cli md-to-epub
 
 # Create app directory
 WORKDIR /app

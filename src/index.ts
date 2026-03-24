@@ -7,6 +7,7 @@ import {
   IDLE_TIMEOUT,
   NOSTR_DM_ALLOWLIST,
   POLL_INTERVAL,
+  MCP_SERVER_ENABLED,
   SIGNAL_PHONE_NUMBER,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -658,6 +659,19 @@ async function main(): Promise<void> {
   );
   if (mainEntry) {
     initHealthMonitor({ adminJid: mainEntry[0], channel: signal });
+  }
+
+  // Start paid MCP server if enabled
+  if (MCP_SERVER_ENABLED) {
+    try {
+      const { startMcpServer } = await import('./mcp-server.js');
+      await startMcpServer();
+    } catch (err) {
+      logger.error(
+        { err },
+        'Failed to start MCP server (continuing without it)',
+      );
+    }
   }
 
   // Start subsystems (independently of connection handler)

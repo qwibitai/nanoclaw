@@ -27,6 +27,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -313,6 +314,61 @@ function buildVolumeMounts(
     });
   }
 
+  // Proton Pass CLI: main-only (credential vault access is architecturally restricted)
+  if (isMain) {
+    const passCliBin = path.join(os.homedir(), '.local', 'bin', 'pass-cli');
+    if (fs.existsSync(passCliBin)) {
+      mounts.push({
+        hostPath: passCliBin,
+        containerPath: '/usr/local/bin/pass-cli',
+        readonly: true,
+      });
+    }
+
+    const passCliData = path.join(
+      os.homedir(),
+      '.local',
+      'share',
+      'proton-pass-cli',
+    );
+    if (fs.existsSync(passCliData)) {
+      mounts.push({
+        hostPath: passCliData,
+        containerPath: '/home/node/.local/share/proton-pass-cli',
+        readonly: false,
+      });
+    }
+
+    // rclone binary and config for Proton Drive
+    const rcloneBin = '/usr/bin/rclone';
+    if (fs.existsSync(rcloneBin)) {
+      mounts.push({
+        hostPath: rcloneBin,
+        containerPath: '/usr/local/bin/rclone',
+        readonly: true,
+      });
+    }
+
+    const rcloneConfig = path.join(os.homedir(), '.config', 'rclone');
+    if (fs.existsSync(rcloneConfig)) {
+      mounts.push({
+        hostPath: rcloneConfig,
+        containerPath: '/home/node/.config/rclone',
+        readonly: true,
+      });
+    }
+
+    // GitHub CLI binary
+    const ghBin = '/usr/bin/gh';
+    if (fs.existsSync(ghBin)) {
+      mounts.push({
+        hostPath: ghBin,
+        containerPath: '/usr/local/bin/gh',
+        readonly: true,
+      });
+    }
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -329,11 +385,15 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  isMain = false,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Proton Pass CLI: use filesystem key provider (kernel keyring not available in containers)
+  args.push('-e', 'PROTON_PASS_KEY_PROVIDER=fs');
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -350,6 +410,15 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // GitHub CLI token (main-only — Jorgenclaw's own token for PR/issue management)
+  if (isMain) {
+    const ghEnv = readEnvFile(['GITHUB_TOKEN']);
+    const ghToken = process.env.GITHUB_TOKEN || ghEnv.GITHUB_TOKEN;
+    if (ghToken) {
+      args.push('-e', `GH_TOKEN=${ghToken}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -392,7 +461,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, input.isMain);
 
   logger.debug(
     {

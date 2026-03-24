@@ -15,6 +15,7 @@ const envConfig = readEnvFile([
   'NOSTR_DM_ALLOWLIST',
   'NOSTR_DM_RELAYS',
   'NOSTR_SIGNER_SOCKET',
+  'MCP_SERVER_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -154,6 +155,16 @@ export const NOSTR_DM_ALLOWLIST = (
 )
   .split(',')
   .filter(Boolean);
+
+// Paid MCP Server
+export const MCP_SERVER_ENABLED =
+  (process.env.MCP_SERVER_ENABLED || envConfig.MCP_SERVER_ENABLED) === 'true';
+
+// Proton Pass CLI
+export const PROTON_PASS_BIN =
+  process.env.PROTON_PASS_BIN ||
+  path.join(HOME_DIR, '.local', 'bin', 'pass-cli');
+export const PROTON_PASS_VAULT = process.env.PROTON_PASS_VAULT || 'NanoClaw';
 
 // Local Whisper transcription (whisper-cli from whisper.cpp)
 // Set WHISPER_BIN to empty string to disable and fall back to OpenAI only.
