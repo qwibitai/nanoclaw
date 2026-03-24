@@ -26,7 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
-import { readEnvFile } from './env.js';
+import { readEnvFile, readEnvFileByPrefix } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -244,6 +244,19 @@ function buildContainerArgs(
   const githubToken = GITHUB_TOKEN || process.env.GITHUB_TOKEN;
   if (githubToken) {
     args.push('-e', `GH_TOKEN=${githubToken}`);
+  }
+
+  // Forward remote-log-analyzer credentials (RLA_* vars) from .env to container.
+  // The agent inside the container passes them to the remote-log-analyzer MCP server.
+  const rlaFromFile = readEnvFileByPrefix('RLA_');
+  for (const [key, value] of Object.entries(rlaFromFile)) {
+    args.push('-e', `${key}=${value}`);
+  }
+  // Also forward any RLA_* vars set directly in the host shell environment
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('RLA_') && value && !rlaFromFile[key]) {
+      args.push('-e', `${key}=${value}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution

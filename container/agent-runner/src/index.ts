@@ -423,6 +423,16 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        'remote-log-analyzer': {
+          command: 'node',
+          args: ['/opt/remote-log-analyzer/mcp-server/dist/index.js'],
+          // Pass all RLA_* credential vars forwarded from the host .env
+          env: Object.fromEntries(
+            Object.entries(process.env)
+              .filter(([k]) => k.startsWith('RLA_'))
+              .map(([k, v]) => [k, v ?? ''])
+          ),
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

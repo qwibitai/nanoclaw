@@ -37,6 +37,32 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
+# ── remote-log-analyzer: PowerShell Core + Posh-SSH + MCP server ─────────────
+# node:22-slim is Debian Bookworm — use the Microsoft Debian 12 package feed
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb \
+    && apt-get update && apt-get install -y --no-install-recommends powershell \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# PSWSMan enables WinRM from Linux; Posh-SSH handles SSH password auth on all platforms
+RUN pwsh -NonInteractive -NoProfile -Command "\$ErrorActionPreference='Stop'; \
+    Install-Module PSWSMan  -Scope AllUsers -Force -AllowClobber; \
+    Install-WSMan; \
+    Install-Module Posh-SSH -Scope AllUsers -Force -AllowClobber"
+
+# Clone and build the remote-log-analyzer MCP server (prod deps only)
+RUN git clone --depth 1 https://github.com/vmphibian/remote-log-analyzer.git /opt/remote-log-analyzer \
+    && cd /opt/remote-log-analyzer/mcp-server \
+    && npm ci --ignore-scripts \
+    && npm run build \
+    && npm ci --omit=dev --ignore-scripts \
+    && pwsh -NonInteractive -NoProfile -Command "\$ErrorActionPreference='Stop'; \
+       Import-Module /opt/remote-log-analyzer/pwsh/RemoteLogAnalyzer.psd1 -Force; \
+       Write-Host 'RemoteLogAnalyzer module OK'"
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Create app directory
 WORKDIR /app
 
