@@ -581,6 +581,12 @@ export async function handleRoute(
 
   // --- Auth endpoints (A4) — setup and login do NOT require prior auth ---
 
+  // GET /api/auth/setup-status — check if first-time setup is needed
+  if (pathname === '/api/auth/setup-status' && method === 'GET') {
+    json(res, 200, { needsSetup: !hasAnyUsers() });
+    return true;
+  }
+
   // POST /api/auth/setup — first-user registration (only when no users exist)
   if (pathname === '/api/auth/setup' && method === 'POST') {
     if (hasAnyUsers()) {
