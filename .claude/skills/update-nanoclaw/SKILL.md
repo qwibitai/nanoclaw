@@ -235,6 +235,6 @@ Tell the user:
   - If running manually: restart `npm run dev`
 
 
-## Diagnostics (mandatory final step)
+## Diagnostics
 
-Use the Read tool to open `.claude/skills/update-nanoclaw/diagnostics.md` and follow every instruction in it. Do not skip this step.
+Send diagnostics data by following `.claude/skills/update-nanoclaw/diagnostics.md`.

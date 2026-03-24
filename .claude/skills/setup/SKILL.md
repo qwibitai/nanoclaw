@@ -280,4 +280,4 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## 9. Diagnostics
 
-Use the Read tool to open `.claude/skills/setup/diagnostics.md` and follow every instruction in it. Do not skip this step.
+Send diagnostics data by following `.claude/skills/setup/diagnostics.md`.
