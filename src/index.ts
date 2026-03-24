@@ -11,7 +11,6 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
-  TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -260,6 +259,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
+    const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const escapedTrigger = group.trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const groupTriggerPattern = new RegExp(
@@ -538,6 +538,7 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
+            const triggerPattern = getTriggerPattern(group.trigger);
             const allowlistCfg = loadSenderAllowlist();
             const escapedTrigger = group.trigger.replace(
               /[.*+?^${}()|[\]\\]/g,

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import {
+  ASSISTANT_NAME,
+  getTriggerPattern,
+  TRIGGER_PATTERN,
+} from './config.js';
 import {
   escapeXml,
   formatMessages,
@@ -161,6 +165,28 @@ describe('TRIGGER_PATTERN', () => {
   });
 });
 
+describe('getTriggerPattern', () => {
+  it('uses the configured per-group trigger when provided', () => {
+    const pattern = getTriggerPattern('@Claw');
+
+    expect(pattern.test('@Claw hello')).toBe(true);
+    expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(false);
+  });
+
+  it('falls back to the default trigger when group trigger is missing', () => {
+    const pattern = getTriggerPattern(undefined);
+
+    expect(pattern.test(`@${ASSISTANT_NAME} hello`)).toBe(true);
+  });
+
+  it('treats regex characters in custom triggers literally', () => {
+    const pattern = getTriggerPattern('@C.L.A.U.D.E');
+
+    expect(pattern.test('@C.L.A.U.D.E hello')).toBe(true);
+    expect(pattern.test('@CXLXAUXDXE hello')).toBe(false);
+  });
+});
+
 // --- Outbound formatting (internal tag stripping + prefix) ---
 
 describe('stripInternalTags', () => {
@@ -207,7 +233,7 @@ describe('formatOutbound', () => {
 
 describe('trigger gating (requiresTrigger interaction)', () => {
   // Replicates the exact logic from processGroupMessages and startMessageLoop:
-  //   if (!isMainGroup && group.requiresTrigger !== false) { check trigger }
+  //   if (!isMainGroup && group.requiresTrigger !== false) { check group.trigger }
   function shouldRequireTrigger(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
@@ -218,39 +244,51 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   function shouldProcess(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
+    trigger: string | undefined,
     messages: NewMessage[],
   ): boolean {
     if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
-    return messages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+    const triggerPattern = getTriggerPattern(trigger);
+    return messages.some((m) => triggerPattern.test(m.content.trim()));
   }
 
   it('main group always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, undefined, msgs)).toBe(true);
+    expect(shouldProcess(true, undefined, undefined, msgs)).toBe(true);
   });
 
   it('main group processes even with requiresTrigger=true', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, true, msgs)).toBe(true);
+    expect(shouldProcess(true, true, undefined, msgs)).toBe(true);
   });
 
   it('non-main group with requiresTrigger=undefined requires trigger (defaults to true)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, undefined, msgs)).toBe(false);
+    expect(shouldProcess(false, undefined, undefined, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true requires trigger', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, true, msgs)).toBe(false);
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
     const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
-    expect(shouldProcess(false, true, msgs)).toBe(true);
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(true);
+  });
+
+  it('non-main group uses its per-group trigger instead of the default trigger', () => {
+    const msgs = [makeMsg({ content: '@Claw do something' })];
+    expect(shouldProcess(false, true, '@Claw', msgs)).toBe(true);
+  });
+
+  it('non-main group does not process when only the default trigger is present for a custom-trigger group', () => {
+    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
+    expect(shouldProcess(false, true, '@Claw', msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, false, msgs)).toBe(true);
+    expect(shouldProcess(false, false, undefined, msgs)).toBe(true);
   });
 });
