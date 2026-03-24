@@ -22,7 +22,6 @@ import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
-  writeTasksSnapshot,
 } from './container-runner.js';
 import {
   cleanupOrphans,
@@ -33,7 +32,6 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
-  getAllTasks,
   getConversationContext,
   getNewMessages,
   getRegisteredGroup,
@@ -433,29 +431,6 @@ async function runAgent(opts: RunAgentOpts): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId =
     sessionOverride !== undefined ? sessionOverride : sessions[group.folder];
-
-  // Pre-create thread IPC dir so the snapshot propagation loop can find it.
-  // buildVolumeMounts creates this later, but writeTasksSnapshot needs it now.
-  if (threadId) {
-    const threadIpcDir = path.join(DATA_DIR, 'ipc', group.folder, threadId);
-    fs.mkdirSync(threadIpcDir, { recursive: true });
-  }
-
-  // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
@@ -985,19 +960,8 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
     onTasksChanged: () => {
-      const tasks = getAllTasks();
-      const taskRows = tasks.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      }));
-      for (const group of Object.values(registeredGroups)) {
-        writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
-      }
+      // Tasks are now read via IPC request-response (list_tasks handler).
+      // No snapshot propagation needed.
     },
     setThreadContext: (jid: string, threadId: string) => {
       const channel = findChannel(channels, jid);

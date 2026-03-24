@@ -9,14 +9,9 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-  writeTasksSnapshot,
-} from './container-runner.js';
+import { ContainerOutput, runContainerAgent } from './container-runner.js';
 import {
   deleteSession,
-  getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
@@ -143,23 +138,6 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
-  const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
   let result: string | null = null;
   let error: string | null = null;
   let capturedSessionId: string | undefined;
@@ -221,7 +199,7 @@ async function runTask(
         sessionId: sid,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
-        isMain,
+        isMain: group.isMain === true,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         threadId: taskThreadId,

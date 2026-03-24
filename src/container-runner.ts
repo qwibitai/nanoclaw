@@ -855,62 +855,6 @@ export async function runContainerAgent(
   });
 }
 
-export function writeTasksSnapshot(
-  groupFolder: string,
-  isMain: boolean,
-  tasks: Array<{
-    id: string;
-    groupFolder: string;
-    prompt: string;
-    schedule_type: string;
-    schedule_value: string;
-    status: string;
-    next_run: string | null;
-  }>,
-): void {
-  // Main sees all tasks, others only see their own
-  const filteredTasks = isMain
-    ? tasks
-    : tasks.filter((t) => t.groupFolder === groupFolder);
-
-  const content = JSON.stringify(filteredTasks, null, 2);
-
-  // Write to the group-level IPC directory
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
-  fs.writeFileSync(path.join(groupIpcDir, 'current_tasks.json'), content);
-
-  // Also write to each thread-specific IPC subdirectory so threaded
-  // containers (which mount {groupIpcDir}/{threadId}/ as /workspace/ipc/)
-  // can see the snapshot via list_tasks.
-  try {
-    for (const entry of fs.readdirSync(groupIpcDir, { withFileTypes: true })) {
-      if (
-        entry.isDirectory() &&
-        ![
-          'messages',
-          'tasks',
-          'files',
-          'prs',
-          'input',
-          'debug',
-          'errors',
-          'audit',
-        ].includes(entry.name)
-      ) {
-        const threadFile = path.join(
-          groupIpcDir,
-          entry.name,
-          'current_tasks.json',
-        );
-        fs.writeFileSync(threadFile, content);
-      }
-    }
-  } catch {
-    // Best-effort — thread dirs may not exist yet
-  }
-}
-
 export interface AvailableGroup {
   jid: string;
   name: string;
