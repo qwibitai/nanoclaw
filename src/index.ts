@@ -170,7 +170,21 @@ async function processGroupMessages(
 
   const isMainGroup = group.isMain === true;
 
-  const missedMessages = getUnprocessedMessages(chatJid, ASSISTANT_NAME);
+  // Filter messages by thread context to prevent cross-thread contamination.
+  // Without this, two concurrent @mentions would both land in whichever
+  // container starts first, leaving the second container with no messages.
+  const isThreadContext = threadId !== undefined && threadId.startsWith('ctx-');
+  const ctxIdFilter = isThreadContext
+    ? parseInt(threadId!.replace('ctx-', ''), 10)
+    : threadId === 'default' || threadId === undefined
+      ? null // only non-threaded messages
+      : undefined; // task containers etc. — legacy behavior (all messages)
+  const missedMessages = getUnprocessedMessages(
+    chatJid,
+    ASSISTANT_NAME,
+    200,
+    ctxIdFilter,
+  );
 
   if (missedMessages.length === 0) return true;
 
@@ -194,7 +208,6 @@ async function processGroupMessages(
   // For non-main groups, check if trigger is required and present.
   // Thread messages (ctx-* threadId) skip this — they're already in a bot thread.
   const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-  const isThreadContext = threadId !== undefined && threadId.startsWith('ctx-');
   if (needsTrigger && !isThreadContext) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
@@ -643,11 +656,12 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Try IPC to active container for this specific thread
-          const allPending = getUnprocessedMessages(chatJid, ASSISTANT_NAME);
-          // Filter to this thread's messages only
-          const threadPending = threadCtxId
-            ? allPending.filter((m) => m.thread_context_id === threadCtxId)
-            : allPending.filter((m) => !m.thread_context_id);
+          const threadPending = getUnprocessedMessages(
+            chatJid,
+            ASSISTANT_NAME,
+            200,
+            threadCtxId ?? null,
+          );
           const messagesToSend =
             threadPending.length > 0 ? threadPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE, channel);

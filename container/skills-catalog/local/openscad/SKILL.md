@@ -5,12 +5,6 @@ description: Create 3D models with OpenSCAD. ONLY trigger when the user explicit
 
 # 3D Modeling with OpenSCAD
 
-## IMPORTANT: File locations and sending
-
-- **Always write files to `/workspace/group/`** — this is the writable, mounted workspace. Do NOT use `/tmp/` (not persistent, not mounted to host)
-- **You MUST use the `mcp__nanoclaw__send_files` tool** to send files to the user — do NOT just tell them where files are
-- The `send_files` tool sends actual file attachments to the chat (images appear inline, ZIPs are downloadable)
-
 ## Workflow
 
 1. Ensure the work directory exists: `mkdir -p /workspace/group`

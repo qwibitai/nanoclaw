@@ -356,9 +356,9 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
 server.tool(
   'send_files',
-  `Send files (images, archives) to the chat as attachments. Files must exist on disk before calling this tool. Allowed extensions: .png, .zip (configurable by host).
+  `Send files to the chat as attachments. Files must be under /workspace/ or /tmp/ and must exist on disk.
 
-Use this after generating output files (renders, archives, exports) to share them with the user.`,
+Use this after generating output files (renders, documents, archives) to share them with the user.`,
   {
     files: z
       .array(

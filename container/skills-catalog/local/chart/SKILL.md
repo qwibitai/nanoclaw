@@ -6,12 +6,6 @@ allowed-tools: Bash(agent-browser:*)
 
 # Chart & Data Visualization with Chart.js
 
-## IMPORTANT: File locations and sending
-
-- **Write chart.html to /workspace/group/** (create dir if needed: `mkdir -p /workspace/group`)
-- **You MUST use the `mcp__nanoclaw__send_files` tool** to send the PNG to the user — do NOT just tell them where the file is
-- The `send_files` tool sends actual file attachments to the chat (images appear inline)
-
 ## Workflow
 
 1. Write `/workspace/group/chart.html` with a Chart.js config tailored to the user's data

@@ -103,7 +103,8 @@ export const TIMEZONE =
 // Allowlist of file extensions agents can send back to channels.
 // Scoped narrowly by default; extend via env var.
 export const FILE_SEND_ALLOWLIST = (
-  process.env.FILE_SEND_ALLOWLIST || '.png,.zip'
+  process.env.FILE_SEND_ALLOWLIST ||
+  '.png,.zip,.pdf,.pptx,.docx,.xlsx,.jpg,.jpeg,.gif,.mp3,.mp4,.webp,.svg,.csv,.txt,.json'
 )
   .split(',')
   .map((s) => s.trim().toLowerCase());

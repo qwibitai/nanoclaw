@@ -512,7 +512,39 @@ export function getUnprocessedMessages(
   chatJid: string,
   botPrefix: string,
   limit: number = 200,
+  threadContextId?: number | null,
 ): NewMessage[] {
+  // When threadContextId is provided, only return messages for that thread.
+  // When null is passed explicitly, return only non-threaded messages.
+  // When undefined (omitted), return all unprocessed messages (legacy behavior).
+  if (threadContextId !== undefined) {
+    if (threadContextId === null) {
+      return db
+        .prepare(
+          `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_context_id
+           FROM messages
+           WHERE processed = 0 AND chat_jid = ?
+             AND is_bot_message = 0 AND content NOT LIKE ?
+             AND content != '' AND content IS NOT NULL
+             AND thread_context_id IS NULL
+           ORDER BY timestamp
+           LIMIT ?`,
+        )
+        .all(chatJid, `${botPrefix}:%`, limit) as NewMessage[];
+    }
+    return db
+      .prepare(
+        `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_context_id
+         FROM messages
+         WHERE processed = 0 AND chat_jid = ?
+           AND is_bot_message = 0 AND content NOT LIKE ?
+           AND content != '' AND content IS NOT NULL
+           AND thread_context_id = ?
+         ORDER BY timestamp
+         LIMIT ?`,
+      )
+      .all(chatJid, `${botPrefix}:%`, threadContextId, limit) as NewMessage[];
+  }
   return db
     .prepare(
       `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_context_id

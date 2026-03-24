@@ -70,6 +70,10 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+## Sending Files to the User
+
+Use `mcp__nanoclaw__send_files` to deliver files as chat attachments. Don't just tell the user where files are — they can't access your filesystem. Generated files can go in `/tmp/` (ephemeral) or `/workspace/group/` (persistent) — both work with `send_files`.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
