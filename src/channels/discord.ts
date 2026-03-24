@@ -238,15 +238,8 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Always trigger on Discord messages — no @mention needed.
-      if (!triggerPattern.test(content)) {
-        content = `@${assistantName} ${content}`;
-      }
-
       // Handle reply context — include the parent message so the agent
       // knows what is being replied to (not just who wrote it).
-      // This runs AFTER the trigger check to avoid the reply prefix
-      // pushing the @mention past the anchor and causing a double prefix.
       if (message.reference?.messageId) {
         try {
           const repliedTo = await message.channel.messages.fetch(
@@ -275,6 +268,12 @@ export class DiscordChannel implements Channel {
         } catch (err) {
           logger.debug({ err }, 'Failed to fetch replied-to message');
         }
+      }
+
+      // Always trigger on Discord messages — no @mention needed.
+      // Runs AFTER reply context so the trigger is always at the start.
+      if (!triggerPattern.test(content)) {
+        content = `@${assistantName} ${content}`;
       }
 
       // Store chat metadata for discovery (always use parent JID)
