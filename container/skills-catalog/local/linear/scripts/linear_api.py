@@ -332,9 +332,19 @@ def cmd_bulk_create(args):
 
 def resolve_issue_id(identifier):
     """Resolve a short identifier like ENG-42 to the internal UUID."""
+    # Linear API removed 'identifier' from IssueFilter — query by team key + number instead
+    parts = identifier.rsplit("-", 1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        print(f"Invalid issue identifier: {identifier} (expected format: TEAM-123)", file=sys.stderr)
+        sys.exit(1)
+    team_key, number = parts[0], int(parts[1])
     data = gql("""
-    query($filter: IssueFilter) { issues(filter: $filter) { nodes { id identifier } } }
-    """, {"filter": {"identifier": {"eq": identifier}}})
+    query($teamKey: String!, $number: Float!) {
+      issues(filter: { team: { key: { eq: $teamKey } }, number: { eq: $number } }) {
+        nodes { id identifier }
+      }
+    }
+    """, {"teamKey": team_key, "number": number})
     issues = data["issues"]["nodes"]
     if not issues:
         print(f"Issue {identifier} not found.", file=sys.stderr)
@@ -349,7 +359,7 @@ def cmd_update(args):
 
     if args.state:
         # Get team for this issue to resolve state
-        data = gql("query($id: ID!) { issue(id: $id) { team { id } } }", {"id": issue_id})
+        data = gql("query($id: String!) { issue(id: $id) { team { id } } }", {"id": issue_id})
         team_id = data["issue"]["team"]["id"]
         input_fields["stateId"] = get_state_id(team_id, args.state)
     if args.priority is not None:
