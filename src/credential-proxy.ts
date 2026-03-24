@@ -110,7 +110,10 @@ export function startCredentialProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode, upstream: upstreamUrl.origin }, 'Credential proxy started');
+      logger.info(
+        { port, host, authMode, upstream: upstreamUrl.origin },
+        'Credential proxy started',
+      );
       resolve(server);
     });
 
