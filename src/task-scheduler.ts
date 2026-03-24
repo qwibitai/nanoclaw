@@ -312,9 +312,6 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
-      if (dueTasks.length > 0) {
-        logger.info({ count: dueTasks.length }, 'Found due tasks');
-      }
 
       for (const task of dueTasks) {
         // Re-check task status in case it was paused/cancelled
