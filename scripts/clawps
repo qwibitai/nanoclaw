@@ -1,0 +1,342 @@
+#!/usr/bin/env bash
+# clawps — list/manage running NanoClaw containers
+# Works with Docker and Apple Containers.
+
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG="$SCRIPT_DIR/../logs/nanoclaw.log"
+log() { echo "[$(date '+%H:%M:%S.000')] INFO (clawps): $*" >> "$LOG" 2>/dev/null || true; }
+
+# ---------------------------------------------------------------------------
+# --help
+# ---------------------------------------------------------------------------
+if [[ " $* " == *" --help"* ]] || [[ " $* " == *" -h"* ]] || [[ "$*" == "--help" ]] || [[ "$*" == "-h" ]]; then
+  cat <<'EOF'
+Usage: clawps [options] [filter]
+
+List and manage NanoClaw containers.
+
+Options:
+  -h, --help          Show this help message
+  --all               Include unnamed/zombie containers in default listing
+  --logs [filter]     Dump logs for matching named containers
+  --tail [filter]     Follow logs for matching containers (multiplexed, Ctrl-C to stop)
+  --kill-zombies      Stop and remove unnamed nanoclaw-agent containers
+
+Arguments:
+  filter              Optional substring to filter container names (e.g. "main")
+
+Examples:
+  clawps                        List all running NanoClaw containers
+  clawps main                   List containers matching "main"
+  clawps --logs                 Dump logs for all named containers
+  clawps --logs main            Dump logs for containers matching "main"
+  clawps --tail                 Follow logs for all named containers
+  clawps --kill-zombies         Remove unnamed stale containers
+
+Requires: Python 3, Docker or Apple Containers runtime.
+EOF
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Runtime detection
+# ---------------------------------------------------------------------------
+RUNTIME=""
+if container ls &>/dev/null 2>&1; then
+  RUNTIME="apple"
+elif docker ps &>/dev/null 2>&1; then
+  RUNTIME="docker"
+else
+  echo "clawps: no container runtime found (tried container, docker)" >&2
+  exit 1
+fi
+
+if [[ "$RUNTIME" == "apple" ]]; then
+  CMD_LOGS() { container logs "$@"; }
+  CMD_STOP() { container stop "$@"; }
+  CMD_RM()   { container rm   "$@"; }
+else
+  CMD_LOGS() { docker logs "$@"; }
+  CMD_STOP() { docker stop "$@"; }
+  CMD_RM()   { docker rm   "$@"; }
+fi
+
+# ---------------------------------------------------------------------------
+# Fetch raw JSON from the runtime
+# Apple: returns a JSON array.
+# Docker: returns NDJSON (one JSON object per line); we wrap into an array.
+# ---------------------------------------------------------------------------
+fetch_json() {
+  if [[ "$RUNTIME" == "apple" ]]; then
+    container ls --format json 2>/dev/null
+  else
+    # Docker: pre-filter by name, output NDJSON, wrap into JSON array
+    local lines
+    lines=$(docker ps --filter "name=nanoclaw-" --format json 2>/dev/null) || true
+    if [[ -z "$lines" ]]; then
+      echo "[]"
+    else
+      python3 -c "
+import sys, json
+lines = sys.stdin.read().strip().splitlines()
+objs = [json.loads(l) for l in lines if l.strip()]
+print(json.dumps(objs))
+" <<< "$lines"
+    fi
+  fi
+}
+
+OUTPUT=$(fetch_json)
+if [[ -z "$OUTPUT" ]] || [[ "$OUTPUT" == "[]" ]]; then
+  echo "No NanoClaw containers running."
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Human-readable age from seconds
+human_age_py='
+def human_age(secs):
+    secs = int(secs)
+    if secs < 60:   return f"{secs}s"
+    if secs < 3600:
+        m = secs // 60; s = secs % 60
+        return f"{m}m {s:02d}s"
+    if secs < 86400:
+        h = secs // 3600; m = (secs % 3600) // 60
+        return f"{h}h {m:02d}m"
+    d = secs // 86400; h = (secs % 86400) // 3600
+    return f"{d}d {h:02d}h"
+'
+
+# Parse containers from JSON (both runtimes) and emit TSV: name\tstate\tage
+parse_containers_py="
+import sys, json, os, datetime, time
+
+$human_age_py
+
+runtime = os.environ.get('CLAWPS_RUNTIME', 'apple')
+data = json.load(sys.stdin)
+now = time.time()
+results = []
+
+for c in data:
+    if runtime == 'apple':
+        config = c.get('configuration') or {}
+        cid    = config.get('id') or ''
+        image  = (config.get('image') or {}).get('reference') or ''
+        state  = c.get('status') or '?'
+        sd     = c.get('startedDate')
+        if sd is not None:
+            try:
+                age = human_age(now - (float(sd) + 978307200))
+            except Exception:
+                age = '?'
+        else:
+            age = '?'
+        is_nanoclaw = 'nanoclaw-agent' in image or cid.startswith('nanoclaw-')
+    else:
+        # Docker
+        cid   = c.get('Names') or c.get('ID') or ''
+        image = c.get('Image') or ''
+        state = (c.get('State') or c.get('Status') or '?').lower()
+        if 'running' in state: state = 'running'
+        age   = c.get('RunningFor') or '?'
+        # Strip trailing ' ago' for compactness
+        if age.endswith(' ago'): age = age[:-4]
+        is_nanoclaw = 'nanoclaw-agent' in image or cid.startswith('nanoclaw-')
+
+    if not is_nanoclaw:
+        continue
+    results.append((cid, state, age))
+
+for row in results:
+    print('\t'.join(row))
+"
+
+# Extract named container IDs matching an optional substring filter.
+get_named_ids() {
+  CLAWPS_FILTER="${1:-}" CLAWPS_RUNTIME="$RUNTIME" python3 -c "
+import sys, json, os
+data = json.load(sys.stdin)
+filt = os.environ.get('CLAWPS_FILTER', '')
+runtime = os.environ.get('CLAWPS_RUNTIME', 'apple')
+for c in data:
+    if runtime == 'apple':
+        config = c.get('configuration') or {}
+        cid = config.get('id') or ''
+    else:
+        cid = c.get('Names') or c.get('ID') or ''
+    if cid.startswith('nanoclaw-') and (not filt or filt in cid):
+        print(cid)
+" <<< "$OUTPUT"
+}
+
+# ---------------------------------------------------------------------------
+# --logs [filter]: dump logs for named containers
+# ---------------------------------------------------------------------------
+if [[ " $* " == *" --logs"* ]] || [[ "$*" == "--logs" ]]; then
+  FILTER=""
+  TAKE_NEXT=0
+  for arg in "$@"; do
+    if [[ "$TAKE_NEXT" == "1" ]] && [[ "$arg" != --* ]]; then FILTER="$arg"; break; fi
+    [[ "$arg" == "--logs" ]] && TAKE_NEXT=1 || TAKE_NEXT=0
+  done
+  IDS=$(get_named_ids "$FILTER")
+  if [[ -z "$IDS" ]]; then echo "No matching containers."; exit 0; fi
+  while IFS= read -r id; do
+    echo "=== $id ==="
+    CMD_LOGS "$id" 2>&1
+    echo
+  done <<< "$IDS"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# --tail [filter]: follow logs (multiplexed)
+# ---------------------------------------------------------------------------
+if [[ " $* " == *" --tail"* ]] || [[ "$*" == "--tail" ]]; then
+  FILTER=""
+  TAKE_NEXT=0
+  for arg in "$@"; do
+    if [[ "$TAKE_NEXT" == "1" ]] && [[ "$arg" != --* ]]; then FILTER="$arg"; break; fi
+    [[ "$arg" == "--tail" ]] && TAKE_NEXT=1 || TAKE_NEXT=0
+  done
+  IDS=$(get_named_ids "$FILTER")
+  if [[ -z "$IDS" ]]; then echo "No matching containers."; exit 0; fi
+  while IFS= read -r id; do
+    label="${id#nanoclaw-}"
+    CMD_LOGS -f "$id" 2>&1 | sed "s/^/[$label] /" &
+  done <<< "$IDS"
+  trap "kill 0" INT TERM
+  wait
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# --kill-zombies: stop and remove unnamed nanoclaw-agent containers
+# ---------------------------------------------------------------------------
+if [[ " $* " == *" --kill-zombies"* ]] || [[ "$*" == "--kill-zombies" ]]; then
+  ZOMBIE_IDS=$(CLAWPS_RUNTIME="$RUNTIME" python3 -c "
+import sys, json, os
+data = json.load(sys.stdin)
+runtime = os.environ.get('CLAWPS_RUNTIME', 'apple')
+for c in data:
+    if runtime == 'apple':
+        config = c.get('configuration') or {}
+        cid    = config.get('id') or ''
+        image  = (config.get('image') or {}).get('reference') or ''
+    else:
+        cid   = c.get('Names') or c.get('ID') or ''
+        image = c.get('Image') or ''
+    if 'nanoclaw-agent' in image and not cid.startswith('nanoclaw-'):
+        print(cid)
+" <<< "$OUTPUT")
+
+  if [[ -z "$ZOMBIE_IDS" ]]; then
+    echo "No zombie containers to remove."
+    exit 0
+  fi
+  COUNT=0
+  while IFS= read -r id; do
+    echo "Stopping $id..."
+    log "Stopping zombie container $id"
+    CMD_STOP "$id" 2>/dev/null || true
+    CMD_RM   "$id" 2>/dev/null || true
+    log "Removed zombie container $id"
+    COUNT=$((COUNT + 1))
+  done <<< "$ZOMBIE_IDS"
+  echo "Removed $COUNT zombie container(s)."
+  log "kill-zombies: removed $COUNT container(s)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Default: list named containers + zombie summary
+# ---------------------------------------------------------------------------
+
+# Collect optional positional filter (any non-flag argument)
+FILTER=""
+for arg in "$@"; do
+  [[ "$arg" == --* ]] && continue
+  FILTER="$arg"
+  break
+done
+
+SHOW_ALL=0
+[[ " $* " == *" --all"* ]] && SHOW_ALL=1
+
+_TMPJSON=$(mktemp)
+printf '%s' "$OUTPUT" > "$_TMPJSON"
+CLAWPS_RUNTIME="$RUNTIME" CLAWPS_FILTER="$FILTER" CLAWPS_ALL="$SHOW_ALL" \
+CLAWPS_JSON="$_TMPJSON" python3 << 'PYEOF'
+import json, os, time
+
+def human_age(secs):
+    secs = int(secs)
+    if secs < 60:    return f"{secs}s"
+    if secs < 3600:
+        m = secs // 60; s = secs % 60
+        return f"{m}m {s:02d}s"
+    if secs < 86400:
+        h = secs // 3600; m = (secs % 3600) // 60
+        return f"{h}h {m:02d}m"
+    d = secs // 86400; h = (secs % 86400) // 3600
+    return f"{d}d {h:02d}h"
+
+runtime  = os.environ.get('CLAWPS_RUNTIME', 'apple')
+filt     = os.environ.get('CLAWPS_FILTER', '')
+show_all = os.environ.get('CLAWPS_ALL', '0') == '1'
+now      = time.time()
+named    = []
+unnamed  = []
+
+with open(os.environ['CLAWPS_JSON']) as f:
+    data = json.load(f)
+
+for c in data:
+    if runtime == 'apple':
+        config = c.get('configuration') or {}
+        cid    = config.get('id') or ''
+        image  = (config.get('image') or {}).get('reference') or ''
+        state  = c.get('status') or '?'
+        sd     = c.get('startedDate')
+        age    = human_age(now - (float(sd) + 978307200)) if sd is not None else '?'
+    else:
+        cid   = c.get('Names') or c.get('ID') or ''
+        image = c.get('Image') or ''
+        s     = (c.get('State') or c.get('Status') or '?').lower()
+        state = 'running' if 'running' in s else s
+        age   = (c.get('RunningFor') or '?').removesuffix(' ago')
+
+    is_nanoclaw = 'nanoclaw-agent' in image or cid.startswith('nanoclaw-')
+    if not is_nanoclaw:
+        continue
+
+    if cid.startswith('nanoclaw-'):
+        if not filt or filt in cid:
+            named.append((cid, state, age))
+    else:
+        unnamed.append((cid, state, age))
+
+if named:
+    print(f"{'CONTAINER':<56} {'STATUS':<10} AGE")
+    print('-' * 78)
+    for cid, state, age in sorted(named):
+        print(f"{cid:<56} {state:<10} {age}")
+elif filt:
+    print(f'No containers matching "{filt}".')
+else:
+    print('No named NanoClaw containers running.')
+
+if unnamed:
+    n = len(unnamed)
+    print(f'\nZombies: {n} unnamed container(s)  [use --all to list, --kill-zombies to remove]')
+    if show_all:
+        for cid, state, age in unnamed:
+            print(f'  {cid}  {state}  {age}')
+PYEOF
+rm -f "$_TMPJSON"
