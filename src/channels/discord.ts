@@ -273,21 +273,29 @@ export class DiscordChannel implements Channel {
           const nonImageDescriptions: string[] = [];
           for (const att of message.attachments.values()) {
             const contentType = att.contentType || '';
-            if (contentType.startsWith('image/') && att.url) {
-              try {
-                const resp = await fetch(att.url);
-                if (resp.ok) {
-                  const buf = Buffer.from(await resp.arrayBuffer());
-                  images.push({
-                    data: buf.toString('base64'),
-                    mediaType: contentType.split(';')[0],
-                    name: att.name || undefined,
-                  });
+            if (contentType.startsWith('image/')) {
+              if (att.url) {
+                try {
+                  const resp = await fetch(att.url);
+                  if (resp.ok) {
+                    const buf = Buffer.from(await resp.arrayBuffer());
+                    images.push({
+                      data: buf.toString('base64'),
+                      mediaType: contentType.split(';')[0],
+                      name: att.name || undefined,
+                    });
+                  } else {
+                    nonImageDescriptions.push(
+                      `[Image: ${att.name || 'image'}]`,
+                    );
+                  }
+                } catch {
+                  nonImageDescriptions.push(
+                    `[Image: ${att.name || 'image'} (download failed)]`,
+                  );
                 }
-              } catch {
-                nonImageDescriptions.push(
-                  `[Image: ${att.name || 'image'} (download failed)]`,
-                );
+              } else {
+                nonImageDescriptions.push(`[Image: ${att.name || 'image'}]`);
               }
             } else if (contentType.startsWith('video/')) {
               nonImageDescriptions.push(`[Video: ${att.name || 'video'}]`);
