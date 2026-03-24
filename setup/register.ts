@@ -116,6 +116,41 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
+  // Create CLAUDE.md from template if it doesn't exist
+  const groupClaudeMd = path.join(projectRoot, 'groups', parsed.folder, 'CLAUDE.md');
+  const globalClaudeMd = path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
+  const mainClaudeMd = path.join(projectRoot, 'groups', 'main', 'CLAUDE.md');
+
+  if (!fs.existsSync(groupClaudeMd)) {
+    logger.info({ file: groupClaudeMd }, 'Creating CLAUDE.md from template');
+
+    // Start with global template
+    let templateContent = '';
+    if (fs.existsSync(globalClaudeMd)) {
+      templateContent = fs.readFileSync(globalClaudeMd, 'utf-8');
+    } else {
+      // Fallback: create minimal template if global doesn't exist
+      templateContent = '# Andy\n\nYou are Andy, a personal assistant. You help with tasks, answer questions, and can schedule reminders.\n\n## What You Can Do\n\n- Answer questions and have conversations\n- Search the web and fetch content from URLs\n- Read and write files in your workspace\n- Run bash commands in your sandbox\n- Schedule tasks to run later or on a recurring basis\n- Send messages back to the chat\n\n## Your Workspace\n\nFiles you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.\n\n## Memory\n\nWhen you learn something important, create files for structured data in your workspace.\n';
+    }
+
+    // For main group, append admin context from main template
+    if (parsed.isMain && fs.existsSync(mainClaudeMd)) {
+      const mainContent = fs.readFileSync(mainClaudeMd, 'utf-8');
+      // Extract admin context section (everything after the first ---)
+      const adminMatch = mainContent.match(/---\s*\n\s*## Admin Context[\s\S]*$/);
+      if (adminMatch) {
+        templateContent += '\n' + adminMatch[0];
+      }
+    }
+
+    // Replace assistant name
+    templateContent = templateContent.replace(/^# Andy$/m, '# ' + parsed.assistantName);
+    templateContent = templateContent.replace(/You are Andy/g, 'You are ' + parsed.assistantName);
+
+    fs.writeFileSync(groupClaudeMd, templateContent);
+    logger.info({ file: groupClaudeMd }, 'Created CLAUDE.md');
+  }
+
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
@@ -132,10 +167,10 @@ export async function run(args: string[]): Promise<void> {
     for (const mdFile of mdFiles) {
       if (fs.existsSync(mdFile)) {
         let content = fs.readFileSync(mdFile, 'utf-8');
-        content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
+        content = content.replace(/^# Andy$/m, '# ' + parsed.assistantName);
         content = content.replace(
           /You are Andy/g,
-          `You are ${parsed.assistantName}`,
+          'You are ' + parsed.assistantName,
         );
         fs.writeFileSync(mdFile, content);
         logger.info({ file: mdFile }, 'Updated CLAUDE.md');
@@ -149,14 +184,14 @@ export async function run(args: string[]): Promise<void> {
       if (envContent.includes('ASSISTANT_NAME=')) {
         envContent = envContent.replace(
           /^ASSISTANT_NAME=.*$/m,
-          `ASSISTANT_NAME="${parsed.assistantName}"`,
+          'ASSISTANT_NAME="' + parsed.assistantName + '"',
         );
       } else {
-        envContent += `\nASSISTANT_NAME="${parsed.assistantName}"`;
+        envContent += '\nASSISTANT_NAME="' + parsed.assistantName + '"';
       }
       fs.writeFileSync(envFile, envContent);
     } else {
-      fs.writeFileSync(envFile, `ASSISTANT_NAME="${parsed.assistantName}"\n`);
+      fs.writeFileSync(envFile, 'ASSISTANT_NAME="' + parsed.assistantName + '"\n');
     }
     logger.info('Set ASSISTANT_NAME in .env');
     nameUpdated = true;
