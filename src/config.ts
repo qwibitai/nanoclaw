@@ -4,7 +4,11 @@ import path from 'path';
 import { readEnvFile } from './env.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'ONECLI_URL']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'ONECLI_URL',
+]);
 
 export const ASSISTANT_NAME = (() => {
   const fromTrigger = (process.env.NANOCLAW_TRIGGER || '').replace(/^@/, '');
