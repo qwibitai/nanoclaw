@@ -160,6 +160,8 @@ jobs:
               'nanoclaw-slack',
               'nanoclaw-gmail',
               'nanoclaw-docker-sandboxes',
+              'nanoclaw-docker-sandbox',
+              'nanoclaw-docker-sandbox-windows',
             ];
             const sha = context.sha.substring(0, 7);
             for (const repo of forks) {
