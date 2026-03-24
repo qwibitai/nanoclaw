@@ -81,7 +81,6 @@ You are working on an autonomous goal. Work independently to completion.
 `.trim();
 
 // SDK error messages (may change across versions — check on SDK upgrades)
-const SDK_ERR_TRANSPORT_NOT_READY = 'ProcessTransport is not ready';
 const SDK_ERR_SESSION_NOT_FOUND = 'No conversation found with session ID';
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -573,12 +572,10 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
- * Run a single query and stream results via writeOutput.
- * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
- * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
+ * Run a single turn: send one message, stream the response.
+ * Each turn is a separate query() call. Follow-up messages start new turns.
  */
-async function runQuery(
+async function runTurn(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
@@ -586,53 +583,8 @@ async function runQuery(
   images: ImageAttachment[] | undefined,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; leftoverMessages: string[] }> {
-  const stream = new MessageStream();
-  stream.push(prompt, images);
-
-  // Poll IPC for follow-up messages and _close sentinel during the query.
-  // Messages that arrive after the SDK has delivered a result are collected
-  // as "late" instead of being pushed into the (possibly dead) stream.
-  let ipcPolling = true;
-  let closedDuringQuery = false;
-  const lateMessages: string[] = [];
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
-      closedDuringQuery = true;
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      if (resultCount > 0) {
-        // SDK already delivered a result — don't push into dead transport.
-        // End the stream so the for-await loop exits and the main loop
-        // can feed these messages into the next query.
-        log(`Collecting late IPC message (${text.length} chars) for next query`);
-        if (lateMessages.length < 50) lateMessages.push(text);
-        stream.end();
-        ipcPolling = false;
-        return;
-      } else {
-        log(`Piping IPC message into active query (${text.length} chars)`);
-        if (!stream.push(text)) {
-          log('Stream ended, stopping IPC poll');
-          ipcPolling = false;
-          return;
-        }
-      }
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-  };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string }> {
+  const messageIterable = singleMessageIterable(prompt, images);
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -642,7 +594,6 @@ async function runQuery(
   }
 
   // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
@@ -657,8 +608,12 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  let newSessionId: string | undefined;
+  let lastAssistantUuid: string | undefined;
+  let messageCount = 0;
+
   for await (const message of query({
-    prompt: stream,
+    prompt: messageIterable,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
@@ -707,7 +662,6 @@ async function runQuery(
 
     if (message.type === 'assistant') {
       const msg = message as any;
-      // SDK assistant messages may use 'content' (raw API) or 'message.content' (wrapped)
       const content = msg.content ?? msg.message?.content;
       if (Array.isArray(content)) {
         for (const block of content) {
@@ -734,33 +688,18 @@ async function runQuery(
     }
 
     if (message.type === 'result') {
-      resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      log(`Result: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId
       });
-      // End the stream immediately so the SDK finishes its iterable.
-      // Late IPC messages will be collected by the poll callback (resultCount > 0 guard).
-      stream.end();
     }
   }
 
-  ipcPolling = false;
-
-  // Drain any IPC messages that arrived after the SDK finished but before
-  // we stopped polling. Without this, messages consumed by pollIpcDuringQuery
-  // (pushed into the now-dead stream) or sitting on disk would be lost until
-  // the next user message triggers waitForIpcMessage.
-  const leftover = [...lateMessages, ...drainIpcInput()];
-  if (leftover.length > 0) {
-    log(`Recovered ${leftover.length} IPC message(s) after query ended (${lateMessages.length} late, ${leftover.length - lateMessages.length} drained)`);
-  }
-
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery, leftoverMessages: leftover };
+  log(`Turn done. Messages: ${messageCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}`);
+  return { newSessionId, lastAssistantUuid };
 }
 
 async function main(): Promise<void> {
@@ -780,19 +719,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Prevent EPIPE from crashing the process when SDK subprocess exits.
-  // The SDK spawns a CLI subprocess; if it dies mid-write, the stdin pipe
-  // emits an unhandled 'error' event that would otherwise crash Node.
+  // Prevent EPIPE from crashing the process
   process.stdout.on('error', () => {});
   process.stderr.on('error', () => {});
   process.on('uncaughtException', (err) => {
     if ('code' in err && (err as NodeJS.ErrnoException).code === 'EPIPE') {
       log('Caught EPIPE — SDK subprocess exited, continuing');
-      return; // Swallow EPIPE, let the query catch block handle the error
-    }
-    if (err.message?.includes(SDK_ERR_TRANSPORT_NOT_READY)) {
-      log('Caught ProcessTransport error — SDK subprocess exited, continuing');
-      return; // Same root cause as EPIPE — transport dead after subprocess exit
+      return;
     }
     // Re-throw non-EPIPE errors
     throw err;
@@ -822,17 +755,16 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
-  // Images are only sent with the first query, not follow-ups
   let initialImages = containerInput.images;
+
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(`Starting turn (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      let queryResult: Awaited<ReturnType<typeof runQuery>>;
+      let turnResult: Awaited<ReturnType<typeof runTurn>>;
       try {
-        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, initialImages, sdkEnv, resumeAt);
+        turnResult = await runTurn(prompt, sessionId, mcpServerPath, containerInput, initialImages, sdkEnv, resumeAt);
       } catch (queryErr) {
         const msg = queryErr instanceof Error ? queryErr.message : String(queryErr);
         const isStaleSession = msg.includes(SDK_ERR_SESSION_NOT_FOUND);
@@ -841,51 +773,31 @@ async function main(): Promise<void> {
           log(`Session error (${isStaleSession ? 'stale' : 'crash'}) — retrying with fresh session`);
           sessionId = undefined;
           resumeAt = undefined;
-          initialImages = containerInput.images; // Re-include images on retry
-          queryResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, initialImages, sdkEnv, undefined);
+          initialImages = containerInput.images;
+          turnResult = await runTurn(prompt, undefined, mcpServerPath, containerInput, initialImages, sdkEnv, undefined);
         } else {
           throw queryErr;
         }
       }
 
-      // Clear images after first query — don't resend on follow-ups
-      initialImages = undefined;
+      initialImages = undefined; // Only send images on first turn
 
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
-      }
+      if (turnResult.newSessionId) sessionId = turnResult.newSessionId;
+      if (turnResult.lastAssistantUuid) resumeAt = turnResult.lastAssistantUuid;
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
-        break;
-      }
-
-      // Emit session update so host can track it
+      // Emit session update for host tracking
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
-      // Use leftover messages from the query if any were consumed but not processed
-      let nextMessage: string | null;
-      if (queryResult.leftoverMessages.length > 0) {
-        nextMessage = queryResult.leftoverMessages.join('\n');
-        log(`Using ${queryResult.leftoverMessages.length} leftover message(s) from previous query`);
-      } else {
-        log('Query ended, waiting for next IPC message...');
-        // Wait for the next message or _close sentinel
-        nextMessage = await waitForIpcMessage();
-      }
+      // Wait for next IPC message or _close sentinel
+      log('Turn ended, waiting for next IPC message...');
+      const nextMessage = await waitForIpcMessage();
 
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      log(`Got new message (${nextMessage.length} chars), starting new turn`);
       prompt = nextMessage;
     }
   } catch (err) {
