@@ -23,7 +23,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
-API keys, secret keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway — which replaces the old credential proxy and handles secret injection into containers at request time, so no keys or tokens are ever passed to containers directly. Run `onecli --help` to manage secrets, agents, and gateway config.
+API keys, secret keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway — which handles secret injection into containers at request time, so no keys or tokens are ever passed to containers directly. Run `onecli --help`.
 
 ## Skills
 
