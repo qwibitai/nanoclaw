@@ -15,6 +15,7 @@ import {
   createTask,
   createThreadContext,
   deleteTask,
+  getAllTasks,
   getTaskById,
   getThreadContextByThreadId,
   updateTask,
@@ -424,6 +425,33 @@ async function processQueueFile(
         registeredGroups,
       );
       break;
+    case 'list_tasks': {
+      const requestId = data.requestId as string;
+      if (!requestId) break;
+
+      const allTasks = getAllTasks();
+      const filtered = isMain
+        ? allTasks
+        : allTasks.filter((t) => t.group_folder === sourceGroup);
+
+      const response = filtered.map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        prompt: t.prompt,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      }));
+
+      const inputDir = path.join(basePath, 'input');
+      fs.mkdirSync(inputDir, { recursive: true });
+      const responseFile = path.join(inputDir, `list_tasks-${requestId}.json`);
+      const tempFile = `${responseFile}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(response));
+      fs.renameSync(tempFile, responseFile);
+      break;
+    }
     case 'schedule_task':
     case 'pause_task':
     case 'resume_task':
