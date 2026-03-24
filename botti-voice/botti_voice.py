@@ -190,9 +190,7 @@ class AudioLoop:
 
         self.audio_stream = None
 
-        # Half-duplex: mic is suppressed while audio plays back
-        self._mic_enabled = asyncio.Event()
-        self._mic_enabled.set()  # Start with mic enabled
+        # Full-duplex: mic always on, Gemini server-side VAD handles turn-taking
 
     async def send_text(self):
         while True:
@@ -300,8 +298,7 @@ class AudioLoop:
             kwargs = {}
         while True:
             data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
-            # Half-duplex: only send mic data when not playing back audio
-            if self._mic_enabled.is_set() and self.out_queue is not None:
+            if self.out_queue is not None:
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
 
     async def receive_audio(self):
@@ -339,13 +336,7 @@ class AudioLoop:
         while True:
             if self.audio_in_queue is not None:
                 bytestream = await self.audio_in_queue.get()
-                # Suppress mic while playing to prevent echo
-                self._mic_enabled.clear()
                 await asyncio.to_thread(stream.write, bytestream)
-                # Re-enable mic after a brief grace period if no more audio queued
-                if self.audio_in_queue.empty():
-                    await asyncio.sleep(0.15)
-                    self._mic_enabled.set()
 
     async def run(self):
         try:

@@ -73,6 +73,36 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+// Anti-spam: rate-limit error cooldown (4h between notifications per JID)
+const ERROR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+const lastErrorNotifiedAt: Record<string, number> = {};
+const RATE_LIMIT_PATTERNS = [
+  'hit your limit',
+  'rate limit',
+  'rate_limit',
+  'overloaded',
+  '429',
+];
+
+function isRateLimitError(text: string): boolean {
+  const lower = text.toLowerCase();
+  return RATE_LIMIT_PATTERNS.some((p) => lower.includes(p));
+}
+
+function shouldNotifyError(chatJid: string): boolean {
+  const last = lastErrorNotifiedAt[chatJid];
+  if (!last) return true;
+  return Date.now() - last >= ERROR_COOLDOWN_MS;
+}
+
+function markErrorNotified(chatJid: string): void {
+  lastErrorNotifiedAt[chatJid] = Date.now();
+}
+
+function resetErrorCooldown(chatJid: string): void {
+  delete lastErrorNotifiedAt[chatJid];
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -222,7 +252,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
+
+      // Anti-spam: intercept rate-limit errors
+      if (text && isRateLimitError(text)) {
+        if (shouldNotifyError(chatJid)) {
+          await channel.sendMessage(chatJid, '\u23f8\ufe0f Je suis temporairement indisponible. Je reviens d\u00e8s que possible.');
+          markErrorNotified(chatJid);
+          outputSentToUser = true;
+        } else {
+          logger.warn({ group: group.name, chatJid }, 'Rate limit error suppressed (cooldown active)');
+        }
+        hadError = true;
+      } else if (text) {
+        // Normal output — reset error cooldown on success
+        resetErrorCooldown(chatJid);
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }

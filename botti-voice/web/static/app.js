@@ -38,6 +38,8 @@ class BottiVoice {
             // Use ScriptProcessorNode for PCM access
             // (AudioWorklet is cleaner but ScriptProcessor works everywhere)
             this.processor = this.captureContext.createScriptProcessor(1024, 1, 1);
+            // Full-duplex: always send mic audio (browser AEC handles echo)
+            // This lets Gemini server-side VAD detect barge-in during playback
             this.processor.onaudioprocess = (event) => {
                 if (this.isMuted || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
                 const float32 = event.inputBuffer.getChannelData(0);
@@ -75,6 +77,9 @@ class BottiVoice {
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'text') {
                             appendTranscript(msg.content);
+                        } else if (msg.type === 'turn_complete') {
+                            // Gemini interrupted or turn ended — stop all playback immediately
+                            this.stopAllPlayback();
                         }
                         // Ignore pings
                     } catch (e) {}
@@ -114,8 +119,23 @@ class BottiVoice {
         }
     }
 
+    stopAllPlayback() {
+        // Cancel all scheduled audio sources immediately (barge-in)
+        if (this.scheduledSources) {
+            for (const src of this.scheduledSources) {
+                try { src.stop(); } catch (e) { /* already stopped */ }
+            }
+        }
+        this.scheduledSources = [];
+        this.nextPlayTime = 0;
+        this.isPlaying = false;
+        document.getElementById('pulseRing').classList.remove('speaking');
+    }
+
     playAudio(pcmBuffer) {
         if (!this.playbackContext) return;
+
+        if (!this.scheduledSources) this.scheduledSources = [];
 
         const int16 = new Int16Array(pcmBuffer);
         const float32 = new Float32Array(int16.length);
@@ -135,6 +155,7 @@ class BottiVoice {
         const startTime = Math.max(currentTime + 0.01, this.nextPlayTime);
         source.start(startTime);
         this.nextPlayTime = startTime + audioBuffer.duration;
+        this.scheduledSources.push(source);
 
         // Track speaking state for visual feedback
         if (!this.isPlaying) {
@@ -143,6 +164,9 @@ class BottiVoice {
         }
 
         source.onended = () => {
+            // Remove from tracked sources
+            const idx = this.scheduledSources.indexOf(source);
+            if (idx !== -1) this.scheduledSources.splice(idx, 1);
             // Check if this was the last scheduled buffer
             if (this.playbackContext && this.playbackContext.currentTime >= this.nextPlayTime - 0.05) {
                 this.isPlaying = false;

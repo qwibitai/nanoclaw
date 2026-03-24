@@ -40,6 +40,7 @@ export class GmailChannel implements Channel {
   private threadMeta = new Map<string, ThreadMeta>();
   private consecutiveErrors = 0;
   private userEmail = '';
+  private lastDeliveredThreadId = '';
 
   constructor(opts: GmailChannelOpts, pollIntervalMs = 60000) {
     this.opts = opts;
@@ -47,7 +48,7 @@ export class GmailChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    const credDir = path.join(os.homedir(), '.gmail-mcp');
+    const credDir = process.env.GMAIL_MCP_DIR || path.join(os.homedir(), '.gmail-mcp');
     const keysPath = path.join(credDir, 'gcp-oauth.keys.json');
     const tokensPath = path.join(credDir, 'credentials.json');
 
@@ -114,11 +115,35 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const threadId = jid.replace(/^gmail:/, '');
-    const meta = this.threadMeta.get(threadId);
+    let threadId = jid.replace(/^gmail:/, '');
+    let meta = this.threadMeta.get(threadId);
+
+    // Main group aggregation: find the most recent thread to reply to.
+    // The agent's response may contain "[Reply to: X]" to target a specific sender,
+    // otherwise we reply to the last email received.
+    if (!meta && threadId === 'main') {
+      // Try to match a sender from the response text
+      const replyMatch = text.match(/\[Reply to:\s*(.+?)\]/i);
+      if (replyMatch) {
+        const target = replyMatch[1].toLowerCase().trim();
+        for (const [tid, m] of this.threadMeta) {
+          if (m.sender.toLowerCase().includes(target) || m.senderName.toLowerCase().includes(target)) {
+            threadId = tid;
+            meta = m;
+            text = text.replace(/\[Reply to:\s*.+?\]\s*/i, '').trim();
+            break;
+          }
+        }
+      }
+      // Fallback: most recent thread
+      if (!meta && this.lastDeliveredThreadId) {
+        threadId = this.lastDeliveredThreadId;
+        meta = this.threadMeta.get(threadId);
+      }
+    }
 
     if (!meta) {
-      logger.warn({ jid }, 'No thread metadata for reply, cannot send');
+      logger.warn({ jid, threadId }, 'No thread metadata for reply, cannot send');
       return;
     }
 
@@ -178,7 +203,7 @@ export class GmailChannel implements Channel {
   // --- Private ---
 
   private buildQuery(): string {
-    return 'is:unread category:primary';
+    return 'is:unread in:inbox';
   }
 
   private async pollForMessages(): Promise<void> {
@@ -282,6 +307,9 @@ export class GmailChannel implements Channel {
 
     const mainJid = mainEntry[0];
     const content = `[Email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
+
+    // Track last thread for reply routing from main group
+    this.lastDeliveredThreadId = threadId;
 
     this.opts.onMessage(mainJid, {
       id: messageId,

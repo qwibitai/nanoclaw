@@ -20,6 +20,7 @@ groups/global/*
 
 # Secrets
 *.keys.json
+*-service-account.json
 .env
 
 # Temp files

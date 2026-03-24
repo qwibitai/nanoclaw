@@ -18,6 +18,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { downloadAndSaveMedia, isMediaMessage } from '../media-download.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -182,8 +183,8 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          // but allow voice messages through for transcription
-          if (!content && !isVoiceMessage(msg)) continue;
+          // but allow voice messages and media (images, documents) through
+          if (!content && !isVoiceMessage(msg) && !isMediaMessage(msg)) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -211,6 +212,29 @@ export class WhatsAppChannel implements Channel {
             } catch (err) {
               logger.error({ err }, 'Voice transcription error');
               finalContent = '[Voice Message - transcription failed]';
+            }
+          } else if (msg.message?.imageMessage) {
+            try {
+              const mediaPath = await downloadAndSaveMedia(msg, this.sock);
+              const caption = msg.message.imageMessage.caption || '';
+              finalContent = caption ? `[Image: ${mediaPath}]\n${caption}` : `[Image: ${mediaPath}]`;
+              logger.info({ chatJid, mediaPath }, 'Image downloaded');
+            } catch (err) {
+              logger.error({ err }, 'Image download failed');
+              finalContent = '[Image - téléchargement échoué]';
+            }
+          } else if (msg.message?.documentMessage) {
+            try {
+              const mediaPath = await downloadAndSaveMedia(msg, this.sock);
+              const caption = msg.message.documentMessage.caption || '';
+              const fileName = msg.message.documentMessage.fileName || 'unknown';
+              finalContent = caption
+                ? `[Document: ${mediaPath}] Filename: ${fileName}\n${caption}`
+                : `[Document: ${mediaPath}] Filename: ${fileName}`;
+              logger.info({ chatJid, mediaPath, fileName }, 'Document downloaded');
+            } catch (err) {
+              logger.error({ err }, 'Document download failed');
+              finalContent = '[Document - téléchargement échoué]';
             }
           }
 

@@ -92,6 +92,10 @@ class GeminiBridge:
                         await callback("text", text)
                     if response.tool_call:
                         await self._handle_tool_calls(response.tool_call, callback)
+
+                # Turn ended (normal completion or barge-in interruption).
+                # Signal browser to flush any queued audio immediately.
+                await callback("turn_complete", "")
             except Exception as e:
                 logger.error(f"Gemini receive error: {e}")
                 break
