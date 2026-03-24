@@ -607,9 +607,13 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt, images);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC for follow-up messages and _close sentinel during the query.
+  // Messages that arrive after the SDK has delivered a result are collected
+  // as "late" instead of being pushed into the (possibly dead) stream.
   let ipcPolling = true;
   let closedDuringQuery = false;
+  let resultSeen = false;
+  const lateMessages: string[] = [];
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
@@ -621,11 +625,17 @@ async function runQuery(
     }
     const messages = drainIpcInput();
     for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      if (!stream.push(text)) {
-        log('Stream ended, stopping IPC poll');
-        ipcPolling = false;
-        return;
+      if (resultSeen) {
+        // SDK already delivered a result — don't push into dead transport
+        log(`Collecting late IPC message (${text.length} chars) for next query`);
+        lateMessages.push(text);
+      } else {
+        log(`Piping IPC message into active query (${text.length} chars)`);
+        if (!stream.push(text)) {
+          log('Stream ended, stopping IPC poll');
+          ipcPolling = false;
+          return;
+        }
       }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
@@ -738,6 +748,7 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
+      resultSeen = true; // Signal IPC poll to stop pushing into stream
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
@@ -755,9 +766,9 @@ async function runQuery(
   // we stopped polling. Without this, messages consumed by pollIpcDuringQuery
   // (pushed into the now-dead stream) or sitting on disk would be lost until
   // the next user message triggers waitForIpcMessage.
-  const leftover = drainIpcInput();
+  const leftover = [...lateMessages, ...drainIpcInput()];
   if (leftover.length > 0) {
-    log(`Recovered ${leftover.length} IPC message(s) after query ended`);
+    log(`Recovered ${leftover.length} IPC message(s) after query ended (${lateMessages.length} late, ${leftover.length - lateMessages.length} drained)`);
   }
 
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
