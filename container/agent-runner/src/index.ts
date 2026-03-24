@@ -80,6 +80,10 @@ You are working on an autonomous goal. Work independently to completion.
 - Do not ask clarifying questions unless truly stuck — make reasonable decisions and proceed
 `.trim();
 
+// SDK error messages (may change across versions — check on SDK upgrades)
+const SDK_ERR_TRANSPORT_NOT_READY = 'ProcessTransport is not ready';
+const SDK_ERR_SESSION_NOT_FOUND = 'No conversation found with session ID';
+
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_INPUT_PAUSE_SENTINEL = path.join(IPC_INPUT_DIR, '_pause');
@@ -612,7 +616,6 @@ async function runQuery(
   // as "late" instead of being pushed into the (possibly dead) stream.
   let ipcPolling = true;
   let closedDuringQuery = false;
-  let resultSeen = false;
   const lateMessages: string[] = [];
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
@@ -625,12 +628,12 @@ async function runQuery(
     }
     const messages = drainIpcInput();
     for (const text of messages) {
-      if (resultSeen) {
+      if (resultCount > 0) {
         // SDK already delivered a result — don't push into dead transport.
         // End the stream so the for-await loop exits and the main loop
         // can feed these messages into the next query.
         log(`Collecting late IPC message (${text.length} chars) for next query`);
-        lateMessages.push(text);
+        if (lateMessages.length < 50) lateMessages.push(text);
         stream.end();
         ipcPolling = false;
         return;
@@ -753,7 +756,6 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      resultSeen = true; // Signal IPC poll to stop pushing into stream
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
@@ -807,7 +809,7 @@ async function main(): Promise<void> {
       log('Caught EPIPE — SDK subprocess exited, continuing');
       return; // Swallow EPIPE, let the query catch block handle the error
     }
-    if (err.message?.includes('ProcessTransport is not ready')) {
+    if (err.message?.includes(SDK_ERR_TRANSPORT_NOT_READY)) {
       log('Caught ProcessTransport error — SDK subprocess exited, continuing');
       return; // Same root cause as EPIPE — transport dead after subprocess exit
     }
@@ -852,7 +854,7 @@ async function main(): Promise<void> {
         queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, initialImages, sdkEnv, resumeAt);
       } catch (queryErr) {
         const msg = queryErr instanceof Error ? queryErr.message : String(queryErr);
-        const isStaleSession = msg.includes('No conversation found with session ID');
+        const isStaleSession = msg.includes(SDK_ERR_SESSION_NOT_FOUND);
         const isProcessCrash = msg.includes('exited with code') || msg.includes('EPIPE');
         if ((isStaleSession || isProcessCrash) && sessionId) {
           log(`Session error (${isStaleSession ? 'stale' : 'crash'}) — retrying with fresh session`);
