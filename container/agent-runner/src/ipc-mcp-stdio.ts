@@ -63,6 +63,62 @@ server.tool(
 );
 
 server.tool(
+  'send_file',
+  "Send a file (PDF, image, document, video, etc.) to the user or group immediately. The file must exist at the given absolute path under /workspace/group/.",
+  {
+    file_path: z.string().describe('Absolute path to the file (e.g., "/workspace/group/report.pdf"). Must be under /workspace/group/.'),
+    caption: z.string().optional().describe('Optional caption to accompany the file'),
+    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+  },
+  async (args) => {
+    if (!path.isAbsolute(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File path must be absolute. Got: "${args.file_path}"` }],
+        isError: true,
+      };
+    }
+
+    const CONTAINER_GROUP_PREFIX = '/workspace/group/';
+    if (!args.file_path.startsWith(CONTAINER_GROUP_PREFIX)) {
+      return {
+        content: [{ type: 'text' as const, text: `File must be under /workspace/group/. Got: "${args.file_path}"` }],
+        isError: true,
+      };
+    }
+
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: "${args.file_path}"` }],
+        isError: true,
+      };
+    }
+
+    try {
+      fs.accessSync(args.file_path, fs.constants.R_OK);
+    } catch {
+      return {
+        content: [{ type: 'text' as const, text: `File is not readable: "${args.file_path}"` }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'file',
+      chatJid,
+      file_path: args.file_path,
+      caption: args.caption || undefined,
+      sender: args.sender || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'File queued for sending.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
