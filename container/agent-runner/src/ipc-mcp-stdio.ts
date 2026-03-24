@@ -157,34 +157,55 @@ server.tool(
   "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
   {},
   async () => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-
     try {
-      if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+      // Write IPC request
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      writeIpcFile(QUEUE_DIR, {
+        type: 'list_tasks',
+        requestId,
+        groupFolder,
+        isMain: String(isMain),
+        timestamp: new Date().toISOString(),
+      });
+
+      // Poll for response
+      const inputDir = path.join(IPC_DIR, 'input');
+      const responseFile = path.join(inputDir, `list_tasks-${requestId}.json`);
+      const timeout = 5000;
+      const pollInterval = 100;
+      const start = Date.now();
+
+      while (Date.now() - start < timeout) {
+        if (fs.existsSync(responseFile)) {
+          const tasks = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+          // Clean up response file
+          try { fs.unlinkSync(responseFile); } catch { /* ignore */ }
+
+          // Host already filtered by group — no need to re-filter here
+
+          if (tasks.length === 0) {
+            return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+          }
+
+          const formatted = tasks
+            .map(
+              (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
+                `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            )
+            .join('\n');
+
+          return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
       }
 
-      const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-
-      const tasks = isMain
-        ? allTasks
-        : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
-
-      if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
-      }
-
-      const formatted = tasks
-        .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
-        )
-        .join('\n');
-
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return {
+        content: [{ type: 'text' as const, text: 'Timed out waiting for task list from host. Try again.' }],
+        isError: true,
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `Error listing tasks: ${err instanceof Error ? err.message : String(err)}` }],
       };
     }
   },
