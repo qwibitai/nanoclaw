@@ -222,7 +222,13 @@ export class TelegramChannel implements Channel {
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       let content = '[Voice message]';
       try {
@@ -232,7 +238,10 @@ export class TelegramChannel implements Channel {
           const buffer = await downloadTelegramFile(url);
           const transcript = await transcribeBuffer(buffer);
           content = `[Voice: ${transcript}]`;
-          logger.info({ chatJid, chars: transcript.length }, 'Transcribed Telegram voice note');
+          logger.info(
+            { chatJid, chars: transcript.length },
+            'Transcribed Telegram voice note',
+          );
         }
       } catch (err) {
         logger.warn({ err }, 'Failed to transcribe Telegram voice note');
