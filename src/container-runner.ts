@@ -215,80 +215,45 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(
-  mounts: VolumeMount[],
-  containerName: string,
-): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+function buildEnvFile(containerName: string): string | null {
+  const envLines: string[] = [];
 
-  // Pass host timezone so container's local time matches the user's
-  args.push('-e', `TZ=${TIMEZONE}`);
-
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
+  // Auth placeholder
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    envLines.push('ANTHROPIC_API_KEY=placeholder');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    envLines.push('CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
-  // EasyBits MCP: pass API key to container
+  // Collect all secret env vars into the file
   const ebKey = readEnvFile(['EASYBITS_API_KEY']).EASYBITS_API_KEY;
-  if (ebKey) {
-    args.push('-e', `EASYBITS_API_KEY=${ebKey}`);
-  }
+  if (ebKey) envLines.push(`EASYBITS_API_KEY=${ebKey}`);
 
-  // Panel MCP: pass credentials to container
   const panelKey = readEnvFile(['PANEL_API_KEY']).PANEL_API_KEY;
   const panelUrl = readEnvFile(['PANEL_URL']).PANEL_URL;
   if (panelKey) {
-    args.push('-e', `PANEL_API_KEY=${panelKey}`);
-    args.push('-e', `PANEL_URL=${panelUrl || ''}`);
+    envLines.push(`PANEL_API_KEY=${panelKey}`);
+    envLines.push(`PANEL_URL=${panelUrl || ''}`);
   }
 
-  // OpenAI: pass API key to container (image generation)
   const openaiKey = readEnvFile(['OPENAI_API_KEY']).OPENAI_API_KEY;
-  if (openaiKey) {
-    args.push('-e', `OPENAI_API_KEY=${openaiKey}`);
-  }
+  if (openaiKey) envLines.push(`OPENAI_API_KEY=${openaiKey}`);
 
-  // fal.ai: pass API key to container (face swap)
   const falKey = readEnvFile(['FAL_KEY']).FAL_KEY;
-  if (falKey) {
-    args.push('-e', `FAL_KEY=${falKey}`);
-  }
+  if (falKey) envLines.push(`FAL_KEY=${falKey}`);
 
-  // AWS: pass credentials to container (Polly TTS)
   const awsEnv = readEnvFile([
     'AWS_BEDROCK_ACCESS_KEY_ID',
     'AWS_BEDROCK_SECRET_ACCESS_KEY',
     'AWS_BEDROCK_REGION',
   ]);
   if (awsEnv.AWS_BEDROCK_ACCESS_KEY_ID) {
-    args.push(
-      '-e',
-      `AWS_BEDROCK_ACCESS_KEY_ID=${awsEnv.AWS_BEDROCK_ACCESS_KEY_ID}`,
-    );
-    args.push(
-      '-e',
-      `AWS_BEDROCK_SECRET_ACCESS_KEY=${awsEnv.AWS_BEDROCK_SECRET_ACCESS_KEY}`,
-    );
-    args.push(
-      '-e',
-      `AWS_BEDROCK_REGION=${awsEnv.AWS_BEDROCK_REGION || 'us-east-1'}`,
-    );
+    envLines.push(`AWS_BEDROCK_ACCESS_KEY_ID=${awsEnv.AWS_BEDROCK_ACCESS_KEY_ID}`);
+    envLines.push(`AWS_BEDROCK_SECRET_ACCESS_KEY=${awsEnv.AWS_BEDROCK_SECRET_ACCESS_KEY}`);
+    envLines.push(`AWS_BEDROCK_REGION=${awsEnv.AWS_BEDROCK_REGION || 'us-east-1'}`);
   }
 
-  // AWS SES: pass credentials to container (email sending)
   const sesEnv = readEnvFile([
     'SES_REGION',
     'SES_KEY',
@@ -297,18 +262,52 @@ function buildContainerArgs(
     'SES_FROM_NAME',
   ]);
   if (sesEnv.SES_KEY) {
-    args.push('-e', `SES_REGION=${sesEnv.SES_REGION || 'us-east-2'}`);
-    args.push('-e', `SES_KEY=${sesEnv.SES_KEY}`);
-    args.push('-e', `SES_SECRET=${sesEnv.SES_SECRET || ''}`);
-    args.push('-e', `SES_FROM_EMAIL=${sesEnv.SES_FROM_EMAIL || ''}`);
-    args.push('-e', `SES_FROM_NAME=${sesEnv.SES_FROM_NAME || ''}`);
+    envLines.push(`SES_REGION=${sesEnv.SES_REGION || 'us-east-2'}`);
+    envLines.push(`SES_KEY=${sesEnv.SES_KEY}`);
+    envLines.push(`SES_SECRET=${sesEnv.SES_SECRET || ''}`);
+    envLines.push(`SES_FROM_EMAIL=${sesEnv.SES_FROM_EMAIL || ''}`);
+    envLines.push(`SES_FROM_NAME=${sesEnv.SES_FROM_NAME || ''}`);
   }
 
-  // Smatch MCP: pass credentials to container
   const smatchEnv = readEnvFile(['SMATCH_MONGODB_URI', 'SMATCH_CLUB_ID']);
   if (smatchEnv.SMATCH_MONGODB_URI) {
-    args.push('-e', `SMATCH_MONGODB_URI=${smatchEnv.SMATCH_MONGODB_URI}`);
-    args.push('-e', `SMATCH_CLUB_ID=${smatchEnv.SMATCH_CLUB_ID || ''}`);
+    envLines.push(`SMATCH_MONGODB_URI=${smatchEnv.SMATCH_MONGODB_URI}`);
+    envLines.push(`SMATCH_CLUB_ID=${smatchEnv.SMATCH_CLUB_ID || ''}`);
+  }
+
+  if (envLines.length === 0) return null;
+
+  const envFilePath = path.join(DATA_DIR, `env-${containerName}`);
+  fs.writeFileSync(envFilePath, envLines.join('\n') + '\n', { mode: 0o600 });
+  return envFilePath;
+}
+
+function cleanupEnvFile(containerName: string): void {
+  const envFilePath = path.join(DATA_DIR, `env-${containerName}`);
+  try {
+    fs.unlinkSync(envFilePath);
+  } catch {
+    // Already cleaned up or never created
+  }
+}
+
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+  envFilePath: string | null,
+): string[] {
+  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Non-secret env vars stay as -e (safe to appear in process list)
+  args.push('-e', `TZ=${TIMEZONE}`);
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Secrets go via --env-file (not visible in ps/docker inspect args)
+  if (envFilePath) {
+    args.push('--env-file', envFilePath);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -351,7 +350,8 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const envFilePath = buildEnvFile(containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, envFilePath);
 
   logger.debug(
     {
@@ -507,6 +507,7 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      cleanupEnvFile(containerName);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -712,6 +713,7 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      cleanupEnvFile(containerName);
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',
