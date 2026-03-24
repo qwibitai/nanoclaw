@@ -21,6 +21,7 @@
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
+    "grammy": "^1.39.3",
     "cron-parser": "^5.5.0",
     "openai": "^6.32.0",
     "pino": "^9.6.0",
