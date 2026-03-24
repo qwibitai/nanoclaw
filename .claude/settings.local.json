@@ -1,8 +1,2 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(netstat:*)",
-      "Bash(cd:*)"
-    ]
-  }
 }
