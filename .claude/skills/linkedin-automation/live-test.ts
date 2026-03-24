@@ -7,10 +7,16 @@
  * Usage:
  *   cd /home/shail-lm10/nanoclaw
  *   npx dotenv -e .env -- npx tsx .claude/skills/linkedin-automation/live-test.ts
+ *
+ * Tier 4 (interactive button verification) prompts for LinkedIn profile URLs.
+ * To skip the prompts, set env vars before running:
+ *   LIVE_TEST_PROFILE=<url>           — profile NOT yet connected (connect/visit tests)
+ *   LIVE_TEST_CONNECTED_PROFILE=<url> — 1st-degree connection (message test)
  */
 
 import { spawnSync } from 'child_process';
 import path from 'path';
+import readline from 'readline';
 import { upsertLead, updateLeadStatus, getLeadsByStatus, getCampaignStats, _setDataSourceId } from './lib/notion.js';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
@@ -33,12 +39,21 @@ function log(status: 'pass' | 'fail' | 'skip', name: string, detail?: string) {
   results.push({ name, status, detail });
 }
 
+/** Throw inside a test() body to mark it skipped rather than failed */
+class SkipSignal extends Error {
+  constructor(reason: string) { super(reason); this.name = 'SkipSignal'; }
+}
+
 async function test(name: string, fn: () => Promise<void>) {
   try {
     await fn();
     log('pass', name);
   } catch (err) {
-    log('fail', name, err instanceof Error ? err.message : String(err));
+    if (err instanceof SkipSignal) {
+      log('skip', name, err.message);
+    } else {
+      log('fail', name, err instanceof Error ? err.message : String(err));
+    }
   }
 }
 
@@ -216,6 +231,150 @@ if (!process.env.NOTION_API_KEY || !process.env.NOTION_LEADS_DB_ID) {
   } else {
     skipTest('scrape-profile (browser)', 'No scraped profile URL available from previous step');
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TIER 4 — Interactive: real button verification against live LinkedIn
+//
+// These tests verify the exact selectors that broke silently in live testing:
+//   - :visible prevents picking hidden DOM duplicates (affects all action buttons)
+//   - connectBtn case-insensitive ("Invite X to connect" vs "Connect")
+//   - No-note path uses sendWithoutNoteBtn, never sendNowBtn  (ISSUE-003)
+//   - Note path: addNoteBtn → fill → sendNowBtn ("Send invitation")
+//   - messageBtn:visible on 1st-degree connections
+//
+// Set env vars to skip prompts (useful for scripted re-runs):
+//   LIVE_TEST_PROFILE=<url>           — profile NOT yet connected (connect tests)
+//   LIVE_TEST_CONNECTED_PROFILE=<url> — 1st-degree connection (message test)
+// ════════════════════════════════════════════════════════════════════════════
+
+console.log(`\n${BOLD}Tier 4: Interactive button verification (real LinkedIn actions)${RESET}`);
+console.log(`  Confirms the selectors that broke silently in live testing.`);
+console.log(`  Each test asks for confirmation before doing anything on LinkedIn.\n`);
+
+/** Ask a yes/no/skip-all question at the terminal. Returns 'y', 'n', or 'skip'. */
+async function confirm(question: string): Promise<'y' | 'n' | 'skip'> {
+  if (!process.stdin.isTTY) return 'n';
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      const a = answer.trim().toLowerCase();
+      if (a === 's' || a === 'skip' || a === 'skip-all') resolve('skip');
+      else if (a === 'y' || a === 'yes') resolve('y');
+      else resolve('n');
+    });
+  });
+}
+
+async function promptUrl(label: string): Promise<string> {
+  if (!process.stdin.isTTY) return '';
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(label, (answer) => { rl.close(); resolve(answer.trim()); });
+  });
+}
+
+// ── Collect profile URLs ──────────────────────────────────────────────────
+
+let connectProfile = process.env.LIVE_TEST_PROFILE || '';
+if (!connectProfile && process.stdin.isTTY) {
+  connectProfile = await promptUrl(
+    `  Profile URL for visit + connect tests\n` +
+    `  (must NOT be a current connection — or Enter to skip Tier 4):\n  > `
+  );
+}
+
+let messageProfile = process.env.LIVE_TEST_CONNECTED_PROFILE || '';
+if (!messageProfile && connectProfile && process.stdin.isTTY) {
+  messageProfile = await promptUrl(
+    `\n  Profile URL for the message test\n` +
+    `  (must be a 1st-degree connection — or Enter to skip message test):\n  > `
+  );
+}
+
+// ── T4-A: visit-profile (:visible navigation) ────────────────────────────
+
+if (!connectProfile) {
+  skipTest('T4-A visit-profile (:visible navigation)',      'No LIVE_TEST_PROFILE — skipping Tier 4');
+  skipTest('T4-B send-connection no-note (ISSUE-003)',      'No LIVE_TEST_PROFILE — skipping Tier 4');
+  skipTest('T4-C send-connection with note (modal flow)',   'No LIVE_TEST_PROFILE — skipping Tier 4');
+} else {
+  let skipRestOfTier4 = false;
+
+  await test('T4-A visit-profile — :visible navigation (adds to "Who viewed your profile")', async () => {
+    if (!process.env.LIVE_TEST_PROFILE) {
+      console.log(`\n  Profile: ${connectProfile}`);
+      const ans = await confirm(`  Run visit-profile? [y/n/skip-all]: `);
+      if (ans === 'skip') { skipRestOfTier4 = true; throw new SkipSignal('Skipped by user'); }
+      if (ans !== 'y') throw new SkipSignal('Skipped by user');
+    }
+    const result = runScript('visit-profile.ts', { profileUrl: connectProfile }, 60_000);
+    if (!result.success) throw new Error(result.message);
+    console.log(`        ${result.message}`);
+  });
+
+  // T4-B: send-connection without note
+  // Regression: no-note path must use sendWithoutNoteBtn only, never sendNowBtn ("Send invitation")
+  if (!skipRestOfTier4) {
+    await test('T4-B send-connection (no note) — :visible connectBtn + sendWithoutNoteBtn, NOT sendNowBtn', async () => {
+      if (!process.env.LIVE_TEST_PROFILE) {
+        console.log(`\n  Profile: ${connectProfile}`);
+        console.log(`  ${YELLOW}⚠ Only run if NOT already connected to this person${RESET}`);
+        console.log(`  Regression guarded: no-note path must never call "Send invitation" (sendNowBtn)`);
+        const ans = await confirm(`  Run send-connection (no note)? [y/n/skip-all]: `);
+        if (ans === 'skip') { skipRestOfTier4 = true; throw new SkipSignal('Skipped by user'); }
+        if (ans !== 'y') throw new SkipSignal('Skipped by user');
+      }
+      const result = runScript('send-connection.ts', { profileUrl: connectProfile }, 60_000);
+      if (!result.success) throw new Error(result.message);
+      console.log(`        ${result.message}`);
+    });
+  }
+
+  // T4-C: send-connection with note (tests full modal flow)
+  // Regression: note path must use addNoteBtn → fill → sendNowBtn ("Send invitation")
+  // In practice, skip if T4-B already sent a request to the same profile.
+  if (!skipRestOfTier4) {
+    await test('T4-C send-connection (with note) — :visible connectBtn + addNoteBtn + sendNowBtn modal flow', async () => {
+      if (!process.env.LIVE_TEST_PROFILE) {
+        console.log(`\n  Profile: ${connectProfile}`);
+        console.log(`  ${YELLOW}⚠ Skip if T4-B already sent a connection request (pending request exists)${RESET}`);
+        console.log(`  Regression guarded: note path must click addNoteBtn then "Send invitation"`);
+        const ans = await confirm(`  Run send-connection (with note)? [y/n/skip-all]: `);
+        if (ans === 'skip') { skipRestOfTier4 = true; throw new SkipSignal('Skipped by user'); }
+        if (ans !== 'y') throw new SkipSignal('Skipped by user');
+      }
+      const result = runScript('send-connection.ts', {
+        profileUrl: connectProfile,
+        note: 'Button selector live test — safe to ignore',
+      }, 60_000);
+      if (!result.success) throw new Error(result.message);
+      console.log(`        ${result.message}`);
+    });
+  }
+}
+
+// ── T4-D: send-message (messageBtn:visible) ───────────────────────────────
+
+if (!messageProfile) {
+  skipTest('T4-D send-message — messageBtn:visible (1st-degree only)', 'No LIVE_TEST_CONNECTED_PROFILE — skipping message test');
+} else {
+  await test('T4-D send-message — messageBtn:visible (regression: hidden DOM duplicate would miss this)', async () => {
+    if (!process.env.LIVE_TEST_CONNECTED_PROFILE) {
+      console.log(`\n  Profile: ${messageProfile}`);
+      console.log(`  ${YELLOW}⚠ Must be a 1st-degree connection or message button won't appear${RESET}`);
+      console.log(`  Will send: "Button selector live test — please ignore"`);
+      const ans = await confirm(`  Run send-message? [y/n]: `);
+      if (ans !== 'y') throw new SkipSignal('Skipped by user');
+    }
+    const result = runScript('send-message.ts', {
+      profileUrl: messageProfile,
+      message: 'Button selector live test — please ignore',
+    }, 60_000);
+    if (!result.success) throw new Error(result.message);
+    console.log(`        ${result.message}`);
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
