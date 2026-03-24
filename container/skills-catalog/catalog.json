@@ -1213,6 +1213,16 @@
         "creative"
       ],
       "path": "/skills-catalog/local/xlsx"
+    },
+    {
+      "name": "technical-analysis",
+      "source": "local",
+      "description": "Compute RSI, MACD, Bollinger Bands, EMA, and ATR for any stock ticker and return a signal summary. Use when you need technical indicators or want to know if a stock is overbought/oversold, trending, or showing bullish/bearish signals.",
+      "categories": [
+        "finance",
+        "general"
+      ],
+      "path": "/skills-catalog/local/technical-analysis"
     }
   ]
 }
