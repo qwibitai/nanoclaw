@@ -314,6 +314,24 @@ function buildVolumeMounts(
     });
   }
 
+  // Proton MCP server: mail, pass, drive, calendar, VPN tools (all groups)
+  const protonMcpDir = path.join(projectRoot, 'tools', 'proton-mcp');
+  if (fs.existsSync(protonMcpDir)) {
+    mounts.push({
+      hostPath: protonMcpDir,
+      containerPath: '/usr/local/lib/proton-mcp',
+      readonly: true,
+    });
+  }
+  const protonBridgeConfig = path.join(os.homedir(), '.proton-mcp');
+  if (fs.existsSync(protonBridgeConfig)) {
+    mounts.push({
+      hostPath: protonBridgeConfig,
+      containerPath: '/home/node/.proton-mcp',
+      readonly: true,
+    });
+  }
+
   // Proton Pass CLI: main-only (credential vault access is architecturally restricted)
   if (isMain) {
     const passCliBin = path.join(os.homedir(), '.local', 'bin', 'pass-cli');
@@ -379,6 +397,19 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // System prompt file — always mounted read-only so agents cannot modify it.
+  // Only the user (on the host) can change its contents.
+  // The agent runner reads it at /workspace/system-prompt.md and prepends it
+  // to every invocation's system prompt.
+  const systemPromptFile = path.join(projectRoot, 'system-prompt.md');
+  if (fs.existsSync(systemPromptFile)) {
+    mounts.push({
+      hostPath: systemPromptFile,
+      containerPath: '/workspace/system-prompt.md',
+      readonly: true,
+    });
+  }
+
   return mounts;
 }
 
@@ -388,6 +419,16 @@ function buildContainerArgs(
   isMain = false,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Custom seccomp profile: Docker's default + syscalls Chromium needs.
+  const seccompProfile = path.join(
+    process.cwd(),
+    'container',
+    'chromium-seccomp.json',
+  );
+  if (fs.existsSync(seccompProfile)) {
+    args.push('--security-opt', `seccomp=${seccompProfile}`);
+  }
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -692,10 +733,20 @@ export async function runContainerAgent(
       const isError = code !== 0;
 
       if (isVerbose || isError) {
+        // On error, log input metadata only — not the full prompt.
+        // Full input is only included at verbose level to avoid
+        // persisting user conversation content on every non-zero exit.
+        if (isVerbose) {
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
+        } else {
+          logLines.push(
+            `=== Input Summary ===`,
+            `Prompt length: ${input.prompt.length} chars`,
+            `Session ID: ${input.sessionId || 'new'}`,
+            ``,
+          );
+        }
         logLines.push(
-          `=== Input ===`,
-          JSON.stringify(input, null, 2),
-          ``,
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
@@ -881,7 +932,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
+  _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });

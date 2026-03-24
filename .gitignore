@@ -37,3 +37,4 @@ groups/main/docs/*
 .nanoclaw/
 
 agents-sdk-docs
+system-prompt.md

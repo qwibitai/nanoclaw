@@ -77,6 +77,79 @@ describe('task scheduler', () => {
     expect(new Date(nextRun!).getTime()).toBe(expected);
   });
 
+  it('pre-advances next_run before dispatch to prevent double-fire on restart', async () => {
+    const originalNextRun = new Date(Date.now() - 1000).toISOString();
+    createTask({
+      id: 'interval-task',
+      group_folder: 'mygroup',
+      chat_jid: 'mygroup@g.us',
+      prompt: 'recurring task',
+      schedule_type: 'interval',
+      schedule_value: '86400000',
+      context_mode: 'isolated',
+      next_run: originalNextRun,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    let nextRunAtDispatch: string | null | undefined;
+    const enqueueTask = vi.fn(
+      (_groupJid: string, id: string, _fn: () => Promise<void>) => {
+        nextRunAtDispatch = getTaskById(id)?.next_run;
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({}),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(enqueueTask).toHaveBeenCalledOnce();
+    expect(nextRunAtDispatch).toBeDefined();
+    // next_run must be in the future — not the original past due time
+    expect(new Date(nextRunAtDispatch!).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('marks once tasks completed before dispatch to prevent double-fire on restart', async () => {
+    createTask({
+      id: 'once-task',
+      group_folder: 'mygroup',
+      chat_jid: 'mygroup@g.us',
+      prompt: 'one-time task',
+      schedule_type: 'once',
+      schedule_value: '',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 1000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    let statusAtDispatch: string | undefined;
+    const enqueueTask = vi.fn(
+      (_groupJid: string, id: string, _fn: () => Promise<void>) => {
+        statusAtDispatch = getTaskById(id)?.status;
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({}),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(enqueueTask).toHaveBeenCalledOnce();
+    expect(statusAtDispatch).toBe('completed');
+  });
+
   it('computeNextRun returns null for once-tasks', () => {
     const task = {
       id: 'once-test',
