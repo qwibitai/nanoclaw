@@ -122,7 +122,7 @@ Skills we'd like to see:
 
 ## Requirements
 
-- macOS or Linux
+- macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
@@ -154,9 +154,9 @@ Key files:
 
 Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
 
-**Can I run this on Linux?**
+**Can I run this on Linux or Windows?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Just run `/setup`.
 
 **Is this secure?**
 

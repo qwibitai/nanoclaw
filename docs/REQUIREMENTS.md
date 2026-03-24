@@ -166,7 +166,7 @@ A personal Claude assistant accessible via messaging, with minimal custom code.
 - `/update-nanoclaw` - Pull upstream changes, merge with customizations
 
 ### Deployment
-- Runs on macOS (launchd) or Linux (systemd)
+- Runs on macOS (launchd), Linux (systemd), or Windows (WSL2)
 - Single Node.js process handles everything
 
 ---
