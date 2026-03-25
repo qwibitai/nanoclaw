@@ -100,6 +100,7 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
+      const threadId = ctx.message.message_thread_id;
 
       // Determine chat name
       const chatName =
@@ -157,6 +158,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        thread_id: threadId ? threadId.toString() : undefined,
       });
 
       logger.info(
@@ -237,7 +239,11 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    threadId?: string,
+  ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -245,21 +251,28 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+      const options = threadId
+        ? { message_thread_id: parseInt(threadId, 10) }
+        : {};
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text);
+        await sendTelegramMessage(this.bot.api, numericId, text, options);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await sendTelegramMessage(
             this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
+            options,
           );
         }
       }
-      logger.info({ jid, length: text.length }, 'Telegram message sent');
+      logger.info(
+        { jid, length: text.length, threadId },
+        'Telegram message sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
