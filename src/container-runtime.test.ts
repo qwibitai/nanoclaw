@@ -177,3 +177,10 @@ describe('cleanupOrphans', () => {
     );
   });
 });
+
+describe('timeout config defaults', () => {
+  it('IDLE_TIMEOUT default is less than CONTAINER_TIMEOUT default', async () => {
+    const { IDLE_TIMEOUT, CONTAINER_TIMEOUT } = await import('./config.js');
+    expect(IDLE_TIMEOUT).toBeLessThan(CONTAINER_TIMEOUT);
+  });
+});

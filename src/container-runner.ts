@@ -411,8 +411,9 @@ export async function runContainerAgent(
     let timedOut = false;
     let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful _close sentinel has time to trigger before the hard kill fires.
+    // Hard kill fires at whichever is larger: the configured task timeout, or
+    // IDLE_TIMEOUT + 30s grace period. CONTAINER_TIMEOUT (default 30min) bounds
+    // total wall-clock time. IDLE_TIMEOUT (default 10min) bounds inactivity.
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
