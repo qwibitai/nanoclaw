@@ -48,6 +48,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  updateProfilePicture: (jid: string, filePath: string) => Promise<void>;
   onTasksChanged: () => void;
 }
 
@@ -283,6 +284,28 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC document attempt blocked',
                   );
+                }
+              } else if (
+                data.type === 'update_profile_picture' &&
+                data.chatJid &&
+                data.filename
+              ) {
+                if (
+                  data.filename.includes('/') ||
+                  data.filename.includes('..')
+                ) {
+                  logger.warn(
+                    { filename: data.filename, sourceGroup },
+                    'Rejected profile picture with unsafe filename',
+                  );
+                } else {
+                  const absPath = path.join(
+                    GROUPS_DIR,
+                    sourceGroup,
+                    data.filename,
+                  );
+                  await deps.updateProfilePicture(data.chatJid, absPath);
+                  logger.info({ sourceGroup, chatJid: data.chatJid }, 'Profile picture updated via IPC');
                 }
               } else if (data.type === 'track_image_gen') {
                 trackImageGeneration({

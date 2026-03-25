@@ -150,6 +150,32 @@ server.tool(
 );
 
 server.tool(
+  'update_profile_picture',
+  'Change the group profile picture. Image should be square (640x640+ recommended).',
+  {
+    image_path: z.string().describe('Absolute path to the image file (e.g. /workspace/group/profile.jpg)'),
+  },
+  async (args) => {
+    const filename = path.basename(args.image_path);
+    if (filename.includes('/') || filename.includes('..')) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid filename.' }],
+        isError: true,
+      };
+    }
+    const data = {
+      type: 'update_profile_picture',
+      chatJid,
+      filename,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Group profile picture update requested.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

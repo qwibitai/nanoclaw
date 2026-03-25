@@ -855,6 +855,14 @@ async function main(): Promise<void> {
       }
       return Promise.resolve();
     },
+    updateProfilePicture: async (jid, filePath) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.updateProfilePicture) {
+        await channel.updateProfilePicture(jid, filePath);
+      } else {
+        logger.warn({ jid }, 'No channel supports updateProfilePicture');
+      }
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

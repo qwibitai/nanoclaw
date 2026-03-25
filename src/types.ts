@@ -108,6 +108,8 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: get a group invite link.
   getInviteLink?(jid: string): Promise<string | null>;
+  // Optional: update the bot's profile picture.
+  updateProfilePicture?(jid: string, filePath: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
