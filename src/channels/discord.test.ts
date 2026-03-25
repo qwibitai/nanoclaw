@@ -614,13 +614,13 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      // Reply context is appended after trigger check, so reply prefix
-      // wraps the already-triggered content.
+      // Reply context is prepended before trigger check, so trigger
+      // is always at the start of the content.
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
           content:
-            '[Reply to Bob: "Original parent message"] @Andy I agree with that',
+            '@Andy [Reply to Bob: "Original parent message"] I agree with that',
         }),
       );
     });
@@ -647,7 +647,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: `[Reply to Bob: "${'x'.repeat(500)}…"] @Andy thoughts?`,
+          content: `@Andy [Reply to Bob: "${'x'.repeat(500)}…"] thoughts?`,
         }),
       );
     });
@@ -673,7 +673,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Reply to Bob] @Andy what was that?',
+          content: '@Andy [Reply to Bob] what was that?',
         }),
       );
     });
@@ -699,7 +699,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content:
-            '[Reply to Bob: "he said \'stop\' immediately"] @Andy really?',
+            '@Andy [Reply to Bob: "he said \'stop\' immediately"] really?',
         }),
       );
     });
