@@ -1,6 +1,9 @@
 import asyncio
 import base64
+import json
 import logging
+import urllib.request
+import urllib.error
 from email.utils import parseaddr
 from typing import Optional
 
@@ -55,6 +58,7 @@ class WorkspaceClient:
             "list_calendar_events": self.list_calendar_events,
             "create_calendar_event": self.create_calendar_event,
             "search_drive": self.search_drive,
+            "send_email": self.send_email,
         }
         handler = handlers.get(function_name)
         if not handler:
@@ -164,6 +168,33 @@ class WorkspaceClient:
             }
 
         return await asyncio.to_thread(_create)
+
+    async def send_email(self, to: str, subject: str, body: str, cc: str = "") -> dict:
+        """Send email via agent-hub Cloud Run endpoint."""
+        def _send():
+            payload = json.dumps({
+                "action": "send-email",
+                "agent": "botti",
+                "params": {"to": to, "subject": subject, "body": body, "cc": cc},
+            }).encode()
+            req = urllib.request.Request(
+                f"{config.AGENT_HUB_URL}/agent-action",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {config.AGENT_HUB_API_KEY}",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                return {"error": f"HTTP {e.code}: {e.read().decode()[:200]}"}
+
+        result = await asyncio.to_thread(_send)
+        logger.info(f"send_email to={to} subject={subject}: {result.get('status', 'unknown')}")
+        return result
 
     async def search_drive(self, query: str) -> dict:
         """Search Google Drive files."""

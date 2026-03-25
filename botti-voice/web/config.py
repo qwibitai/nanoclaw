@@ -90,7 +90,25 @@ WORKSPACE_FUNCTIONS = [
             required=["query"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="send_email",
+        description="Envoyer un email depuis sam@bestoftours.co.uk. Emails internes (@bestoftours.co.uk) envoyés directement. Emails externes créés en brouillon pour review.",
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "to": types.Schema(type="STRING", description="Adresse email du destinataire"),
+                "subject": types.Schema(type="STRING", description="Sujet de l'email"),
+                "body": types.Schema(type="STRING", description="Corps de l'email en texte brut"),
+                "cc": types.Schema(type="STRING", description="CC optionnel"),
+            },
+            required=["to", "subject", "body"],
+        ),
+    ),
 ]
+
+# Agent Hub Cloud Run endpoint for outbound actions
+AGENT_HUB_URL = os.environ.get("AGENT_HUB_URL", "https://agent-hub-215323664878.europe-west1.run.app")
+AGENT_HUB_API_KEY = os.environ.get("AGENT_HUB_API_KEY", "")
 
 SYSTEM_PROMPT = """Tu es Botti, l'assistant IA personnel de Yacine Bakouche, en mode vocal.
 

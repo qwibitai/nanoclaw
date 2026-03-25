@@ -1,0 +1,80 @@
+openapi: 3.1.0
+info:
+  title: Agent Hub - Thaïs Actions
+  description: Actions disponibles pour l'agent Thaïs (COSY Best of Tours)
+  version: 1.0.0
+servers:
+  - url: https://agent-hub-215323664878.europe-west1.run.app
+    description: Agent Hub (Cloud Run)
+
+paths:
+  /agent-action:
+    post:
+      operationId: agent_action
+      summary: Execute an action as Thaïs
+      description: |
+        Execute une action au nom de Thaïs. Actions disponibles :
+        - send-email : envoyer un email depuis thais@bestoftours.co.uk
+        - fetch-sheet : lire un Google Sheet
+
+        Règles :
+        - Emails internes (@bestoftours.co.uk, @botler360.com) : envoi direct
+        - Emails externes : crée un brouillon + notifie Yacine pour review (mode supervised)
+        - Sheets : essaie avec le compte thais@, fallback sur le compte par défaut si pas d'accès
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+                - agent
+                - params
+              properties:
+                action:
+                  type: string
+                  enum: [send-email, fetch-sheet]
+                  description: "L'action à exécuter"
+                agent:
+                  type: string
+                  enum: [thais]
+                  description: "Toujours 'thais' pour cette intégration"
+                  default: thais
+                params:
+                  type: object
+                  description: "Paramètres de l'action"
+                  properties:
+                    to:
+                      type: string
+                      description: "Destinataire email (pour send-email)"
+                    subject:
+                      type: string
+                      description: "Sujet de l'email (pour send-email)"
+                    body:
+                      type: string
+                      description: "Corps de l'email (pour send-email)"
+                    cc:
+                      type: string
+                      description: "CC optionnel (pour send-email)"
+                    spreadsheet_id:
+                      type: string
+                      description: "ID du Google Sheet (pour fetch-sheet)"
+                    range:
+                      type: string
+                      description: "Plage de cellules, ex: A1:Z50 (pour fetch-sheet)"
+      responses:
+        '200':
+          description: Résultat de l'action
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [sent, ok, draft_created, blocked, error]
+                  message:
+                    type: string
+                  data:
+                    type: object

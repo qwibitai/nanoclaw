@@ -1,0 +1,17 @@
+{
+  "name": "thais",
+  "display_name": "Thais",
+  "gws_accounts": ["thais@bestoftours.co.uk"],
+  "gws_config_dir": "/Users/boty/.config/gws/accounts/thais",
+  "api_provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "triage_model": "gemini-2.5-flash",
+  "external_comms": "supervised",
+  "internal_domains": ["@bestoftours.co.uk", "@botler360.com"],
+  "recipient_whitelist": [],
+  "gmail_urgent_senders": ["eline@bestoftours.co.uk", "ahmed@bestoftours.co.uk"],
+  "gmail_important_senders": ["yacine@bestoftours.co.uk"],
+  "email_draft_triggers": ["prix", "contrat", "sensible"],
+  "channels": ["gmail", "calendar", "chat"],
+  "system_prompt_file": "agents/thais/system_prompt.txt"
+}

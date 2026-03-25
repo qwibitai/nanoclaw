@@ -1,0 +1,17 @@
+{
+  "name": "alan",
+  "display_name": "Alan Reblot",
+  "gws_accounts": ["alan@bestoftours.co.uk"],
+  "gws_config_dir": "/Users/boty/.config/gws/accounts/alan",
+  "api_provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "triage_model": "gemini-2.5-flash",
+  "external_comms": "blocked",
+  "internal_domains": ["@bestoftours.co.uk", "@botler360.com"],
+  "whitelist_external": [],
+  "daily_limit_usd": 20.0,
+  "gmail_urgent_senders": ["yacine@bestoftours.co.uk", "ahmed@bestoftours.co.uk"],
+  "gmail_important_senders": ["eline@bestoftours.co.uk", "amani@bestoftours.co.uk"],
+  "channels": ["gmail", "calendar", "chat"],
+  "claude_md_path": "./agents/alan/CLAUDE.md"
+}

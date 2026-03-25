@@ -1,0 +1,7 @@
+__pycache__/
+venv/
+*.pyc
+gws-creds/
+data/
+logs/
+.env
