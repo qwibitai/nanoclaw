@@ -566,7 +566,7 @@ async function main(): Promise<void> {
       log(`Script decided not to wake agent: ${reason}`);
       writeOutput({
         status: 'success',
-        result: `Script: ${reason}`,
+        result: null,
       });
       return;
     }
