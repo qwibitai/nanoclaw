@@ -46,6 +46,7 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
     },
   };
 });
@@ -648,6 +649,118 @@ describe('WhatsAppChannel', () => {
         'registered@g.us',
         expect.objectContaining({ sender_name: '5551234' }),
       );
+    });
+
+    it('downloads and injects PDF attachment path', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-pdf',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            documentMessage: {
+              mimetype: 'application/pdf',
+              fileName: 'report.pdf',
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(downloadMediaMessage).toHaveBeenCalled();
+
+      const fs = await import('fs');
+      expect(fs.default.writeFileSync).toHaveBeenCalled();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: expect.stringContaining('[PDF: attachments/report.pdf'),
+        }),
+      );
+    });
+
+    it('preserves document caption alongside PDF info', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-pdf-caption',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            documentMessage: {
+              mimetype: 'application/pdf',
+              fileName: 'report.pdf',
+              caption: 'Here is the monthly report',
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: expect.stringContaining('Here is the monthly report'),
+        }),
+      );
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: expect.stringContaining('[PDF: attachments/report.pdf'),
+        }),
+      );
+    });
+
+    it('handles PDF download failure gracefully', async () => {
+      vi.mocked(downloadMediaMessage).mockRejectedValueOnce(
+        new Error('Download failed'),
+      );
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-pdf-fail',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            documentMessage: {
+              mimetype: 'application/pdf',
+              fileName: 'report.pdf',
+            },
+          },
+          pushName: 'Bob',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      // Message skipped since content remains empty after failed download
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
   });
 
