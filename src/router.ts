@@ -21,13 +21,23 @@ export function formatMessages(
     // Build message XML with optional reply attributes
     let replyAttrs = '';
     if (m.is_reply) {
-      const replyTo = m.reply_to_username ? ` reply_to="${escapeXml(m.reply_to_username)}"` : '';
-      const replyToId = m.reply_to_message_id ? ` reply_to_id="${escapeXml(m.reply_to_message_id)}"` : '';
+      const replyTo = m.reply_to_username
+        ? ` reply_to="${escapeXml(m.reply_to_username)}"`
+        : '';
+      const replyToId = m.reply_to_message_id
+        ? ` reply_to_id="${escapeXml(m.reply_to_message_id)}"`
+        : '';
       replyAttrs = `${replyTo}${replyToId}`;
 
       // Debug: log reply metadata being formatted
       logger.debug(
-        { id: m.id, sender: m.sender_name, is_reply: m.is_reply, reply_to_username: m.reply_to_username, reply_to_message_id: m.reply_to_message_id },
+        {
+          id: m.id,
+          sender: m.sender_name,
+          is_reply: m.is_reply,
+          reply_to_username: m.reply_to_username,
+          reply_to_message_id: m.reply_to_message_id,
+        },
         'Formatting reply message',
       );
     }

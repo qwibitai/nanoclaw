@@ -195,7 +195,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const hasTrigger = missedMessages.some(
       (m) =>
         (TRIGGER_PATTERN.test(m.content.trim()) &&
-          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
+          (m.is_from_me ||
+            isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
         // Reply to bot's own message is also a valid trigger (Telegram bot usernames end with "_bot")
         (m.is_reply && m.reply_to_username?.endsWith('_bot')),
     );

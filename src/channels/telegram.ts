@@ -155,7 +155,8 @@ export class TelegramChannel implements Channel {
 
       if (ctx.message.reply_to_message) {
         is_reply = true;
-        reply_to_message_id = ctx.message.reply_to_message.message_id.toString();
+        reply_to_message_id =
+          ctx.message.reply_to_message.message_id.toString();
 
         const botUserId = ctx.me?.id;
         const originalSender = ctx.message.reply_to_message.from;
@@ -166,14 +167,21 @@ export class TelegramChannel implements Channel {
             reply_to_username = ctx.me?.username || null;
           } else {
             // User replied to another user's message
-            reply_to_username = originalSender.username ||
-                               originalSender.first_name ||
-                               `user_${originalSender.id}`;
+            reply_to_username =
+              originalSender.username ||
+              originalSender.first_name ||
+              `user_${originalSender.id}`;
           }
         }
 
         logger.debug(
-          { chatJid, sender: senderName, is_reply, reply_to_username, reply_to_message_id },
+          {
+            chatJid,
+            sender: senderName,
+            is_reply,
+            reply_to_username,
+            reply_to_message_id,
+          },
           'Telegram reply metadata detected',
         );
       }
@@ -219,7 +227,8 @@ export class TelegramChannel implements Channel {
 
       if (ctx.message.reply_to_message) {
         is_reply = true;
-        reply_to_message_id = ctx.message.reply_to_message.message_id.toString();
+        reply_to_message_id =
+          ctx.message.reply_to_message.message_id.toString();
 
         const botUserId = ctx.me?.id;
         const originalSender = ctx.message.reply_to_message.from;
@@ -230,9 +239,10 @@ export class TelegramChannel implements Channel {
             reply_to_username = ctx.me?.username || null;
           } else {
             // User replied to another user's message
-            reply_to_username = originalSender.username ||
-                               originalSender.first_name ||
-                               `user_${originalSender.id}`;
+            reply_to_username =
+              originalSender.username ||
+              originalSender.first_name ||
+              `user_${originalSender.id}`;
           }
         }
       }
