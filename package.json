@@ -19,9 +19,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1016.0",
+    "@aws-sdk/s3-request-presigner": "^3.1016.0",
     "better-sqlite3": "^11.8.1",
-    "discord.js": "^14.18.0",
     "cron-parser": "^5.5.0",
+    "discord.js": "^14.18.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",

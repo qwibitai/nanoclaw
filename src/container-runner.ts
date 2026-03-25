@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -236,6 +237,27 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass host env vars to containers (GitHub, R2 storage, instance identity)
+  const passthruKeys = [
+    'GH_TOKEN',
+    'R2_ACCOUNT_ID',
+    'R2_PRIVATE_BUCKET',
+    'R2_PRIVATE_ACCESS_KEY',
+    'R2_PRIVATE_SECRET_KEY',
+    'R2_SHARED_BUCKET',
+    'R2_SHARED_READ_ACCESS_KEY',
+    'R2_SHARED_READ_SECRET_KEY',
+    'R2_SHARED_WRITE_ACCESS_KEY',
+    'R2_SHARED_WRITE_SECRET_KEY',
+    'NANOCLAW_ID',
+  ] as const;
+  const envSecrets = readEnvFile([...passthruKeys]);
+  for (const key of passthruKeys) {
+    if (envSecrets[key]) {
+      args.push('-e', `${key}=${envSecrets[key]}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution

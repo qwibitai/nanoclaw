@@ -1,8 +1,15 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  TextChannel,
+} from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { getR2Client } from '../r2.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -86,24 +93,49 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
+      // Handle attachments
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
+        const r2 = getR2Client();
+        const group = this.opts.registeredGroups()[chatJid];
+        const r2Permission = group?.r2Permission ?? 'none';
+        const attachmentParts: string[] = [];
+
+        for (const att of [...message.attachments.values()]) {
+          if (r2 && r2Permission !== 'none') {
+            const uploadToR2 = async () => {
+              const res = await fetch(att.url);
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              const buffer = Buffer.from(await res.arrayBuffer());
+              const key = `uploads/${Date.now()}-${att.name ?? 'file'}`;
+              await r2.upload(key, buffer, att.contentType ?? undefined);
+              return key;
+            };
+            try {
+              const key = await uploadToR2();
+              attachmentParts.push(`[File uploaded to R2: ${key} (${att.name ?? 'file'})]`);
+              logger.info({ key, name: att.name }, 'Attachment uploaded to R2');
+            } catch {
+              try {
+                const key = await uploadToR2();
+                attachmentParts.push(`[File uploaded to R2: ${key} (${att.name ?? 'file'})]`);
+              } catch (retryErr) {
+                logger.error({ name: att.name, err: retryErr }, 'Failed to upload attachment to R2 after retry');
+                attachmentParts.push(`[File upload failed: ${att.name ?? 'file'}]`);
+              }
+            }
           } else {
-            return `[File: ${att.name || 'file'}]`;
+            const ct = att.contentType ?? '';
+            if (ct.startsWith('image/')) attachmentParts.push(`[Image: ${att.name ?? 'image'}]`);
+            else if (ct.startsWith('video/')) attachmentParts.push(`[Video: ${att.name ?? 'video'}]`);
+            else if (ct.startsWith('audio/')) attachmentParts.push(`[Audio: ${att.name ?? 'audio'}]`);
+            else attachmentParts.push(`[File: ${att.name ?? 'file'}]`);
           }
-        });
-        if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
-        } else {
-          content = attachmentDescriptions.join('\n');
+        }
+
+        if (attachmentParts.length > 0) {
+          content = content
+            ? `${content}\n${attachmentParts.join('\n')}`
+            : attachmentParts.join('\n');
         }
       }
 
@@ -125,7 +157,13 @@ export class DiscordChannel implements Channel {
 
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'discord', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'discord',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
