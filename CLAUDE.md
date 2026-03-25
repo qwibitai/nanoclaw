@@ -1,25 +1,27 @@
-# NanoClaw
+# AgentLite
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
+SDK for running Claude agents in isolated BoxLite VMs with messaging channel integration. See [README.md](README.md) for setup.
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process. The `AgentLite` SDK class is the public API — register channels and groups, then start. Messages route to Claude Agent SDK running in BoxLite VMs (hardware-isolated). Each group has isolated filesystem and memory.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/sdk.ts` | AgentLite SDK class (public API) |
+| `src/index.ts` | Orchestrator: state, message loop, agent invocation, SDK exports |
+| `src/box-runtime.ts` | BoxLite VM runtime management |
+| `src/container-runner.ts` | Spawns agent VMs with volume mounts |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+| `container/skills/` | Skills loaded inside agent VMs (browser, status, formatting) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
