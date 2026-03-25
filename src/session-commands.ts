@@ -12,6 +12,8 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
+  const compactMatch = text.match(/^\/compact\s+(\S+)$/);
+  if (compactMatch) return `/compact ${compactMatch[1]}`;
   return null;
 }
 

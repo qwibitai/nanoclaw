@@ -182,6 +182,57 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // --- Session command interception (before trigger check) ---
+
+  // Cross-group compact: `/compact <folder>` from main targets another group
+  const cmdMsg = missedMessages.find(
+    (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
+  );
+  if (cmdMsg && isMainGroup) {
+    const cmd = extractSessionCommand(cmdMsg.content, TRIGGER_PATTERN)!;
+    const crossMatch = cmd.match(/^\/compact\s+(\S+)$/);
+    if (crossMatch) {
+      const targetFolder = crossMatch[1];
+      // Find target group by folder prefix match
+      const targetEntry = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === targetFolder || g.folder.includes(targetFolder),
+      );
+      if (!targetEntry) {
+        await channel.sendMessage(chatJid, `Group "${targetFolder}" not found.`);
+      } else {
+        const [targetJid, targetGroup] = targetEntry;
+        // Kill active container for target group
+        queue.closeStdin(targetJid);
+        // Wait for container to die
+        await new Promise((r) => setTimeout(r, 3000));
+        // Run /compact against the target group
+        await channel.sendMessage(chatJid, `Compacting ${targetGroup.name}...`);
+        const compactResult = await runAgent(
+          targetGroup,
+          '/compact',
+          targetJid,
+          [],
+          async (output) => {
+            const text =
+              typeof output.result === 'string'
+                ? output.result.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim()
+                : '';
+            if (text) await channel.sendMessage(chatJid, text);
+          },
+        );
+        if (compactResult === 'error') {
+          await channel.sendMessage(chatJid, `/compact ${targetGroup.name} failed.`);
+        } else {
+          await channel.sendMessage(chatJid, `${targetGroup.name} compacted.`);
+        }
+      }
+      // Advance cursor past all messages in batch
+      const lastMsg = missedMessages[missedMessages.length - 1];
+      lastAgentTimestamp[chatJid] = lastMsg.timestamp;
+      saveState();
+      return true;
+    }
+  }
+
   const cmdResult = await handleSessionCommand({
     missedMessages,
     isMainGroup,
@@ -480,6 +531,15 @@ async function startMessageLoop(): Promise<void> {
               )
             ) {
               queue.closeStdin(chatJid);
+              // Cross-group compact: also close target group's container
+              const cmd = extractSessionCommand(loopCmdMsg.content, TRIGGER_PATTERN);
+              const crossMatch = cmd?.match(/^\/compact\s+(\S+)$/);
+              if (crossMatch && isMainGroup) {
+                const targetEntry = Object.entries(registeredGroups).find(
+                  ([, g]) => g.folder === crossMatch[1] || g.folder.includes(crossMatch[1]),
+                );
+                if (targetEntry) queue.closeStdin(targetEntry[0]);
+              }
             }
             // Enqueue so processGroupMessages handles auth + cursor advancement.
             // Don't pipe via IPC — slash commands need a fresh container with
