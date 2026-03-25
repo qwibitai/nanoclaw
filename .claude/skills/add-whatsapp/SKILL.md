@@ -40,7 +40,7 @@ Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: How do you want to
 
 If they chose pairing code:
 
-AskUserQuestion: What is your phone number? (Include country code without +, e.g., 1234567890)
+AskUserQuestion: What is your phone number? (Digits only — country code followed by your 10-digit number, no + prefix, spaces, or dashes. Example: 14155551234 where 1 is the US country code and 4155551234 is the phone number.)
 
 ## Phase 2: Apply Code Changes
 
@@ -308,7 +308,7 @@ rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone
 ```
 
 Enter the code **immediately** when it appears. Also ensure:
-1. Phone number includes country code without `+` (e.g., `1234567890`)
+1. Phone number is digits only — country code + number, no `+` prefix (e.g., `14155551234` where `1` is country code, `4155551234` is the number)
 2. Phone has internet access
 3. WhatsApp is updated to the latest version
 
