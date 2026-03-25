@@ -21,6 +21,7 @@ import {
 } from '../config.js';
 import {
   getLastGroupSync,
+  findMembersByName,
   getRegisteredGroup,
   setLastGroupSync,
   updateChatName,
@@ -469,9 +470,20 @@ export class WhatsAppChannel implements Channel {
       );
       return;
     }
+    // Resolve @mentions to JIDs for real WhatsApp tagging
+    const mentionMatches = prefixed.match(/@[\w\u00C0-\u024F]+/g);
+    let mentions: string[] | undefined;
+    if (mentionMatches) {
+      const names = mentionMatches.map((m) => m.slice(1)); // strip @
+      const members = findMembersByName(jid, names);
+      if (members.length > 0) {
+        mentions = members.map((m) => m.jid);
+      }
+    }
+
     try {
-      await this.sock.sendMessage(jid, { text: prefixed });
-      logger.info({ jid, length: prefixed.length }, 'Message sent');
+      await this.sock.sendMessage(jid, { text: prefixed, mentions });
+      logger.info({ jid, length: prefixed.length, mentions: mentions?.length ?? 0 }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ kind: 'text', jid, text: prefixed });

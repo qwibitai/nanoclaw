@@ -375,6 +375,24 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function findMembersByName(
+  chatJid: string,
+  names: string[],
+): { name: string; jid: string }[] {
+  if (names.length === 0) return [];
+  const conditions = names.map(() => 'LOWER(sender_name) LIKE ?').join(' OR ');
+  const sql = `
+    SELECT DISTINCT sender AS jid, sender_name AS name
+    FROM messages
+    WHERE chat_jid = ? AND is_bot_message = 0 AND sender_name != '' AND (${conditions})
+  `;
+  const params = names.map((n) => `%${n.toLowerCase()}%`);
+  return db.prepare(sql).all(chatJid, ...params) as {
+    name: string;
+    jid: string;
+  }[];
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
