@@ -12,11 +12,12 @@ const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_AGENTS || '3');
 async function main() {
   const runner = new ChildProcessRunner({ maxConcurrent: MAX_CONCURRENT });
 
+  // Create handlers with a late-bound pushEvent that captures server by reference.
+  // eslint-disable-next-line prefer-const -- server must be declared before the closure but assigned after
   let server: ManagementServer;
 
-  const handlers = createHandlers(
-    runner,
-    (event, payload) => server.pushEvent(event, payload),
+  const handlers = createHandlers(runner, (event, payload) =>
+    server.pushEvent(event, payload),
   );
   server = new ManagementServer({ port: MANAGEMENT_PORT, handlers });
   await server.start();
