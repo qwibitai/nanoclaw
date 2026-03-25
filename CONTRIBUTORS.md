@@ -15,3 +15,4 @@ Thanks to everyone who has contributed to NanoClaw!
 - [kk17](https://github.com/kk17) — Kyle Zhike Chen
 - [flobo3](https://github.com/flobo3) — Flo
 - [edwinwzhe](https://github.com/edwinwzhe) — Edwin He
+- [scottgl9](https://github.com/scottgl9) — Scott Glover
