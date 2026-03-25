@@ -47,10 +47,12 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private reactEmoji: string;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
+  constructor(botToken: string, opts: TelegramChannelOpts, reactEmoji: string = '') {
     this.botToken = botToken;
     this.opts = opts;
+    this.reactEmoji = reactEmoji;
   }
 
   async connect(): Promise<void> {
@@ -163,6 +165,17 @@ export class TelegramChannel implements Channel {
         { chatJid, chatName, sender: senderName },
         'Telegram message stored',
       );
+
+      // Automatically react to the message if configured
+      if (this.reactEmoji) {
+        try {
+          await this.bot!.api.setMessageReaction(ctx.chat.id, ctx.message.message_id, [
+            { type: 'emoji', emoji: this.reactEmoji as any },
+          ]);
+        } catch (err) {
+          logger.debug({ err, emoji: this.reactEmoji }, 'Failed to set Telegram reaction');
+        }
+      }
     });
 
     // Handle non-text messages with placeholders so the agent knows something was sent
@@ -293,12 +306,14 @@ export class TelegramChannel implements Channel {
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_REACT_EMOJI']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+  const reactEmoji =
+    process.env.TELEGRAM_REACT_EMOJI || envVars.TELEGRAM_REACT_EMOJI || '';
   if (!token) {
     logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
     return null;
   }
-  return new TelegramChannel(token, opts);
+  return new TelegramChannel(token, opts, reactEmoji);
 });
