@@ -46,8 +46,8 @@ RUN mkdir -p /home/node/.nanoclaw && chown node:node /home/node/.nanoclaw
 # Expose management API port
 EXPOSE 18789
 
-# Non-root user
+# Non-root user — WORKDIR must be .nanoclaw so readEnvFile() finds .env
 USER node
-WORKDIR /home/node
+WORKDIR /home/node/.nanoclaw
 
 CMD ["node", "/ws/dist/k8s-entrypoint.js"]

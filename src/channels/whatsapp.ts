@@ -85,6 +85,12 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        // In k8s/PaaS mode (detected by MANAGEMENT_PORT env var), don't exit —
+        // the management API handles pairing via whatsapp.qr events.
+        if (process.env.MANAGEMENT_PORT) {
+          logger.warn('WhatsApp QR code received — waiting for pairing via management API');
+          return;
+        }
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
@@ -397,4 +403,13 @@ export class WhatsAppChannel implements Channel {
   }
 }
 
-registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));
+registerChannel('whatsapp', (opts: ChannelOpts) => {
+  // In k8s/PaaS mode, only create the WhatsApp channel if auth state exists on disk.
+  // WhatsApp uses QR pairing (no env var token), so without auth files the channel
+  // would immediately request a QR code and crash the container.
+  const authDir = path.join(STORE_DIR, 'auth');
+  if (!fs.existsSync(path.join(authDir, 'creds.json'))) {
+    return null;
+  }
+  return new WhatsAppChannel(opts);
+});
