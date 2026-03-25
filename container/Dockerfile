@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
 # Install Snowflake CLI (snow)
 RUN apt-get update && apt-get install -y python3 python3-pip python3-venv \
     && python3 -m venv /opt/snow-venv \
-    && /opt/snow-venv/bin/pip install snowflake-cli==3.15.0 \
+    && /opt/snow-venv/bin/pip install snowflake-cli==3.16.0 \
     && ln -s /opt/snow-venv/bin/snow /usr/local/bin/snow \
     && rm -rf /var/lib/apt/lists/*
 
@@ -70,7 +70,7 @@ RUN apt-get update && apt-get install -y unzip \
 # Mermaid CLI uses system Chromium (PUPPETEER_SKIP_DOWNLOAD avoids 300MB download).
 # Pinned versions — build.sh checks for updates automatically.
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g \
-    agent-browser@0.17.1 \
+    agent-browser@0.22.1 \
     @anthropic-ai/claude-code \
     @gongrzhe/server-gmail-autoauth-mcp@1.1.11 \
     @cocal/google-calendar-mcp@2.6.1 \
@@ -95,7 +95,7 @@ RUN ARCH=$(uname -m) \
     && rm -rf /tmp/awscli.zip /tmp/aws
 
 # Install Render CLI, Railway CLI, and Supabase CLI
-ARG RENDER_VERSION=2.14.0
+ARG RENDER_VERSION=2.15.0
 ARG RAILWAY_VERSION=4.33.0
 ARG SUPABASE_VERSION=2.78.1
 RUN DPKG_ARCH=$(dpkg --print-architecture) && UARCH=$(uname -m) \
