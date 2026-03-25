@@ -1,4 +1,5 @@
 import https from 'https';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -48,15 +49,23 @@ export class TelegramChannel implements Channel {
   private opts: TelegramChannelOpts;
   private botToken: string;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
+  constructor(botToken: string, opts?: TelegramChannelOpts) {
     this.botToken = botToken;
+    this.opts = opts ?? { onMessage: () => {}, onChatMetadata: () => {}, registeredGroups: () => ({}) };
+  }
+
+  /** @internal Inject callbacks (used by SDK to wire up message storage) */
+  _setOpts(opts: TelegramChannelOpts): void {
     this.opts = opts;
   }
 
   async connect(): Promise<void> {
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
+    const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : https.globalAgent;
+
     this.bot = new Bot(this.botToken, {
       client: {
-        baseFetchConfig: { agent: https.globalAgent, compress: true },
+        baseFetchConfig: { agent, compress: true },
       },
     });
 

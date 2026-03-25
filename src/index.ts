@@ -60,7 +60,11 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
-// Re-export for backwards compatibility during refactor
+// SDK exports
+export { AgentLite } from './sdk.js';
+export { TelegramChannel } from './channels/telegram.js';
+export type { Channel, RegisteredGroup, NewMessage } from './types.js';
+export type { ContainerOutput } from './container-runner.js';
 export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
@@ -559,8 +563,11 @@ async function main(): Promise<void> {
     }
   }
 
-  // Channel callbacks (shared by all channels)
+  // Channel callbacks — builds on shared buildChannelOpts() but adds
+  // remote control interception (only relevant for direct-run mode)
+  const baseOpts = buildChannelOpts();
   const channelOpts = {
+    ...baseOpts,
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
@@ -570,38 +577,11 @@ async function main(): Promise<void> {
         );
         return;
       }
-
-      // Sender allowlist drop mode: discard messages from denied senders before storing
-      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
-        const cfg = loadSenderAllowlist();
-        if (
-          shouldDropMessage(chatJid, cfg) &&
-          !isSenderAllowed(chatJid, msg.sender, cfg)
-        ) {
-          if (cfg.logDenied) {
-            logger.debug(
-              { chatJid, sender: msg.sender },
-              'sender-allowlist: dropping message (drop mode)',
-            );
-          }
-          return;
-        }
-      }
-      storeMessage(msg);
+      baseOpts.onMessage(chatJid, msg);
     },
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
   };
 
   // Create and connect all registered channels.
-  // Each channel self-registers via the barrel import above.
-  // Factories return null when credentials are missing, so unconfigured channels are skipped.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -620,7 +600,46 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Start subsystems (independently of connection handler)
+  startSubsystems();
+}
+
+// --- Shared helpers (used by both main() and SDK entry points) ---
+
+/** Build the channel callback opts for message storage. */
+function buildChannelOpts() {
+  return {
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+        const cfg = loadSenderAllowlist();
+        if (
+          shouldDropMessage(chatJid, cfg) &&
+          !isSenderAllowed(chatJid, msg.sender, cfg)
+        ) {
+          return;
+        }
+      }
+      storeMessage(msg);
+    },
+    onChatMetadata: (
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
+    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    registeredGroups: () => registeredGroups,
+  };
+}
+
+/** Inject internal callbacks into a channel that supports _setOpts. */
+function injectChannelOpts(channel: Channel): void {
+  if ('_setOpts' in channel && typeof (channel as any)._setOpts === 'function') {
+    (channel as any)._setOpts(buildChannelOpts());
+  }
+}
+
+/** Start scheduler, IPC watcher, queue, and message loop. */
+function startSubsystems(): void {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
@@ -679,7 +698,76 @@ async function main(): Promise<void> {
   });
 }
 
-// Guard: only run when executed directly, not when imported by tests
+// --- SDK entry points (@internal) ---
+
+/** @internal */
+export async function _startFromSDK(
+  sdkChannels: Channel[],
+  sdkGroups: Map<string, RegisteredGroup>,
+): Promise<void> {
+  await ensureContainerSystemRunning();
+  initDatabase();
+  logger.info('Database initialized');
+  loadState();
+
+  for (const [jid, group] of sdkGroups) {
+    setRegisteredGroup(jid, group);
+    registeredGroups[jid] = group;
+  }
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    ensureOneCLIAgent(jid, group);
+  }
+
+  restoreRemoteControl();
+
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'Shutdown signal received');
+    await queue.shutdown(10000);
+    for (const ch of channels) await ch.disconnect();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
+  for (const channel of sdkChannels) {
+    injectChannelOpts(channel);
+    channels.push(channel);
+    await channel.connect();
+  }
+
+  if (channels.length > 0) {
+    logger.info({ count: channels.length }, 'Initial channels connected');
+  } else {
+    logger.info('No initial channels — waiting for dynamic registration');
+  }
+
+  startSubsystems();
+}
+
+/** @internal */
+export async function _registerChannelFromSDK(channel: Channel): Promise<void> {
+  injectChannelOpts(channel);
+  channels.push(channel);
+  await channel.connect();
+  logger.info({ channel: channel.name }, 'Channel registered dynamically');
+}
+
+/** @internal */
+export function _registerGroupFromSDK(jid: string, group: RegisteredGroup): void {
+  setRegisteredGroup(jid, group);
+  registeredGroups[jid] = group;
+  ensureOneCLIAgent(jid, group);
+  logger.info({ jid, name: group.name, folder: group.folder }, 'Group registered dynamically');
+}
+
+/** @internal */
+export async function _stopFromSDK(): Promise<void> {
+  await queue.shutdown(10000);
+  for (const ch of channels) await ch.disconnect();
+}
+
+// Guard: only run when executed directly, not when imported as SDK
 const isDirectRun =
   process.argv[1] &&
   new URL(import.meta.url).pathname ===
@@ -687,7 +775,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClaw');
+    logger.error({ err }, 'Failed to start AgentLite');
     process.exit(1);
   });
 }

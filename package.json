@@ -1,5 +1,5 @@
 {
-  "name": "agentlite",
+  "name": "@boxlite-ai/agentlite",
   "version": "1.2.25",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",

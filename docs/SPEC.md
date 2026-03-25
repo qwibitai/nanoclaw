@@ -269,7 +269,7 @@ nanoclaw/
 │   └── container-runner.ts        # Spawns agents in containers
 │
 ├── container/
-│   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
+│   ├── Dockerfile                 # OCI image definition (runs as 'node' user, includes Claude Code CLI)
 │   ├── build.sh                   # Build script for container image
 │   ├── agent-runner/              # Code that runs inside the container
 │   │   ├── package.json
@@ -342,7 +342,7 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 // Container configuration
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const BOX_IMAGE = process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
