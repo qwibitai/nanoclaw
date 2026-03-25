@@ -119,6 +119,14 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add fail_count and last_error columns for retry tracking
+  try {
+    database.prepare(`ALTER TABLE scheduled_tasks ADD COLUMN fail_count INTEGER DEFAULT 0`).run();
+  } catch { /* column already exists */ }
+  try {
+    database.prepare(`ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT`).run();
+  } catch { /* column already exists */ }
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -478,6 +486,18 @@ export function updateTaskAfterRun(
     WHERE id = ?
   `,
   ).run(nextRun, now, lastResult, nextRun, id);
+}
+
+export function updateTaskFailCount(id: string, failCount: number, lastError: string): void {
+  db.prepare(
+    `UPDATE scheduled_tasks SET fail_count = ?, last_error = ? WHERE id = ?`,
+  ).run(failCount, lastError, id);
+}
+
+export function resetTaskFailCount(id: string): void {
+  db.prepare(
+    `UPDATE scheduled_tasks SET fail_count = 0, last_error = NULL WHERE id = ?`,
+  ).run(id);
 }
 
 export function logTaskRun(log: TaskRunLog): void {

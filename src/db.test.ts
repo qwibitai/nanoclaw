@@ -9,10 +9,12 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  resetTaskFailCount,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
+  updateTaskFailCount,
 } from './db.js';
 
 beforeEach(() => {
@@ -449,6 +451,26 @@ describe('message query LIMIT', () => {
   });
 });
 
+// --- Helper for task tests ---
+
+let taskCounter = 0;
+function createTestTask() {
+  const id = `test-task-${++taskCounter}`;
+  createTask({
+    id,
+    group_folder: 'main',
+    chat_jid: 'group@g.us',
+    prompt: 'test prompt',
+    schedule_type: 'once',
+    schedule_value: '2024-06-01T00:00:00.000Z',
+    context_mode: 'isolated',
+    next_run: '2024-06-01T00:00:00.000Z',
+    status: 'active',
+    created_at: '2024-01-01T00:00:00.000Z',
+  });
+  return getTaskById(id)!;
+}
+
 // --- RegisteredGroup isMain round-trip ---
 
 describe('registered group isMain', () => {
@@ -480,5 +502,30 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('task retry tracking', () => {
+  it('updateTaskFailCount sets fail_count and last_error', () => {
+    const task = createTestTask();
+    updateTaskFailCount(task.id, 1, 'container timed out');
+    const updated = getTaskById(task.id)!;
+    expect(updated.fail_count).toBe(1);
+    expect(updated.last_error).toBe('container timed out');
+  });
+
+  it('resetTaskFailCount zeros fail_count and clears last_error', () => {
+    const task = createTestTask();
+    updateTaskFailCount(task.id, 3, 'some error');
+    resetTaskFailCount(task.id);
+    const updated = getTaskById(task.id)!;
+    expect(updated.fail_count).toBe(0);
+    expect(updated.last_error).toBeNull();
+  });
+
+  it('new tasks have fail_count 0 and last_error null', () => {
+    const task = createTestTask();
+    expect(task.fail_count).toBe(0);
+    expect(task.last_error).toBeNull();
   });
 });
