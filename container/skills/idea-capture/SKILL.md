@@ -1,13 +1,13 @@
 ---
 name: idea-capture
 description: >
-  Capture research ideas as lightweight Obsidian notes when the researcher
-  shares a substantive thought. Offers optional escalation to investigation.
+  Capture research ideas as minimal Obsidian notes with a backlink in the
+  scratch note. No structured sections, no registry, no escalation prompt.
 ---
 
 # Idea Capture
 
-When the researcher shares a substantive research thought — a hypothesis, a methodological angle, a connection between literatures — capture it as a note in `ideas/`.
+When the researcher shares a substantive research thought — a hypothesis, a methodological angle, a connection between literatures — capture it as a note in `ideas/` and add a backlink to the scratch.
 
 ## What counts as a substantive thought
 
@@ -17,29 +17,31 @@ A research-relevant idea, not a task, question, or casual remark. Use judgment. 
 
 1. **Read researcher context** — `mcp__mcpvault__read_note` on `_meta/researcher-profile.md` and `_meta/top-of-mind.md` to understand the researcher's active interests and projects.
 
-2. **Write the note** — `mcp__mcpvault__write_note` to `ideas/YYYY-MM-DD-slug.md` with:
+2. **Check for duplicates** — `mcp__mcpvault__search_notes` in `ideas/` to see if a similar idea already exists. If it does, tell the researcher and offer to add to the existing note instead.
 
+3. **Write the idea note** — `mcp__mcpvault__write_note` to `ideas/YYYY-MM-DD-slug.md`:
+
+   Frontmatter (nothing else):
    ```yaml
    ---
    created: 'YYYY-MM-DD'
    status: spark
-   domain: <1-2 word domain>
-   connected_projects:
-     - <project name if applicable>
-   potential: <low|medium|high>
    ---
    ```
 
-   Body structure:
-   - `# Title` — descriptive, not the raw quote
-   - `_Raw idea captured YYYY-MM-DD via WhatsApp._`
-   - `## The idea` — the researcher's words as a blockquote
-   - `## Why this matters` — 2-4 sentences connecting the idea to the researcher's existing work, methods, or open questions. This is the value-add: situating the spark in context.
-   - `## Initial framings` — 2-3 possible angles, each 2-3 sentences. Draw on the researcher's known methods and interests.
+   Body: the idea in freeform prose. Write it as a sharp research assistant who knows the researcher's work — situate the idea in context, note why it matters for *this researcher*, sketch possible angles. No headings, no template sections. Just a paragraph or two of good thinking.
 
-3. **Update the registry** — `mcp__mcpvault__read_note` on `ideas/_registry.md`, then `mcp__mcpvault__write_note` (append mode) or `mcp__mcpvault__patch_note` to add the new idea under the appropriate status heading.
+   Slug: lowercase, hyphen-separated, max ~60 chars, derived from the core concept.
 
-4. **Confirm and offer escalation** — Tell the researcher what you captured. Then ask: "Want me to run a research investigation on this?" Never escalate without explicit confirmation.
+4. **Add to scratch** — `mcp__mcpvault__patch_note` on `ideas/scratch.md` to prepend (newest first) a backlinked one-liner:
+
+   ```
+   - [[YYYY-MM-DD-slug]] — one-sentence summary of the idea
+   ```
+
+   Insert after the frontmatter closing `---`, before existing entries.
+
+5. **Confirm** — Tell the researcher: "Captured [[slug]] in scratch."
 
 ## Tone
 
@@ -47,7 +49,9 @@ Write like a sharp research assistant who knows the researcher's work. No filler
 
 ## What not to do
 
-- Don't add boilerplate frontmatter fields beyond what's listed
+- Don't add frontmatter fields beyond `created` and `status`
+- Don't add headings or template sections to the idea note
+- Don't update any registry file
+- Don't prompt for investigation or escalation — the nudge handles that
 - Don't create subdirectories inside `ideas/`
-- Don't overwrite existing notes — check if a similar idea exists first via `mcp__mcpvault__search_notes`
-- Don't escalate to investigation without confirmation
+- Don't overwrite existing notes
