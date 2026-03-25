@@ -98,6 +98,13 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
+## 2a. Timezone
+
+Run `npx tsx setup/index.ts --step timezone` and parse the status block.
+
+- If NEEDS_USER_INPUT=true → The system timezone could not be autodetected (e.g. POSIX-style TZ like `IST-2`). AskUserQuestion: "What is your timezone?" with common options (America/New_York, Europe/London, Asia/Jerusalem, Asia/Tokyo) and an "Other" escape. Then re-run: `npx tsx setup/index.ts --step timezone -- --tz <their-answer>`.
+- If STATUS=success → Timezone is configured. Note RESOLVED_TZ for reference.
+
 ## 3. Container Runtime
 
 ### 3a. Choose runtime
