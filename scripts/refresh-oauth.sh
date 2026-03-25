@@ -1,11 +1,17 @@
 #!/bin/bash
 # Refresh OAuth token for credential proxy
 # Run via cron every 12 hours
+#
+# The credential proxy re-reads .env on each request, so updating
+# the file is sufficient — no service restart needed.
 
 set -e
 
 CREDS_FILE="$HOME/.claude/.credentials.json"
 ENV_FILE="$HOME/shoggoth/.env"
+
+# Ensure XDG_RUNTIME_DIR is set (needed for systemctl --user from cron)
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 # Check if credentials file exists
 if [ ! -f "$CREDS_FILE" ]; then
@@ -31,13 +37,8 @@ fi
 # Read the (possibly refreshed) token
 NEW_TOKEN=$(jq -r '.claudeAiOauth.accessToken' "$CREDS_FILE")
 
-# Update .env
-# Remove old token line and append new one
+# Update .env — proxy re-reads on each request, no restart needed
 sed -i '/^CLAUDE_CODE_OAUTH_TOKEN=/d' "$ENV_FILE"
 echo "CLAUDE_CODE_OAUTH_TOKEN=${NEW_TOKEN}" >> "$ENV_FILE"
 
 echo "OAuth token updated in .env"
-
-# Restart NanoClaw to pick up new token
-systemctl --user restart nanoclaw
-echo "NanoClaw restarted"
