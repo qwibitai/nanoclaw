@@ -2141,7 +2141,10 @@ async function main(): Promise<void> {
           ([jid]) => jid === gate.chat_jid,
         );
         if (!groupEntry) {
-          logger.warn({ gateId, chat_jid: gate.chat_jid }, 'Gate group not found for resume');
+          logger.warn(
+            { gateId, chat_jid: gate.chat_jid },
+            'Gate group not found for resume',
+          );
           return;
         }
         const [chatJid, group] = groupEntry;

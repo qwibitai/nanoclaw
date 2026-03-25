@@ -19,16 +19,8 @@ import { handleCors } from './api/cors.js';
 import { handleRoute, RouteDeps } from './api/routes.js';
 import { initWebSocket, WsDeps } from './api/ws.js';
 import type { ActiveSession, AuthUser, Capabilities } from './api/types.js';
-import {
-  getOrCreateJwtSecret,
-  parseCookieToken,
-  verifyJwt,
-} from './auth.js';
-import {
-  getUserById,
-  getUserGroups,
-  hasAnyUsers,
-} from './db.js';
+import { getOrCreateJwtSecret, parseCookieToken, verifyJwt } from './auth.js';
+import { getUserById, getUserGroups, hasAnyUsers } from './db.js';
 import { logger } from './logger.js';
 import type { ProgressEvent } from './container-runner.js';
 

@@ -191,7 +191,10 @@ export function getInstalledSkills(): InstalledSkill[] {
   // Global Claude Code skills: ~/.claude/skills/ (design, dev skills synced to container)
   const globalClaudeSkillsDir = path.join(os.homedir(), '.claude', 'skills');
   // Only scan if it's a different directory than the project-level .claude/skills/
-  if (globalClaudeSkillsDir !== nanoclawSkillsDir && fs.existsSync(globalClaudeSkillsDir)) {
+  if (
+    globalClaudeSkillsDir !== nanoclawSkillsDir &&
+    fs.existsSync(globalClaudeSkillsDir)
+  ) {
     try {
       scanSkillDirectory(globalClaudeSkillsDir, projectRoot, skills, 'global');
     } catch {
@@ -224,7 +227,14 @@ export function getInstalledSkills(): InstalledSkill[] {
           'skills',
         );
         if (!fs.existsSync(groupSkillsDir)) continue;
-        scanSkillDirectory(groupSkillsDir, projectRoot, skills, 'group', undefined, { group: groupEntry.name });
+        scanSkillDirectory(
+          groupSkillsDir,
+          projectRoot,
+          skills,
+          'group',
+          undefined,
+          { group: groupEntry.name },
+        );
       }
     } catch {
       // Groups directory read failed

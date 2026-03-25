@@ -2376,7 +2376,9 @@ export function createUser(
   );
 }
 
-export function getUserById(id: string): (User & { password_hash: string }) | undefined {
+export function getUserById(
+  id: string,
+): (User & { password_hash: string }) | undefined {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as
     | (User & { password_hash: string })
     | undefined;
@@ -2467,9 +2469,9 @@ export function setUserGroups(userId: string, groupFolders: string[]): void {
 // --- Cockpit: config key-value store ---
 
 export function getConfigValue(key: string): string | null {
-  const row = db
-    .prepare('SELECT value FROM config WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key) as
+    | { value: string }
+    | undefined;
   return row?.value ?? null;
 }
 
@@ -2490,9 +2492,7 @@ export function getGatesPaginated(
   if (status) {
     const total = (
       db
-        .prepare(
-          'SELECT COUNT(*) AS c FROM pending_gates WHERE status = ?',
-        )
+        .prepare('SELECT COUNT(*) AS c FROM pending_gates WHERE status = ?')
         .get(status) as { c: number }
     ).c;
     const data = db

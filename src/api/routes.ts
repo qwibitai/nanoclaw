@@ -600,7 +600,9 @@ export async function handleRoute(
         displayName?: string;
       }>(req);
       if (!body.username || !body.password) {
-        json(res, 400, { error: 'Missing required fields: username, password' });
+        json(res, 400, {
+          error: 'Missing required fields: username, password',
+        });
         return true;
       }
       const hash = await hashPassword(body.password);
@@ -639,7 +641,9 @@ export async function handleRoute(
         password?: string;
       }>(req);
       if (!body.username || !body.password) {
-        json(res, 400, { error: 'Missing required fields: username, password' });
+        json(res, 400, {
+          error: 'Missing required fields: username, password',
+        });
         return true;
       }
       const user = getUserByUsername(body.username);
@@ -736,7 +740,9 @@ export async function handleRoute(
         groups?: string[];
       }>(req);
       if (!body.username || !body.password) {
-        json(res, 400, { error: 'Missing required fields: username, password' });
+        json(res, 400, {
+          error: 'Missing required fields: username, password',
+        });
         return true;
       }
       const role = body.role === 'admin' ? 'admin' : 'member';
@@ -790,9 +796,12 @@ export async function handleRoute(
         groups?: string[];
       }>(req);
       const updates: Parameters<typeof updateUser>[1] = {};
-      if (body.displayName !== undefined) updates.display_name = body.displayName;
-      if (body.role === 'admin' || body.role === 'member') updates.role = body.role;
-      if (body.password) updates.password_hash = await hashPassword(body.password);
+      if (body.displayName !== undefined)
+        updates.display_name = body.displayName;
+      if (body.role === 'admin' || body.role === 'member')
+        updates.role = body.role;
+      if (body.password)
+        updates.password_hash = await hashPassword(body.password);
       updateUser(userId, updates);
       if (body.groups !== undefined && Array.isArray(body.groups)) {
         setUserGroups(userId, body.groups);
@@ -853,11 +862,10 @@ export async function handleRoute(
     const result = getGatesPaginated('approved', limit, offset);
     const cancelled = getGatesPaginated('cancelled', 50, 0);
     // Combine both resolved statuses
-    const combined = [...result.data, ...cancelled.data].sort(
-      (a, b) =>
-        (b.resolved_at ?? b.created_at).localeCompare(
-          a.resolved_at ?? a.created_at,
-        ),
+    const combined = [...result.data, ...cancelled.data].sort((a, b) =>
+      (b.resolved_at ?? b.created_at).localeCompare(
+        a.resolved_at ?? a.created_at,
+      ),
     );
     json(res, 200, {
       data: combined.slice(offset, offset + limit),
@@ -966,7 +974,9 @@ export async function handleRoute(
         description?: string;
       }>(req);
       if (!body.group || !body.prompt || !body.schedule) {
-        json(res, 400, { error: 'Missing required fields: group, prompt, schedule' });
+        json(res, 400, {
+          error: 'Missing required fields: group, prompt, schedule',
+        });
         return true;
       }
       if (!hasGroupAccess(auth, body.group)) {
@@ -1066,7 +1076,13 @@ export async function handleRoute(
         server_type: serverType,
       });
       json(res, 201, {
-        data: { id, group_folder: body.group, name: body.name, url: body.url, server_type: serverType },
+        data: {
+          id,
+          group_folder: body.group,
+          name: body.name,
+          url: body.url,
+          server_type: serverType,
+        },
       });
     } catch (err) {
       handleBodyError(res, err);
@@ -1079,9 +1095,9 @@ export async function handleRoute(
   if (mcpServerIdMatch && method === 'DELETE') {
     const serverId = decodeURIComponent(mcpServerIdMatch[1]);
     // Find the server first to check group access
-    const allServers = deps.getRegisteredGroups().flatMap((g) =>
-      listMcpServers(g.folder),
-    );
+    const allServers = deps
+      .getRegisteredGroups()
+      .flatMap((g) => listMcpServers(g.folder));
     const server = allServers.find((s) => s.id === serverId);
     if (!server) {
       json(res, 404, { error: 'MCP server not found' });

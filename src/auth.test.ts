@@ -33,17 +33,20 @@ beforeEach(() => {
 
 // --- User CRUD ---
 
-function makeUser(overrides: Partial<{
-  id: string;
-  username: string;
-  password_hash: string;
-  display_name: string | null;
-  role: 'admin' | 'member';
-}> = {}) {
+function makeUser(
+  overrides: Partial<{
+    id: string;
+    username: string;
+    password_hash: string;
+    display_name: string | null;
+    role: 'admin' | 'member';
+  }> = {},
+) {
   const now = new Date().toISOString();
   return {
     id: overrides.id ?? `user-${Math.random().toString(36).slice(2, 8)}`,
-    username: overrides.username ?? `user_${Math.random().toString(36).slice(2, 8)}`,
+    username:
+      overrides.username ?? `user_${Math.random().toString(36).slice(2, 8)}`,
     password_hash: overrides.password_hash ?? '$2b$10$fakehash',
     display_name: overrides.display_name ?? null,
     role: (overrides.role ?? 'member') as 'admin' | 'member',
@@ -190,12 +193,14 @@ describe('getConfigValue + setConfigValue', () => {
 
 // --- Gate pagination ---
 
-function makeGate(overrides: Partial<{
-  id: string;
-  group_folder: string;
-  chat_jid: string;
-  status: 'pending' | 'approved' | 'cancelled';
-}> = {}) {
+function makeGate(
+  overrides: Partial<{
+    id: string;
+    group_folder: string;
+    chat_jid: string;
+    status: 'pending' | 'approved' | 'cancelled';
+  }> = {},
+) {
   return {
     id: overrides.id ?? `gate-${Math.random().toString(36).slice(2, 8)}`,
     group_folder: overrides.group_folder ?? 'test-group',
@@ -205,7 +210,10 @@ function makeGate(overrides: Partial<{
     context_data: null,
     resume_prompt: null,
     session_key: null,
-    status: (overrides.status ?? 'pending') as 'pending' | 'approved' | 'cancelled',
+    status: (overrides.status ?? 'pending') as
+      | 'pending'
+      | 'approved'
+      | 'cancelled',
     created_at: new Date().toISOString(),
   };
 }

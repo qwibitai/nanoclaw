@@ -198,20 +198,23 @@ export function initWebSocket(
     }
 
     // Auth check (async)
-    deps.checkAuth(req, token).then((authResult) => {
-      if (!authResult) {
+    deps
+      .checkAuth(req, token)
+      .then((authResult) => {
+        if (!authResult) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit('connection', ws, req);
+        });
+      })
+      .catch(() => {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
-        return;
-      }
-
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit('connection', ws, req);
       });
-    }).catch(() => {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-    });
   });
 
   // Handle new connections
@@ -227,19 +230,22 @@ export function initWebSocket(
     // Resolve JWT auth from cookie for group isolation
     let userId: string | undefined;
     let allowedGroups: Set<string> | undefined;
-    deps.checkAuth(req, token).then((authResult) => {
-      if (authResult && authResult !== true) {
-        userId = authResult.id;
-        // Non-admins get restricted to their allowed groups
-        if (authResult.role !== 'admin') {
-          allowedGroups = new Set(authResult.groups);
+    deps
+      .checkAuth(req, token)
+      .then((authResult) => {
+        if (authResult && authResult !== true) {
+          userId = authResult.id;
+          // Non-admins get restricted to their allowed groups
+          if (authResult.role !== 'admin') {
+            allowedGroups = new Set(authResult.groups);
+          }
+          client.userId = userId;
+          client.allowedGroups = allowedGroups;
         }
-        client.userId = userId;
-        client.allowedGroups = allowedGroups;
-      }
-    }).catch(() => {
-      // Auth resolution failure is non-fatal for already-connected WS
-    });
+      })
+      .catch(() => {
+        // Auth resolution failure is non-fatal for already-connected WS
+      });
 
     const client: WsClient = {
       ws,
@@ -319,7 +325,13 @@ export function initWebSocket(
           typeof parsed.threadId === 'string' ? parsed.threadId : undefined;
 
         // startSession now returns the real message ID or false
-        const msgId = deps.startSession(groupJid, text, senderName, senderId, threadId);
+        const msgId = deps.startSession(
+          groupJid,
+          text,
+          senderName,
+          senderId,
+          threadId,
+        );
         if (msgId) {
           sendJson(ws, { type: 'message_stored', id: msgId });
         } else {
