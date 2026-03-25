@@ -24,7 +24,6 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
 import { getAllChats } from './db.js';
 import { readEnvFile } from './env.js';
 import { OneCLI } from '@onecli-sh/sdk';
