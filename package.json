@@ -25,6 +25,8 @@
     "@whiskeysockets/baileys": "^6.7.16",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
+    "google-auth-library": "^9.15.1",
+    "googleapis": "^146.0.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "qrcode": "^1.5.4",
