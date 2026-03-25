@@ -267,7 +267,7 @@ The task will run in that group's context with access to their files and memory.
 
 ## Task Scripts
 
-When scheduling tasks that check a condition before acting (new PRs, website changes, API status), use the `script` parameter. The script runs first — if there's nothing to do, you don't wake up.
+To check or monitor something on a recurring basis, use `schedule_task` — not a bash loop. This way the check survives container restarts and doesn't block other messages. If the user only needs to know when a condition changes, add a `script` to avoid unnecessary wake-ups — the script runs first, and you only wake up when there's something to act on.
 
 ### How it works
 
