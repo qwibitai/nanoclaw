@@ -31,8 +31,12 @@ if (envConfig.REGISTRY_URL && !process.env.REGISTRY_URL) {
 if (envConfig.TELEMETRY_URL && !process.env.TELEMETRY_URL) {
   process.env.TELEMETRY_URL = envConfig.TELEMETRY_URL;
 }
-if (envConfig.TELEMETRY_REGISTRATION_TOKEN && !process.env.TELEMETRY_REGISTRATION_TOKEN) {
-  process.env.TELEMETRY_REGISTRATION_TOKEN = envConfig.TELEMETRY_REGISTRATION_TOKEN;
+if (
+  envConfig.TELEMETRY_REGISTRATION_TOKEN &&
+  !process.env.TELEMETRY_REGISTRATION_TOKEN
+) {
+  process.env.TELEMETRY_REGISTRATION_TOKEN =
+    envConfig.TELEMETRY_REGISTRATION_TOKEN;
 }
 
 // Service Bot: expose GROQ_API_KEY for audio transcription

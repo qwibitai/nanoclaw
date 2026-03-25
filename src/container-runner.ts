@@ -260,11 +260,15 @@ function buildVolumeMounts(
   }
 
   // Bot Dashboard MCP server — mounted read-only for all groups
-  const botDashboardMcpDir = path.resolve(projectRoot, "..", "bot-dashboard-mcp");
+  const botDashboardMcpDir = path.resolve(
+    projectRoot,
+    '..',
+    'bot-dashboard-mcp',
+  );
   if (fs.existsSync(botDashboardMcpDir)) {
     mounts.push({
       hostPath: botDashboardMcpDir,
-      containerPath: "/home/node/bot-dashboard-mcp",
+      containerPath: '/home/node/bot-dashboard-mcp',
       readonly: true,
     });
   }
@@ -618,11 +622,7 @@ export async function runContainerAgent(
         // Full input is only included at verbose level to avoid
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
-          logLines.push(
-            `=== Input ===`,
-            JSON.stringify(input, null, 2),
-            ``,
-          );
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
           logLines.push(
             `=== Input Summary ===`,
