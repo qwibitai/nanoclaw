@@ -1,4 +1,5 @@
-import { Bot } from 'grammy';
+import https from 'https';
+import { Api, Bot } from 'grammy';
 
 import {
   ASSISTANT_NAME,
@@ -10,6 +11,29 @@ import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Attachment, Channel } from '../types.js';
+
+/**
+ * Send a message with Telegram Markdown parse mode, falling back to plain text.
+ * Claude's output naturally matches Telegram's Markdown v1 format:
+ *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
+ */
+async function sendTelegramMessage(
+  api: { sendMessage: Api['sendMessage'] },
+  chatId: string | number,
+  text: string,
+  options: { message_thread_id?: number } = {},
+): Promise<void> {
+  try {
+    await api.sendMessage(chatId, text, {
+      ...options,
+      parse_mode: 'Markdown',
+    });
+  } catch (err) {
+    // Fallback: send as plain text if Markdown parsing fails
+    logger.debug({ err }, 'Markdown send failed, falling back to plain text');
+    await api.sendMessage(chatId, text, options);
+  }
+}
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
@@ -25,7 +49,11 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    this.bot = new Bot(this.botToken);
+    this.bot = new Bot(this.botToken, {
+      client: {
+        baseFetchConfig: { agent: https.globalAgent, compress: true },
+      },
+    });
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
@@ -47,9 +75,16 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Telegram bot commands handled above — skip them in the general handler
+    // so they don't also get stored as messages. All other /commands flow through.
+    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands
-      if (ctx.message.text.startsWith('/')) return;
+      // Skip only recognized Telegram bot commands; let other /commands through
+      if (ctx.message.text.startsWith('/')) {
+        const cmd = ctx.message.text.slice(1).split(/[\s@]/)[0].toLowerCase();
+        if (TELEGRAM_BOT_COMMANDS.has(cmd)) return;
+      }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
@@ -277,10 +312,11 @@ export class TelegramChannel implements Channel {
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await sendTelegramMessage(this.bot.api, numericId, text);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(
+          await sendTelegramMessage(
+            this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
           );

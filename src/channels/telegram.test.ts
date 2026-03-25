@@ -307,16 +307,38 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('skips command messages (starting with /)', async () => {
+    it('skips recognized bot commands (/chatid, /ping)', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createTextCtx({ text: '/start' });
+      const ctx = createTextCtx({ text: '/chatid' });
       await triggerTextMessage(ctx);
 
       expect(opts.onMessage).not.toHaveBeenCalled();
       expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    });
+
+    it('passes unrecognized /commands through as messages', async () => {
+      const opts = createTestOpts();
+      opts.registeredGroups = () => ({
+        'tg:100200300': {
+          name: 'Test',
+          folder: 'test',
+          trigger: '@Andy',
+          added_at: new Date().toISOString(),
+        },
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: '/remote-control status' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '/remote-control status' }),
+      );
     });
 
     it('extracts sender name from first_name', async () => {
@@ -730,6 +752,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Hello',
+        expect.objectContaining({ parse_mode: 'Markdown' }),
       );
     });
 
@@ -743,6 +766,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '-1001234567890',
         'Group message',
+        expect.objectContaining({ parse_mode: 'Markdown' }),
       );
     });
 
@@ -759,11 +783,13 @@ describe('TelegramChannel', () => {
         1,
         '100200300',
         'x'.repeat(4096),
+        expect.objectContaining({ parse_mode: 'Markdown' }),
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         2,
         '100200300',
         'x'.repeat(904),
+        expect.objectContaining({ parse_mode: 'Markdown' }),
       );
     });
 
