@@ -60,14 +60,57 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
+// --- Swarm (Agent Teams) configuration ---
+// Optional Telegram bot pool tokens (comma-separated). If populated,
+// swarm features auto-enable unless TELEGRAM_SWARM_ENABLED is explicitly set.
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
+
+// Toggle swarm features on/off. Default: enabled when TELEGRAM_BOT_POOL is non-empty.
+export const TELEGRAM_SWARM_ENABLED =
+  (process.env.TELEGRAM_SWARM_ENABLED || 'false') === 'true' ||
+  TELEGRAM_BOT_POOL.length > 0;
+
+// Runtime defaults for swarm behavior. These may be overridden via env vars.
+export const SWARM_NUM_AGENTS = Math.max(
+  1,
+  parseInt(process.env.SWARM_NUM_AGENTS || '3', 10) || 3,
+);
+
+// Aggregation policy: one of 'synthesize' | 'send_all' | 'majority_vote' | 'select_best' | 'first_response' | 'quorum'
+export const SWARM_POLICY = (
+  process.env.SWARM_POLICY || 'synthesize'
+).toLowerCase();
+
+// How long (ms) to wait for subagents before aggregating/returning partial results
+export const SWARM_TIMEOUT_MS = parseInt(
+  process.env.SWARM_TIMEOUT_MS || '10000',
+  10,
+);
+
+// Whether to keep raw subagent outputs (for audit or optional display)
+export const SWARM_KEEP_RAW =
+  (process.env.SWARM_KEEP_RAW || 'false') === 'true';
+
+// Quorum size for 'quorum' policy. If not set, defaults to ceil(SWARM_NUM_AGENTS/2).
+export const SWARM_QUORUM_K = Math.max(
+  1,
+  parseInt(process.env.SWARM_QUORUM_K || String(Math.ceil(SWARM_NUM_AGENTS / 2)), 10),
+);
+
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return str.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
 }
 
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+// Whether to enable LLM-based synthesis. Default: false (opt-in via env)
+export const SWARM_USE_LLM = (process.env.SWARM_USE_LLM || 'false').toLowerCase();
 
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.
