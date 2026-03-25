@@ -197,7 +197,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ([, g]) => g.folder === targetFolder || g.folder.includes(targetFolder),
       );
       if (!targetEntry) {
-        await channel.sendMessage(chatJid, `Group "${targetFolder}" not found.`);
+        await channel.sendMessage(
+          chatJid,
+          `Group "${targetFolder}" not found.`,
+        );
       } else {
         const [targetJid, targetGroup] = targetEntry;
         // Kill active container for target group
@@ -214,15 +217,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           async (output) => {
             const text =
               typeof output.result === 'string'
-                ? output.result.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim()
+                ? output.result
+                    .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                    .trim()
                 : '';
             if (text) await channel.sendMessage(chatJid, text);
           },
         );
         if (compactResult === 'error') {
-          await channel.sendMessage(chatJid, `/compact ${targetGroup.name} failed.`);
-        } else {
-          await channel.sendMessage(chatJid, `${targetGroup.name} compacted.`);
+          await channel.sendMessage(
+            chatJid,
+            `/compact ${targetGroup.name} failed.`,
+          );
         }
       }
       // Advance cursor past all messages in batch
@@ -532,11 +538,16 @@ async function startMessageLoop(): Promise<void> {
             ) {
               queue.closeStdin(chatJid);
               // Cross-group compact: also close target group's container
-              const cmd = extractSessionCommand(loopCmdMsg.content, TRIGGER_PATTERN);
+              const cmd = extractSessionCommand(
+                loopCmdMsg.content,
+                TRIGGER_PATTERN,
+              );
               const crossMatch = cmd?.match(/^\/compact\s+(\S+)$/);
               if (crossMatch && isMainGroup) {
                 const targetEntry = Object.entries(registeredGroups).find(
-                  ([, g]) => g.folder === crossMatch[1] || g.folder.includes(crossMatch[1]),
+                  ([, g]) =>
+                    g.folder === crossMatch[1] ||
+                    g.folder.includes(crossMatch[1]),
                 );
                 if (targetEntry) queue.closeStdin(targetEntry[0]);
               }
