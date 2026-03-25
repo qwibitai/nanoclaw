@@ -7,6 +7,14 @@ class StatusBarController: NSObject {
 
     private let plistPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.nanoclaw.plist"
 
+    /// Derive the NanoClaw project root from the binary location.
+    /// The binary is compiled to {project}/dist/statusbar, so the parent of
+    /// the parent directory is the project root.
+    private static let projectRoot: String = {
+        let binary = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        return binary.deletingLastPathComponent().deletingLastPathComponent().path
+    }()
+
     override init() {
         super.init()
         setupStatusItem()
@@ -108,7 +116,7 @@ class StatusBarController: NSObject {
     }
 
     @objc private func viewLogs() {
-        let logPath = "\(NSHomeDirectory())/Documents/Projects/nanoclaw/logs/nanoclaw.log"
+        let logPath = "\(StatusBarController.projectRoot)/logs/nanoclaw.log"
         NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
     }
 
