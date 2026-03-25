@@ -20,8 +20,9 @@ Access these via `mcp__mcpvault__read_note`.
 - Run bash commands in your sandbox
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
-- **Capture research ideas** to the vault
-- **Run research investigations** with sub-agents
+- **Capture research ideas** to the vault scratch note
+- **Explore ideas** with parallel Opus sub-agent swarms
+- **Triage ideas** — archive or upgrade to projects with GitHub repos
 - **Monitor literature** for new relevant papers
 - **Track project status** across research projects
 - **Generate daily briefings** with prioritized action items
@@ -30,8 +31,10 @@ Access these via `mcp__mcpvault__read_note`.
 
 | Trigger | Skill | What it does |
 |---------|-------|-------------|
-| User shares a research idea, hypothesis, or methodological insight | `/idea-capture` | Captures to vault `ideas/`, offers investigation |
-| "investigate this", "dig into this idea" (after confirmation) | `/research-investigation` | Deep multi-agent investigation with literature, framing, feasibility |
+| User shares a research idea, hypothesis, or methodological insight | `/idea-capture` | Captures to vault `ideas/` with backlink in scratch |
+| "explore this idea", "explore the ideas in scratch" (explicit only) | `/idea-explore` | Parallel Opus sub-agent exploration: literature, methodology, framing |
+| "archive [[slug]]", "upgrade [[slug]] to project" | `/idea-triage` | Archives idea or upgrades to project with vault folder + GitHub repo |
+| Scheduled every 3 days (Sonnet) | `/idea-nudge` | Scans for stale ideas, sends WhatsApp summary |
 | "what are my projects?", "how's X going?", project update | `/project-status` | Reads vault project files, synthesizes status, appends updates |
 | Morning briefing (scheduled) or "give me a briefing" | `/daily-briefing` | Scans projects, recent activity, produces actionable briefing |
 | Weekly literature scan (scheduled) or "check for new papers" | `/literature-monitoring` | Searches for recent papers, produces tiered reading list |
@@ -39,7 +42,7 @@ Access these via `mcp__mcpvault__read_note`.
 | "what can you do?", "/capabilities" | `/capabilities` | System capabilities report |
 | "/status" | `/status` | Quick health check |
 
-**Important:** When the user shares something that sounds like a research idea (a hypothesis, a connection between fields, a methodological angle), invoke `/idea-capture` proactively. Don't wait for them to say "capture this."
+**Important:** When the user shares something that sounds like a research idea (a hypothesis, a connection between fields, a methodological angle), invoke `/idea-capture` proactively. Don't wait for them to say "capture this." Do NOT auto-trigger `/idea-explore` — exploration only runs on explicit request.
 
 ## MCP Tools
 
