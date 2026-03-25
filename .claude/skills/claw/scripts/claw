@@ -31,6 +31,8 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
 # ── Globals ─────────────────────────────────────────────────────────────────
@@ -302,8 +304,6 @@ def fetch_containers(runtime: str) -> list[dict]:
 
     Each dict: id, state, age, named (bool).
     """
-    import time
-
     if runtime == "container":
         result = subprocess.run(
             ["container", "ls", "--format", "json"],
@@ -358,10 +358,6 @@ def fetch_containers(runtime: str) -> list[dict]:
         return containers
 
 
-def _rt_cmd(runtime: str) -> str:
-    return "container" if runtime == "container" else "docker"
-
-
 def cmd_ps(ps_args, runtime: str) -> None:
     containers = fetch_containers(runtime)
     filt = ps_args.filter or ""
@@ -375,7 +371,7 @@ def cmd_ps(ps_args, runtime: str) -> None:
             return
         for c in matches:
             print(f"=== {c['id']} ===")
-            subprocess.run([_rt_cmd(runtime), "logs", c["id"]], stderr=subprocess.STDOUT)
+            subprocess.run([runtime, "logs", c["id"]], stderr=subprocess.STDOUT)
             print()
         return
 
@@ -388,7 +384,7 @@ def cmd_ps(ps_args, runtime: str) -> None:
         for c in matches:
             label = c["id"].removeprefix("nanoclaw-")
             proc = subprocess.Popen(
-                [_rt_cmd(runtime), "logs", "-f", c["id"]],
+                [runtime, "logs", "-f", c["id"]],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -419,16 +415,18 @@ def cmd_ps(ps_args, runtime: str) -> None:
         for c in unnamed:
             cid = c["id"]
             print(f"Stopping {cid}...")
-            subprocess.run([_rt_cmd(runtime), "stop", cid], capture_output=True)
-            subprocess.run([_rt_cmd(runtime), "rm",   cid], capture_output=True)
-            count += 1
-            try:
-                from datetime import datetime
-                ts = datetime.now().strftime("%H:%M:%S.000")
-                with open(log_path, "a") as f:
-                    f.write(f"[{ts}] INFO (claw ps): Removed zombie container {cid}\n")
-            except OSError:
-                pass
+            subprocess.run([runtime, "stop", cid], capture_output=True)
+            rm_result = subprocess.run([runtime, "rm", cid], capture_output=True)
+            if rm_result.returncode == 0:
+                count += 1
+                try:
+                    ts = datetime.now().strftime("%H:%M:%S.000")
+                    with open(log_path, "a") as f:
+                        f.write(f"[{ts}] INFO (claw ps): Removed zombie container {cid}\n")
+                except OSError:
+                    pass
+            else:
+                print(f"  warning: failed to remove {cid}", file=sys.stderr)
         print(f"Removed {count} zombie container(s).")
         return
 
@@ -465,13 +463,14 @@ def main():
         )
         ps_parser.add_argument("filter", nargs="?", help="Substring filter for container names")
         ps_parser.add_argument("--all", action="store_true",
-                               help="Show unnamed/zombie containers in the listing")
-        ps_parser.add_argument("--logs", action="store_true",
-                               help="Dump logs for matching containers")
-        ps_parser.add_argument("--tail", action="store_true",
-                               help="Follow logs (multiplexed with [label] prefix, Ctrl-C to stop)")
-        ps_parser.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
-                               help="Stop and remove unnamed nanoclaw-agent containers")
+                               help="Show unnamed/zombie containers (ignored with --logs/--tail)")
+        mode = ps_parser.add_mutually_exclusive_group()
+        mode.add_argument("--logs", action="store_true",
+                          help="Dump logs for matching containers")
+        mode.add_argument("--tail", action="store_true",
+                          help="Follow logs (multiplexed with [label] prefix, Ctrl-C to stop)")
+        mode.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
+                          help="Stop and remove unnamed nanoclaw-agent containers")
         ps_parser.add_argument("--runtime", choices=["docker", "container"],
                                help="Container runtime (default: auto-detect)")
         ps_parser.add_argument("-v", "--verbose", action="store_true")
@@ -484,6 +483,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="claw",
         description="Run a NanoClaw agent from the command line.",
+        epilog="Container management: run 'claw ps --help' for listing, logs, and zombie cleanup.",
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to send")
     parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
