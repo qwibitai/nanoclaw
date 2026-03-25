@@ -131,3 +131,7 @@ For tasks that involve multiple steps (generating images, creating documents, we
 - If a step fails or takes long, let the user know ("Me pegó un rate limit, reintentando...")
 
 Do NOT stay silent for more than 30 seconds during multi-step work. The user should always know what you are doing.
+
+## Error Handling
+
+If an API call or tool fails with the same error twice in a row, STOP retrying. Tell the user what went wrong and ask how to proceed. Never loop on the same failing operation — it wastes tokens and leaves the user waiting with no response.
