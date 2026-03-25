@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  getActiveTaskByName,
   getAllTasks,
   getRegisteredGroup,
   getTaskById,
@@ -633,6 +634,129 @@ describe('schedule_task context_mode', () => {
 
     const tasks = getAllTasks();
     expect(tasks[0].context_mode).toBe('isolated');
+  });
+});
+
+// --- schedule_task idempotency (Issue #783) ---
+
+describe('schedule_task idempotency via name', () => {
+  it('deduplicates tasks with the same name in the same group', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'daily report',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+        targetJid: 'other@g.us',
+        name: 'daily-report',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Second call with same name should be a no-op
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'daily report',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+        targetJid: 'other@g.us',
+        name: 'daily-report',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].name).toBe('daily-report');
+  });
+
+  it('allows same name in different groups', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'report for other',
+        schedule_type: 'interval',
+        schedule_value: '3600000',
+        targetJid: 'other@g.us',
+        name: 'hourly-check',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'report for third',
+        schedule_type: 'interval',
+        schedule_value: '3600000',
+        targetJid: 'third@g.us',
+        name: 'hourly-check',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(2);
+  });
+
+  it('creates duplicate tasks when no name is provided', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'unnamed task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'unnamed task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Without a name, duplicates are still allowed (backwards compatible)
+    expect(getAllTasks()).toHaveLength(2);
+  });
+
+  it('stores name on created task and retrieves via getActiveTaskByName', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'named task',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+        targetJid: 'other@g.us',
+        name: 'my-task',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const task = getActiveTaskByName('my-task', 'other-group');
+    expect(task).toBeDefined();
+    expect(task!.name).toBe('my-task');
+    expect(task!.prompt).toBe('named task');
   });
 });
 

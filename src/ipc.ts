@@ -5,7 +5,13 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getActiveTaskByName,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -248,6 +254,24 @@ export async function processTaskIpc(
           nextRun = date.toISOString();
         }
 
+        const taskName = data.name
+          ? String(data.name).trim() || null
+          : null;
+
+        // Idempotency: if a name is provided and an active task with that
+        // name already exists in this group, return the existing task ID
+        // instead of creating a duplicate.  (Fixes #783)
+        if (taskName) {
+          const existing = getActiveTaskByName(taskName, targetFolder);
+          if (existing) {
+            logger.info(
+              { taskId: existing.id, taskName, targetFolder },
+              'Task with this name already exists, skipping duplicate',
+            );
+            break;
+          }
+        }
+
         const taskId =
           data.taskId ||
           `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -263,12 +287,13 @@ export async function processTaskIpc(
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
+          name: taskName,
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),
         });
         logger.info(
-          { taskId, sourceGroup, targetFolder, contextMode },
+          { taskId, taskName, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
         deps.onTasksChanged();
