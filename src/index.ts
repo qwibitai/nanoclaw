@@ -194,8 +194,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        (TRIGGER_PATTERN.test(m.content.trim()) &&
+          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
+        // Reply to bot's own message is also a valid trigger (Telegram bot usernames end with "_bot")
+        (m.is_reply && m.reply_to_username?.endsWith('_bot')),
     );
     if (!hasTrigger) return true;
   }
@@ -422,9 +424,11 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+                (TRIGGER_PATTERN.test(m.content.trim()) &&
+                  (m.is_from_me ||
+                    isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
+                // Reply to bot's own message is also a valid trigger (Telegram bot usernames end with "_bot")
+                (m.is_reply && m.reply_to_username?.endsWith('_bot')),
             );
             if (!hasTrigger) continue;
           }
