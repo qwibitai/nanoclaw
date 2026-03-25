@@ -2442,74 +2442,44 @@ function buildVolumeMounts(
  * This ensures shared/multi-tenant groups get a fine-grained PAT scoped
  * to their org, making cross-org repo access impossible by construction.
  */
+/**
+ * Read non-HTTP secrets that OneCLI Agent Vault cannot handle.
+ *
+ * HTTP API credentials (Anthropic, GitHub, OpenAI, Railway, Render API,
+ * dbt Cloud API) are managed by OneCLI — its HTTPS proxy intercepts
+ * outbound requests and injects real credentials at request time.
+ *
+ * This function only reads credentials consumed as process env vars or
+ * file paths: dbt Cloud CLI login, Google Workspace MCP config, gcloud
+ * key paths, and Render PG/Redis connection strings (TCP, not HTTP).
+ */
 function readSecrets(
   groupFolder: string,
   tools?: string[],
 ): Record<string, string> {
-  // Determine which GitHub token env var to read
-  const { scopes: githubScopes, isScoped: githubScoped } = extractToolScopes(
-    tools,
-    'github',
-  );
-  const githubTokenKey = githubScoped
-    ? `GITHUB_TOKEN_${githubScopes[0].toUpperCase()}`
-    : 'GITHUB_TOKEN';
-
-  if (githubScopes.length > 1) {
-    logger.warn(
-      'Multiple github: scopes specified — only the first (%s) is used',
-      githubScopes[0],
-    );
-  }
-
-  // Derive the scope suffix for this group (e.g. "sunday" → "SUNDAY")
   const scope = groupFolder.toUpperCase();
 
-  // Build dbt keys: scoped variants take priority; fall back to unscoped globals
+  // dbt Cloud CLI login credentials (email/password — not HTTP API calls)
   const dbtScopedEmail = `DBT_CLOUD_EMAIL_${scope}`;
   const dbtScopedPassword = `DBT_CLOUD_PASSWORD_${scope}`;
-  const dbtScopedApiKey = `DBT_CLOUD_API_KEY_${scope}`;
   const dbtScopedApiUrl = `DBT_CLOUD_API_URL_${scope}`;
 
-  // Build env var list — conditionally include google-workspace OAuth keys
   const envKeys = [
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    githubTokenKey,
     'DBT_CLOUD_EMAIL',
     'DBT_CLOUD_PASSWORD',
     dbtScopedEmail,
     dbtScopedPassword,
-    dbtScopedApiKey,
     dbtScopedApiUrl,
     ...(isToolEnabled(tools, 'google-workspace')
       ? ['GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET']
       : []),
-    ...(isToolEnabled(tools, 'railway') ? ['RAILWAY_API_TOKEN'] : []),
   ];
   const secrets = readEnvFile(envKeys);
 
-  // Warn if scoped token is missing (fail-closed: no GITHUB_TOKEN at all)
-  if (githubTokenKey !== 'GITHUB_TOKEN' && !secrets[githubTokenKey]) {
-    logger.warn(
-      { key: githubTokenKey },
-      'Scoped GitHub token not found in .env — container will have no GitHub access',
-    );
-  }
-
-  // Normalize scoped token key to GITHUB_TOKEN so the container entrypoint finds it
-  if (githubTokenKey !== 'GITHUB_TOKEN' && secrets[githubTokenKey]) {
-    secrets.GITHUB_TOKEN = secrets[githubTokenKey];
-    delete secrets[githubTokenKey];
-  }
-
-  // Normalize scoped dbt keys to their generic names, then remove the scoped originals.
-  // Scoped values override unscoped globals — unscoped globals remain as fallback if
-  // no scoped key exists for this group.
+  // Normalize scoped dbt keys to their generic names
   for (const [scoped, generic] of [
     [dbtScopedEmail, 'DBT_CLOUD_EMAIL'],
     [dbtScopedPassword, 'DBT_CLOUD_PASSWORD'],
-    [dbtScopedApiKey, 'DBT_CLOUD_API_KEY'],
     [dbtScopedApiUrl, 'DBT_CLOUD_API_URL'],
   ] as const) {
     if (secrets[scoped]) {
@@ -2531,7 +2501,6 @@ function readSecrets(
         (s) => `GCLOUD_KEY_${s.toUpperCase()}`,
       );
       const gcloudKeyMap = readEnvFile(gcloudEnvKeys);
-      // Use the first scope's key file for GOOGLE_APPLICATION_CREDENTIALS
       const firstEnvKey = gcloudEnvKeys[0];
       const keyFile = gcloudKeyMap[firstEnvKey];
       if (keyFile) {
@@ -2540,34 +2509,24 @@ function readSecrets(
     }
   }
 
-  // Render credentials — gated by tools config.
-  // 'render:illysium' → RENDER_API_KEY_ILLYSIUM + all RENDER_PG_*/RENDER_REDIS_* for that scope.
-  // Scope portion is stripped from key names inside the container.
+  // Render PG/Redis connection strings (TCP, not HTTP — OneCLI can't proxy these).
+  // API key is handled by OneCLI; only connection strings remain here.
   if (isToolEnabled(tools, 'render')) {
     const { scopes: renderScopes, isScoped: renderScoped } = extractToolScopes(
       tools,
       'render',
     );
-    const renderScope = renderScoped ? renderScopes[0].toUpperCase() : scope; // scope = groupFolder.toUpperCase()
+    const renderScope = renderScoped ? renderScopes[0].toUpperCase() : scope;
     const scopeToken = `_${renderScope}_`;
-    const apiKeyName = `RENDER_API_KEY_${renderScope}`;
 
-    // Single .env pass: API key + all PG/Redis connection strings for this scope
     const renderVars = readEnvFileMatching(
       (key) =>
-        key === apiKeyName ||
-        ((key.startsWith('RENDER_PG_') || key.startsWith('RENDER_REDIS_')) &&
-          key.includes(scopeToken)),
+        (key.startsWith('RENDER_PG_') || key.startsWith('RENDER_REDIS_')) &&
+        key.includes(scopeToken),
     );
 
-    // Normalize: API key → RENDER_API_KEY, connection strings → strip scope
-    if (renderVars[apiKeyName]) {
-      secrets.RENDER_API_KEY = renderVars[apiKeyName];
-    }
     for (const [key, value] of Object.entries(renderVars)) {
-      if (key !== apiKeyName) {
-        secrets[key.replace(scopeToken, '_')] = value;
-      }
+      secrets[key.replace(scopeToken, '_')] = value;
     }
   }
 

@@ -1125,12 +1125,13 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // CLI tools that authenticate via env vars need secrets exported to process.env
-  // so Bash subprocesses inherit them (same reason GITHUB_TOKEN is set in entrypoint.sh).
-  const cliSecrets = ['RAILWAY_API_TOKEN'];
-  for (const key of cliSecrets) {
-    if (containerInput.secrets?.[key]) {
-      process.env[key] = containerInput.secrets[key];
+  // CLI tools that previously needed secrets exported to process.env now get
+  // credentials injected by the OneCLI HTTPS proxy at request time. Only
+  // non-HTTP secrets (dbt login, gcloud paths) remain in containerInput.secrets.
+  // Export any remaining secrets that CLI tools might need as env vars.
+  for (const [key, value] of Object.entries(containerInput.secrets || {})) {
+    if (key.startsWith('DBT_CLOUD_') || key === 'GOOGLE_APPLICATION_CREDENTIALS') {
+      process.env[key] = value;
     }
   }
 
