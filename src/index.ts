@@ -1037,7 +1037,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       },
       webUI
         ? (event: ProgressEvent) =>
-            webUI!.broadcast(sessionKey, group.name, effectiveThreadId, event)
+            webUI!.broadcast(sessionKey, group.folder, effectiveThreadId, event)
         : undefined,
     );
   } finally {
@@ -1163,7 +1163,7 @@ async function runAgent(
   const sessionKey = buildSessionKey(group.folder, threadId);
   const sessionId = sessions.get(sessionKey);
 
-  webUI?.notifySessionStart(sessionKey, group.name, chatJid, threadId);
+  webUI?.notifySessionStart(sessionKey, group.folder, chatJid, threadId);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
