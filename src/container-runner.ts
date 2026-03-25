@@ -34,6 +34,58 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+/**
+ * macOS APFS creates "name 2", "name 3" conflict files during concurrent
+ * copy/move operations. Node's cpSync fails with EDEADLK when it encounters
+ * these artifacts.
+ */
+const APFS_CONFLICT_RE = / \d+$/;
+
+/** Filter directory entries to skip APFS conflict artifacts and stale temp files */
+function safeReaddirSync(dir: string): string[] {
+  return fs.readdirSync(dir).filter((name) => {
+    if (APFS_CONFLICT_RE.test(name)) {
+      logger.warn({ dir, name }, 'Skipping APFS conflict artifact');
+      return false;
+    }
+    return true;
+  });
+}
+
+/** cpSync filter that skips APFS conflict artifacts during the directory walk */
+function cpSyncFilter(srcPath: string): boolean {
+  const name = path.basename(srcPath);
+  if (APFS_CONFLICT_RE.test(name)) {
+    logger.warn({ path: srcPath }, 'Skipping APFS conflict artifact during copy');
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Safe recursive copy that handles macOS APFS quirks.
+ * Uses a filter to skip conflict artifacts and retries once on EDEADLK.
+ */
+function safeCpSync(
+  src: string,
+  dst: string,
+  opts?: { recursive?: boolean },
+): void {
+  const cpOpts = { ...opts, filter: cpSyncFilter };
+  try {
+    fs.cpSync(src, dst, cpOpts);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EDEADLK') {
+      logger.warn({ src, dst }, 'EDEADLK during copy, retrying');
+      fs.rmSync(dst, { recursive: true, force: true });
+      fs.cpSync(src, dst, cpOpts);
+    } else {
+      throw err;
+    }
+  }
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -151,11 +203,11 @@ function buildVolumeMounts(
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
+    for (const skillDir of safeReaddirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      safeCpSync(srcDir, dstDir, { recursive: true });
     }
   }
   mounts.push({
@@ -192,7 +244,7 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    safeCpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
