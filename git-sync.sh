@@ -133,6 +133,25 @@ sync_repo /home/atlas/projects/gpg/monthly-reporting gpg/monthly-reporting
 sync_repo /home/atlas/projects/gpg/ops-hub gpg/ops-hub
 sync_repo /home/atlas/projects/gpg/social-post-studio gpg/social-post-studio
 
+# Atlas Command — auto-pull + rebuild + restart on changes
+ATLAS_CMD_DIR=/home/atlas/atlas-command
+if [ -d "$ATLAS_CMD_DIR/.git" ]; then
+    cd "$ATLAS_CMD_DIR"
+    HEAD_BEFORE=$(git rev-parse HEAD 2>/dev/null)
+    sync_repo "$ATLAS_CMD_DIR" atlas-command
+    HEAD_AFTER=$(git rev-parse HEAD 2>/dev/null)
+    if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] && [ -n "$HEAD_BEFORE" ] && [ -n "$HEAD_AFTER" ]; then
+        echo "$TIMESTAMP | BUILD | atlas-command | Source changed, rebuilding..." >> "$LOG"
+        BUILD_OUT=$(cd "$ATLAS_CMD_DIR" && npm run build 2>&1)
+        if [ $? -eq 0 ]; then
+            echo "$TIMESTAMP | BUILD | atlas-command | Build succeeded, restarting" >> "$LOG"
+            sudo /usr/bin/systemctl restart atlas-mission-control
+        else
+            echo "$TIMESTAMP | FAIL | atlas-command | Build failed: ${BUILD_OUT:0:200}" >> "$LOG"
+        fi
+    fi
+fi
+
 # Crownscape project repos (nullglob so empty dirs don't produce a false iteration)
 if [ -d /home/atlas/projects/crownscape ]; then
     shopt -s nullglob
