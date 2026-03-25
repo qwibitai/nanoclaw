@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,8 +20,7 @@ interface GroupState {
   runningTaskId: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
-  process: ChildProcess | null;
-  containerName: string | null;
+  boxName: string | null;
   groupFolder: string | null;
   retryCount: number;
 }
@@ -45,8 +43,7 @@ export class GroupQueue {
         runningTaskId: null,
         pendingMessages: false,
         pendingTasks: [],
-        process: null,
-        containerName: null,
+        boxName: null,
         groupFolder: null,
         retryCount: 0,
       };
@@ -129,15 +126,13 @@ export class GroupQueue {
     );
   }
 
-  registerProcess(
+  registerBox(
     groupJid: string,
-    proc: ChildProcess,
-    containerName: string,
+    boxName: string,
     groupFolder?: string,
   ): void {
     const state = this.getGroup(groupJid);
-    state.process = proc;
-    state.containerName = containerName;
+    state.boxName = boxName;
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
@@ -223,8 +218,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
-      state.process = null;
-      state.containerName = null;
+      state.boxName = null;
       state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
@@ -252,8 +246,7 @@ export class GroupQueue {
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
-      state.process = null;
-      state.containerName = null;
+      state.boxName = null;
       state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
@@ -347,19 +340,19 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
+    // Count active boxes but don't kill them — they'll finish on their own
+    // via idle timeout or box timeout. autoRemove cleans them up on exit.
     // This prevents WhatsApp reconnection restarts from killing working agents.
-    const activeContainers: string[] = [];
+    const activeBoxes: string[] = [];
     for (const [_jid, state] of this.groups) {
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
+      if (state.boxName) {
+        activeBoxes.push(state.boxName);
       }
     }
 
     logger.info(
-      { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      { activeCount: this.activeCount, detachedBoxes: activeBoxes },
+      'GroupQueue shutting down (boxes detached, not killed)',
     );
   }
 }

@@ -298,9 +298,8 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register a process so closeStdin has a groupFolder
-    queue.registerProcess(
+    queue.registerBox(
       'group1@g.us',
-      {} as any,
       'container-1',
       'test-group',
     );
@@ -338,9 +337,8 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and mark idle
-    queue.registerProcess(
+    queue.registerBox(
       'group1@g.us',
-      {} as any,
       'container-1',
       'test-group',
     );
@@ -377,9 +375,8 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
+    queue.registerBox(
       'group1@g.us',
-      {} as any,
       'container-1',
       'test-group',
     );
@@ -418,9 +415,8 @@ describe('GroupQueue', () => {
     // Start a task (sets isTaskContainer = true)
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
-    queue.registerProcess(
+    queue.registerBox(
       'group1@g.us',
-      {} as any,
       'container-1',
       'test-group',
     );
@@ -451,9 +447,8 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and enqueue a task (no idle yet — no preemption)
-    queue.registerProcess(
+    queue.registerBox(
       'group1@g.us',
-      {} as any,
       'container-1',
       'test-group',
     );

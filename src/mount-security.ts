@@ -34,7 +34,7 @@ const DEFAULT_BLOCKED_PATTERNS = [
   '.azure',
   '.gcloud',
   '.kube',
-  '.docker',
+  '.boxlite',
   'credentials',
   '.env',
   '.netrc',

@@ -1,7 +1,10 @@
-# NanoClaw Agent Container
-# Runs Claude Agent SDK in isolated Linux VM with browser automation
+# AgentLite Agent Container
+# Runs Claude Agent SDK in isolated BoxLite VM with browser automation
 
 FROM node:22-slim
+
+# Link package to GitHub repo (enables visibility on repo page)
+LABEL org.opencontainers.image.source=https://github.com/boxlite-ai/agentlite
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \

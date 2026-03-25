@@ -41,8 +41,19 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
-export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const BOX_IMAGE = process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
+// Path to OCI layout directory exported by container/build.sh.
+// When set, BoxLite uses this local rootfs instead of pulling from a registry.
+export const BOX_ROOTFS_PATH = process.env.BOX_ROOTFS_PATH || path.join(
+  PROJECT_ROOT,
+  'container',
+  'oci-image',
+);
+export const BOX_MEMORY_MIB = parseInt(
+  process.env.BOX_MEMORY_MIB || '2048',
+  10,
+);
+export const BOX_CPUS = parseInt(process.env.BOX_CPUS || '2', 10);
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,

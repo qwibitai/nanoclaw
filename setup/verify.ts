@@ -82,18 +82,14 @@ export async function run(_args: string[]): Promise<void> {
   }
   logger.info({ service }, 'Service status');
 
-  // 2. Check container runtime
+  // 2. Check container runtime (BoxLite)
   let containerRuntime = 'none';
   try {
-    execSync('command -v container', { stdio: 'ignore' });
-    containerRuntime = 'apple-container';
+    const { JsBoxlite } = await import('@boxlite-ai/boxlite');
+    JsBoxlite.withDefaultConfig();
+    containerRuntime = 'boxlite';
   } catch {
-    try {
-      execSync('docker info', { stdio: 'ignore' });
-      containerRuntime = 'docker';
-    } catch {
-      // No runtime
-    }
+    // BoxLite not available
   }
 
   // 3. Check credentials

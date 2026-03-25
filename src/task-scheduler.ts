@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
@@ -68,7 +67,7 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
-    proc: ChildProcess,
+    boxName: string,
     containerName: string,
     groupFolder: string,
   ) => void;
@@ -180,8 +179,8 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (boxName, containerName) =>
+        deps.onProcess(task.chat_jid, boxName, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

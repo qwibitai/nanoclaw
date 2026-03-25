@@ -1,13 +1,11 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Spawns agent execution in BoxLite VMs and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
-  CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
@@ -16,14 +14,10 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { BOX_IMAGE, BOX_ROOTFS_PATH, BOX_MEMORY_MIB, BOX_CPUS } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  CONTAINER_RUNTIME_BIN,
-  hostGatewayArgs,
-  readonlyMountArgs,
-  stopContainer,
-} from './container-runtime.js';
+import { getRuntime } from './box-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -130,14 +124,8 @@ function buildVolumeMounts(
       JSON.stringify(
         {
           env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
             CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
           },
         },
@@ -207,67 +195,64 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    mounts.push(...validatedMounts);
+    for (const m of validatedMounts) {
+      mounts.push({
+        hostPath: m.hostPath,
+        containerPath: m.containerPath,
+        readonly: m.readonly,
+      });
+    }
   }
 
   return mounts;
 }
 
-async function buildContainerArgs(
-  mounts: VolumeMount[],
+/**
+ * Extract environment variables from OneCLI gateway config.
+ * OneCLI's applyContainerConfig mutates a Docker args array with -e flags.
+ * We parse those out to get the env vars for BoxLite.
+ */
+async function extractOnecliEnv(
   containerName: string,
   agentIdentifier?: string,
-): Promise<string[]> {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
-
-  // Pass host timezone so container's local time matches the user's
-  args.push('-e', `TZ=${TIMEZONE}`);
-
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
+): Promise<Record<string, string>> {
+  const tempArgs: string[] = [];
+  const applied = await onecli.applyContainerConfig(tempArgs, {
+    addHostMapping: false,
     agent: agentIdentifier,
   });
-  if (onecliApplied) {
+
+  if (applied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'OneCLI gateway not reachable — box will have no credentials',
     );
   }
 
-  // Runtime-specific args for host gateway resolution
-  args.push(...hostGatewayArgs());
-
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
-  }
-
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+  const env: Record<string, string> = {};
+  for (let i = 0; i < tempArgs.length; i++) {
+    if (tempArgs[i] === '-e' && i + 1 < tempArgs.length) {
+      const [key, ...rest] = tempArgs[i + 1].split('=');
+      env[key] = rest.join('=');
+      i++;
     }
   }
-
-  args.push(CONTAINER_IMAGE);
-
-  return args;
+  return env;
 }
+
+// Entrypoint command that runs inside the box (same as old Dockerfile entrypoint)
+const ENTRYPOINT_CMD =
+  'cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2 && ' +
+  'ln -s /app/node_modules /tmp/dist/node_modules && ' +
+  'chmod -R a-w /tmp/dist && ' +
+  'node /tmp/dist/index.js';
 
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (boxName: string, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
@@ -278,15 +263,29 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
-    mounts,
-    containerName,
-    agentIdentifier,
-  );
+
+  // Build environment variables
+  const onecliEnv = await extractOnecliEnv(containerName, agentIdentifier);
+  const boxEnv: Record<string, string> = {
+    ...onecliEnv,
+    TZ: TIMEZONE,
+    AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
+  };
+
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  const userStr =
+    hostUid != null && hostUid !== 0 && hostUid !== 1000
+      ? `${hostUid}:${hostGid}`
+      : undefined;
+
+  if (userStr) {
+    boxEnv['HOME'] = '/home/node';
+  }
 
   logger.debug(
     {
@@ -296,9 +295,8 @@ export async function runContainerAgent(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
-      containerArgs: containerArgs.join(' '),
     },
-    'Container mount configuration',
+    'Box mount configuration',
   );
 
   logger.info(
@@ -308,356 +306,404 @@ export async function runContainerAgent(
       mountCount: mounts.length,
       isMain: input.isMain,
     },
-    'Spawning container agent',
+    'Spawning box agent',
   );
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  // Create box via BoxLite runtime
+  const runtime = getRuntime();
+  const envArray = Object.entries(boxEnv).map(([key, value]) => ({
+    key,
+    value,
+  }));
 
-    onProcess(container, containerName);
+  let box;
+  try {
+    // Use local OCI layout if available (from container/build.sh), else pull from registry.
+    // Check for oci-layout file to distinguish a valid OCI directory from an empty one.
+    const useLocalRootfs = BOX_ROOTFS_PATH &&
+      fs.existsSync(path.join(BOX_ROOTFS_PATH, 'oci-layout'));
+    box = await runtime.create(
+      {
+        image: useLocalRootfs ? undefined : BOX_IMAGE,
+        rootfsPath: useLocalRootfs ? BOX_ROOTFS_PATH : undefined,
+        autoRemove: true,
+        memoryMib: BOX_MEMORY_MIB,
+        cpus: BOX_CPUS,
+        volumes: mounts.map((m) => ({
+          hostPath: m.hostPath,
+          guestPath: m.containerPath,
+          readOnly: m.readonly,
+        })),
+        env: envArray,
+        workingDir: '/workspace/group',
+        user: userStr,
+      },
+      containerName,
+    );
+  } catch (err) {
+    logger.error(
+      { group: group.name, containerName, error: err },
+      'Box creation failed',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: `Box creation failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
-    let stdout = '';
-    let stderr = '';
-    let stdoutTruncated = false;
-    let stderrTruncated = false;
+  onProcess(containerName, containerName);
 
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+  // Start the agent entrypoint via box.exec (returns JsExecution with streaming)
+  let execution;
+  try {
+    const timeoutSecs = Math.max(
+      Math.floor(CONTAINER_TIMEOUT / 1000),
+      Math.floor((IDLE_TIMEOUT + 30_000) / 1000),
+    );
 
-    // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
-    let parseBuffer = '';
-    let newSessionId: string | undefined;
-    let outputChain = Promise.resolve();
+    execution = await box.exec(
+      'bash',
+      ['-c', ENTRYPOINT_CMD],
+      null, // env already set on box creation
+      false, // tty
+      null, // user already set on box creation
+      timeoutSecs,
+      '/workspace/group',
+    );
+  } catch (err) {
+    logger.error(
+      { group: group.name, containerName, error: err },
+      'Failed to start agent in box',
+    );
+    try { await box.stop(); } catch { /* ignore */ }
+    return {
+      status: 'error',
+      result: null,
+      error: `Failed to start agent: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
-    container.stdout.on('data', (data) => {
-      const chunk = data.toString();
+  // Write input via stdin (same protocol as Docker's container.stdin.write)
+  try {
+    const stdin = await execution.stdin();
+    await stdin.writeString(JSON.stringify(input));
+    await stdin.close();
+  } catch (err) {
+    logger.error(
+      { group: group.name, containerName, error: err },
+      'Failed to write stdin to box',
+    );
+    try { await execution.kill(); } catch { /* ignore */ }
+    try { await box.stop(); } catch { /* ignore */ }
+    return {
+      status: 'error',
+      result: null,
+      error: `Failed to write stdin: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
-      // Always accumulate for logging
-      if (!stdoutTruncated) {
-        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
-        if (chunk.length > remaining) {
-          stdout += chunk.slice(0, remaining);
-          stdoutTruncated = true;
-          logger.warn(
-            { group: group.name, size: stdout.length },
-            'Container stdout truncated due to size limit',
-          );
-        } else {
-          stdout += chunk;
-        }
-      }
+  // Stream stdout and stderr, parse output markers
+  let parseBuffer = '';
+  let newSessionId: string | undefined;
+  let outputChain = Promise.resolve();
+  let hadStreamingOutput = false;
+  let stdout = '';
+  let stderr = '';
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
 
-      // Stream-parse for output markers
-      if (onOutput) {
-        parseBuffer += chunk;
-        let startIdx: number;
-        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
-          const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-          if (endIdx === -1) break; // Incomplete pair, wait for more data
+  // Timeout handling
+  let timedOut = false;
+  const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+  const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
-          const jsonStr = parseBuffer
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const killOnTimeout = async () => {
+    timedOut = true;
+    logger.error(
+      { group: group.name, containerName },
+      'Box timeout, stopping',
+    );
+    try { await execution.kill(); } catch { /* ignore */ }
+    try { await box.stop(); } catch { /* ignore */ }
+  };
+  timeoutHandle = setTimeout(killOnTimeout, timeoutMs);
 
-          try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
-            }
-            hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
-            resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
-          } catch (err) {
+  const resetTimeout = () => {
+    clearTimeout(timeoutHandle);
+    timeoutHandle = setTimeout(killOnTimeout, timeoutMs);
+  };
+
+  // Read stdout line-by-line via BoxLite's streaming API
+  const readStdout = async () => {
+    try {
+      const stdoutStream = await execution.stdout();
+      while (true) {
+        const line = await stdoutStream.next();
+        if (line === null) break;
+
+        // Accumulate for logging
+        if (!stdoutTruncated) {
+          const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+          if (line.length > remaining) {
+            stdout += line.slice(0, remaining);
+            stdoutTruncated = true;
             logger.warn(
-              { group: group.name, error: err },
-              'Failed to parse streamed output chunk',
+              { group: group.name, size: stdout.length },
+              'Box stdout truncated due to size limit',
             );
+          } else {
+            stdout += line;
+          }
+        }
+
+        // Parse output markers (same logic as before, adapted for line-by-line)
+        if (onOutput) {
+          parseBuffer += line;
+          let startIdx: number;
+          while (
+            (startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1
+          ) {
+            const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
+            if (endIdx === -1) break;
+
+            const jsonStr = parseBuffer
+              .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+              .trim();
+            parseBuffer = parseBuffer.slice(
+              endIdx + OUTPUT_END_MARKER.length,
+            );
+
+            try {
+              const parsed: ContainerOutput = JSON.parse(jsonStr);
+              if (parsed.newSessionId) {
+                newSessionId = parsed.newSessionId;
+              }
+              hadStreamingOutput = true;
+              resetTimeout();
+              outputChain = outputChain.then(() => onOutput(parsed));
+            } catch (err) {
+              logger.warn(
+                { group: group.name, error: err },
+                'Failed to parse streamed output chunk',
+              );
+            }
           }
         }
       }
-    });
+    } catch {
+      // Stream ended or error
+    }
+  };
 
-    container.stderr.on('data', (data) => {
-      const chunk = data.toString();
-      const lines = chunk.trim().split('\n');
-      for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
-      }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
-      if (stderrTruncated) return;
-      const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
-      if (chunk.length > remaining) {
-        stderr += chunk.slice(0, remaining);
-        stderrTruncated = true;
-        logger.warn(
-          { group: group.name, size: stderr.length },
-          'Container stderr truncated due to size limit',
-        );
-      } else {
-        stderr += chunk;
-      }
-    });
+  // Read stderr line-by-line for logging
+  const readStderr = async () => {
+    try {
+      const stderrStream = await execution.stderr();
+      while (true) {
+        const line = await stderrStream.next();
+        if (line === null) break;
 
-    let timedOut = false;
-    let hadStreamingOutput = false;
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful _close sentinel has time to trigger before the hard kill fires.
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+        const trimmed = line.trim();
+        if (trimmed) logger.debug({ container: group.folder }, trimmed);
 
-    const killOnTimeout = () => {
-      timedOut = true;
-      logger.error(
-        { group: group.name, containerName },
-        'Container timeout, stopping gracefully',
-      );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
+        if (stderrTruncated) continue;
+        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
+        if (line.length > remaining) {
+          stderr += line.slice(0, remaining);
+          stderrTruncated = true;
           logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
+            { group: group.name, size: stderr.length },
+            'Box stderr truncated due to size limit',
           );
-          container.kill('SIGKILL');
-        }
-      });
-    };
-
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
-
-    // Reset the timeout whenever there's activity (streaming output)
-    const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
-    };
-
-    container.on('close', (code) => {
-      clearTimeout(timeout);
-      const duration = Date.now() - startTime;
-
-      if (timedOut) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(
-          timeoutLog,
-          [
-            `=== Container Run Log (TIMEOUT) ===`,
-            `Timestamp: ${new Date().toISOString()}`,
-            `Group: ${group.name}`,
-            `Container: ${containerName}`,
-            `Duration: ${duration}ms`,
-            `Exit Code: ${code}`,
-            `Had Streaming Output: ${hadStreamingOutput}`,
-          ].join('\n'),
-        );
-
-        // Timeout after output = idle cleanup, not failure.
-        // The agent already sent its response; this is just the
-        // container being reaped after the idle period expired.
-        if (hadStreamingOutput) {
-          logger.info(
-            { group: group.name, containerName, duration, code },
-            'Container timed out after output (idle cleanup)',
-          );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
-            });
-          });
-          return;
-        }
-
-        logger.error(
-          { group: group.name, containerName, duration, code },
-          'Container timed out with no output',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Container timed out after ${configTimeout}ms`,
-        });
-        return;
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const logFile = path.join(logsDir, `container-${timestamp}.log`);
-      const isVerbose =
-        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
-
-      const logLines = [
-        `=== Container Run Log ===`,
-        `Timestamp: ${new Date().toISOString()}`,
-        `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
-        `Duration: ${duration}ms`,
-        `Exit Code: ${code}`,
-        `Stdout Truncated: ${stdoutTruncated}`,
-        `Stderr Truncated: ${stderrTruncated}`,
-        ``,
-      ];
-
-      const isError = code !== 0;
-
-      if (isVerbose || isError) {
-        // On error, log input metadata only — not the full prompt.
-        // Full input is only included at verbose level to avoid
-        // persisting user conversation content on every non-zero exit.
-        if (isVerbose) {
-          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
-          logLines.push(
-            `=== Input Summary ===`,
-            `Prompt length: ${input.prompt.length} chars`,
-            `Session ID: ${input.sessionId || 'new'}`,
-            ``,
-          );
+          stderr += line;
         }
-        logLines.push(
-          `=== Container Args ===`,
-          containerArgs.join(' '),
-          ``,
-          `=== Mounts ===`,
-          mounts
-            .map(
-              (m) =>
-                `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-            )
-            .join('\n'),
-          ``,
-          `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stderr,
-          ``,
-          `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
-          stdout,
-        );
-      } else {
-        logLines.push(
-          `=== Input Summary ===`,
-          `Prompt length: ${input.prompt.length} chars`,
-          `Session ID: ${input.sessionId || 'new'}`,
-          ``,
-          `=== Mounts ===`,
-          mounts
-            .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
-            .join('\n'),
-          ``,
-        );
       }
+    } catch {
+      // Stream ended or error
+    }
+  };
 
-      fs.writeFileSync(logFile, logLines.join('\n'));
-      logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
-
-      if (code !== 0) {
-        logger.error(
-          {
-            group: group.name,
-            code,
-            duration,
-            stderr,
-            stdout,
-            logFile,
-          },
-          'Container exited with error',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
-        });
-        return;
-      }
-
-      // Streaming mode: wait for output chain to settle, return completion marker
-      if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
-          });
-        });
-        return;
-      }
-
-      // Legacy mode: parse the last output marker pair from accumulated stdout
-      try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
-        }
-
-        const output: ContainerOutput = JSON.parse(jsonLine);
-
-        logger.info(
-          {
-            group: group.name,
-            duration,
-            status: output.status,
-            hasResult: !!output.result,
-          },
-          'Container completed',
-        );
-
-        resolve(output);
-      } catch (err) {
-        logger.error(
-          {
-            group: group.name,
-            stdout,
-            stderr,
-            error: err,
-          },
-          'Failed to parse container output',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    });
-
-    container.on('error', (err) => {
-      clearTimeout(timeout);
+  // Run stdout/stderr readers and wait for completion in parallel
+  const [, , execResult] = await Promise.all([
+    readStdout(),
+    readStderr(),
+    execution.wait().catch((err: unknown) => {
       logger.error(
         { group: group.name, containerName, error: err },
-        'Container spawn error',
+        'Box wait error',
       );
-      resolve({
-        status: 'error',
-        result: null,
-        error: `Container spawn error: ${err.message}`,
-      });
-    });
-  });
+      return { exitCode: 1, errorMessage: String(err) };
+    }),
+  ]);
+
+  clearTimeout(timeoutHandle);
+  const duration = Date.now() - startTime;
+  const code = execResult.exitCode;
+
+  if (timedOut) {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const timeoutLog = path.join(logsDir, `container-${ts}.log`);
+    fs.writeFileSync(
+      timeoutLog,
+      [
+        `=== Box Run Log (TIMEOUT) ===`,
+        `Timestamp: ${new Date().toISOString()}`,
+        `Group: ${group.name}`,
+        `Box: ${containerName}`,
+        `Duration: ${duration}ms`,
+        `Exit Code: ${code}`,
+        `Had Streaming Output: ${hadStreamingOutput}`,
+      ].join('\n'),
+    );
+
+    if (hadStreamingOutput) {
+      logger.info(
+        { group: group.name, containerName, duration, code },
+        'Box timed out after output (idle cleanup)',
+      );
+      await outputChain;
+      return { status: 'success', result: null, newSessionId };
+    }
+
+    logger.error(
+      { group: group.name, containerName, duration, code },
+      'Box timed out with no output',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: `Box timed out after ${configTimeout}ms`,
+    };
+  }
+
+  // Write log file
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const logFile = path.join(logsDir, `container-${timestamp}.log`);
+  const isVerbose =
+    process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+
+  const logLines = [
+    `=== Box Run Log ===`,
+    `Timestamp: ${new Date().toISOString()}`,
+    `Group: ${group.name}`,
+    `IsMain: ${input.isMain}`,
+    `Duration: ${duration}ms`,
+    `Exit Code: ${code}`,
+    `Stdout Truncated: ${stdoutTruncated}`,
+    `Stderr Truncated: ${stderrTruncated}`,
+    ``,
+  ];
+
+  const isError = code !== 0;
+
+  if (isVerbose || isError) {
+    if (isVerbose) {
+      logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
+    } else {
+      logLines.push(
+        `=== Input Summary ===`,
+        `Prompt length: ${input.prompt.length} chars`,
+        `Session ID: ${input.sessionId || 'new'}`,
+        ``,
+      );
+    }
+    logLines.push(
+      `=== Mounts ===`,
+      mounts
+        .map(
+          (m) =>
+            `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
+        )
+        .join('\n'),
+      ``,
+      `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
+      stderr,
+      ``,
+      `=== Stdout${stdoutTruncated ? ' (TRUNCATED)' : ''} ===`,
+      stdout,
+    );
+  } else {
+    logLines.push(
+      `=== Input Summary ===`,
+      `Prompt length: ${input.prompt.length} chars`,
+      `Session ID: ${input.sessionId || 'new'}`,
+      ``,
+      `=== Mounts ===`,
+      mounts
+        .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
+        .join('\n'),
+      ``,
+    );
+  }
+
+  fs.writeFileSync(logFile, logLines.join('\n'));
+  logger.debug({ logFile, verbose: isVerbose }, 'Box log written');
+
+  if (code !== 0) {
+    logger.error(
+      { group: group.name, code, duration, stderr, stdout, logFile },
+      'Box exited with error',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: `Box exited with code ${code}: ${stderr.slice(-200)}`,
+    };
+  }
+
+  // Streaming mode: wait for output chain to settle
+  if (onOutput) {
+    await outputChain;
+    logger.info(
+      { group: group.name, duration, newSessionId },
+      'Box completed (streaming mode)',
+    );
+    return { status: 'success', result: null, newSessionId };
+  }
+
+  // Legacy mode: parse the last output marker pair from accumulated stdout
+  try {
+    const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
+    const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+
+    let jsonLine: string;
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      jsonLine = stdout
+        .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+        .trim();
+    } else {
+      const lines = stdout.trim().split('\n');
+      jsonLine = lines[lines.length - 1];
+    }
+
+    const output: ContainerOutput = JSON.parse(jsonLine);
+    logger.info(
+      {
+        group: group.name,
+        duration,
+        status: output.status,
+        hasResult: !!output.result,
+      },
+      'Box completed',
+    );
+    return output;
+  } catch (err) {
+    logger.error(
+      { group: group.name, stdout, stderr, error: err },
+      'Failed to parse box output',
+    );
+    return {
+      status: 'error',
+      result: null,
+      error: `Failed to parse box output: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 export function writeTasksSnapshot(
@@ -673,11 +719,9 @@ export function writeTasksSnapshot(
     next_run: string | null;
   }>,
 ): void {
-  // Write filtered tasks to the group's IPC directory
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all tasks, others only see their own
   const filteredTasks = isMain
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
@@ -693,11 +737,6 @@ export interface AvailableGroup {
   isRegistered: boolean;
 }
 
-/**
- * Write available groups snapshot for the container to read.
- * Only main group can see all available groups (for activation).
- * Non-main groups only see their own registration status.
- */
 export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
@@ -707,7 +746,6 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
   const visibleGroups = isMain ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');

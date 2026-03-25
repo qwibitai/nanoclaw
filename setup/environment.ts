@@ -27,16 +27,14 @@ export async function run(_args: string[]): Promise<void> {
     appleContainer = 'installed';
   }
 
-  // Check Docker
-  let docker: 'running' | 'installed_not_running' | 'not_found' = 'not_found';
-  if (commandExists('docker')) {
-    try {
-      const { execSync } = await import('child_process');
-      execSync('docker info', { stdio: 'ignore' });
-      docker = 'running';
-    } catch {
-      docker = 'installed_not_running';
-    }
+  // Check BoxLite
+  let boxlite: 'available' | 'not_found' = 'not_found';
+  try {
+    const { JsBoxlite } = await import('@boxlite-ai/boxlite');
+    JsBoxlite.withDefaultConfig();
+    boxlite = 'available';
+  } catch {
+    boxlite = 'not_found';
   }
 
   // Check existing config
@@ -71,7 +69,7 @@ export async function run(_args: string[]): Promise<void> {
       platform,
       wsl,
       appleContainer,
-      docker,
+      boxlite,
       hasEnv,
       hasAuth,
       hasRegisteredGroups,
@@ -84,7 +82,7 @@ export async function run(_args: string[]): Promise<void> {
     IS_WSL: wsl,
     IS_HEADLESS: headless,
     APPLE_CONTAINER: appleContainer,
-    DOCKER: docker,
+    BOXLITE: boxlite,
     HAS_ENV: hasEnv,
     HAS_AUTH: hasAuth,
     HAS_REGISTERED_GROUPS: hasRegisteredGroups,

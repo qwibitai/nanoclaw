@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -8,7 +6,10 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
+  BOX_IMAGE: 'agentlite-agent:latest',
+  BOX_ROOTFS_PATH: '/nonexistent/path',
+  BOX_MEMORY_MIB: 2048,
+  BOX_CPUS: 2,
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
@@ -42,6 +43,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -55,47 +57,105 @@ vi.mock('./mount-security.js', () => ({
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: class {
     applyContainerConfig = vi.fn().mockResolvedValue(true);
-    createAgent = vi.fn().mockResolvedValue({ id: 'test' });
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
   },
 }));
 
-// Create a controllable fake ChildProcess
-function createFakeProcess() {
-  const proc = new EventEmitter() as EventEmitter & {
-    stdin: PassThrough;
-    stdout: PassThrough;
-    stderr: PassThrough;
-    kill: ReturnType<typeof vi.fn>;
-    pid: number;
-  };
-  proc.stdin = new PassThrough();
-  proc.stdout = new PassThrough();
-  proc.stderr = new PassThrough();
-  proc.kill = vi.fn();
-  proc.pid = 12345;
-  return proc;
+// Mock BoxLite runtime
+interface MockStdoutLine {
+  resolve: (line: string | null) => void;
 }
 
-let fakeProc: ReturnType<typeof createFakeProcess>;
+function createMockExecution() {
+  const stdoutQueue: string[] = [];
+  const stdoutWaiters: MockStdoutLine[] = [];
+  let stdoutClosed = false;
 
-// Mock child_process.spawn
-vi.mock('child_process', async () => {
-  const actual =
-    await vi.importActual<typeof import('child_process')>('child_process');
-  return {
-    ...actual,
-    spawn: vi.fn(() => fakeProc),
-    exec: vi.fn(
-      (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
-        if (cb) cb(null);
-        return new EventEmitter();
-      },
-    ),
+  const stderrQueue: string[] = [];
+  const stderrWaiters: MockStdoutLine[] = [];
+  let stderrClosed = false;
+
+  let waitResolve: (result: { exitCode: number }) => void;
+  const waitPromise = new Promise<{ exitCode: number }>((resolve) => {
+    waitResolve = resolve;
+  });
+
+  const mockStdin = {
+    writeString: vi.fn().mockResolvedValue(undefined),
+    write: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
   };
-});
+
+  const mockStdout = {
+    next: vi.fn(() => {
+      if (stdoutQueue.length > 0) {
+        return Promise.resolve(stdoutQueue.shift()!);
+      }
+      if (stdoutClosed) return Promise.resolve(null);
+      return new Promise<string | null>((resolve) => {
+        stdoutWaiters.push({ resolve });
+      });
+    }),
+  };
+
+  const mockStderr = {
+    next: vi.fn(() => {
+      if (stderrQueue.length > 0) {
+        return Promise.resolve(stderrQueue.shift()!);
+      }
+      if (stderrClosed) return Promise.resolve(null);
+      return new Promise<string | null>((resolve) => {
+        stderrWaiters.push({ resolve });
+      });
+    }),
+  };
+
+  const execution = {
+    stdin: vi.fn().mockResolvedValue(mockStdin),
+    stdout: vi.fn().mockResolvedValue(mockStdout),
+    stderr: vi.fn().mockResolvedValue(mockStderr),
+    wait: vi.fn(() => waitPromise),
+    kill: vi.fn().mockResolvedValue(undefined),
+  };
+
+  return {
+    execution,
+    mockStdin,
+    pushStdout(line: string) {
+      if (stdoutWaiters.length > 0) {
+        stdoutWaiters.shift()!.resolve(line);
+      } else {
+        stdoutQueue.push(line);
+      }
+    },
+    closeStdout() {
+      stdoutClosed = true;
+      for (const w of stdoutWaiters) w.resolve(null);
+      stdoutWaiters.length = 0;
+    },
+    closeStderr() {
+      stderrClosed = true;
+      for (const w of stderrWaiters) w.resolve(null);
+      stderrWaiters.length = 0;
+    },
+    resolveWait(exitCode: number) {
+      waitResolve!({ exitCode });
+    },
+  };
+}
+
+let mockExec: ReturnType<typeof createMockExecution>;
+const mockBox = {
+  exec: vi.fn(),
+  stop: vi.fn().mockResolvedValue(undefined),
+};
+const mockRuntime = {
+  create: vi.fn().mockResolvedValue(mockBox),
+};
+
+vi.mock('./box-runtime.js', () => ({
+  getRuntime: () => mockRuntime,
+  stopBox: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
@@ -114,18 +174,20 @@ const testInput = {
   isMain: false,
 };
 
-function emitOutputMarker(
-  proc: ReturnType<typeof createFakeProcess>,
+function emitOutputToExec(
+  exec: ReturnType<typeof createMockExecution>,
   output: ContainerOutput,
 ) {
   const json = JSON.stringify(output);
-  proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
+  exec.pushStdout(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
-describe('container-runner timeout behavior', () => {
+describe('container-runner with BoxLite', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    fakeProc = createFakeProcess();
+    mockExec = createMockExecution();
+    mockBox.exec.mockResolvedValue(mockExec.execution);
+    mockRuntime.create.mockResolvedValue(mockBox);
   });
 
   afterEach(() => {
@@ -141,8 +203,11 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
+    // Let box creation and exec settle
+    await vi.advanceTimersByTimeAsync(10);
+
     // Emit output with a result
-    emitOutputMarker(fakeProc, {
+    emitOutputToExec(mockExec, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
@@ -154,10 +219,11 @@ describe('container-runner timeout behavior', () => {
     // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
     await vi.advanceTimersByTimeAsync(1830000);
 
-    // Emit close event (as if container was stopped by the timeout)
-    fakeProc.emit('close', 137);
+    // Close streams and resolve wait (simulating box being killed)
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(137);
 
-    // Let the promise resolve
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
@@ -177,11 +243,15 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
+    await vi.advanceTimersByTimeAsync(10);
+
     // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
 
-    // Emit close event
-    fakeProc.emit('close', 137);
+    // Close streams and resolve wait
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(137);
 
     await vi.advanceTimersByTimeAsync(10);
 
@@ -200,8 +270,10 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
+    await vi.advanceTimersByTimeAsync(10);
+
     // Emit output
-    emitOutputMarker(fakeProc, {
+    emitOutputToExec(mockExec, {
       status: 'success',
       result: 'Done',
       newSessionId: 'session-456',
@@ -210,7 +282,9 @@ describe('container-runner timeout behavior', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Normal exit (no timeout)
-    fakeProc.emit('close', 0);
+    mockExec.closeStdout();
+    mockExec.closeStderr();
+    mockExec.resolveWait(0);
 
     await vi.advanceTimersByTimeAsync(10);
 

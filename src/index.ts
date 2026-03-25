@@ -24,8 +24,8 @@ import {
 } from './container-runner.js';
 import {
   cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
+  ensureRuntimeReady,
+} from './box-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -344,8 +344,8 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (boxName, _containerName) =>
+        queue.registerBox(chatJid, boxName, group.folder),
       wrappedOnOutput,
     );
 
@@ -488,13 +488,13 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+async function ensureContainerSystemRunning(): Promise<void> {
+  ensureRuntimeReady();
+  await cleanupOrphans();
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -625,8 +625,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, boxName, _containerName, groupFolder) =>
+      queue.registerBox(groupJid, boxName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
