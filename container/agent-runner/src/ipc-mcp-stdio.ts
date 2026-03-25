@@ -339,7 +339,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 // Register the 10 Service Bot tools for managing DB and Nook.
 // These tools SSH outbound to target hosts using the dedicated service key.
 const githubToken = process.env.GITHUB_TOKEN || '';
-registerServiceBotTools(server, githubToken || undefined);
+await registerServiceBotTools(server, githubToken || undefined);
 
 // Start the stdio transport
 const transport = new StdioServerTransport();

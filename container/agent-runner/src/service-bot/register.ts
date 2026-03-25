@@ -8,21 +8,29 @@ import { createGitHubClient } from './github.js';
 import { botStatus, readLogs, readFile, listIssues } from './observe.js';
 import { searchLogs, inspectConfig } from './diagnose.js';
 import { editFile, dockerCommand, createIssue, runCommand } from './act.js';
+import { initRegistry, refreshConfigs } from './config.js';
 import { chubSearch, chubGet, chubExec } from './chub.js';
+import { readOwnConversations } from './self.js';
+import { transcribeAudio } from './audio.js';
+
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }] };
 }
 
 /**
- * Register all 10 Service Bot tools on the given MCP server.
+ * Register all Service Bot tools on the given MCP server.
  * Call this from ipc-mcp-stdio.ts after creating the McpServer.
+ * Initializes the bot registry for dynamic config loading.
  */
-export function registerServiceBotTools(
+export async function registerServiceBotTools(
   server: McpServer,
   githubToken?: string,
 ) {
   const github = githubToken ? createGitHubClient(githubToken) : null;
+
+  // Initialize registry (fetches configs from API, falls back to cache)
+  await initRegistry();
 
   // ─── Observe ─────────────────────────────────────────────
 
@@ -172,4 +180,60 @@ export function registerServiceBotTools(
     async ({ id, lang, full }) =>
       text(await chubGet(id, chubExec, { lang, full })),
   );
+
+  // ─── Audio Processing ────────────────────────────────────
+
+  server.tool(
+    'transcribe_audio',
+    'Transcribe audio from a Telegram voice message or file. Converts speech to text using Groq Whisper API.',
+    {
+      telegramFileId: z.string().describe('Telegram file_id from voice message'),
+      audioUrl: z.string().optional().describe('Direct URL to audio file (optional if telegramFileId provided)'),
+    },
+    async ({ telegramFileId, audioUrl }) => {
+      const url = audioUrl || '';
+      const result = await transcribeAudio(url, telegramFileId);
+      return text(result);
+    },
+  );
+
+  // ─── Self-Observation ────────────────────────────────────
+
+  server.tool(
+    'read_own_conversations',
+    'Read X\'s own conversation history across all channels (Slack + Telegram). Queries the messages database directly. Used for cross-channel context awareness.',
+    {
+      channel: z.enum(['slack', 'telegram']).optional().describe('Filter by channel. Omit to get all channels.'),
+      lines: z.number().optional().describe('Number of messages to return (default 20, max 100)'),
+      search: z.string().optional().describe('Search term to filter messages by content'),
+      hours: z.number().optional().describe('How many hours back to search (default 4)'),
+    },
+    async ({ channel, lines, search, hours }) =>
+      text(await readOwnConversations(sshExec, { channel, lines, search, hours })),
+  );
+
+  // ─── Registry Management ──────────────────────────────────
+
+  server.tool(
+    'refresh_configs',
+    'Refresh bot configurations from the central registry API. Use after onboarding a new bot or updating a bot\'s config in the registry. Returns a diff of added/removed bots.',
+    {},
+    async () => {
+      const result = await refreshConfigs();
+      const lines = [
+        `Loaded ${result.botsLoaded} bot configs (source: ${result.source})`,
+      ];
+      if (result.added.length > 0) lines.push(`Added: ${result.added.join(', ')}`);
+      if (result.removed.length > 0) lines.push(`Removed: ${result.removed.join(', ')}`);
+      if (result.added.length === 0 && result.removed.length === 0) {
+        lines.push('No changes detected.');
+      }
+      return text(lines.join('\n'));
+    },
+  );
+
+  // ─── Notice Board ─────────────────────────────────────────
+  // Notice tools (read_notices, acknowledge_notice, post_notice) have been
+  // moved to the standalone bot-dashboard-mcp server. All bots now consume
+  // notices via that MCP server instead of baked-in tools.
 }

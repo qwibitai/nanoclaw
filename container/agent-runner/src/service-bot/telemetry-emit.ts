@@ -1,6 +1,6 @@
 // Telemetry emission — sends service_action events to the UTI telemetry service.
 
-import { BOTS } from './config.js';
+import { getBotConfig } from './config.js';
 
 export interface ServiceAction {
   targetBot: string; // bot name (e.g. "db", "nook")
@@ -18,8 +18,12 @@ const TELEMETRY_TIMEOUT_MS = 3000;
  * Returns undefined if the bot has no telemetryBotId configured.
  */
 function resolveTargetBotId(botName: string): string | undefined {
-  const config = BOTS[botName.toLowerCase()];
-  return config?.telemetryBotId;
+  try {
+    const config = getBotConfig(botName);
+    return config.telemetryBotId;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
