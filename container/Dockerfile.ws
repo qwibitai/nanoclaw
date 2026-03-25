@@ -37,7 +37,7 @@ RUN npm install -g @anthropic-ai/claude-code
 # Management server + channel runtime
 WORKDIR /ws
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 COPY dist/ ./dist/
 
 # Config directory for .env
