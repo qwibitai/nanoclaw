@@ -624,7 +624,7 @@
     {
       "name": "linear",
       "source": "local",
-      "description": "Manage Linear issues and projects — create, update, list, and search issues; view team and project status; sync project notes to Linear. Use when asked to manage tasks in Linear, create issues, check project progress, or offload project management to Linear.",
+      "description": "Manage Linear issues and projects \u2014 create, update, list, and search issues; view team and project status; sync project notes to Linear. Use when asked to manage tasks in Linear, create issues, check project progress, or offload project management to Linear.",
       "categories": [
         "general"
       ],
@@ -1224,6 +1224,14 @@
         "general"
       ],
       "path": "/skills-catalog/local/technical-analysis"
+    },
+    {
+      "name": "fundamental-analysis",
+      "description": "Compute Piotroski F-Score, PEG Ratio, Graham Number, and ROIC quality for stocks. Blend with technical analysis into a single 0-100 conviction score. Use when you need to evaluate a stock financial health, intrinsic value, or want a combined fundamental+technical signal.",
+      "path": "/skills-catalog/local/fundamental-analysis",
+      "categories": [
+        "general"
+      ]
     }
   ]
 }
