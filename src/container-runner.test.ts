@@ -99,6 +99,7 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { validateAdditionalMounts } from './mount-security.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -217,5 +218,62 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('buildVolumeMounts — isScheduledTask permission forwarding', () => {
+  const groupWithMounts: RegisteredGroup = {
+    ...testGroup,
+    containerConfig: {
+      additionalMounts: [
+        { hostPath: '/data', containerPath: 'data', readonly: false },
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(validateAdditionalMounts).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('treats isScheduledTask=true as isMain=true in validateAdditionalMounts', async () => {
+    const resultPromise = runContainerAgent(
+      groupWithMounts,
+      { ...testInput, isMain: false, isScheduledTask: true },
+      () => {},
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+    expect(vi.mocked(validateAdditionalMounts)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      true,
+    );
+  });
+
+  it('treats isScheduledTask=false as isMain=false in validateAdditionalMounts', async () => {
+    const resultPromise = runContainerAgent(
+      groupWithMounts,
+      { ...testInput, isMain: false, isScheduledTask: false },
+      () => {},
+    );
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+    expect(vi.mocked(validateAdditionalMounts)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      false,
+    );
   });
 });
