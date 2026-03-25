@@ -114,17 +114,22 @@ export function startCredentialProxy(
           const jid = url.searchParams.get('jid');
           if (!jid || !handlers.getInviteLink) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Missing jid or handler not ready' }));
+            res.end(
+              JSON.stringify({ error: 'Missing jid or handler not ready' }),
+            );
             return;
           }
-          handlers.getInviteLink(jid).then((link) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ link }));
-          }).catch((err) => {
-            logger.error({ err, jid }, 'Error getting invite link');
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Internal error' }));
-          });
+          handlers
+            .getInviteLink(jid)
+            .then((link) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ link }));
+            })
+            .catch((err) => {
+              logger.error({ err, jid }, 'Error getting invite link');
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Internal error' }));
+            });
           return;
         }
 
