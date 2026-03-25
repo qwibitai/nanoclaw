@@ -62,7 +62,11 @@ export class R2Client {
     );
   }
 
-  async upload(key: string, body: Buffer, contentType?: string): Promise<string> {
+  async upload(
+    key: string,
+    body: Buffer,
+    contentType?: string,
+  ): Promise<string> {
     await this.privateClient.send(
       new PutObjectCommand({
         Bucket: this.config.privateBucket,
@@ -170,13 +174,27 @@ export function getR2Client(): R2Client | null {
   _r2Client = new R2Client({
     accountId,
     privateBucket: process.env.R2_PRIVATE_BUCKET ?? env.R2_PRIVATE_BUCKET ?? '',
-    privateAccessKey: process.env.R2_PRIVATE_ACCESS_KEY ?? env.R2_PRIVATE_ACCESS_KEY ?? '',
-    privateSecretKey: process.env.R2_PRIVATE_SECRET_KEY ?? env.R2_PRIVATE_SECRET_KEY ?? '',
+    privateAccessKey:
+      process.env.R2_PRIVATE_ACCESS_KEY ?? env.R2_PRIVATE_ACCESS_KEY ?? '',
+    privateSecretKey:
+      process.env.R2_PRIVATE_SECRET_KEY ?? env.R2_PRIVATE_SECRET_KEY ?? '',
     sharedBucket: process.env.R2_SHARED_BUCKET ?? env.R2_SHARED_BUCKET ?? '',
-    sharedReadAccessKey: process.env.R2_SHARED_READ_ACCESS_KEY ?? env.R2_SHARED_READ_ACCESS_KEY ?? '',
-    sharedReadSecretKey: process.env.R2_SHARED_READ_SECRET_KEY ?? env.R2_SHARED_READ_SECRET_KEY ?? '',
-    sharedWriteAccessKey: process.env.R2_SHARED_WRITE_ACCESS_KEY ?? env.R2_SHARED_WRITE_ACCESS_KEY ?? '',
-    sharedWriteSecretKey: process.env.R2_SHARED_WRITE_SECRET_KEY ?? env.R2_SHARED_WRITE_SECRET_KEY ?? '',
+    sharedReadAccessKey:
+      process.env.R2_SHARED_READ_ACCESS_KEY ??
+      env.R2_SHARED_READ_ACCESS_KEY ??
+      '',
+    sharedReadSecretKey:
+      process.env.R2_SHARED_READ_SECRET_KEY ??
+      env.R2_SHARED_READ_SECRET_KEY ??
+      '',
+    sharedWriteAccessKey:
+      process.env.R2_SHARED_WRITE_ACCESS_KEY ??
+      env.R2_SHARED_WRITE_ACCESS_KEY ??
+      '',
+    sharedWriteSecretKey:
+      process.env.R2_SHARED_WRITE_SECRET_KEY ??
+      env.R2_SHARED_WRITE_SECRET_KEY ??
+      '',
     nanoclawId: process.env.NANOCLAW_ID ?? env.NANOCLAW_ID ?? 'default',
   });
 

@@ -112,22 +112,34 @@ export class DiscordChannel implements Channel {
             };
             try {
               const key = await uploadToR2();
-              attachmentParts.push(`[File uploaded to R2: ${key} (${att.name ?? 'file'})]`);
+              attachmentParts.push(
+                `[File uploaded to R2: ${key} (${att.name ?? 'file'})]`,
+              );
               logger.info({ key, name: att.name }, 'Attachment uploaded to R2');
             } catch {
               try {
                 const key = await uploadToR2();
-                attachmentParts.push(`[File uploaded to R2: ${key} (${att.name ?? 'file'})]`);
+                attachmentParts.push(
+                  `[File uploaded to R2: ${key} (${att.name ?? 'file'})]`,
+                );
               } catch (retryErr) {
-                logger.error({ name: att.name, err: retryErr }, 'Failed to upload attachment to R2 after retry');
-                attachmentParts.push(`[File upload failed: ${att.name ?? 'file'}]`);
+                logger.error(
+                  { name: att.name, err: retryErr },
+                  'Failed to upload attachment to R2 after retry',
+                );
+                attachmentParts.push(
+                  `[File upload failed: ${att.name ?? 'file'}]`,
+                );
               }
             }
           } else {
             const ct = att.contentType ?? '';
-            if (ct.startsWith('image/')) attachmentParts.push(`[Image: ${att.name ?? 'image'}]`);
-            else if (ct.startsWith('video/')) attachmentParts.push(`[Video: ${att.name ?? 'video'}]`);
-            else if (ct.startsWith('audio/')) attachmentParts.push(`[Audio: ${att.name ?? 'audio'}]`);
+            if (ct.startsWith('image/'))
+              attachmentParts.push(`[Image: ${att.name ?? 'image'}]`);
+            else if (ct.startsWith('video/'))
+              attachmentParts.push(`[Video: ${att.name ?? 'video'}]`);
+            else if (ct.startsWith('audio/'))
+              attachmentParts.push(`[Audio: ${att.name ?? 'audio'}]`);
             else attachmentParts.push(`[File: ${att.name ?? 'file'}]`);
           }
         }

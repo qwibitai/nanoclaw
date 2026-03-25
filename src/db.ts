@@ -586,7 +586,8 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
-    r2Permission: (row.r2_permission as 'full' | 'shared_read' | 'none' | null) ?? 'none',
+    r2Permission:
+      (row.r2_permission as 'full' | 'shared_read' | 'none' | null) ?? 'none',
   };
 }
 
@@ -642,7 +643,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
-      r2Permission: (row.r2_permission as 'full' | 'shared_read' | 'none' | null) ?? 'none',
+      r2Permission:
+        (row.r2_permission as 'full' | 'shared_read' | 'none' | null) ?? 'none',
     };
   }
   return result;
