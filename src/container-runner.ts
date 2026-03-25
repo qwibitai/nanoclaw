@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -78,16 +79,9 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // .env shadowing is handled inside the container entrypoint via mount --bind.
+    // Apple Container doesn't support file-level bind mounts (only directories),
+    // so the entrypoint runs as root, shadows .env, then drops privileges.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -242,6 +236,56 @@ async function buildContainerArgs(
   });
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
+
+    // Apple Container only supports directory mounts, not file mounts.
+    // OneCLI SDK injects `-v /path/to/file.pem:/tmp/target.pem:ro` mounts
+    // for CA certs. Convert these to a single directory mount.
+    // Also replace host.docker.internal (not resolvable in Apple Container)
+    // with the gateway IP 192.168.64.1.
+    if (CONTAINER_RUNTIME_BIN === 'container') {
+      const certDir = path.join(os.tmpdir(), `nanoclaw-certs-${Date.now()}`);
+      fs.mkdirSync(certDir, { recursive: true });
+
+      // Find and remove -v file mounts for .pem cert files
+      let i = 0;
+      while (i < args.length) {
+        if (args[i] === '-v' && i + 1 < args.length) {
+          const match = args[i + 1].match(
+            /^(.+\.pem):\/tmp\/(onecli-.+\.pem):ro$/,
+          );
+          if (match) {
+            const [, srcFile, fileName] = match;
+            try {
+              fs.copyFileSync(srcFile, path.join(certDir, fileName));
+            } catch {
+              /* cert may not exist yet */
+            }
+            args.splice(i, 2);
+            continue;
+          }
+        }
+        i++;
+      }
+
+      // Mount the cert directory
+      args.push(...readonlyMountArgs(certDir, '/tmp/onecli-certs'));
+
+      // Update env vars: cert paths and host.docker.internal → gateway IP
+      for (let j = 0; j < args.length; j++) {
+        if (args[j] === '-e' && j + 1 < args.length) {
+          args[j + 1] = args[j + 1]
+            .replace(
+              /^SSL_CERT_FILE=\/tmp\/onecli-combined-ca\.pem$/,
+              'SSL_CERT_FILE=/tmp/onecli-certs/onecli-combined-ca.pem',
+            )
+            .replace(
+              /^NODE_EXTRA_CA_CERTS=\/tmp\/onecli-gateway-ca\.pem$/,
+              'NODE_EXTRA_CA_CERTS=/tmp/onecli-certs/onecli-gateway-ca.pem',
+            )
+            .replace(/host\.docker\.internal/g, '192.168.64.1');
+        }
+      }
+    }
   } else {
     logger.warn(
       { containerName },
