@@ -51,11 +51,43 @@ RUN npm run build
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
+# Pre-create tsconfig for runtime compilation from merged source in /tmp/src.
+# Placed in /app so node_modules resolution works correctly.
+RUN echo '{"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","outDir":"/tmp/dist","rootDir":"/tmp/src","strict":true,"esModuleInterop":true,"skipLibCheck":true},"include":["/tmp/src/**/*"]}' > /app/tsconfig.build.json
+
 # Create entrypoint script
+# Source merging: /app/src-global (read-only mount) + /app/src-custom (per-group overrides)
+# are merged into /tmp/src before compilation. Custom files take priority, so per-group
+# agents can add or override tool files without blocking global updates.
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+COPY <<'ENTRY' /app/entrypoint.sh
+#!/bin/bash
+set -e
+# Two-layer source merge for clean upgrades + per-group customization:
+#   /app/src-global  (read-only mount)  — latest global agent-runner source
+#   /app/src-custom  (read-write mount) — per-group tool overrides/additions
+# Merged into /tmp/src then compiled via tsconfig.build.json (in /app for node_modules).
+mkdir -p /tmp/src
+if [ -d /app/src-global ]; then
+  cp -r /app/src-global/* /tmp/src/
+else
+  cp -r /app/src/* /tmp/src/
+fi
+if [ -d /app/src-custom ] && [ "$(ls -A /app/src-custom 2>/dev/null)" ]; then
+  cp -r /app/src-custom/* /tmp/src/
+fi
+# Symlink node_modules and package.json so module resolution works from /tmp/src
+ln -sfn /app/node_modules /tmp/node_modules
+ln -sfn /app/package.json /tmp/package.json
+cd /app && npx tsc -p tsconfig.build.json 2>&1 >&2
+ln -s /app/node_modules /tmp/dist/node_modules
+chmod -R a-w /tmp/dist
+cat > /tmp/input.json
+node /tmp/dist/index.js < /tmp/input.json
+ENTRY
+RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
