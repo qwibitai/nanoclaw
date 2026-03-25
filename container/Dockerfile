@@ -37,13 +37,13 @@ RUN npm install -g agent-browser @anthropic-ai/claude-code
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY container/agent-runner/package*.json ./
+COPY agent-runner/package*.json ./
 
 # Install dependencies
 RUN npm install
 
 # Copy source code
-COPY container/agent-runner/ ./
+COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
@@ -57,25 +57,8 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# PaaS mode: install management server and child-process runner from compiled host src/
-# These are compiled by `npm run build` (host) before docker build runs (see build.sh).
-WORKDIR /paas
-RUN echo '{"name":"nanoclaw-paas","version":"1.0.0","type":"module"}' > package.json \
-  && npm install ws@8
-COPY dist/paas-entrypoint.js dist/paas-entrypoint.js.map ./dist/
-COPY dist/child-process-runner.js dist/child-process-runner.js.map ./dist/
-COPY dist/management/ ./dist/management/
-
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
-
-# Ensure .nanoclaw config directory exists (config bridge writes .env here)
-# Must be owned by node user since container runs as node and ApplyConfig
-# writes the .env file via docker exec as the container user.
-RUN mkdir -p /home/node/.nanoclaw && chown node:node /home/node/.nanoclaw
-
-# Expose management API port
-EXPOSE 18789
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
@@ -83,5 +66,5 @@ USER node
 # Set working directory to group workspace
 WORKDIR /workspace/group
 
-# PaaS entrypoint: management API + child process runner
-CMD ["node", "/paas/dist/paas-entrypoint.js"]
+# Entry point reads JSON from stdin, outputs JSON to stdout
+ENTRYPOINT ["/app/entrypoint.sh"]

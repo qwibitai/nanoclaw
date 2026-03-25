@@ -17,7 +17,7 @@
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "start:paas": "node dist/paas-entrypoint.js",
+    "start:ws": "node dist/k8s-entrypoint.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
