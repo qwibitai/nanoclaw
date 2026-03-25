@@ -82,8 +82,24 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
   bot.on('message', (ctx) => {
     const msg = ctx.message;
 
-    // Filter to text messages only
-    if (!('text' in msg) || !msg.text) return;
+    // Extract content from text, voice, or audio messages
+    let messageContent: string | null = null;
+    if ('text' in msg && msg.text) {
+      messageContent = msg.text;
+    } else if ('voice' in msg && msg.voice) {
+      const v = msg.voice as { file_id: string; duration?: number };
+      const dur = v.duration ? ` duration=${v.duration}s` : '';
+      messageContent = `[Voice message: telegram_file_id=${v.file_id}${dur}. Use transcribe_audio with this file_id to read what was said.]`;
+    } else if ('audio' in msg && msg.audio) {
+      const a = msg.audio as {
+        file_id: string;
+        duration?: number;
+        title?: string;
+      };
+      const dur = a.duration ? ` duration=${a.duration}s` : '';
+      messageContent = `[Audio file: telegram_file_id=${a.file_id}${dur}${a.title ? ` title="${a.title}"` : ''}. Use transcribe_audio with this file_id.]`;
+    }
+    if (!messageContent) return;
 
     const chatId = String(msg.chat.id);
     const jid = `telegram:${chatId}`;
@@ -116,7 +132,7 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
     );
     const sender = from.username || String(from.id);
 
-    let content = msg.text;
+    let content = messageContent;
 
     // Handle /x command: strip prefix and prepend assistant name
     if (content.startsWith('/x ') || content === '/x') {
