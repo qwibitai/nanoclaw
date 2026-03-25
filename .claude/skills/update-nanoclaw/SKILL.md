@@ -237,4 +237,4 @@ Tell the user:
 
 ## Diagnostics
 
-Read and follow [diagnostics.md](diagnostics.md).
+Send diagnostics data by following `.claude/skills/update-nanoclaw/diagnostics.md`.
