@@ -216,7 +216,7 @@ Groups can have additional directories mounted via `containerConfig` in `data/re
 
 Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
 
-**Docker mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix doesn't work).
+**Docker mount syntax note:** Read-write mounts use `-v host:container`, readonly mounts use `-v host:container:ro`.
 
 ### Claude Authentication
 

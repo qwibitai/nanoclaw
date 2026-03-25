@@ -433,6 +433,8 @@ async function processTaskIpc(
     folder?: string;
     trigger?: string;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For request_deploy
+    reason?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -644,8 +646,81 @@ async function processTaskIpc(
       }
       break;
 
+    case 'request_deploy':
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized deploy attempt blocked');
+        break;
+      }
+      logger.info(
+        { reason: data.reason, sourceGroup },
+        'Deploy requested via IPC',
+      );
+      executeDeploy(data.reason || 'Agent-requested deploy').catch((err) =>
+        logger.error({ err }, 'Deploy failed'),
+      );
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+async function executeDeploy(reason: string): Promise<void> {
+  const projectRoot = process.cwd();
+
+  logger.info({ reason }, 'Starting deploy sequence');
+
+  try {
+    // Step 1: Ensure we're on main branch
+    execSync('git checkout main', {
+      cwd: projectRoot,
+      timeout: 10000,
+      stdio: 'pipe',
+    });
+    logger.info('Checked out main branch');
+
+    // Step 2: Pull latest (includes the merged PR)
+    execSync('git pull origin main', {
+      cwd: projectRoot,
+      timeout: 30000,
+      stdio: 'pipe',
+    });
+    logger.info('Git pull complete');
+
+    // Step 3: Rebuild container image
+    execSync('./container/build.sh', {
+      cwd: projectRoot,
+      timeout: 300000,
+      stdio: 'pipe',
+    });
+    logger.info('Container image rebuilt');
+
+    // Step 4: Install dependencies (in case package.json changed)
+    execSync('npm install', {
+      cwd: projectRoot,
+      timeout: 120000,
+      stdio: 'pipe',
+    });
+    logger.info('npm install complete');
+
+    // Step 5: Compile TypeScript
+    execSync('npm run build', {
+      cwd: projectRoot,
+      timeout: 60000,
+      stdio: 'pipe',
+    });
+    logger.info('TypeScript build complete');
+
+    // Step 6: Exit to let launchd restart with new code
+    // KeepAlive: true in the plist ensures automatic restart
+    logger.info('Deploy complete, exiting for launchd restart...');
+    process.exit(0);
+  } catch (err) {
+    logger.error(
+      { err, reason },
+      'Deploy sequence failed - service continues running on previous version',
+    );
+    throw err;
   }
 }
 

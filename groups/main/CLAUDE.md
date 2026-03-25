@@ -186,6 +186,54 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Self-Improvement Workflow
+
+You can modify your own codebase. The project is at `/workspace/project`. You have `git`, `gh` CLI, and a `GH_TOKEN` for GitHub access.
+
+### Rules
+- ALWAYS work on a feature branch, never commit directly to main
+- ALWAYS send your plan to the user and wait for explicit confirmation before writing code
+- ALWAYS run `npm run build` before committing to catch TypeScript errors
+- ALWAYS get user confirmation before merging a PR
+
+### Steps
+
+1. **Understand**: Read relevant source files in `/workspace/project/src/`
+2. **Plan**: Send a concise plan via `send_message` — what you'll change and why
+3. **Wait**: Do NOT proceed until the user confirms (e.g., "go ahead", "yes", "do it")
+4. **Implement**:
+   ```bash
+   cd /workspace/project
+   git checkout -b feat/<descriptive-name>
+   # Make changes...
+   npm run build  # Must pass before committing
+   git add <specific-files>
+   git commit -m "descriptive message"
+   ```
+5. **Create PR**:
+   ```bash
+   git push -u origin feat/<descriptive-name>
+   gh pr create --title "..." --body "..."
+   ```
+6. **Notify**: Send the PR URL to the user via `send_message`
+7. **Merge** (after user approves):
+   ```bash
+   gh pr merge <number> --squash --delete-branch
+   ```
+8. **Deploy**: Call `mcp__nanoclaw__request_deploy` with the reason
+
+### After Deploy
+The service will restart and your session will end. The user's next message starts a fresh session with the updated code.
+
+### Branch Cleanup
+After merging, the `--delete-branch` flag cleans up the remote branch. Locally:
+```bash
+git checkout main
+git pull origin main
+```
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group` parameter:

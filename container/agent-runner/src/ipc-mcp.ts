@@ -315,6 +315,40 @@ Use available_groups.json to find the JID for a group. The folder name should be
             }]
           };
         }
+      ),
+
+      tool(
+        'request_deploy',
+        `Request the host to rebuild and redeploy NanoClaw. Main group only.
+This will: pull latest main, rebuild the container image, recompile TypeScript, install deps, and restart the service.
+Use after merging a PR that changes NanoClaw code. The current session will end when the service restarts.`,
+        {
+          reason: z.string().describe('Brief description of what changed and why deploy is needed')
+        },
+        async (args) => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only the main group can request deploys.' }],
+              isError: true
+            };
+          }
+
+          const data = {
+            type: 'request_deploy',
+            reason: args.reason,
+            groupFolder,
+            timestamp: new Date().toISOString()
+          };
+
+          writeIpcFile(TASKS_DIR, data);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Deploy requested: ${args.reason}. The host will rebuild and restart the service. This session will end.`
+            }]
+          };
+        }
       )
     ]
   });
