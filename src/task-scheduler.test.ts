@@ -4,6 +4,7 @@ import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
+  computeRetryDelay,
   startSchedulerLoop,
 } from './task-scheduler.js';
 
@@ -94,6 +95,18 @@ describe('task scheduler', () => {
     };
 
     expect(computeNextRun(task)).toBeNull();
+  });
+
+  it('computeRetryDelay returns 5min for first failure', () => {
+    expect(computeRetryDelay(1)).toBe(5 * 60 * 1000);
+  });
+
+  it('computeRetryDelay doubles each failure up to 60min cap', () => {
+    expect(computeRetryDelay(2)).toBe(10 * 60 * 1000);
+    expect(computeRetryDelay(3)).toBe(20 * 60 * 1000);
+    expect(computeRetryDelay(4)).toBe(40 * 60 * 1000);
+    expect(computeRetryDelay(5)).toBe(60 * 60 * 1000);
+    expect(computeRetryDelay(10)).toBe(60 * 60 * 1000);
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {

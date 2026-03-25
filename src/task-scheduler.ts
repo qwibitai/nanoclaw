@@ -13,13 +13,23 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  resetTaskFailCount,
   updateTask,
   updateTaskAfterRun,
+  updateTaskFailCount,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+const MAX_RETRY_DELAY_MS = 60 * 60 * 1000; // 1 hour cap
+const BASE_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 min base
+
+/** Exponential backoff: 5min, 10min, 20min, 40min, 60min (capped). */
+export function computeRetryDelay(failCount: number): number {
+  return Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, failCount - 1), MAX_RETRY_DELAY_MS);
+}
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -235,7 +245,41 @@ async function runTask(
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  if (error) {
+    const newFailCount = (task.fail_count ?? 0) + 1;
+    updateTaskFailCount(task.id, newFailCount, error);
+
+    // Once-tasks: pause after 5 consecutive failures and notify user
+    if (task.schedule_type === 'once' && newFailCount >= 5) {
+      updateTask(task.id, { status: 'paused' });
+      logger.warn(
+        { taskId: task.id, failCount: newFailCount },
+        'Once-task paused after max retries',
+      );
+      const short = task.prompt.slice(0, 60);
+      await deps
+        .sendMessage(
+          task.chat_jid,
+          `Task "${short}" paused after 5 failures. Last error: ${error}`,
+        )
+        .catch(() => {});
+      return;
+    }
+
+    // Schedule retry sooner than next normal run
+    const retryAt = new Date(
+      Date.now() + computeRetryDelay(newFailCount),
+    ).toISOString();
+    updateTaskAfterRun(task.id, retryAt, resultSummary);
+    logger.info(
+      { taskId: task.id, failCount: newFailCount, retryAt },
+      'Task failed, retry scheduled',
+    );
+  } else {
+    resetTaskFailCount(task.id);
+    updateTaskAfterRun(task.id, nextRun, resultSummary);
+  }
 }
 
 let schedulerRunning = false;
