@@ -29,7 +29,7 @@ type: idea-scratch
 - [[2026-03-23-platform-governance-legitimacy]] — democratic legitimacy frameworks applied to content moderation appeals
 ```
 
-Append-only list of backlinked one-liners. No other structure.
+Newest entries at the top. No other structure.
 
 **Idea note** (`ideas/YYYY-MM-DD-slug.md`):
 
@@ -97,21 +97,25 @@ Design constraints:
 - Synthesis produces a single coherent narrative, not three dumped sections
 - Multiple ideas can be explored in parallel, capped at 2-3 concurrent explorations to manage Opus quota
 - When processing "explore ideas in scratch," each idea gets its own separate exploration
+- If a sub-agent fails (timeout, search unavailable), the synthesis proceeds with partial results and notes which perspective is missing
+
+Implementation notes:
+- Single container invocation per exploration. The parent agent runs on Opus with `enableAgentTeams: true` and dispatches Literature/Methodology/Framing agents via `TeamCreate`.
+- For batch exploration ("explore ideas in scratch"), the parent agent processes ideas sequentially within one container invocation, running each idea's 3-agent swarm in parallel. The agent limits itself to exploring 2-3 ideas per invocation to cap Opus quota. If more ideas are pending, it reports what it explored and notes the remainder.
+- Slugs: lowercase, hyphen-separated, max ~60 chars, derived from the agent's summary of the core concept (not raw user words verbatim).
 
 #### 3. `idea-triage` (new)
 
 Triggers manually. User says "archive [[slug]]" or "upgrade [[slug]] to project."
 
 **Archive path:**
-1. Move note to `ideas/archive/`
-2. Update frontmatter: `status: archived`
-3. Remove backlink line from `ideas/scratch.md`
+1. Move note via `mcp__mcpvault__move_note` to `ideas/archive/`
+2. Update frontmatter via `mcp__mcpvault__update_frontmatter`: `status: archived`
+3. Remove backlink line from `ideas/scratch.md` via `mcp__mcpvault__patch_note`
 4. Confirm: "Archived [[slug]]"
 
 **Upgrade path:**
-1. Create `projects/{slug}/` directory in vault
-2. Move idea note to `projects/{slug}/ORIGIN.md`, set `status: upgraded`
-3. Create `projects/{slug}/PROJECT.md` using existing project template:
+1. Create `projects/{slug}/PROJECT.md` via `mcp__mcpvault__write_note` using existing project template:
    ```yaml
    ---
    phase: research
@@ -120,18 +124,22 @@ Triggers manually. User says "archive [[slug]]" or "upgrade [[slug]] to project.
    ---
    ```
    Status/Context/Key Decisions sections seeded from exploration findings in ORIGIN.md
-4. Create private GitHub repo: `gh repo create {slug} --private --template research-project-template`
-5. Remove backlink line from `ideas/scratch.md`
-6. Confirm with project link and repo URL
+2. Move idea note via `mcp__mcpvault__move_note` to `projects/{slug}/ORIGIN.md`, update `status: upgraded` via `mcp__mcpvault__update_frontmatter`
+3. Create private GitHub repo via Bash: `gh repo create {slug} --private --template research-project-template` (uses shell, not MCP -- the skill must instruct the agent to use Bash for this step)
+4. Remove backlink line from `ideas/scratch.md` via `mcp__mcpvault__patch_note`
+5. Confirm with project link and repo URL
 
 #### 4. `idea-nudge` (new, scheduled)
 
 Runs on Sonnet every 3 days via the task scheduler.
 
+Scheduling config: `schedule_type: cron`, `schedule_value: "0 10 */3 * *"` (every 3 days at 10am). Runs in the main group with `context_mode: isolated`. The scheduled task prompt instructs the agent to invoke the `idea-nudge` skill.
+
 Steps:
-1. Scan `ideas/` frontmatter for:
+1. Scan `ideas/` frontmatter (via `mcp__mcpvault__get_frontmatter`) for:
    - `status: spark` (unexplored)
    - `status: explored` (explored but not triaged)
+   - `status: investigated` (legacy status from old system, treated as equivalent to `explored`)
 2. If any found, send a single WhatsApp message grouping ideas by staleness category
 3. If nothing stale, do nothing (no "all clear" messages)
 
@@ -151,7 +159,14 @@ Sonnet reads frontmatter only -- does not ingest note bodies.
 
 ### GitHub Template Repo
 
-A `research-project-template` repo with this skeleton:
+A `research-project-template` repo created under the user's GitHub account as a template repository. Must be created before `idea-triage` upgrade path can be used. Created via:
+
+```bash
+gh repo create research-project-template --private --template ''
+# then populate with skeleton and mark as template via GitHub settings
+```
+
+Skeleton:
 
 ```
 draft/          # writing artifacts
@@ -190,4 +205,11 @@ Additional directories (`data/`, `test/`, `experiments/`) are created as needed 
 
 ### Group CLAUDE.md Update
 
-The group instructions that tell the agent to proactively capture ideas need updating to reference the new capture flow (scratch + backlink) and remove any mention of the registry or structured templates.
+The main group's CLAUDE.md (the group where idea capture is triggered) needs updating to:
+- Reference the new capture flow (scratch + backlink) instead of the registry
+- Remove any mention of `_registry.md` or structured templates
+- Add instructions for the `idea-explore` and `idea-triage` trigger phrases
+
+### Daily Briefing Update
+
+Add a line to the briefing output showing idea pipeline status: count of sparks in scratch and explored ideas awaiting triage. This goes under the existing "Active / Needs Attention" section as a sub-item, not a new top-level section.
