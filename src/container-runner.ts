@@ -363,6 +363,9 @@ function buildContainerArgs(
     'GEMINI_API_KEY',
     'VERCEL_TOKEN',
     'LINEAR_API_KEY',
+    'FINNHUB_API_KEY',
+    'NOTION_TOKEN',
+    'FIRECRAWL_API_KEY',
   ]);
 
   // Inject GitHub credentials if configured (for gh CLI and git operations)
@@ -387,6 +390,15 @@ function buildContainerArgs(
   }
   if (secrets.LINEAR_API_KEY) {
     args.push('-e', `LINEAR_API_KEY=${secrets.LINEAR_API_KEY}`);
+  }
+  if (secrets.FINNHUB_API_KEY) {
+    args.push('-e', `FINNHUB_API_KEY=${secrets.FINNHUB_API_KEY}`);
+  }
+  if (secrets.NOTION_TOKEN) {
+    args.push('-e', `NOTION_TOKEN=${secrets.NOTION_TOKEN}`);
+  }
+  if (secrets.FIRECRAWL_API_KEY) {
+    args.push('-e', `FIRECRAWL_API_KEY=${secrets.FIRECRAWL_API_KEY}`);
   }
 
   // Tag scheduled task containers so in-container send_message routes to main channel
