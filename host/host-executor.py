@@ -499,6 +499,38 @@ def process_task(task_path: Path) -> None:
             task_path.unlink()
             return
 
+
+        # --- MULTI-PROVIDER ROUTING ---
+        # If the task specifies a task_type that matches the routing table,
+        # try atlas.route() first. This sends research to Sonar, classification
+        # to Groq, lookups to Grok — skipping Claude for pure-text tasks.
+        task_type = task.get("task_type", "")
+        ROUTE_ELIGIBLE_TYPES = {
+            "research", "quick_lookup", "deep_research",
+            "classification", "extraction",
+            "market_signal", "social_monitoring", "cron_check",
+            "document_summary",
+        }
+        if task_type in ROUTE_ELIGIBLE_TYPES:
+            try:
+                import sys as _sys
+                _sys.path.insert(0, str(Path.home() / ".atlas" / "lib"))
+                from providers import route as atlas_route
+                route_result = atlas_route(task_type, prompt, entity=entity)
+                if route_result.success:
+                    log(f"  Routed via atlas.route() -> {route_result.provider}/{route_result.model} ({route_result.duration_seconds:.1f}s)")
+                    write_result(task_id, entity, "success", 0,
+                                 route_result.content[:MAX_OUTPUT_SIZE],
+                                 [], False)
+                    task_path.unlink()
+                    if callback_group and route_result.content:
+                        send_telegram_result(callback_group, route_result.content, task_id, entity)
+                    return
+                else:
+                    log(f"  atlas.route() failed ({route_result.error}), falling back to claude -p")
+            except Exception as e:
+                log(f"  atlas.route() import error ({e}), falling back to claude -p")
+
         # Record HEAD before execution for commit tracking
         head_before = get_head_hash(project_dir)
 
