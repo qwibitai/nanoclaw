@@ -105,7 +105,7 @@ li_run 'li_endorse_skill' '{"profileUrl":"https://linkedin.com/in/USERNAME","ski
 
 ### Scrape search results → Notion
 ```bash
-li_run 'li_scrape_search' '{"query":"startup founders NYC","maxResults":50}' 300
+li_run 'li_scrape_search' '{"query":"startup founders NYC","maxLeads":50}' 300
 ```
 
 ### Scrape a single profile → Notion
@@ -115,7 +115,7 @@ li_run 'li_scrape_profile' '{"profileUrl":"https://linkedin.com/in/USERNAME"}'
 
 ### Scrape post engagers → Notion
 ```bash
-li_run 'li_scrape_post_engagers' '{"postUrl":"https://linkedin.com/posts/...","maxResults":100}' 300
+li_run 'li_scrape_post_engagers' '{"postUrl":"https://linkedin.com/posts/...","maxLeads":100}' 300
 ```
 
 ### Get campaign stats
