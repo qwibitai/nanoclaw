@@ -207,8 +207,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         queue.closeStdin(targetJid);
         // Wait for container to die
         await new Promise((r) => setTimeout(r, 3000));
-        // Run /compact against the target group
-        await channel.sendMessage(chatJid, `Compacting ${targetGroup.name}...`);
+        // Gather stats for the confirmation message
+        const targetMsgs = getMessagesSince(targetJid, lastAgentTimestamp[targetJid] || '', ASSISTANT_NAME);
+        const msgCount = targetMsgs.length;
+        const hasSession = !!sessions[targetGroup.folder];
+        await channel.sendMessage(
+          chatJid,
+          `Compacting ${targetGroup.name} (${msgCount} pending msgs, session: ${hasSession ? 'active' : 'none'})...`,
+        );
         const compactResult = await runAgent(
           targetGroup,
           '/compact',
