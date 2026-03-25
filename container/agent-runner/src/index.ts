@@ -325,7 +325,7 @@ function waitForIpcMessage(): Promise<string | null> {
 
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const SONNET_MODEL = 'claude-sonnet-4-6-20250514';
+const SONNET_MODEL = 'claude-sonnet-4-6';
 
 /**
  * Classify whether a prompt needs the full model or can use Haiku.
@@ -458,7 +458,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__bot-dashboard__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -472,6 +473,14 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        'bot-dashboard': {
+          command: 'node',
+          args: ['/home/node/bot-dashboard-mcp/dist/index.js'],
+          env: {
+            TELEMETRY_URL: process.env.TELEMETRY_URL || 'http://100.99.148.99:3100',
+            TELEMETRY_REGISTRATION_TOKEN: process.env.TELEMETRY_REGISTRATION_TOKEN || '',
           },
         },
       },

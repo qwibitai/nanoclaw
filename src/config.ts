@@ -10,11 +10,39 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'GITHUB_TOKEN',
+  'REGISTRY_URL',
+  'TELEMETRY_URL',
+  'TELEMETRY_REGISTRATION_TOKEN',
+  'GROQ_API_KEY',
+  'TELEGRAM_BOT_TOKEN',
 ]);
 
 // Service Bot: expose GITHUB_TOKEN to process.env so container-runner can pass it
 if (envConfig.GITHUB_TOKEN && !process.env.GITHUB_TOKEN) {
   process.env.GITHUB_TOKEN = envConfig.GITHUB_TOKEN;
+}
+
+// Service Bot: expose REGISTRY_URL for bot registry client
+if (envConfig.REGISTRY_URL && !process.env.REGISTRY_URL) {
+  process.env.REGISTRY_URL = envConfig.REGISTRY_URL;
+}
+
+// Service Bot: expose telemetry vars for container-runner → Docker → MCP servers
+if (envConfig.TELEMETRY_URL && !process.env.TELEMETRY_URL) {
+  process.env.TELEMETRY_URL = envConfig.TELEMETRY_URL;
+}
+if (envConfig.TELEMETRY_REGISTRATION_TOKEN && !process.env.TELEMETRY_REGISTRATION_TOKEN) {
+  process.env.TELEMETRY_REGISTRATION_TOKEN = envConfig.TELEMETRY_REGISTRATION_TOKEN;
+}
+
+// Service Bot: expose GROQ_API_KEY for audio transcription
+if (envConfig.GROQ_API_KEY && !process.env.GROQ_API_KEY) {
+  process.env.GROQ_API_KEY = envConfig.GROQ_API_KEY;
+}
+
+// Audio transcription: Telegram bot token for file downloads
+if (envConfig.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN) {
+  process.env.TELEGRAM_BOT_TOKEN = envConfig.TELEGRAM_BOT_TOKEN;
 }
 
 export const ASSISTANT_NAME =

@@ -62,6 +62,25 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+/**
+ * Sync new files from source to destination without overwriting existing files.
+ * Recursively walks the source tree and copies any file that does not exist
+ * in the destination. This ensures newly added tools propagate to existing
+ * per-group agent-runner-src directories.
+ */
+function syncNewFiles(srcDir: string, dstDir: string): void {
+  fs.mkdirSync(dstDir, { recursive: true });
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name);
+    const dstPath = path.join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      syncNewFiles(srcPath, dstPath);
+    } else if (!fs.existsSync(dstPath)) {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -196,8 +215,16 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    if (!fs.existsSync(groupAgentRunnerDir)) {
+      // First time: full copy of agent-runner source
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    } else {
+      // Sync new files from source template without overwriting existing ones.
+      // This ensures newly added tools (e.g. notices.ts) propagate to existing
+      // group sessions while preserving per-group customizations.
+      syncNewFiles(agentRunnerSrc, groupAgentRunnerDir);
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -232,6 +259,16 @@ function buildVolumeMounts(
     });
   }
 
+  // Bot Dashboard MCP server — mounted read-only for all groups
+  const botDashboardMcpDir = path.resolve(projectRoot, "..", "bot-dashboard-mcp");
+  if (fs.existsSync(botDashboardMcpDir)) {
+    mounts.push({
+      hostPath: botDashboardMcpDir,
+      containerPath: "/home/node/bot-dashboard-mcp",
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -261,7 +298,36 @@ function buildContainerArgs(
   }
 
   // Service Bot: SSH config path for tools that SSH to managed hosts
+  // Service Bot: Registry URL for dynamic bot config loading
+  const registryUrl = process.env.REGISTRY_URL || '';
+  if (registryUrl) {
+    args.push('-e', 'REGISTRY_URL=' + registryUrl);
+    args.push('-e', 'REGISTRY_CACHE_PATH=/tmp/bot-configs.json');
+  }
+
   args.push('-e', 'SERVICE_BOT_SSH_CONFIG=/workspace/extra/service-ssh/config');
+
+  // Notice Board: telemetry API credentials for read_notices / acknowledge_notice / post_notice
+  const telemetryUrl = process.env.TELEMETRY_URL || '';
+  const telemetryToken = process.env.TELEMETRY_REGISTRATION_TOKEN || '';
+  if (telemetryUrl) {
+    args.push('-e', 'TELEMETRY_URL=' + telemetryUrl);
+  }
+  if (telemetryToken) {
+    args.push('-e', 'TELEMETRY_REGISTRATION_TOKEN=' + telemetryToken);
+  }
+
+  // Audio transcription: Groq Whisper API key
+  const groqKey = process.env.GROQ_API_KEY || '';
+  if (groqKey) {
+    args.push('-e', 'GROQ_API_KEY=' + groqKey);
+  }
+
+  // Audio transcription: Telegram bot token for file downloads
+  const tgToken = process.env.TELEGRAM_BOT_TOKEN || '';
+  if (tgToken) {
+    args.push('-e', 'TELEGRAM_BOT_TOKEN=' + tgToken);
+  }
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
