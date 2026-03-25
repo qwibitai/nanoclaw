@@ -129,7 +129,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && (data.text || data.filePath)) {
+              if (
+                data.type === 'message' &&
+                data.chatJid &&
+                (data.text || data.filePath)
+              ) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
@@ -140,17 +144,34 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   // Translate container path to host path: /workspace/group/<rel> → {GROUPS_DIR}/{sourceGroup}/<rel>
                   let media: IpcMedia | undefined;
                   const CONTAINER_GROUP_PREFIX = '/workspace/group/';
-                  if (data.filePath && typeof data.filePath === 'string' && data.filePath.startsWith(CONTAINER_GROUP_PREFIX)) {
-                    const relativePath = data.filePath.slice(CONTAINER_GROUP_PREFIX.length);
-                    const hostPath = path.resolve(GROUPS_DIR, sourceGroup, relativePath);
-                    if (hostPath.startsWith(path.resolve(GROUPS_DIR, sourceGroup) + path.sep)) {
+                  if (
+                    data.filePath &&
+                    typeof data.filePath === 'string' &&
+                    data.filePath.startsWith(CONTAINER_GROUP_PREFIX)
+                  ) {
+                    const relativePath = data.filePath.slice(
+                      CONTAINER_GROUP_PREFIX.length,
+                    );
+                    const hostPath = path.resolve(
+                      GROUPS_DIR,
+                      sourceGroup,
+                      relativePath,
+                    );
+                    if (
+                      hostPath.startsWith(
+                        path.resolve(GROUPS_DIR, sourceGroup) + path.sep,
+                      )
+                    ) {
                       media = {
                         filePath: hostPath,
                         fileName: data.fileName || undefined,
                         caption: data.caption || undefined,
                       };
                     } else {
-                      logger.warn({ filePath: data.filePath, sourceGroup }, 'IPC media path traversal attempt blocked');
+                      logger.warn(
+                        { filePath: data.filePath, sourceGroup },
+                        'IPC media path traversal attempt blocked',
+                      );
                     }
                   }
 

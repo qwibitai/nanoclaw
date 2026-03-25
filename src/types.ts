@@ -80,9 +80,9 @@ export interface TaskRunLog {
 // --- Media attachment support ---
 
 export interface IpcMedia {
-  filePath: string;   // Absolute path on the host filesystem
-  fileName?: string;  // Display filename for the attachment
-  caption?: string;   // Optional caption alongside the file
+  filePath: string; // Absolute path on the host filesystem
+  fileName?: string; // Display filename for the attachment
+  caption?: string; // Optional caption alongside the file
 }
 
 // --- Channel abstraction ---

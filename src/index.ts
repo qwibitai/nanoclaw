@@ -96,7 +96,10 @@ function filterAuthorized(messages: NewMessage[]): NewMessage[] {
   const { owner_ids, trusted_members } = securityPolicy.trust;
   if (owner_ids.length === 0) return messages;
   return messages.filter(
-    (m) => m.is_from_me || owner_ids.includes(m.sender) || trusted_members.includes(m.sender),
+    (m) =>
+      m.is_from_me ||
+      owner_ids.includes(m.sender) ||
+      trusted_members.includes(m.sender),
   );
 }
 

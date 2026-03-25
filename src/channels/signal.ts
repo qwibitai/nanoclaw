@@ -413,7 +413,11 @@ export class SignalChannel implements Channel {
     }
   }
 
-  async sendMessage(jid: string, text: string, media?: import('../types.js').IpcMedia): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    media?: import('../types.js').IpcMedia,
+  ): Promise<void> {
     // If media is attached, send as image/file via signal-cli attachment support
     if (media?.filePath) {
       await this.sendImage(jid, media.filePath, media.caption || text);
