@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Code CLI running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
@@ -56,6 +56,19 @@ npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
+
+### Deploying container changes
+
+When `container/agent-runner/src/` is modified, the per-group source copies must be cleared so the host re-copies the latest source on next container spawn. Skipping this step causes containers to run stale code.
+
+```bash
+./container/build.sh                          # 1. Rebuild image
+rm -r data/sessions/*/agent-runner-src        # 2. Clear stale per-group source copies
+systemctl --user restart nanoclaw             # 3. Restart service (Linux)
+# launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # (macOS)
+```
+
+**Why the rm step is needed:** Each group gets a writable copy of `container/agent-runner/src/` at `data/sessions/<group>/agent-runner-src/`, mounted into the container at `/app/src`. The host only copies source when this directory doesn't exist yet. Skills (e.g. `/add-gmail`) may also add custom code there per-group. Deleting forces a fresh copy from the latest source on next spawn.
 
 Service management:
 ```bash
