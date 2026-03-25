@@ -366,6 +366,7 @@ function buildContainerArgs(
     'FINNHUB_API_KEY',
     'NOTION_TOKEN',
     'FIRECRAWL_API_KEY',
+    'SENTRY_AUTH_TOKEN',
   ]);
 
   // Inject GitHub credentials if configured (for gh CLI and git operations)
@@ -399,6 +400,9 @@ function buildContainerArgs(
   }
   if (secrets.FIRECRAWL_API_KEY) {
     args.push('-e', `FIRECRAWL_API_KEY=${secrets.FIRECRAWL_API_KEY}`);
+  }
+  if (secrets.SENTRY_AUTH_TOKEN) {
+    args.push('-e', `SENTRY_AUTH_TOKEN=${secrets.SENTRY_AUTH_TOKEN}`);
   }
 
   // Tag scheduled task containers so in-container send_message routes to main channel
