@@ -28,7 +28,10 @@ const BASE_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 min base
 
 /** Exponential backoff: 5min, 10min, 20min, 40min, 60min (capped). */
 export function computeRetryDelay(failCount: number): number {
-  return Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, failCount - 1), MAX_RETRY_DELAY_MS);
+  return Math.min(
+    BASE_RETRY_DELAY_MS * Math.pow(2, failCount - 1),
+    MAX_RETRY_DELAY_MS,
+  );
 }
 
 /**
@@ -38,7 +41,10 @@ export function computeRetryDelay(failCount: number): number {
  *
  * Co-authored-by: @community-pr-601
  */
-export function computeNextRun(task: ScheduledTask): string | null {
+export function computeNextRun(
+  task: ScheduledTask,
+  anchorTime?: string | null,
+): string | null {
   if (task.schedule_type === 'once') return null;
 
   const now = Date.now();
@@ -60,9 +66,10 @@ export function computeNextRun(task: ScheduledTask): string | null {
       );
       return new Date(now + 60_000).toISOString();
     }
-    // Anchor to the scheduled time, not now, to prevent drift.
+    // Anchor to the original scheduled time (not a retry timestamp) to prevent
+    // drift. anchorTime captures task.next_run before any retry overwrites it.
     // Skip past any missed intervals so we always land in the future.
-    let next = new Date(task.next_run!).getTime() + ms;
+    let next = new Date(anchorTime ?? task.next_run!).getTime() + ms;
     while (next <= now) {
       next += ms;
     }
@@ -90,6 +97,8 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
+  // Capture the canonical schedule slot before any retry may overwrite next_run.
+  const scheduledAt = task.next_run;
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
@@ -239,7 +248,7 @@ async function runTask(
     error,
   });
 
-  const nextRun = computeNextRun(task);
+  const nextRun = computeNextRun(task, scheduledAt);
   const resultSummary = error
     ? `Error: ${error}`
     : result
@@ -267,11 +276,13 @@ async function runTask(
       return;
     }
 
-    // Schedule retry sooner than next normal run
+    // Schedule retry sooner than next normal run.
+    // Use updateTask (not updateTaskAfterRun) to avoid corrupting last_run —
+    // preserving last_run keeps the schedule anchor intact for computeNextRun.
     const retryAt = new Date(
       Date.now() + computeRetryDelay(newFailCount),
     ).toISOString();
-    updateTaskAfterRun(task.id, retryAt, resultSummary);
+    updateTask(task.id, { next_run: retryAt });
     logger.info(
       { taskId: task.id, failCount: newFailCount, retryAt },
       'Task failed, retry scheduled',

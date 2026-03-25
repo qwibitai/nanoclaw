@@ -53,6 +53,38 @@ describe('task scheduler', () => {
     expect(task?.status).toBe('paused');
   });
 
+  it('computeNextRun with anchorTime preserves cadence after a retry', () => {
+    const originalSlot = new Date(Date.now() - 2000).toISOString(); // was due 2s ago
+    const retryAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // retry in 5min
+    const ms = 60000;
+
+    // Simulate post-retry state: next_run is now retryAt (corrupted)
+    const task = {
+      id: 'retry-cadence-test',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'interval' as const,
+      schedule_value: String(ms),
+      context_mode: 'isolated' as const,
+      next_run: retryAt, // overwritten by retry logic
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2026-01-01T00:00:00.000Z',
+      fail_count: 1,
+      last_error: 'timeout',
+    };
+
+    // Without anchorTime: would anchor to retryAt → wrong cadence
+    // With anchorTime (original slot): anchors correctly
+    const nextRun = computeNextRun(task, originalSlot);
+    expect(nextRun).not.toBeNull();
+
+    const expected = new Date(originalSlot).getTime() + ms;
+    expect(new Date(nextRun!).getTime()).toBe(expected);
+  });
+
   it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
     const scheduledTime = new Date(Date.now() - 2000).toISOString(); // 2s ago
     const task = {
