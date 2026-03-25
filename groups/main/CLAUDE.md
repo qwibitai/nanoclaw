@@ -232,3 +232,38 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Scheduled Tasks — Rules & Registry
+
+### CRITICAL: Never assume tasks are missing
+
+**ALWAYS run `mcp__nanoclaw__list_tasks` before claiming any task is missing or lost.** Tasks are persisted in SQLite and survive container restarts. Never say "tasks were lost" or "no tasks scheduled" without running list_tasks first.
+
+### Silence rule
+
+Think loops and autonomous loops must **never post to chat when there is nothing meaningful to report**. Always include "stay silent if nothing to do" in loop prompts.
+
+### Canonical recurring tasks
+
+These tasks must always be running. On any session where a user asks about tasks — or you notice something feels off — run `list_tasks` and recreate any that are absent.
+
+**Think loops (system)**
+- Fast think loop — `interval: 1800000` (30 min) — runs autonomous-think skill, silent if nothing to do
+- Deep think loop — `interval: 14400000` (4 hours) — runs autonomous-think skill (deep mode), silent if nothing to do
+
+**Daily content (this group)**
+- Eye bleach — `cron: 30 8 * * *` — fetch top r/eyebleach post and share
+- Morning briefing — `cron: 0 8 * * *` — news, weather, positive story
+
+**PM loop**
+- Product manager review — `interval: 21600000` (6 hours) — pull Linear backlog for Purrogue + typurrr, assess priorities, create/reprioritize issues autonomously. Silent unless something meaningful changed.
+
+**Autonomous dev loops**
+- typurrr improvement — `interval: 7200000` (2 hours) — fix bugs, add features, open PRs to zxela-claude/typurrr. Post to chat when a PR is opened, silent otherwise.
+- Stock agent skill builder — `interval: 7200000` (2 hours) — build NAN-80 to NAN-88 skills into zxela-nanoclaw repo, commit to `feat/stock-agent-skills`. Silent when all done.
+
+### Recreating a missing task
+
+If a canonical task is absent from `list_tasks`, recreate it using `mcp__nanoclaw__schedule_task` with `context_mode: "isolated"` for all autonomous loops. Use the descriptions above as the prompt basis — full prompts are in conversation history or can be reconstructed from context.
