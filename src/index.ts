@@ -208,7 +208,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Wait for container to die
         await new Promise((r) => setTimeout(r, 3000));
         // Gather stats for the confirmation message
-        const targetMsgs = getMessagesSince(targetJid, lastAgentTimestamp[targetJid] || '', ASSISTANT_NAME);
+        const targetMsgs = getMessagesSince(
+          targetJid,
+          lastAgentTimestamp[targetJid] || '',
+          ASSISTANT_NAME,
+        );
         const msgCount = targetMsgs.length;
         const hasSession = !!sessions[targetGroup.folder];
         await channel.sendMessage(
