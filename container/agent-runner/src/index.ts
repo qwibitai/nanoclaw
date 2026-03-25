@@ -931,6 +931,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText = ''; // accumulate text from assistant content blocks
   let messageCount = 0;
   let resultCount = 0;
 
@@ -1034,6 +1035,12 @@ async function runQuery(
           }
         }
 
+        // Accumulate text for fallback when result.result is null
+        const textBlocks = content.filter((b) => b.type === 'text' && b.text);
+        if (textBlocks.length > 0) {
+          lastAssistantText = textBlocks.map((b) => b.text!).join('\n');
+        }
+
         for (const block of content) {
           if (block.type === 'text' && block.text) {
             writeProgress('text', { text: block.text });
@@ -1084,11 +1091,14 @@ async function runQuery(
           log(`Result extra keys: ${usageKeys.join(', ')} = ${JSON.stringify(Object.fromEntries(usageKeys.map(k => [k, msgAny[k]])))}`);
         }
       }
+      // Claude Code SDK may return result: null when text was only sent via
+      // streaming events. Fall back to the last assistant text block content.
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: textResult || lastAssistantText || null,
         newSessionId
       });
+      lastAssistantText = '';
       hasPipedSinceLastOutput = false;
     }
   }
