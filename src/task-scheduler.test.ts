@@ -68,6 +68,8 @@ describe('task scheduler', () => {
       last_result: null,
       status: 'active' as const,
       created_at: '2026-01-01T00:00:00.000Z',
+      fail_count: 0,
+      last_error: null,
     };
 
     const nextRun = computeNextRun(task);
@@ -92,6 +94,8 @@ describe('task scheduler', () => {
       last_result: null,
       status: 'active' as const,
       created_at: '2026-01-01T00:00:00.000Z',
+      fail_count: 0,
+      last_error: null,
     };
 
     expect(computeNextRun(task)).toBeNull();
@@ -128,6 +132,8 @@ describe('task scheduler', () => {
       last_result: null,
       status: 'active' as const,
       created_at: '2026-01-01T00:00:00.000Z',
+      fail_count: 0,
+      last_error: null,
     };
 
     const nextRun = computeNextRun(task);

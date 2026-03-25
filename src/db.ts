@@ -121,11 +121,21 @@ function createSchema(database: Database.Database): void {
 
   // Add fail_count and last_error columns for retry tracking
   try {
-    database.prepare(`ALTER TABLE scheduled_tasks ADD COLUMN fail_count INTEGER DEFAULT 0`).run();
-  } catch { /* column already exists */ }
+    database
+      .prepare(
+        `ALTER TABLE scheduled_tasks ADD COLUMN fail_count INTEGER DEFAULT 0`,
+      )
+      .run();
+  } catch {
+    /* column already exists */
+  }
   try {
-    database.prepare(`ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT`).run();
-  } catch { /* column already exists */ }
+    database
+      .prepare(`ALTER TABLE scheduled_tasks ADD COLUMN last_error TEXT`)
+      .run();
+  } catch {
+    /* column already exists */
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
@@ -372,7 +382,7 @@ export function getMessagesSince(
 }
 
 export function createTask(
-  task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
+  task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'fail_count' | 'last_error'>,
 ): void {
   db.prepare(
     `
@@ -488,7 +498,11 @@ export function updateTaskAfterRun(
   ).run(nextRun, now, lastResult, nextRun, id);
 }
 
-export function updateTaskFailCount(id: string, failCount: number, lastError: string): void {
+export function updateTaskFailCount(
+  id: string,
+  failCount: number,
+  lastError: string,
+): void {
   db.prepare(
     `UPDATE scheduled_tasks SET fail_count = ?, last_error = ? WHERE id = ?`,
   ).run(failCount, lastError, id);
