@@ -221,7 +221,14 @@ async function runTask(
             );
             scheduleClose();
           } else {
-            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            try {
+              await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            } catch (sendErr) {
+              logger.error(
+                { taskId: task.id, err: sendErr },
+                'Failed to send task output',
+              );
+            }
             scheduleClose();
           }
         }

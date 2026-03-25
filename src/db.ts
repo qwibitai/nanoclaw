@@ -119,6 +119,24 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add allow_bots column to registered_groups if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN allow_bots INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+
+    // Add smart_trigger column to registered_groups if it doesn't exist
+    try {
+      database.exec(
+        `ALTER TABLE registered_groups ADD COLUMN smart_trigger INTEGER DEFAULT 0`,
+      );
+    } catch {
+      /* column already exists */
+    }
+  }
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -343,11 +361,24 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  allowBots: boolean = false,
 ): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
+  // When allowBots=true, allow messages from other bots (but still exclude our own
+  // messages via is_from_me=0 to prevent infinite loops).
+  // When allowBots=false (default), filter all bot messages.
+  const sql = allowBots
+    ? `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE chat_jid = ? AND timestamp > ?
+        AND is_from_me = 0
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `
+    : `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
@@ -358,6 +389,9 @@ export function getMessagesSince(
       LIMIT ?
     ) ORDER BY timestamp
   `;
+  if (allowBots) {
+    return db.prepare(sql).all(chatJid, sinceTimestamp, limit) as NewMessage[];
+  }
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
@@ -554,6 +588,8 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        allow_bots: number | null;
+        smart_trigger: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -576,6 +612,8 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    allowBots: row.allow_bots === 1 ? true : undefined,
+    smartTrigger: row.smart_trigger === 1 ? true : undefined,
   };
 }
 
@@ -584,8 +622,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, allow_bots, smart_trigger)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -595,6 +633,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.allowBots ? 1 : 0,
+    group.smartTrigger ? 1 : 0,
   );
 }
 
@@ -608,6 +648,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    allow_bots: number | null;
+    smart_trigger: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -629,6 +671,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      allowBots: row.allow_bots === 1 ? true : undefined,
+      smartTrigger: row.smart_trigger === 1 ? true : undefined,
     };
   }
   return result;

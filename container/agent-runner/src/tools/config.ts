@@ -2,7 +2,7 @@
 
 export interface BotConfig {
   name: string;
-  sshTarget: string; // e.g. "ubuntu@54.197.72.152" or "rog"
+  sshTarget: string; // e.g. "ubuntu@100.88.246.12" or "rog"
   container: string;
   configPaths: string[];
   githubRepo: string; // "owner/repo" format
@@ -13,7 +13,7 @@ export interface BotConfig {
 export const BOTS: Record<string, BotConfig> = {
   db: {
     name: 'DB',
-    sshTarget: 'ubuntu@54.197.72.152',
+    sshTarget: 'ubuntu@100.88.246.12',
     container: 'openclaw-openclaw-gateway-1',
     configPaths: ['/root/.openclaw/openclaw.json'],
     githubRepo: 'neuron-box/db-issues',

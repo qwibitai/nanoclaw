@@ -95,11 +95,17 @@ export class SlackChannel implements Channel {
       const groups = this.opts.registeredGroups();
       if (!groups[jid]) return;
 
-      const isBotMessage = !!msg.bot_id || msg.user === this.botUserId;
+      // isFromMe: only X's own messages (prevent self-response loops)
+      // isBotMessage: all bots including X (for is_bot_message storage)
+      const isFromMe = msg.user === this.botUserId;
+      const isBotMessage = !!msg.bot_id || isFromMe;
 
       let senderName: string;
-      if (isBotMessage) {
+      if (isFromMe) {
         senderName = ASSISTANT_NAME;
+      } else if (isBotMessage) {
+        // Other bots — use their Slack username if available
+        senderName = (msg as BotMessageEvent).username || msg.bot_id || 'bot';
       } else {
         senderName =
           (msg.user ? await this.resolveUserName(msg.user) : undefined) ||
@@ -108,10 +114,9 @@ export class SlackChannel implements Channel {
       }
 
       // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
-      // Slack encodes @mentions as <@U12345>, which won't match TRIGGER_PATTERN
-      // (e.g., ^@<ASSISTANT_NAME>\b), so we prepend the trigger when the bot is @mentioned.
+      // Apply to all non-self messages (including other bots) so @X from Nook works.
       let content = msg.text;
-      if (this.botUserId && !isBotMessage) {
+      if (this.botUserId && !isFromMe) {
         const mentionPattern = `<@${this.botUserId}>`;
         if (
           content.includes(mentionPattern) &&
@@ -128,14 +133,12 @@ export class SlackChannel implements Channel {
         sender_name: senderName,
         content,
         timestamp,
-        is_from_me: isBotMessage,
+        is_from_me: isFromMe,
         is_bot_message: isBotMessage,
       });
 
-      // Show thinking indicator immediately on inbound messages that will
-      // trigger the agent, rather than waiting for the poll loop + container spawn.
-      // The orchestrator's setTyping(false) cleans it up when the response arrives.
-      if (!isBotMessage && !this.thinkingMessages.has(jid)) {
+      // Show thinking indicator for non-self messages (including other bots)
+      if (!isFromMe && !this.thinkingMessages.has(jid)) {
         const group = groups[jid];
         const willTrigger =
           !group.requiresTrigger ||

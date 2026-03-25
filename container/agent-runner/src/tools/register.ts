@@ -8,6 +8,8 @@ import { createGitHubClient } from './github.js';
 import { botStatus, readLogs, readFile, listIssues } from './observe.js';
 import { searchLogs, inspectConfig } from './diagnose.js';
 import { editFile, dockerCommand, createIssue, runCommand } from './act.js';
+import { readOwnConversations } from './self.js';
+import { readNotices, acknowledgeNotice, postNotice } from '../service-bot/notices.js';
 import {
   watcherCheck,
   readHealthState,
@@ -413,5 +415,52 @@ export function registerServiceBotTools(
         botsRecorded: Object.keys(snapshot.bots),
       }, null, 2));
     },
+  );
+
+  // ─── Self-Observation ────────────────────────────────────
+
+  server.tool(
+    'read_own_conversations',
+    "Read X's own conversation history across all channels (Slack + Telegram). Queries the messages database directly. Used for cross-channel context awareness.",
+    {
+      channel: z.enum(['slack', 'telegram']).optional().describe('Filter by channel. Omit to get all channels.'),
+      lines: z.number().optional().describe('Number of messages to return (default 20, max 100)'),
+      search: z.string().optional().describe('Search term to filter messages by content'),
+      hours: z.number().optional().describe('How many hours back to search (default 4)'),
+    },
+    async ({ channel, lines, search, hours }) =>
+      text(await readOwnConversations(sshExec, { channel, lines, search, hours })),
+  );
+
+  // --- Notice Board ---------------------------------------------------
+  server.tool(
+    'read_notices',
+    'Fetch unread notices for this bot from the notice board. Bot identity is resolved from the registration token. Does NOT auto-mark notices as read -- use acknowledge_notice after processing each one.',
+    {
+      limit: z.number().optional().describe('Max notices to return (default 10, max 50)'),
+    },
+    async ({ limit }) => text(await readNotices({ limit })),
+  );
+
+  server.tool(
+    'acknowledge_notice',
+    'Mark a notice as read. Bot identity is derived from the registration token. Call this after processing a notice from read_notices.',
+    {
+      notice_id: z.string().describe('UUID of the notice to acknowledge'),
+    },
+    async ({ notice_id }) => text(await acknowledgeNotice(notice_id)),
+  );
+
+  server.tool(
+    'post_notice',
+    'Post a new notice to the notice board. Visible to other bots and the operator dashboard. Use for cross-bot announcements, status updates, or coordination.',
+    {
+      title: z.string().describe('Notice title (max 200 chars)'),
+      body: z.string().optional().describe('Notice body text (optional)'),
+      audience: z.array(z.string()).optional().describe('Target audience: bot UUIDs, "@all", or "@operator" (default ["@all"])'),
+      priority: z.enum(['low', 'normal', 'high', 'urgent']).optional().describe('Priority level (default "normal")'),
+    },
+    async ({ title, body, audience, priority }) =>
+      text(await postNotice(title, { body, audience, priority })),
   );
 }

@@ -9,6 +9,7 @@ import { logger } from './logger.js';
 const HEALTH_CHECK_TASK_ID = 'watcher-health-check';
 const DAILY_DIGEST_TASK_ID = 'watcher-daily-digest';
 const CROSS_CHANNEL_DIGEST_TASK_ID = 'cross-channel-digest';
+const NOTICE_CHECK_TASK_ID = 'notice-board-check';
 
 // These prompts match the templates in container/agent-runner/src/tools/watcher.ts
 const HEALTH_CHECK_PROMPT = `Run watcher_check to perform a health check on all managed bots. If there are alerts or recoveries in the result, format them as a clear message:
@@ -76,6 +77,17 @@ The digest MUST follow this exact format:
 After writing the file, return ONLY this exact text (nothing else):
 <internal>done</internal>`;
 
+const NOTICE_CHECK_PROMPT = `Check the notice board for unread notices. Call read_notices to fetch any pending notices.
+
+For each notice:
+1. Read and understand the content
+2. If priority is urgent or high, take any requested action immediately
+3. Call acknowledge_notice with the notice ID to mark it as read
+4. Summarize what you found and any actions taken
+
+If there are no unread notices, return ONLY this exact text (nothing else):
+<internal>done</internal>`;
+
 /**
  * Ensure watcher tasks exist in the task database.
  * Called once on NanoClaw startup. Idempotent — skips if tasks already exist.
@@ -134,5 +146,23 @@ export function ensureWatcherTasks(): void {
       created_at: new Date().toISOString(),
     });
     logger.info('Registered cross-channel digest task (every 10 min)');
+  }
+
+  // Notice board check — interval task (every 30 minutes)
+  if (!getTaskById(NOTICE_CHECK_TASK_ID)) {
+    const nextRun = new Date(Date.now() + 1800000).toISOString(); // First run in 30 min
+    createTask({
+      id: NOTICE_CHECK_TASK_ID,
+      group_folder: 'main',
+      chat_jid: 'slack:D0AM0RZ7HB2',
+      prompt: NOTICE_CHECK_PROMPT,
+      schedule_type: 'interval',
+      schedule_value: '1800000', // 30 minutes
+      context_mode: 'isolated',
+      next_run: nextRun,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    });
+    logger.info('Registered notice board check task (every 30 min)');
   }
 }

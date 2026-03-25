@@ -40,6 +40,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  allowBots?: boolean; // If true, messages from other bots can trigger this group
+  smartTrigger?: boolean; // If true, use LLM-based classification when no explicit trigger
 }
 
 export interface NewMessage {

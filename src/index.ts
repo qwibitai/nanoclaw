@@ -61,6 +61,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { ensureWatcherTasks } from './watcher-registration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { shouldRespondToGroup } from './smart-trigger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -166,6 +167,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
+    undefined,
+    group.allowBots,
   );
 
   if (missedMessages.length === 0) return true;
@@ -178,7 +181,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (!hasTrigger) {
+      // Smart trigger: LLM-based classification
+      if (group.smartTrigger) {
+        const msgs = missedMessages.map((m) => ({
+          sender: m.sender_name || m.sender,
+          content: m.content,
+          timestamp: m.timestamp,
+        }));
+        const shouldRespond = await shouldRespondToGroup(msgs, ASSISTANT_NAME);
+        if (!shouldRespond) return true;
+        logger.info(
+          { group: group.name },
+          'smart-trigger: LLM classified as should-respond',
+        );
+      } else {
+        return true;
+      }
+    }
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -407,7 +427,27 @@ async function startMessageLoop(): Promise<void> {
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
-            if (!hasTrigger) continue;
+            if (!hasTrigger) {
+              // Smart trigger: LLM-based classification
+              if (group.smartTrigger) {
+                const msgs = groupMessages.map((m) => ({
+                  sender: m.sender_name || m.sender,
+                  content: m.content,
+                  timestamp: m.timestamp,
+                }));
+                const shouldRespond = await shouldRespondToGroup(
+                  msgs,
+                  ASSISTANT_NAME,
+                );
+                if (!shouldRespond) continue;
+                logger.info(
+                  { group: group.name },
+                  'smart-trigger: LLM classified as should-respond',
+                );
+              } else {
+                continue;
+              }
+            }
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger

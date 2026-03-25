@@ -5,6 +5,9 @@
 
 // gmail
 
+// irc
+import './irc.js';
+
 // slack
 import './slack.js';
 

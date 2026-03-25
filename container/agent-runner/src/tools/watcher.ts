@@ -296,7 +296,7 @@ export const DEFAULT_DEPENDENCY_MAP: DependencyMap = {
       description: 'SSH from XPS to bot hosts requires XPS to have working network',
       bots: ['db', 'nook'],
       diagnostics: {
-        pingHosts: ['54.197.72.152', '192.168.68.62'],
+        pingHosts: ['100.88.246.12', '192.168.68.62'],
         dnsCheck: 'google.com',
         gatewayCheck: true,
       },
