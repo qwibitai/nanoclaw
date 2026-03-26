@@ -19,7 +19,7 @@ import {
   BOX_ROOTFS_PATH,
   BOX_MEMORY_MIB,
   BOX_CPUS,
-  getAssetsRoot,
+  PACKAGE_ROOT,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -84,7 +84,6 @@ function buildVolumeMounts(
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const assetsRoot = getAssetsRoot();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -161,7 +160,7 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(assetsRoot, 'container', 'skills');
+  const skillsSrc = path.join(PACKAGE_ROOT, 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
@@ -193,7 +192,7 @@ function buildVolumeMounts(
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
-    assetsRoot,
+    PACKAGE_ROOT,
     'container',
     'agent-runner',
     'src',

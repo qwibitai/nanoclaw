@@ -18,18 +18,19 @@ let activeSession: RemoteControlSession | null = null;
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
 const URL_POLL_MS = 200;
-const STATE_FILE = path.join(DATA_DIR, 'remote-control.json');
-const STDOUT_FILE = path.join(DATA_DIR, 'remote-control.stdout');
-const STDERR_FILE = path.join(DATA_DIR, 'remote-control.stderr');
+// Computed lazily — DATA_DIR is set by applyConfig() after import time.
+const stateFile = () => path.join(DATA_DIR, 'remote-control.json');
+const stdoutFile = () => path.join(DATA_DIR, 'remote-control.stdout');
+const stderrFile = () => path.join(DATA_DIR, 'remote-control.stderr');
 
 function saveState(session: RemoteControlSession): void {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify(session));
+  fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
+  fs.writeFileSync(stateFile(), JSON.stringify(session));
 }
 
 function clearState(): void {
   try {
-    fs.unlinkSync(STATE_FILE);
+    fs.unlinkSync(stateFile());
   } catch {
     // ignore
   }
@@ -51,7 +52,7 @@ function isProcessAlive(pid: number): boolean {
 export function restoreRemoteControl(): void {
   let data: string;
   try {
-    data = fs.readFileSync(STATE_FILE, 'utf-8');
+    data = fs.readFileSync(stateFile(), 'utf-8');
   } catch {
     return;
   }
@@ -83,7 +84,7 @@ export function _resetForTesting(): void {
 
 /** @internal — exported for testing only */
 export function _getStateFilePath(): string {
-  return STATE_FILE;
+  return stateFile();
 }
 
 export async function startRemoteControl(
@@ -104,8 +105,8 @@ export async function startRemoteControl(
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
   // This prevents SIGPIPE when NanoClaw restarts.
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const stdoutFd = fs.openSync(STDOUT_FILE, 'w');
-  const stderrFd = fs.openSync(STDERR_FILE, 'w');
+  const stdoutFd = fs.openSync(stdoutFile(), 'w');
+  const stderrFd = fs.openSync(stderrFile(), 'w');
 
   let proc;
   try {
@@ -152,7 +153,7 @@ export async function startRemoteControl(
       // Check for URL in stdout file
       let content = '';
       try {
-        content = fs.readFileSync(STDOUT_FILE, 'utf-8');
+        content = fs.readFileSync(stdoutFile(), 'utf-8');
       } catch {
         // File might not have content yet
       }

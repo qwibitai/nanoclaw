@@ -3,7 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  getAssetsRoot,
+  PACKAGE_ROOT,
   getProjectRoot,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -356,7 +356,7 @@ function injectChannelOpts(channel: Channel): void {
 
 /** Copy default CLAUDE.md templates to group folders. */
 function copyGroupTemplates(): void {
-  const templateDir = path.join(getAssetsRoot(), 'groups');
+  const templateDir = path.join(PACKAGE_ROOT, 'groups');
   if (!fs.existsSync(templateDir)) return;
 
   for (const name of ['global', 'main']) {

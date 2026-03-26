@@ -20,10 +20,8 @@ export interface ModelOptions {
 export interface AgentLiteOptions {
   /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
   name?: string;
-  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to process.cwd(). */
+  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to cwd at start() time. */
   workdir?: string;
-  /** Read-only package assets root (container/, groups/ templates, OCI image). Defaults to package root. */
-  assetsRoot?: string;
   /** Model/LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
   model?: ModelOptions;
 }

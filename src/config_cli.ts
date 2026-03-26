@@ -78,31 +78,8 @@ export let STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export let GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export let DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
-// Assets root: read-only package assets (container/, groups/ templates, OCI image).
-// Defaults to PACKAGE_ROOT. Can be overridden for packaged apps (e.g., Electron).
-let ASSETS_ROOT = PACKAGE_ROOT;
-
-/** Get the current assets root directory. */
-export function getAssetsRoot(): string {
-  return ASSETS_ROOT;
-}
-
-/** Override the assets root directory.
- *  Updates BOX_ROOTFS_PATH (unless overridden by env var). */
-export function setAssetsRoot(dir: string): void {
-  ASSETS_ROOT = path.resolve(dir);
-  if (!process.env.BOX_ROOTFS_PATH) {
-    BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
-  }
-}
-
 export const BOX_IMAGE =
   process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
-// Path to OCI layout directory exported by container/build.sh.
-// When set, BoxLite uses this local rootfs instead of pulling from a registry.
-export let BOX_ROOTFS_PATH =
-  process.env.BOX_ROOTFS_PATH ||
-  path.join(ASSETS_ROOT, 'container', 'oci-image');
 export const BOX_MEMORY_MIB = parseInt(
   process.env.BOX_MEMORY_MIB || '2048',
   10,
