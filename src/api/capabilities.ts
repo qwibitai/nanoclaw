@@ -131,7 +131,11 @@ export function getCapabilities(deps: CapabilityDeps): Capabilities {
   // Aggregate groups by folder for channel-agnostic presentation
   const folderMap = new Map<
     string,
-    { folder: string; name: string; channels: Array<{ jid: string; channel: string; name: string }> }
+    {
+      folder: string;
+      name: string;
+      channels: Array<{ jid: string; channel: string; name: string }>;
+    }
   >();
   for (const g of result.groups) {
     const existing = folderMap.get(g.folder);

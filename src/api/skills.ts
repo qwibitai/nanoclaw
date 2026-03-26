@@ -545,7 +545,10 @@ export function getSkillDetail(skillName: string): SkillDetail | null {
   const absolutePath = path.resolve(projectRoot, skill.path);
 
   // Verify path is within expected boundaries (prevent traversal)
-  if (!absolutePath.startsWith(projectRoot) && !absolutePath.startsWith(os.homedir())) {
+  if (
+    !absolutePath.startsWith(projectRoot) &&
+    !absolutePath.startsWith(os.homedir())
+  ) {
     return null;
   }
 
@@ -566,7 +569,9 @@ export function getSkillDetail(skillName: string): SkillDetail | null {
       }
       // Fallback: read first .md file
       if (!content) {
-        const mdFiles = fs.readdirSync(absolutePath).filter((f) => f.endsWith('.md'));
+        const mdFiles = fs
+          .readdirSync(absolutePath)
+          .filter((f) => f.endsWith('.md'));
         if (mdFiles[0]) {
           content = stripFrontmatter(
             fs.readFileSync(path.join(absolutePath, mdFiles[0]), 'utf-8'),
