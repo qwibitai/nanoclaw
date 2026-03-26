@@ -16,6 +16,8 @@ import { getThisWeekEvents } from '../calendar-service.js';
 import {
   createTask as createDevTask,
   deleteTask as deleteDevTask,
+  dispatchTask as dispatchDevTask,
+  getActiveSessions,
   listTasks as listDevTasks,
   readTask as readDevTask,
   updateTask as updateDevTask,
@@ -417,6 +419,13 @@ export function handleDataApi(
   const deleteTaskMatch = req.method === 'DELETE' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
   if (deleteTaskMatch) {
     authGuard(req, res, token, () => handleDeleteDevTask(res, parseInt(deleteTaskMatch[1], 10)));
+    return true;
+  }
+
+  // Dispatch task: POST /api/dev-tasks/:id/dispatch
+  const dispatchMatch = req.method === 'POST' && url.match(/^\/api\/dev-tasks\/(\d+)\/dispatch$/);
+  if (dispatchMatch) {
+    authGuard(req, res, token, () => handleDispatchDevTask(res, parseInt(dispatchMatch[1], 10)));
     return true;
   }
 
@@ -854,6 +863,35 @@ function handleDeleteDevTask(res: http.ServerResponse, id: number): void {
     logger.error({ err, taskId: id }, 'Failed to delete dev task');
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to delete task' }));
+  }
+}
+
+function handleDispatchDevTask(res: http.ServerResponse, id: number): void {
+  try {
+    const { task } = dispatchDevTask(id);
+
+    if (broadcastDevTasksChange) broadcastDevTasksChange();
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'dispatched', task }));
+  } catch (err: any) {
+    if (err.message?.includes('not found')) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+    if (
+      err.message?.includes('must be') ||
+      err.message?.includes('already being') ||
+      err.message?.includes('Maximum concurrent')
+    ) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
+    logger.error({ err, taskId: id }, 'Failed to dispatch dev task');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to dispatch task' }));
   }
 }
 

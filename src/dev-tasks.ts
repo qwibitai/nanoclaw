@@ -5,6 +5,7 @@
  * directory at the repo root. IDs are allocated from a counter file.
  */
 
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
@@ -269,4 +270,309 @@ export function deleteTask(id: number): boolean {
   fs.unlinkSync(file);
   logger.info({ taskId: id }, 'DevTask deleted');
   return true;
+}
+
+// --- Dispatch and worktree management ---
+
+const MAX_CONCURRENT_SESSIONS = 3;
+
+interface ActiveSession {
+  taskId: number;
+  branch: string;
+  worktreePath: string;
+  startedAt: string;
+  abortController: AbortController;
+}
+
+const activeSessions = new Map<number, ActiveSession>();
+
+/** Override repo path (for tests). */
+let repoDir = SIGMA_REPO;
+export function _setRepoDir(dir: string): void {
+  repoDir = dir;
+}
+
+export function getActiveSessions(): ReadonlyMap<number, ActiveSession> {
+  return activeSessions;
+}
+
+/**
+ * Slugify a title for use in branch names.
+ * Lowercase, replace non-alphanumeric with hyphens, trim, max 40 chars.
+ */
+export function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
+
+/** Build the branch name for a task. */
+export function taskBranchName(id: number, title: string): string {
+  return `pip/task-${id}-${slugify(title)}`;
+}
+
+/** Build the worktree path for a task. */
+export function worktreePath(id: number): string {
+  return `/tmp/sigma-task-${id}`;
+}
+
+/**
+ * Run a git command in the repo directory. Returns stdout.
+ * Throws on non-zero exit.
+ */
+function git(args: string, cwd?: string): string {
+  return execSync(`git ${args}`, {
+    cwd: cwd || repoDir,
+    encoding: 'utf-8',
+    timeout: 30_000,
+  }).trim();
+}
+
+/**
+ * Create a git worktree for a task.
+ * Creates a new branch from HEAD and checks it out in the worktree.
+ */
+export function createWorktree(
+  taskId: number,
+  title: string,
+): { branch: string; worktreePath: string } {
+  const branch = taskBranchName(taskId, title);
+  const wtPath = worktreePath(taskId);
+
+  // Clean up stale worktree if it exists
+  if (fs.existsSync(wtPath)) {
+    logger.warn({ taskId, wtPath }, 'Stale worktree found, removing');
+    try {
+      git(`worktree remove --force "${wtPath}"`);
+    } catch {
+      fs.rmSync(wtPath, { recursive: true, force: true });
+    }
+  }
+
+  // Delete stale branch if it exists (e.g., from a previous failed dispatch)
+  try {
+    git(`branch -D "${branch}"`);
+  } catch {
+    // Branch doesn't exist — expected
+  }
+
+  git(`worktree add "${wtPath}" -b "${branch}"`);
+  logger.info({ taskId, branch, wtPath }, 'Worktree created');
+  return { branch, worktreePath: wtPath };
+}
+
+/**
+ * Clean up a worktree and optionally its branch.
+ */
+export function cleanupWorktree(taskId: number, deleteBranch = false): void {
+  const wtPath = worktreePath(taskId);
+
+  if (fs.existsSync(wtPath)) {
+    try {
+      git(`worktree remove --force "${wtPath}"`);
+    } catch {
+      fs.rmSync(wtPath, { recursive: true, force: true });
+    }
+    logger.info({ taskId, wtPath }, 'Worktree removed');
+  }
+
+  // Prune any stale worktree references
+  try {
+    git('worktree prune');
+  } catch {
+    // ignore
+  }
+
+  if (deleteBranch) {
+    const task = readTask(taskId);
+    if (task?.branch) {
+      try {
+        git(`branch -D "${task.branch}"`);
+        logger.info({ taskId, branch: task.branch }, 'Branch deleted');
+      } catch {
+        // Branch may already be gone
+      }
+    }
+  }
+}
+
+/**
+ * Dispatch a task: create worktree, update status, track session.
+ * The actual Claude Code session spawning is handled by the caller
+ * (claude-session.ts in Unit 2.1) — this function sets up the worktree
+ * and returns the session info for the caller to use.
+ *
+ * Returns the session info, or throws if dispatch is not possible.
+ */
+export function dispatchTask(id: number): {
+  task: DevTask;
+  session: ActiveSession;
+} {
+  const task = readTask(id);
+  if (!task) {
+    throw new Error(`Task ${id} not found`);
+  }
+  if (task.status !== 'open') {
+    throw new Error(
+      `Task ${id} has status '${task.status}', must be 'open' to dispatch`,
+    );
+  }
+  if (activeSessions.has(id)) {
+    throw new Error(`Task ${id} is already being dispatched`);
+  }
+  if (activeSessions.size >= MAX_CONCURRENT_SESSIONS) {
+    throw new Error(
+      `Maximum concurrent sessions (${MAX_CONCURRENT_SESSIONS}) reached`,
+    );
+  }
+
+  const { branch, worktreePath: wtPath } = createWorktree(id, task.title);
+
+  const updated = updateTask(id, { status: 'working', branch });
+
+  const session: ActiveSession = {
+    taskId: id,
+    branch,
+    worktreePath: wtPath,
+    startedAt: new Date().toISOString(),
+    abortController: new AbortController(),
+  };
+  activeSessions.set(id, session);
+
+  logger.info({ taskId: id, branch, wtPath }, 'Task dispatched');
+  return { task: updated, session };
+}
+
+/**
+ * Mark a session as complete. Removes from active sessions,
+ * cleans up worktree.
+ */
+export function completeSession(
+  taskId: number,
+  result: { status: 'pr_ready'; prUrl: string } | { status: 'needs_session' },
+): DevTask {
+  const session = activeSessions.get(taskId);
+  if (session) {
+    activeSessions.delete(taskId);
+    cleanupWorktree(taskId);
+  }
+
+  if (result.status === 'pr_ready') {
+    return updateTask(taskId, {
+      status: 'pr_ready',
+      pr_url: result.prUrl,
+    });
+  } else {
+    return updateTask(taskId, { status: 'needs_session' });
+  }
+}
+
+/**
+ * Cancel an active session.
+ */
+export function cancelSession(taskId: number): void {
+  const session = activeSessions.get(taskId);
+  if (!session) return;
+
+  session.abortController.abort();
+  activeSessions.delete(taskId);
+  cleanupWorktree(taskId);
+
+  // Reset task to open
+  try {
+    updateTask(taskId, { status: 'open' });
+  } catch {
+    // Task may have been deleted
+  }
+
+  logger.info({ taskId }, 'Session cancelled');
+}
+
+/**
+ * Recover task states on startup by checking git state.
+ * For any task with status 'working', check what actually exists:
+ * - Branch has a PR → set pr_ready with PR URL
+ * - Branch has commits but no PR → set needs_session
+ * - Nothing exists → reset to open
+ */
+export async function recoverTasksOnStartup(): Promise<void> {
+  const workingTasks = listTasks({ status: 'working' });
+  if (workingTasks.length === 0) return;
+
+  logger.info(
+    { count: workingTasks.length },
+    'Recovering tasks with working status',
+  );
+
+  for (const task of workingTasks) {
+    try {
+      // Check if branch exists
+      const branch = task.branch;
+      if (!branch) {
+        updateTask(task.id, { status: 'open' });
+        logger.info({ taskId: task.id }, 'Reset to open: no branch recorded');
+        continue;
+      }
+
+      let branchExists = false;
+      try {
+        git(`rev-parse --verify "${branch}"`);
+        branchExists = true;
+      } catch {
+        // Branch doesn't exist locally
+      }
+
+      if (!branchExists) {
+        updateTask(task.id, { status: 'open' });
+        logger.info(
+          { taskId: task.id, branch },
+          'Reset to open: branch not found',
+        );
+        continue;
+      }
+
+      // Check for PR via gh CLI
+      try {
+        const prUrl = execSync(
+          `gh pr view "${branch}" --json url --jq .url 2>/dev/null`,
+          { cwd: repoDir, encoding: 'utf-8', timeout: 10_000 },
+        ).trim();
+
+        if (prUrl) {
+          updateTask(task.id, { status: 'pr_ready', pr_url: prUrl });
+          logger.info(
+            { taskId: task.id, prUrl },
+            'Recovered as pr_ready: PR found',
+          );
+          continue;
+        }
+      } catch {
+        // No PR found — fall through
+      }
+
+      // Branch exists but no PR — session was interrupted
+      updateTask(task.id, { status: 'needs_session' });
+      logger.info(
+        { taskId: task.id, branch },
+        'Recovered as needs_session: branch exists but no PR',
+      );
+    } catch (err) {
+      logger.error({ taskId: task.id, err }, 'Failed to recover task');
+      try {
+        updateTask(task.id, { status: 'open' });
+      } catch {
+        // Task may be corrupt
+      }
+    }
+
+    // Clean up stale worktree if it exists
+    cleanupWorktree(task.id);
+  }
+}
+
+/** Reset dispatch state (for tests). */
+export function _resetDispatchState(): void {
+  activeSessions.clear();
 }

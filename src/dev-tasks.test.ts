@@ -1,17 +1,25 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  _resetDispatchState,
+  _setRepoDir,
   _setTasksDir,
   allocateId,
+  cancelSession,
   createTask,
   deleteTask,
+  dispatchTask,
+  getActiveSessions,
   listTasks,
   parseTaskFile,
   readTask,
   readTaskBody,
   serializeTask,
+  slugify,
+  taskBranchName,
   transitionStatus,
   updateTask,
 } from './dev-tasks.js';
@@ -412,6 +420,160 @@ describe('dev-tasks', () => {
 
     it('returns false for non-existent task', () => {
       expect(deleteTask(999)).toBe(false);
+    });
+  });
+});
+
+// --- Dispatch and worktree tests ---
+// These use a real git repo in /tmp for worktree operations.
+
+describe('dispatch and worktree', () => {
+  let testDir: string;
+  let gitRepoDir: string;
+
+  beforeEach(() => {
+    // Create a temp git repo for worktree operations
+    gitRepoDir = fs.mkdtempSync(path.join('/tmp', 'dev-tasks-git-'));
+    execSync('git init && git commit --allow-empty -m "init"', {
+      cwd: gitRepoDir,
+    });
+
+    // Tasks dir inside the git repo
+    testDir = path.join(gitRepoDir, 'tasks');
+    fs.mkdirSync(testDir);
+    fs.writeFileSync(
+      path.join(testDir, 'counter.json'),
+      JSON.stringify({ next_id: 1 }),
+    );
+
+    _setTasksDir(testDir);
+    _setRepoDir(gitRepoDir);
+    _resetDispatchState();
+  });
+
+  afterEach(() => {
+    // Clean up any worktrees we created
+    _resetDispatchState();
+
+    // Remove worktrees before deleting the repo
+    try {
+      const output = execSync('git worktree list --porcelain', {
+        cwd: gitRepoDir,
+        encoding: 'utf-8',
+      });
+      const paths = output
+        .split('\n')
+        .filter((l) => l.startsWith('worktree '))
+        .map((l) => l.replace('worktree ', ''))
+        .filter((p) => p !== gitRepoDir);
+      for (const p of paths) {
+        try {
+          execSync(`git worktree remove --force "${p}"`, { cwd: gitRepoDir });
+        } catch {
+          fs.rmSync(p, { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    fs.rmSync(gitRepoDir, { recursive: true, force: true });
+  });
+
+  describe('slugify', () => {
+    it('converts title to branch-safe slug', () => {
+      expect(slugify('Fix the login bug')).toBe('fix-the-login-bug');
+    });
+
+    it('handles special characters', () => {
+      expect(slugify('Add @mentions & #tags!')).toBe('add-mentions-tags');
+    });
+
+    it('truncates to 40 chars', () => {
+      const long = 'a'.repeat(60);
+      expect(slugify(long).length).toBe(40);
+    });
+  });
+
+  describe('taskBranchName', () => {
+    it('builds correct branch name', () => {
+      expect(taskBranchName(42, 'Fix login bug')).toBe(
+        'pip/task-42-fix-login-bug',
+      );
+    });
+  });
+
+  describe('dispatchTask', () => {
+    it('creates worktree and updates task status', () => {
+      createTask({ title: 'Dispatch me', source: 'fambot' });
+
+      const { task, session } = dispatchTask(1);
+
+      expect(task.status).toBe('working');
+      expect(task.branch).toBe('pip/task-1-dispatch-me');
+      expect(session.taskId).toBe(1);
+      expect(fs.existsSync(session.worktreePath)).toBe(true);
+
+      // Verify worktree is a git checkout
+      const branch = execSync('git branch --show-current', {
+        cwd: session.worktreePath,
+        encoding: 'utf-8',
+      }).trim();
+      expect(branch).toBe('pip/task-1-dispatch-me');
+    });
+
+    it('rejects non-open tasks', () => {
+      createTask({ title: 'Not open', source: 'fambot' });
+      updateTask(1, { status: 'working' });
+
+      expect(() => dispatchTask(1)).toThrow("must be 'open' to dispatch");
+    });
+
+    it('rejects duplicate dispatch', () => {
+      createTask({ title: 'Double dispatch', source: 'fambot' });
+      dispatchTask(1);
+
+      // Create another open task with same ID scenario
+      createTask({ title: 'Another task', source: 'fambot' });
+      dispatchTask(2);
+
+      createTask({ title: 'Third task', source: 'fambot' });
+      dispatchTask(3);
+
+      createTask({ title: 'Fourth task', source: 'fambot' });
+      expect(() => dispatchTask(4)).toThrow('Maximum concurrent sessions');
+    });
+
+    it('rejects when task is already working', () => {
+      createTask({ title: 'Already running', source: 'fambot' });
+      dispatchTask(1);
+
+      // Task is now 'working', so dispatch rejects on status check
+      expect(() => dispatchTask(1)).toThrow("must be 'open' to dispatch");
+    });
+
+    it('tracks active sessions', () => {
+      createTask({ title: 'Tracked', source: 'fambot' });
+      dispatchTask(1);
+
+      expect(getActiveSessions().size).toBe(1);
+      expect(getActiveSessions().has(1)).toBe(true);
+    });
+  });
+
+  describe('cancelSession', () => {
+    it('cancels and cleans up', () => {
+      createTask({ title: 'Cancel me', source: 'fambot' });
+      const { session } = dispatchTask(1);
+      const wtPath = session.worktreePath;
+
+      cancelSession(1);
+
+      expect(getActiveSessions().size).toBe(0);
+      expect(fs.existsSync(wtPath)).toBe(false);
+
+      const task = readTask(1);
+      expect(task!.status).toBe('open');
     });
   });
 });
