@@ -33,6 +33,8 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `tools/inventory/demand-forecast.ts` | Demand forecast generator (Sales Performance → trend analysis, velocity, demand-forecast.json) |
 | `tools/inventory/trend-alerts.ts` | Trend alerting engine (demand-forecast.json → critical/warning/opportunity alerts) |
 | `tools/reporting/business-health.ts` | Monthly business health score (0-100) combining revenue, inventory, pipeline, and product performance |
+| `tools/inventory/profitability.ts` | Profitability analysis (Product Costs sheet + sales data → margins, profit per product, winners/losers) |
+| `tools/iddi/iddi.ts engagement` | IDDI backend engagement data (QR scans, poll votes, suggestions from Render-hosted backend) |
 | `container/skills/gmail/` | Gmail read/search/send/reply via API |
 | `container/skills/google-drive/` | Google Drive file access |
 | `container/skills/instantly/` | Instantly.ai cold email campaigns (push leads, sync replies, analytics) |

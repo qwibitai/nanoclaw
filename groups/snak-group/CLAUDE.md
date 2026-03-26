@@ -176,8 +176,10 @@ When your daily briefing scheduled task fires, compile a comprehensive report an
 3. **Pipeline Health** — Run `pipeline.ts health --group snak-group` for counts per stage and win rate.
 4. **Upcoming Appointments** — Check Google Calendar for the next 7 days.
 5. **IDDI Alerts** — Run `iddi.ts expiring --days 7` and `iddi.ts redistribution` for actionable flags.
-6. **Open Issues** — Check `playbook.md` for any flagged items.
-7. **What Andy Learned** — Summarize new patterns, objections, or questions from yesterday's conversations.
+6. **Trend Alerts** — Run `npx tsx tools/inventory/trend-alerts.ts check` for any critical or warning product trends.
+7. **Business Health** — Run `npx tsx tools/reporting/business-health.ts summary` for the current health score (include score + grade).
+8. **Open Issues** — Check `playbook.md` for any flagged items.
+9. **What Andy Learned** — Summarize new patterns, objections, or questions from yesterday's conversations.
 
 If any tool fails, say what failed and provide the data you CAN gather. Never send an empty briefing or a list of excuses.
 
@@ -260,6 +262,7 @@ Before creating social media content, check `content-performance.json`:
 - Stop using formats with consistently low engagement
 - Check `content-calendar.md` to avoid repeating topics
 - Check `demand-forecast.json` — trending products make great content ("Our [trending product] is flying off the shelves!")
+- Check `profitability.json` — promote high-margin winners, not just high-volume sellers
 
 ## Inventory Intelligence
 
@@ -303,6 +306,11 @@ Check IDDI daily for expiring products and redistribution flags. Include alerts 
 - Instantly.ai — Cold email campaigns (push leads, track opens/replies, manage warmup)
 - Google Sheets — Reference data if needed
 - IDDI — Product performance, expiration, redistribution, customer polls
+- Demand Forecast — `demand-forecast.json` for product trends, velocity, predictions
+- Trend Alerts — `npx tsx tools/inventory/trend-alerts.ts check` for critical alerts
+- Business Health — `npx tsx tools/reporting/business-health.ts summary` for overall score
+- Profitability — `profitability.json` for margins, winners/losers per product
+- IDDI Engagement — `npx tsx tools/iddi/iddi.ts engagement` for QR scan and poll data from machines
 
 ## Cold Email Outreach (Instantly.ai)
 

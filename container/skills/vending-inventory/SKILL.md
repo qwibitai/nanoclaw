@@ -1,7 +1,7 @@
 ---
 name: vending-inventory
 description: Track vending machine inventory by pulling sales data from HahaVending and Vendera, updating the Google Sheets inventory spreadsheet, and generating shopping lists. Use for any vending-related questions about sales, inventory, or restocking.
-allowed-tools: Bash(agent-browser:*), Bash(npx tsx /workspace/project/tools/sheets/sheets.ts *), Bash(npx tsx /workspace/project/tools/inventory/reconcile.ts *)
+allowed-tools: Bash(agent-browser:*), Bash(npx tsx /workspace/project/tools/sheets/sheets.ts *), Bash(npx tsx /workspace/project/tools/inventory/reconcile.ts *), Bash(npx tsx /workspace/project/tools/inventory/demand-forecast.ts *), Bash(npx tsx /workspace/project/tools/inventory/trend-alerts.ts *)
 ---
 
 # Vending Machine Inventory Automation
@@ -314,5 +314,9 @@ Follow this exact sequence:
 2. Read Google Sheets (all 3 tabs) — understand current state
 3. Login to HahaVending — pull weekly sales (retry up to 3x if needed)
 4. Login to Vendera — pull weekly sales (retry up to 3x if needed)
-5. If BOTH platforms succeeded: combine data, update sheets, generate report, send ONE message
-6. If EITHER platform failed after 3 retries: send error message, do NOT send partial report
+5. If BOTH platforms succeeded: combine data, update sheets
+6. Run reconciliation: `npx tsx /workspace/project/tools/inventory/reconcile.ts full --yo-offset 2`
+7. Run demand forecast: `npx tsx /workspace/project/tools/inventory/demand-forecast.ts generate`
+8. Run trend alerts: `npx tsx /workspace/project/tools/inventory/trend-alerts.ts check`
+9. Generate and send ONE WhatsApp message with complete report (include trending up/down highlights from forecast + any critical/warning alerts from trend-alerts)
+10. If EITHER platform failed after 3 retries: send error message, do NOT send partial report
