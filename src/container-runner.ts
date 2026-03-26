@@ -344,6 +344,7 @@ export async function runContainerAgent(
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
+    let streamError: string | null = null;
 
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
@@ -380,6 +381,9 @@ export async function runContainerAgent(
             const parsed: ContainerOutput = JSON.parse(jsonStr);
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
+            }
+            if (parsed.status === 'error') {
+              streamError = parsed.error || 'Unknown streamed container error';
             }
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
@@ -476,10 +480,21 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
-            'Container timed out after output (idle cleanup)',
+            { group: group.name, containerName, duration, code, streamError },
+            streamError
+              ? 'Container timed out after streamed error output'
+              : 'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
+            if (streamError) {
+              resolve({
+                status: 'error',
+                result: null,
+                newSessionId,
+                error: streamError,
+              });
+              return;
+            }
             resolve({
               status: 'success',
               result: null,
@@ -594,6 +609,19 @@ export async function runContainerAgent(
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
         outputChain.then(() => {
+          if (streamError) {
+            logger.warn(
+              { group: group.name, duration, newSessionId, streamError },
+              'Container completed after streamed error output',
+            );
+            resolve({
+              status: 'error',
+              result: null,
+              newSessionId,
+              error: streamError,
+            });
+            return;
+          }
           logger.info(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
