@@ -36,6 +36,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  awaitingInput?: boolean;
 }
 
 interface SessionEntry {
@@ -598,8 +599,15 @@ async function main(): Promise<void> {
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      // Query has fully settled and the runner is now blocked on IPC input.
+      // Emit this explicit marker so the host does not treat ordinary result
+      // events as proof that the container is already idle-waiting.
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: sessionId,
+        awaitingInput: true,
+      });
 
       log('Query ended, waiting for next IPC message...');
 
