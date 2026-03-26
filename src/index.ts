@@ -1,18 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
-
 import {
   ASSISTANT_NAME,
-  DEFAULT_TRIGGER,
-  getTriggerPattern,
-  GROUPS_DIR,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
-  ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
+  TRIGGER_PATTERN,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -25,8 +22,14 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  TokenInfo,
+  trimMessagesForTokenLimit,
+  validateTokenConfig,
+} from './token-manager.js';
+import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -74,27 +77,6 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-const onecli = new OneCLI({ url: ONECLI_URL });
-
-function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
-  if (group.isMain) return;
-  const identifier = group.folder.toLowerCase().replace(/_/g, '-');
-  onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
-      logger.info(
-        { jid, identifier, created: res.created },
-        'OneCLI agent ensured',
-      );
-    },
-    (err) => {
-      logger.debug(
-        { jid, identifier, err: String(err) },
-        'OneCLI agent ensure skipped',
-      );
-    },
-  );
-}
-
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -134,29 +116,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-  // Copy CLAUDE.md template into the new group folder so agents have
-  // identity and instructions from the first run.  (Fixes #1391)
-  const groupMdFile = path.join(groupDir, 'CLAUDE.md');
-  if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(
-      GROUPS_DIR,
-      group.isMain ? 'main' : 'global',
-      'CLAUDE.md',
-    );
-    if (fs.existsSync(templateFile)) {
-      let content = fs.readFileSync(templateFile, 'utf-8');
-      if (ASSISTANT_NAME !== 'Andy') {
-        content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
-        content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
-      }
-      fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
-    }
-  }
-
-  // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
-  ensureOneCLIAgent(jid, group);
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
@@ -216,17 +175,63 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
+        TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  // Manage token limits: trim old messages if prompt would be too long
+  const beforeTrimCount = missedMessages.length;
+  const { trimmed: messagesToSend, tokenInfo } = trimMessagesForTokenLimit(
+    missedMessages,
+    TIMEZONE,
+    true // autoTrim = true
+  );
+
+  // Log token usage information
+  if (tokenInfo.trimmedCount > 0) {
+    logger.warn(
+      {
+        group: group.name,
+        originalCount: beforeTrimCount,
+        trimmedCount: tokenInfo.trimmedCount,
+        finalCount: messagesToSend.length,
+        tokenCount: tokenInfo.totalTokens,
+        tokenLimit: tokenInfo.tokenLimit,
+        usagePercent: tokenInfo.usagePercent.toFixed(1),
+      },
+      'Token limit: auto-trimmed old messages to fit context window'
+    );
+  } else if (tokenInfo.isWarning) {
+    logger.info(
+      {
+        group: group.name,
+        count: messagesToSend.length,
+        tokenCount: tokenInfo.totalTokens,
+        tokenLimit: tokenInfo.tokenLimit,
+        usagePercent: tokenInfo.usagePercent.toFixed(1),
+      },
+      'Token warning: approaching context limit'
+    );
+  }
+
+  // If we trimmed significantly, send a notice to the user
+  if (tokenInfo.trimmedCount > 0 && !isMainGroup) {
+    // Only notify non-main groups to avoid cluttering main
+    logger.info(
+      {
+        group: group.name,
+        trimmedCount: tokenInfo.trimmedCount,
+      },
+      'Old conversation context removed due to token limits'
+    );
+  }
+
+  const prompt = formatMessages(messagesToSend, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -329,7 +334,6 @@ async function runAgent(
       id: t.id,
       groupFolder: t.group_folder,
       prompt: t.prompt,
-      script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
@@ -400,7 +404,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -446,11 +450,10 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const triggerPattern = getTriggerPattern(group.trigger);
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
+                TRIGGER_PATTERN.test(m.content.trim()) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
@@ -464,8 +467,30 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
           );
-          const messagesToSend =
+          const pendingToProcess =
             allPending.length > 0 ? allPending : groupMessages;
+
+          // Apply token management to pending messages
+          const { trimmed: messagesToSend, tokenInfo } = trimMessagesForTokenLimit(
+            pendingToProcess,
+            TIMEZONE,
+            true
+          );
+
+          // Log if significant trimming occurred
+          if (tokenInfo.trimmedCount > 0) {
+            logger.info(
+              {
+                chatJid,
+                trimmedCount: tokenInfo.trimmedCount,
+                originalCount: pendingToProcess.length,
+                finalCount: messagesToSend.length,
+                usagePercent: tokenInfo.usagePercent.toFixed(1),
+              },
+              'Token limit: trimmed accumulated context'
+            );
+          }
+
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
@@ -498,15 +523,44 @@ async function startMessageLoop(): Promise<void> {
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
+ * Also applies token limits to avoid huge prompts on recovery.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
+      // Apply token trimming during recovery to prevent huge prompts
+      const { trimmed, tokenInfo } = trimMessagesForTokenLimit(
+        pending,
+        TIMEZONE,
+        true
+      );
+
+      if (tokenInfo.trimmedCount > 0) {
+        logger.warn(
+          {
+            group: group.name,
+            originalCount: pending.length,
+            trimmedCount: tokenInfo.trimmedCount,
+            finalCount: trimmed.length,
+            usagePercent: tokenInfo.usagePercent.toFixed(1),
+          },
+          'Recovery: trimmed old messages due to token limits'
+        );
+      }
+
+      // Update the database cursor only to the last message we retained
+      // This prevents re-processing trimmed messages that won't get sent
+      if (trimmed.length > 0) {
+        lastAgentTimestamp[chatJid] =
+          trimmed[trimmed.length - 1].timestamp;
+        saveState();
+      }
+
       logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
+        { group: group.name, pendingCount: trimmed.length },
+        'Recovery: enqueuing message check',
       );
       queue.enqueueMessageCheck(chatJid);
     }
@@ -523,18 +577,21 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
-
-  // Ensure OneCLI agents exist for all registered groups.
-  // Recovers from missed creates (e.g. OneCLI was down at registration time).
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
-  }
-
   restoreRemoteControl();
+
+  // Daily token config validation (log warnings if model misconfigured)
+  validateTokenConfig();
+
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -686,7 +743,6 @@ async function main(): Promise<void> {
         id: t.id,
         groupFolder: t.group_folder,
         prompt: t.prompt,
-        script: t.script || undefined,
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
         status: t.status,
