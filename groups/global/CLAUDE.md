@@ -79,7 +79,7 @@ Standard Markdown works: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 ## Task Scripts
 
-To check or monitor something on a recurring basis, use `schedule_task` — not a bash loop. This way the check survives container restarts and doesn't block other messages. If the user only needs to know when a condition changes, add a `script` to avoid unnecessary wake-ups — the script runs first, and you only wake up when there's something to act on.
+For any recurring task, use `schedule_task`. Tasks that wake the agent frequently — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether you need to act, add a `script` — it runs first, and you only wake up when the check passes. This keeps agent invocations to a minimum. If it's unclear whether the user wants a response every time or only when something requires attention, ask.
 
 ### How it works
 
