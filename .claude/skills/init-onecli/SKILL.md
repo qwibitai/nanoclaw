@@ -155,27 +155,25 @@ onecli secrets list
 
 Tell the user: "Migrated your Anthropic credentials from `.env` to the OneCLI Agent Vault. The raw keys have been removed from `.env` — they're now managed by OneCLI and will be injected at request time without entering containers."
 
-### Offer to migrate other service credentials
+### Offer to migrate other container-facing credentials
 
-After handling Anthropic credentials (whether migrated or freshly registered), scan `.env` again for any remaining credential variables. Look for variables whose names contain `_TOKEN`, `_KEY`, `_SECRET`, or `_PASSWORD`, excluding non-credential entries like `ONECLI_URL` and other config values.
+After handling Anthropic credentials (whether migrated or freshly registered), scan `.env` again for remaining credential variables that containers use for outbound API calls.
 
-Common examples from NanoClaw skills:
+**Important:** Only migrate credentials that containers use via outbound HTTPS. Channel tokens (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `DISCORD_BOT_TOKEN`) are used by the NanoClaw host process to connect to messaging platforms — they must stay in `.env`.
+
+Known container-facing credentials:
 
 | .env variable | Secret name | Host pattern |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | `Telegram` | `api.telegram.org` |
-| `SLACK_BOT_TOKEN` | `Slack Bot` | `slack.com` |
-| `SLACK_APP_TOKEN` | `Slack App` | `slack.com` |
-| `DISCORD_BOT_TOKEN` | `Discord` | `discord.com` |
 | `OPENAI_API_KEY` | `OpenAI` | `api.openai.com` |
 | `PARALLEL_API_KEY` | `Parallel` | `api.parallel.ai` |
 
-If any such variables are found with non-empty values, present them to the user:
+If any of these are found with non-empty values, present them to the user:
 
-AskUserQuestion (multiSelect): "These other credentials are still in `.env`. Would you like to move any of them to the OneCLI Agent Vault as well? Credentials in the vault are never exposed to containers and can have rate limits and policies applied."
+AskUserQuestion (multiSelect): "These credentials are used by container agents for outbound API calls. Moving them to the vault means agents never see the raw keys, and you can apply rate limits and policies."
 
-- One option per credential found (e.g., "TELEGRAM_BOT_TOKEN" — description: "Telegram bot token, will be proxied through the vault")
-- **Skip — keep them in .env** — description: "Leave these credentials in .env for now. You can move them later."
+- One option per credential found (e.g., "OPENAI_API_KEY" — description: "Used by voice transcription and other OpenAI integrations inside containers")
+- **Skip — keep them in .env** — description: "Leave these in .env for now. You can move them later."
 
 For each credential the user selects:
 
@@ -183,9 +181,9 @@ For each credential the user selects:
 onecli secrets create --name <SecretName> --type api_key --value <value> --host-pattern <host>
 ```
 
-If a variable isn't in the table above, use a reasonable secret name derived from the variable name (e.g., `MY_SERVICE_KEY` becomes `My Service`) and ask the user what host pattern to use: "What API host does this credential authenticate against? (e.g., `api.example.com`)"
+If there are credential variables not in the table above that look container-facing (i.e. not a channel token), ask the user: "Is `<VARIABLE_NAME>` used by agents inside containers? If so, what API host does it authenticate against? (e.g., `api.example.com`)" — then migrate accordingly.
 
-After migration, remove the migrated lines from `.env` using the Edit tool. Keep any credentials the user chose not to migrate.
+After migration, remove the migrated lines from `.env` using the Edit tool. Keep channel tokens and any credentials the user chose not to migrate.
 
 Verify all secrets were registered:
 ```bash
