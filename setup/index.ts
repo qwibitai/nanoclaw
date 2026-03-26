@@ -9,6 +9,7 @@ const STEPS: Record<
   string,
   () => Promise<{ run: (args: string[]) => Promise<void> }>
 > = {
+  timezone: () => import('./timezone.js'),
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
   groups: () => import('./groups.js'),
@@ -16,6 +17,7 @@ const STEPS: Record<
   mounts: () => import('./mounts.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
+  'whatsapp-auth': () => import('./whatsapp-auth.js'),
 };
 
 async function main(): Promise<void> {
