@@ -475,11 +475,28 @@ export class WhatsAppChannel implements Channel {
     let mentions: string[] | undefined;
     if (mentionMatches && jid.endsWith('@g.us')) {
       const names = mentionMatches.map((m) => m.slice(1).toLowerCase());
-      // Use DB pushNames to find JIDs, then pass them directly as mentions
-      // (WhatsApp accepts both LID and phone JIDs in the mentions array)
       const dbMembers = findMembersByName(jid, names);
+      logger.debug(
+        {
+          mentionMatches,
+          names,
+          jid,
+          dbMembersCount: dbMembers.length,
+          dbMembers,
+        },
+        'Mention resolution',
+      );
       if (dbMembers.length > 0) {
-        mentions = dbMembers.map((m) => m.jid);
+        // Translate LID JIDs to phone JIDs for real WhatsApp mentions
+        const resolved = await Promise.all(
+          dbMembers.map((m) => this.translateJid(m.jid)),
+        );
+        mentions = resolved.filter((j) => j.endsWith('@s.whatsapp.net'));
+        // If no phone JIDs resolved, try LID JIDs directly as fallback
+        if (mentions.length === 0) {
+          mentions = dbMembers.map((m) => m.jid);
+        }
+        logger.debug({ resolved, mentions }, 'Mention JIDs after translation');
       }
     }
 
