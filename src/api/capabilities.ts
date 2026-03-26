@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { getRegisteredChannelNames } from '../channels/registry.js';
+import { isWebJid } from '../config.js';
 import { COMMIT_DIGEST_TASK_ID } from '../commit-digest.js';
 import { DAILY_TASK_ID } from '../daily-notifications.js';
 import {
@@ -44,6 +45,7 @@ function channelFromJid(jid: string): string {
   if (jid.startsWith('dc:')) return 'discord';
   if (jid.startsWith('slack:')) return 'slack';
   if (jid.startsWith('tg:')) return 'telegram';
+  if (isWebJid(jid)) return 'web';
   if (jid.includes('@s.whatsapp.net') || jid.includes('@g.us'))
     return 'whatsapp';
   return 'unknown';

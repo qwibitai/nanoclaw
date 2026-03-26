@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { load as loadSqliteVec } from 'sqlite-vec';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, isWebJid, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -732,7 +732,7 @@ export function getNewMessages(
 
   // LIKE match for thread-capable channels (dc: and slack:)
   for (const jid of jids) {
-    if (jid.startsWith('dc:') || jid.startsWith('slack:')) {
+    if (jid.startsWith('dc:') || jid.startsWith('slack:') || isWebJid(jid)) {
       conditions.push('chat_jid LIKE ?');
       params.push(`${jid}:thread:%`);
     }

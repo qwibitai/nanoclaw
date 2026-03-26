@@ -146,22 +146,34 @@ export function resolveAssistantName(containerConfig?: {
   return containerConfig?.assistantName || ASSISTANT_NAME;
 }
 
+// --- Web channel JID utilities ---
+
+/** Check if a JID belongs to the web channel. */
+export function isWebJid(jid: string): boolean {
+  return jid.startsWith('web:');
+}
+
+/** Construct a web channel JID from a group folder name. */
+export function makeWebJid(folder: string): string {
+  return `web:${folder}`;
+}
+
 // --- Thread JID parsing utilities ---
 
 export interface ParsedThreadJid {
-  channel: 'dc' | 'slack';
+  channel: 'dc' | 'slack' | 'web';
   parentId: string;
   threadId: string;
 }
 
-const THREAD_JID_RE = /^(dc|slack):([^:]+):thread:(.+)$/;
+const THREAD_JID_RE = /^(dc|slack|web):([^:]+):thread:(.+)$/;
 
 /** Parse a thread JID into its components, or return null for non-thread JIDs. */
 export function parseThreadJid(jid: string): ParsedThreadJid | null {
   const match = jid.match(THREAD_JID_RE);
   if (!match) return null;
   return {
-    channel: match[1] as 'dc' | 'slack',
+    channel: match[1] as 'dc' | 'slack' | 'web',
     parentId: match[2],
     threadId: match[3],
   };

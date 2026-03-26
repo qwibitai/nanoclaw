@@ -29,6 +29,8 @@ import {
   WEB_UI_TOKEN,
   buildTriggerPattern,
   getParentJid,
+  isWebJid,
+  makeWebJid,
   parseThreadJid,
   resolveAssistantName,
 } from './config.js';
@@ -213,8 +215,8 @@ function resolveGroup(
 function isThreadSessionEnabled(jid: string, group: RegisteredGroup): boolean {
   if (group.containerConfig?.enableThreadSessions === false) return false;
   if (group.containerConfig?.enableThreadSessions === true) return true;
-  // Default: on for Discord and Slack, off for others
-  return jid.startsWith('dc:') || jid.startsWith('slack:');
+  // Default: on for Discord, Slack, and Web; off for others
+  return jid.startsWith('dc:') || jid.startsWith('slack:') || isWebJid(jid);
 }
 
 interface ModelOverrideResult {
@@ -358,10 +360,25 @@ function loadState(): void {
   }
   sessions = getAllSessionsV2();
   registeredGroups = getAllRegisteredGroups();
-  logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
-    'State loaded',
-  );
+
+  // Register web: JID aliases so the web UI can target groups by folder name
+  let nativeGroupCount = 0;
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!isWebJid(jid)) {
+      nativeGroupCount++;
+      ensureWebJidAlias(group);
+    }
+  }
+
+  logger.info({ groupCount: nativeGroupCount }, 'State loaded');
+}
+
+/** Register a web:{folder} alias so the web UI can route to this group. */
+function ensureWebJidAlias(group: RegisteredGroup): void {
+  const webJid = makeWebJid(group.folder);
+  if (!registeredGroups[webJid]) {
+    registeredGroups[webJid] = group;
+  }
 }
 
 function saveState(): void {
@@ -383,6 +400,8 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
+
+  if (!isWebJid(jid)) ensureWebJidAlias(group);
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
@@ -439,7 +458,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const isMainGroup = group.isMain === true;
-  const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+  const isWebChannel = isWebJid(parentJid);
+  const needsTrigger = !isMainGroup && !isWebChannel && group.requiresTrigger !== false;
   const groupAssistantName = resolveAssistantName(group.containerConfig);
   const triggerPattern = buildTriggerPattern(groupAssistantName);
 
@@ -1790,6 +1810,7 @@ async function main(): Promise<void> {
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
   for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (isWebJid(jid)) continue; // web: aliases share the same agent
     ensureOneCLIAgent(jid, group);
   }
 
@@ -2140,11 +2161,13 @@ async function main(): Promise<void> {
       sendMessage: (groupJid, threadId, text) =>
         queue.sendMessage(groupJid, threadId, text),
       getRegisteredGroups: () =>
-        Object.entries(registeredGroups).map(([jid, g]) => ({
-          jid,
-          name: g.name,
-          folder: g.folder,
-        })),
+        Object.entries(registeredGroups)
+          .filter(([jid]) => !isWebJid(jid))
+          .map(([jid, g]) => ({
+            jid,
+            name: g.name,
+            folder: g.folder,
+          })),
       startSession: (groupJid, text) => {
         const group = registeredGroups[groupJid];
         if (!group) return false;
@@ -2163,12 +2186,14 @@ async function main(): Promise<void> {
         queue.enqueueMessageCheck(groupJid);
         return true;
       },
-      startSessionWs: (groupJid, text, senderName, senderId, _threadId?) => {
+      startSessionWs: (groupJid, text, senderName, senderId) => {
         const group = registeredGroups[groupJid];
         if (!group) return false;
         const assistantName = resolveAssistantName(group.containerConfig);
+        // Web channel: never require trigger (user is authenticated, deliberate action)
+        const isWeb = isWebJid(groupJid);
         const trigger =
-          group.requiresTrigger !== false ? `@${assistantName} ` : '';
+          !isWeb && group.requiresTrigger !== false ? `@${assistantName} ` : '';
         const msgId = `web-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
         storeMessage({
           id: msgId,
@@ -2228,6 +2253,14 @@ async function main(): Promise<void> {
     },
     WEB_UI_TOKEN,
   );
+
+  // Wire web channel broadcast to the WebSocket server
+  const webChannel = channels.find((ch) => ch.name === 'web');
+  if (webChannel && webUI) {
+    (webChannel as import('./channels/web.js').WebChannel).setBroadcast(
+      webUI.broadcastWebMessage,
+    );
+  }
 
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

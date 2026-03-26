@@ -320,7 +320,10 @@ function updateOneCLIGranolaSecret(newToken: string): void {
     })
     .then(() => logger.debug('OneCLI Granola secret updated'))
     .catch((err) =>
-      logger.debug({ err: String(err) }, 'OneCLI Granola secret update skipped'),
+      logger.debug(
+        { err: String(err) },
+        'OneCLI Granola secret update skipped',
+      ),
     );
 }
 

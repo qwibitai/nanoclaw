@@ -116,6 +116,11 @@ export interface WebUIHandle {
     threadId?: string,
   ) => void;
   notifySessionEnd: (sessionKey: string) => void;
+  broadcastWebMessage: (
+    groupFolder: string,
+    threadId: string | undefined,
+    text: string,
+  ) => void;
 }
 
 /**
@@ -546,6 +551,7 @@ export function startWebUI(
         broadcast,
         notifySessionStart,
         notifySessionEnd,
+        broadcastWebMessage: wsHandlers.broadcastWebMessage,
       });
     });
   });

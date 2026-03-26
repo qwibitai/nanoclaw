@@ -47,7 +47,8 @@ export interface Capabilities {
 export type WsClientMessage =
   | {
       type: 'send_message';
-      groupJid: string;
+      groupJid?: string;
+      groupFolder?: string; // web channel: target group by folder name
       text: string;
       senderName?: string;
       senderId?: string;
@@ -77,6 +78,13 @@ export type WsServerMessage =
       jobId: string;
       output: string;
       status: 'running' | 'completed' | 'failed';
+    }
+  | {
+      type: 'web_message';
+      groupFolder: string;
+      threadId?: string;
+      text: string;
+      timestamp: string;
     }
   | { type: 'resync' }
   | { type: 'error'; code: string; message: string };

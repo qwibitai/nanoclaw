@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { IncomingMessage, Server } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { WEB_UI_SENDER_NAME } from '../config.js';
+import { isWebJid, makeWebJid, WEB_UI_SENDER_NAME } from '../config.js';
 import { logger } from '../logger.js';
 import { isOriginAllowed } from './cors.js';
 import type { Capabilities, WsServerMessage } from './types.js';
@@ -104,6 +104,7 @@ interface WsClient {
   ws: WebSocket;
   subscribedGroups: Set<string> | null; // null = all groups (default)
   tokenHash: string; // first 16 chars of token for rate tracking
+  authResolved: boolean; // false until JWT auth check completes
   userId?: string; // set when authenticated via JWT
   allowedGroups?: Set<string>; // set for non-admin JWT users; undefined = no restriction
 }
@@ -178,6 +179,11 @@ export function initWebSocket(
     output: string,
     status: 'running' | 'completed' | 'failed',
   ) => void;
+  broadcastWebMessage: (
+    groupFolder: string,
+    threadId: string | undefined,
+    text: string,
+  ) => void;
 } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65_536 });
 
@@ -227,32 +233,32 @@ export function initWebSocket(
     const tokenParam = reqUrl.searchParams.get('token') || '';
     const tokenHash = tokenParam.slice(0, 16) || 'anonymous';
 
-    // Resolve JWT auth from cookie for group isolation
-    let userId: string | undefined;
-    let allowedGroups: Set<string> | undefined;
-    deps
-      .checkAuth(req, token)
-      .then((authResult) => {
-        if (authResult && authResult !== true) {
-          userId = authResult.id;
-          // Non-admins get restricted to their allowed groups
-          if (authResult.role !== 'admin') {
-            allowedGroups = new Set(authResult.groups);
-          }
-          client.userId = userId;
-          client.allowedGroups = allowedGroups;
-        }
-      })
-      .catch(() => {
-        // Auth resolution failure is non-fatal for already-connected WS
-      });
-
     const client: WsClient = {
       ws,
       subscribedGroups: null, // default: all groups
       tokenHash,
+      authResolved: false,
     };
     wsClients.add(client);
+
+    // Resolve JWT auth from cookie for group isolation.
+    // Message handling is deferred until this resolves (authResolved flag).
+    deps
+      .checkAuth(req, token)
+      .then((authResult) => {
+        if (authResult && authResult !== true) {
+          client.userId = authResult.id;
+          if (authResult.role !== 'admin') {
+            client.allowedGroups = new Set(authResult.groups);
+          }
+        }
+      })
+      .catch(() => {
+        // Auth resolution failure is non-fatal for already-connected WS
+      })
+      .finally(() => {
+        client.authResolved = true;
+      });
 
     // Send connected message with capabilities
     sendJson(ws, {
@@ -291,6 +297,17 @@ export function initWebSocket(
       const parsed = msg as Record<string, unknown>;
 
       if (parsed.type === 'send_message') {
+        // Block messages until JWT auth resolution completes (prevents
+        // allowedGroups bypass during the async auth window)
+        if (!client.authResolved) {
+          sendJson(ws, {
+            type: 'error',
+            code: 'auth_pending',
+            message: 'Authentication still resolving, try again shortly',
+          });
+          return;
+        }
+
         // Rate limit check (keyed by token hash, not per-connection)
         if (!checkRateLimit(client.tokenHash)) {
           sendJson(ws, {
@@ -301,17 +318,53 @@ export function initWebSocket(
           return;
         }
 
-        // Validate field types, not just truthiness
-        const groupJid = parsed.groupJid;
         const text = parsed.text;
-        if (typeof groupJid !== 'string' || typeof text !== 'string') {
+        if (typeof text !== 'string') {
+          sendJson(ws, {
+            type: 'error',
+            code: 'invalid_params',
+            message: 'Missing required field: text (string)',
+          });
+          return;
+        }
+
+        // Support groupFolder (web channel) or groupJid (legacy/native channel)
+        let groupJid: string;
+        let groupFolder: string | undefined;
+        if (typeof parsed.groupFolder === 'string' && parsed.groupFolder) {
+          groupFolder = parsed.groupFolder;
+          groupJid = makeWebJid(groupFolder);
+        } else if (
+          typeof parsed.groupJid === 'string' &&
+          parsed.groupJid
+        ) {
+          groupJid = parsed.groupJid;
+        } else {
           sendJson(ws, {
             type: 'error',
             code: 'invalid_params',
             message:
-              'Missing required fields: groupJid (string), text (string)',
+              'Missing required field: groupFolder (string) or groupJid (string)',
           });
           return;
+        }
+
+        // Enforce group-level authorization for non-admin JWT users
+        if (client.allowedGroups) {
+          // Resolve folder: from groupFolder param, or look up via capabilities
+          const folder =
+            groupFolder ||
+            deps
+              .getCapabilities()
+              .groups?.find((g) => g.jid === groupJid)?.folder;
+          if (!folder || !client.allowedGroups.has(folder)) {
+            sendJson(ws, {
+              type: 'error',
+              code: 'unauthorized_group',
+              message: 'Not authorized for this group',
+            });
+            return;
+          }
         }
 
         const senderName =
@@ -497,10 +550,27 @@ export function initWebSocket(
     broadcastToWsClients(data, { skipBackpressure: true });
   }
 
+  function broadcastWebMessage(
+    groupFolder: string,
+    threadId: string | undefined,
+    text: string,
+  ): void {
+    const data = JSON.stringify({
+      type: 'web_message',
+      groupFolder,
+      threadId,
+      text,
+      timestamp: new Date().toISOString(),
+    } satisfies WsServerMessage);
+    pushToRingBuffer(data, groupFolder);
+    broadcastToWsClients(data, { group: groupFolder });
+  }
+
   return {
     broadcastWs,
     notifyWsSessionStart,
     notifyWsSessionEnd,
     notifyWsSkillInstall,
+    broadcastWebMessage,
   };
 }
