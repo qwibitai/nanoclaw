@@ -31,11 +31,14 @@ curl -s http://host.docker.internal:3040/api/v1/tasks | jq .
 curl -s http://host.docker.internal:3040/api/v1/tasks/TASK_ID | jq .
 
 # Create task
+# IMPORTANT: `repository` is REQUIRED for any task that will be dispatched to dev-inbox.
+# Use the GitHub "owner/repo" format (e.g. "Jeffrey-Keyser/agency-hq").
+# Tasks without `repository` will be stuck — the dispatcher cannot execute them.
 curl -s -X POST http://host.docker.internal:3040/api/v1/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title": "...", "description": "...", "priority": "high", "assigned_to": "engineering-lead", "created_by": "ceo"}' | jq .
+  -d '{"title": "...", "description": "...", "repository": "Jeffrey-Keyser/REPO_NAME", "priority": "high", "assigned_to": "engineering-lead", "created_by": "ceo"}' | jq .
 
-# Update task (any field: status, priority, assigned_to, sprint_id, branch, pr_url, dev_inbox_run_id)
+# Update task (any field: status, priority, assigned_to, sprint_id, branch, pr_url, dev_inbox_run_id, repository)
 curl -s -X PUT http://host.docker.internal:3040/api/v1/tasks/TASK_ID \
   -H "Content-Type: application/json" \
   -d '{"status": "in-progress"}' | jq .
