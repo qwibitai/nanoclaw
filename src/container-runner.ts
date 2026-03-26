@@ -447,7 +447,10 @@ export async function runContainerAgent(
                 newSessionId = parsed.newSessionId;
               }
               hadStreamingOutput = true;
+              // Activity detected — reset the hard timeout
               resetTimeout();
+              // Call onOutput for all markers (including null results)
+              // so idle timers start even for "silent" query completions.
               outputChain = outputChain.then(() => onOutput(parsed));
             } catch (err) {
               logger.warn(
