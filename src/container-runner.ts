@@ -58,6 +58,27 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+const RUNTIME_ENV_KEYS = ['TAVILY_API_KEY'] as const;
+
+function escapeShellSingleQuoted(value: string): string {
+  return value.replace(/'/g, `'\\''`);
+}
+
+function writeRuntimeEnvScript(scriptPath: string): void {
+  // Keep this allowlist narrow: these values are intentionally exposed to the
+  // container so runtime-only skills can authenticate with external services.
+  const runtimeEnv = readEnvFile([...RUNTIME_ENV_KEYS]);
+  const lines = Object.entries(runtimeEnv)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(
+      ([key, value]) =>
+        `export ${key}='${escapeShellSingleQuoted(value)}'`,
+    );
+  fs.writeFileSync(scriptPath, lines.length > 0 ? `${lines.join('\n')}\n` : '', {
+    mode: 0o600,
+  });
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -159,6 +180,7 @@ function buildVolumeMounts(
       ) + '\n',
     );
   }
+  writeRuntimeEnvScript(path.join(groupSessionsDir, 'runtime-env.sh'));
 
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
