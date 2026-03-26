@@ -271,7 +271,7 @@ The task will run in that group's context with access to their files and memory.
 
 ## Task Scripts
 
-When scheduling tasks that check a condition before acting (new PRs, website changes, API status), use the `script` parameter. The script runs first — if there's nothing to do, you don't wake up.
+For any recurring task, use `schedule_task`. Frequent agent invocations — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether action is needed, add a `script` — it runs first, and the agent is only called when the check passes. This keeps invocations to a minimum.
 
 ### How it works
 
