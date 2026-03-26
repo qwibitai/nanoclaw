@@ -2462,24 +2462,16 @@ function buildVolumeMounts(
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
+ * Read secrets that OneCLI Agent Vault cannot fully handle.
  *
- * When tools includes 'github:<scope>' (e.g. 'github:illysium'), reads
- * GITHUB_TOKEN_<SCOPE> from .env instead of the global GITHUB_TOKEN.
- * This ensures shared/multi-tenant groups get a fine-grained PAT scoped
- * to their org, making cross-org repo access impossible by construction.
- */
-/**
- * Read non-HTTP secrets that OneCLI Agent Vault cannot handle.
+ * Most HTTP API credentials (Anthropic, OpenAI, Render API, dbt Cloud API)
+ * are managed by OneCLI — its HTTPS proxy intercepts outbound requests and
+ * injects real credentials at request time.
  *
- * HTTP API credentials (Anthropic, GitHub, OpenAI, Railway, Render API,
- * dbt Cloud API) are managed by OneCLI — its HTTPS proxy intercepts
- * outbound requests and injects real credentials at request time.
- *
- * This function only reads credentials consumed as process env vars or
- * file paths: dbt Cloud CLI login, Google Workspace MCP config, gcloud
- * key paths, and Render PG/Redis connection strings (TCP, not HTTP).
+ * This function reads credentials that need to be env vars inside the
+ * container: GitHub tokens (used by gh CLI + git credential helper),
+ * dbt Cloud CLI login, Google Workspace MCP config, gcloud key paths,
+ * and Render PG/Redis connection strings (TCP, not HTTP).
  */
 function readSecrets(
   groupFolder: string,
@@ -2487,12 +2479,24 @@ function readSecrets(
 ): Record<string, string> {
   const scope = groupFolder.toUpperCase();
 
+  // GitHub token: gh CLI and git credential helper read this from env vars.
+  // OneCLI proxy handles api.github.com HTTP calls, but git clone/push
+  // and gh auth use env-var-based auth that the proxy can't replace.
+  const { scopes: githubScopes, isScoped: githubScoped } = extractToolScopes(
+    tools,
+    'github',
+  );
+  const githubTokenKey = githubScoped
+    ? `GITHUB_TOKEN_${githubScopes[0].toUpperCase()}`
+    : 'GITHUB_TOKEN';
+
   // dbt Cloud CLI login credentials (email/password — not HTTP API calls)
   const dbtScopedEmail = `DBT_CLOUD_EMAIL_${scope}`;
   const dbtScopedPassword = `DBT_CLOUD_PASSWORD_${scope}`;
   const dbtScopedApiUrl = `DBT_CLOUD_API_URL_${scope}`;
 
   const envKeys = [
+    githubTokenKey,
     'DBT_CLOUD_EMAIL',
     'DBT_CLOUD_PASSWORD',
     dbtScopedEmail,
@@ -2503,6 +2507,12 @@ function readSecrets(
       : []),
   ];
   const secrets = readEnvFile(envKeys);
+
+  // Normalize scoped GitHub token key to GITHUB_TOKEN so entrypoint.sh finds it
+  if (githubTokenKey !== 'GITHUB_TOKEN' && secrets[githubTokenKey]) {
+    secrets.GITHUB_TOKEN = secrets[githubTokenKey];
+    delete secrets[githubTokenKey];
+  }
 
   // Normalize scoped dbt keys to their generic names
   for (const [scoped, generic] of [
