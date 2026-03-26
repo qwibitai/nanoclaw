@@ -44,6 +44,8 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempts = 0;
+  private currentSocketId = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -58,6 +60,22 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+    // Increment socket ID so stale event handlers from the previous socket
+    // can detect they're no longer current and bail out (prevents ghost
+    // sockets from triggering new reconnects and leaking memory).
+    const socketId = ++this.currentSocketId;
+
+    // Close the previous socket to release its WebSocket connection and
+    // allow the GC to collect it once event listeners drop their references.
+    const oldSock = this.sock;
+    if (oldSock) {
+      try {
+        oldSock.end(undefined);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -82,6 +100,9 @@ export class WhatsAppChannel implements Channel {
     });
 
     this.sock.ev.on('connection.update', (update) => {
+      // Ignore events from a socket that has already been superseded
+      if (socketId !== this.currentSocketId) return;
+
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -110,21 +131,32 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          // Exponential backoff: 1s, 2s, 4s, 8s … capped at 60s
+          const delayMs = Math.min(
+            1000 * Math.pow(2, this.reconnectAttempts),
+            60_000,
+          );
+          this.reconnectAttempts++;
+          logger.info(
+            { attempt: this.reconnectAttempts, delayMs },
+            'Reconnecting...',
+          );
+          setTimeout(() => {
+            // Pass onFirstOpen through so the startup connect() Promise
+            // resolves on the first successful open, regardless of how many
+            // reconnect attempts it takes.
+            this.connectInternal(onFirstOpen).catch((err) => {
+              logger.error({ err }, 'Reconnection failed');
+            });
+            onFirstOpen = undefined;
+          }, delayMs);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempts = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -172,6 +204,7 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('creds.update', saveCreds);
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
+      if (socketId !== this.currentSocketId) return;
       for (const msg of messages) {
         try {
           if (!msg.message) continue;
