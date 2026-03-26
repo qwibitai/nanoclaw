@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# generate-video: create a short video using fal.ai (Kling 2.6 Pro)
+# Usage: generate-video "prompt"
+# Same queue→poll→download pattern as face-swap
+set -euo pipefail
+
+PROMPT="${1:?Usage: generate-video \"prompt\"}"
+OUTPUT_DIR="/workspace/group"
+OUTPUT_FILE="${OUTPUT_DIR}/video-$(date +%s%3N).mp4"
+MODEL="fal-ai/kling-video/v2.6/pro/text-to-video"
+
+if [[ -z "${FAL_KEY:-}" ]]; then
+  echo "ERROR: FAL_KEY not set" >&2
+  exit 1
+fi
+
+# Submit video generation request
+PAYLOAD=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'prompt': sys.argv[1],
+    'duration': '5',
+    'aspect_ratio': '16:9'
+}))
+" "$PROMPT")
+
+RESPONSE=$(curl -sS -X POST "https://queue.fal.run/${MODEL}" \
+  -H "Authorization: Key $FAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD")
+
+# Check for immediate error
+ERROR=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'detail' in d:
+    print(d['detail'] if isinstance(d['detail'], str) else json.dumps(d['detail']))
+elif 'error' in d:
+    print(d['error'])
+" <<< "$RESPONSE" 2>/dev/null || true)
+
+if [[ -n "$ERROR" ]]; then
+  echo "ERROR: fal.ai: $ERROR" >&2
+  exit 1
+fi
+
+# Get request ID for polling
+REQUEST_ID=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('request_id', ''))
+" <<< "$RESPONSE")
+
+if [[ -z "$REQUEST_ID" ]]; then
+  echo "ERROR: No request_id in response: $RESPONSE" >&2
+  exit 1
+fi
+
+echo "Job started: $REQUEST_ID" >&2
+
+# Poll for completion (max ~5 minutes)
+for i in $(seq 1 60); do
+  sleep 5
+  STATUS_RESPONSE=$(curl -sS "https://queue.fal.run/${MODEL}/requests/${REQUEST_ID}/status" \
+    -H "Authorization: Key $FAL_KEY")
+
+  STATUS=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('status', ''))
+" <<< "$STATUS_RESPONSE")
+
+  if [[ "$STATUS" == "COMPLETED" ]]; then
+    # Fetch the result
+    RESPONSE=$(curl -sS "https://queue.fal.run/${MODEL}/requests/${REQUEST_ID}" \
+      -H "Authorization: Key $FAL_KEY")
+    break
+  elif [[ "$STATUS" == "FAILED" ]]; then
+    echo "ERROR: Video generation failed" >&2
+    echo "$STATUS_RESPONSE" >&2
+    exit 1
+  fi
+
+  echo "Polling ($i/60)... status: $STATUS" >&2
+done
+
+if [[ "$STATUS" != "COMPLETED" ]]; then
+  echo "ERROR: Timed out waiting for video generation (5 min)" >&2
+  exit 1
+fi
+
+# Extract video URL from result
+VIDEO_URL=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+v = d.get('video', d.get('output', {}))
+if isinstance(v, dict):
+    print(v.get('url', ''))
+elif isinstance(v, str):
+    print(v)
+else:
+    print('')
+" <<< "$RESPONSE")
+
+if [[ -z "$VIDEO_URL" ]]; then
+  echo "ERROR: No video URL in response" >&2
+  echo "Response: $RESPONSE" >&2
+  exit 1
+fi
+
+# Download the video
+curl -sS -o "$OUTPUT_FILE" "$VIDEO_URL"
+
+# Track via IPC (non-fatal)
+{
+  IPC_DIR="/workspace/ipc/messages"
+  mkdir -p "$IPC_DIR"
+  TRACK_FILE="${IPC_DIR}/vidtrack-$(date +%s%3N).json"
+  python3 -c "
+import json, sys
+json.dump({
+    'type': 'track_video_gen',
+    'gen_type': 'text2video',
+    'prompt': sys.argv[1],
+    'model': '${MODEL}',
+    'cost_usd': 0.42
+}, open(sys.argv[2], 'w'))
+" "$PROMPT" "$TRACK_FILE"
+} || true
+
+echo "$OUTPUT_FILE"
