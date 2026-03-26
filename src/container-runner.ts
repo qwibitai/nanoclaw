@@ -619,12 +619,12 @@ export async function runContainerAgent(
 
   if (code !== 0) {
     logger.error(
-      { 
-        group: group.name, 
-        code, 
-        duration, 
-        stderr, 
-        stdout, 
+      {
+        group: group.name,
+        code,
+        duration,
+        stderr,
+        stdout,
         logFile,
       },
       'Box exited with error',
