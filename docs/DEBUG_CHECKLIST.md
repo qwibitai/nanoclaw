@@ -110,6 +110,48 @@ sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;
 docker run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
 ```
 
+## Linux: Container Cannot Reach Host Credential Proxy (iptables/UFW)
+
+Symptom: messages are received but agent runs stall silently, especially on cloud Linux hosts with restrictive firewall defaults.
+
+```bash
+# Host check: proxy should be reachable locally
+curl -sS http://localhost:3001/health || echo "host proxy unreachable"
+
+# Container check: host proxy should be reachable from Docker bridge network
+docker run --rm --network bridge curlimages/curl:8.8.0 \
+  -sS http://host.docker.internal:3001/health || echo "container cannot reach host proxy"
+```
+
+If host works but container fails, check firewall rules:
+
+```bash
+# UFW status (if enabled)
+sudo ufw status verbose
+
+# iptables INPUT chain (look for blanket REJECT/DROP near the end)
+sudo iptables -S INPUT
+```
+
+Allow Docker bridge subnet to reach the local proxy port:
+
+```bash
+# iptables: allow docker bridge -> host:3001
+sudo iptables -I INPUT 1 -s 172.17.0.0/16 -p tcp --dport 3001 -j ACCEPT
+
+# If UFW is enabled, allow bridge subnet explicitly
+sudo ufw allow from 172.17.0.0/16 to any port 3001 proto tcp
+```
+
+Then re-run the container check:
+
+```bash
+docker run --rm --network bridge curlimages/curl:8.8.0 \
+  -sS http://host.docker.internal:3001/health
+```
+
+After the network rule is fixed, restart NanoClaw with your service manager (`launchd`, `systemd`, `pm2`, etc.).
+
 ## Channel Auth Issues
 
 ```bash
