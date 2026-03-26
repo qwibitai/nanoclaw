@@ -10,7 +10,7 @@ sync_repo() {
     local name="$2"
     if [ -d "$dir/.git" ]; then
         cd "$dir"
-        result=$(git pull --ff-only 2>&1)
+        result=$(git pull --rebase --autostash 2>&1)
         status=$?
         if [ $status -ne 0 ]; then
             echo "$TIMESTAMP | FAIL | $name | $result" >> "$LOG"
