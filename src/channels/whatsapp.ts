@@ -285,12 +285,37 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            // Voice message transcription
+            // Voice message transcription + save audio file
             if (isVoiceMessage(msg)) {
               try {
+                // Save the audio file to attachments for voice cloning
+                const audioBuffer = await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                );
+                const groupDir = path.join(
+                  GROUPS_DIR,
+                  groups[chatJid].folder,
+                );
+                const attachDir = path.join(groupDir, 'attachments');
+                fs.mkdirSync(attachDir, { recursive: true });
+                const audioFilename = `voice-${Date.now()}.ogg`;
+                const audioPath = path.join(attachDir, audioFilename);
+                fs.writeFileSync(audioPath, audioBuffer as Buffer);
+                const sizeKB = Math.round(
+                  (audioBuffer as Buffer).length / 1024,
+                );
+                logger.info(
+                  { jid: chatJid, audioFilename, sizeKB },
+                  'Saved voice message audio file',
+                );
+
                 const transcript = await transcribeAudioMessage(msg, this.sock);
                 if (transcript) {
-                  content = `[Voice: ${transcript}]`;
+                  content = `[Voice: ${transcript}]\n[Audio file: attachments/${audioFilename} (${sizeKB}KB)]`;
+                } else {
+                  content = `[Voice Message]\n[Audio file: attachments/${audioFilename} (${sizeKB}KB)]`;
                 }
               } catch (err) {
                 logger.warn(
@@ -360,9 +385,7 @@ export class WhatsAppChannel implements Channel {
                       ? 'Video'
                       : 'Audio';
                     const mediaRef = `[${mediaType}: attachments/${filename} (${sizeKB}KB)]`;
-                    content = caption
-                      ? `${caption}\n\n${mediaRef}`
-                      : mediaRef;
+                    content = caption ? `${caption}\n\n${mediaRef}` : mediaRef;
                   } else {
                     const textContent = (buffer as Buffer).toString('utf-8');
                     const docRef = `[Document: attachments/${filename} (${sizeKB}KB)]\n\n${textContent}`;
