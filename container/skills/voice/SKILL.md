@@ -1,7 +1,7 @@
 ---
 name: voice
 description: Text-to-speech with Mexican Spanish voices (ElevenLabs) and voice cloning
-allowed-tools: Bash(text-to-speech:*),Bash(clone-voice:*)
+allowed-tools: Bash(text-to-speech:*),Bash(clone-voice:*),Bash(ffmpeg:*),Bash(yt-dlp:*)
 ---
 
 # Voice Replies
@@ -46,12 +46,32 @@ mcp__nanoclaw__send_message({ text: "voice", audio_path: "/workspace/group/tts-1
 
 ## Voice cloning
 
-When someone sends an audio and says "clona esta voz", "usa esta voz", "guarda esta voz":
+### From audio attachment
+When someone sends an audio/video and says "clona esta voz", "usa esta voz", "guarda esta voz":
 
 ```bash
 clone-voice /workspace/group/attachments/audio-123.ogg "nombre-de-la-voz"
 ```
 
+### From video attachment (extract audio first)
+If they send a video file (.mp4, .mov, etc.):
+
+```bash
+ffmpeg -i /workspace/group/attachments/video.mp4 -vn -acodec libopus /workspace/group/extracted-audio.ogg -y
+clone-voice /workspace/group/extracted-audio.ogg "nombre-de-la-voz"
+```
+
+### From YouTube link
+When someone sends a YouTube URL and says "clona la voz de este video" or similar:
+
+```bash
+yt-dlp -x --audio-format wav -o "/workspace/group/yt-audio.%(ext)s" "YOUTUBE_URL"
+clone-voice /workspace/group/yt-audio.wav "nombre-de-la-voz"
+```
+
+For best results, pick a video with clear speech (no music, no background noise). If the video has music, try to find a clip with just talking.
+
+### After cloning
 This uploads the audio to ElevenLabs, creates a cloned voice, and saves it to the group config. Future calls with `text-to-speech "text" custom` will use the cloned voice.
 
 To stop using the cloned voice: delete `/workspace/group/voice_config.json`.
