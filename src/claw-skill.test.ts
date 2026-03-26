@@ -8,17 +8,27 @@ import { describe, expect, it } from 'vitest';
 // Resolve the claw script from the marketplace plugin cache or local .claude/skills/
 function findClawScript(): string | null {
   // Check local path first (pre-marketplace installs)
-  const localPath = path.join(process.cwd(), '.claude/skills/claw/scripts/claw');
+  const localPath = path.join(
+    process.cwd(),
+    '.claude/skills/claw/scripts/claw',
+  );
   if (fs.existsSync(localPath)) return localPath;
 
   // Check marketplace plugin cache
-  const cacheBase = path.join(os.homedir(), '.claude/plugins/cache/nanoclaw-skills/nanoclaw-skills');
+  const cacheBase = path.join(
+    os.homedir(),
+    '.claude/plugins/cache/nanoclaw-skills/nanoclaw-skills',
+  );
   if (fs.existsSync(cacheBase)) {
-    const versions = fs.readdirSync(cacheBase).filter(d =>
-      fs.statSync(path.join(cacheBase, d)).isDirectory(),
-    );
+    const versions = fs
+      .readdirSync(cacheBase)
+      .filter((d) => fs.statSync(path.join(cacheBase, d)).isDirectory());
     if (versions.length > 0) {
-      const cached = path.join(cacheBase, versions[0], 'skills/claw/scripts/claw');
+      const cached = path.join(
+        cacheBase,
+        versions[0],
+        'skills/claw/scripts/claw',
+      );
       if (fs.existsSync(cached)) return cached;
     }
   }
