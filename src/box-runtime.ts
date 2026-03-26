@@ -11,11 +11,19 @@ import { logger } from './logger.js';
 type BoxliteRuntime = InstanceType<typeof JsBoxlite>;
 
 let runtime: BoxliteRuntime | null = null;
+let _homeDir: string | undefined;
+
+/** Set the BoxLite home directory. Must be called before getRuntime(). */
+export function setBoxliteHome(homeDir: string): void {
+  _homeDir = homeDir;
+}
 
 /** Get the BoxLite runtime singleton. */
 export function getRuntime(): BoxliteRuntime {
   if (!runtime) {
-    runtime = JsBoxlite.withDefaultConfig();
+    runtime = _homeDir
+      ? new JsBoxlite({ homeDir: _homeDir })
+      : JsBoxlite.withDefaultConfig();
   }
   return runtime;
 }

@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { OneCLI } from '@onecli-sh/sdk';
-
 import {
   ASSISTANT_NAME,
+  getProjectRoot,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
@@ -12,18 +11,14 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import './channels/index.js';
-import {
-  getChannelFactory,
-  getRegisteredChannelNames,
-} from './channels/registry.js';
 import {
   ContainerOutput,
   runContainerAgent,
+  setLLMOptions,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureRuntimeReady } from './box-runtime.js';
+import { cleanupOrphans, ensureRuntimeReady, setBoxliteHome } from './box-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -58,12 +53,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
-// SDK exports
-export { AgentLite } from './sdk.js';
-export { TelegramChannel } from './channels/telegram.js';
-export type { Channel, RegisteredGroup, NewMessage } from './types.js';
-export type { ContainerOutput } from './container-runner.js';
-export { escapeXml, formatMessages } from './router.js';
+// --- Module state ---
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -74,25 +64,174 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+// Lazy OneCLI — dynamically imported so it's not a hard dependency
+let _onecli: any = null;
+async function getOneCLI(): Promise<any> {
+  if (!_onecli) {
+    try {
+      const { OneCLI } = await import('@onecli-sh/sdk');
+      _onecli = new OneCLI({ url: ONECLI_URL });
+    } catch {
+      logger.debug('OneCLI SDK not installed — credential gateway unavailable');
+      return null;
+    }
+  }
+  return _onecli;
+}
+
+// --- Public API ---
+
+export interface StartOptions {
+  /** Pre-built channels to connect on startup. */
+  channels?: Channel[];
+  /** Pre-registered groups. */
+  groups?: Map<string, RegisteredGroup>;
+  /** Install SIGTERM/SIGINT handlers. Default: false. */
+  handleSignals?: boolean;
+  /** LLM configuration. If not provided, falls back to OneCLI gateway. */
+  llm?: {
+    credentials?: () => Promise<Record<string, string>>;
+  };
+}
+
+/**
+ * Start the orchestrator.
+ * Initializes BoxLite runtime, database, state, channels, and subsystems.
+ */
+export async function start(options: StartOptions = {}): Promise<void> {
+  copyGroupTemplates();
+
+  // BoxLite home lives under workdir
+  setBoxliteHome(path.join(getProjectRoot(), '.boxlite'));
+  ensureRuntimeReady();
+  await cleanupOrphans();
+
+  // Configure LLM credentials for container injection
+  if (options.llm) {
+    setLLMOptions(options.llm);
+  }
+  initDatabase();
+  logger.info('Database initialized');
+  loadState();
+
+  // Register pre-provided groups
+  if (options.groups) {
+    for (const [jid, group] of options.groups) {
+      setRegisteredGroup(jid, group);
+      registeredGroups[jid] = group;
+    }
+  }
+
+  // Ensure OneCLI agents exist for all registered groups
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    ensureOneCLIAgent(jid, group);
+  }
+
+  restoreRemoteControl();
+
+  if (options.handleSignals) {
+    const shutdown = async (signal: string) => {
+      logger.info({ signal }, 'Shutdown signal received');
+      await queue.shutdown(10000);
+      for (const ch of channels) await ch.disconnect();
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  }
+
+  // Connect pre-provided channels
+  if (options.channels) {
+    for (const channel of options.channels) {
+      injectChannelOpts(channel);
+      channels.push(channel);
+      await channel.connect();
+    }
+  }
+
+  if (channels.length > 0) {
+    logger.info({ count: channels.length }, 'Initial channels connected');
+  } else {
+    logger.info('No initial channels — waiting for dynamic registration');
+  }
+
+  startSubsystems();
+}
+
+/** Stop the orchestrator gracefully. */
+export async function stop(): Promise<void> {
+  await queue.shutdown(10000);
+  for (const ch of channels) await ch.disconnect();
+}
+
+/** Register a channel dynamically (after start). */
+export async function registerChannel(channel: Channel): Promise<void> {
+  injectChannelOpts(channel);
+  channels.push(channel);
+  await channel.connect();
+  logger.info({ channel: channel.name }, 'Channel registered dynamically');
+}
+
+/** Register a group dynamically (after start). */
+export function registerGroup(jid: string, group: RegisteredGroup): void {
+  setRegisteredGroup(jid, group);
+  registeredGroups[jid] = group;
+  ensureOneCLIAgent(jid, group);
+  logger.info(
+    { jid, name: group.name, folder: group.folder },
+    'Group registered dynamically',
+  );
+}
+
+/** Get the number of connected channels. */
+export function channelCount(): number {
+  return channels.length;
+}
+
+// --- Exports for testing ---
+
+export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+  const chats = getAllChats();
+  const registeredJids = new Set(Object.keys(registeredGroups));
+
+  return chats
+    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .map((c) => ({
+      jid: c.jid,
+      name: c.name,
+      lastActivity: c.last_message_time,
+      isRegistered: registeredJids.has(c.jid),
+    }));
+}
+
+/** @internal - exported for testing */
+export function _setRegisteredGroups(
+  groups: Record<string, RegisteredGroup>,
+): void {
+  registeredGroups = groups;
+}
+
+// --- Internal functions ---
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
-  onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
-      logger.info(
-        { jid, identifier, created: res.created },
-        'OneCLI agent ensured',
-      );
-    },
-    (err) => {
-      logger.debug(
-        { jid, identifier, err: String(err) },
-        'OneCLI agent ensure skipped',
-      );
-    },
-  );
+  getOneCLI().then((onecli) => {
+    if (!onecli) return;
+    onecli.ensureAgent({ name: group.name, identifier }).then(
+      (res: { created: boolean }) => {
+        logger.info(
+          { jid, identifier, created: res.created },
+          'OneCLI agent ensured',
+        );
+      },
+      (err: unknown) => {
+        logger.debug(
+          { jid, identifier, err: String(err) },
+          'OneCLI agent ensure skipped',
+        );
+      },
+    );
+  });
 }
 
 function loadState(): void {
@@ -117,7 +256,7 @@ function saveState(): void {
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
-function registerGroup(jid: string, group: RegisteredGroup): void {
+function internalRegisterGroup(jid: string, group: RegisteredGroup): void {
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
@@ -131,11 +270,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
-
-  // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-  // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
   ensureOneCLIAgent(jid, group);
 
   logger.info(
@@ -144,35 +279,115 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
-/**
- * Get available groups list for the agent.
- * Returns groups ordered by most recent activity.
- */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
-  const chats = getAllChats();
-  const registeredJids = new Set(Object.keys(registeredGroups));
+/** Handle /remote-control and /remote-control-end commands. */
+async function handleRemoteControl(
+  command: string,
+  chatJid: string,
+  msg: NewMessage,
+): Promise<void> {
+  const group = registeredGroups[chatJid];
+  if (!group?.isMain) {
+    logger.warn(
+      { chatJid, sender: msg.sender },
+      'Remote control rejected: not main group',
+    );
+    return;
+  }
 
-  return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
-    .map((c) => ({
-      jid: c.jid,
-      name: c.name,
-      lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid),
-    }));
+  const channel = findChannel(channels, chatJid);
+  if (!channel) return;
+
+  if (command === '/remote-control') {
+    const result = await startRemoteControl(
+      msg.sender,
+      chatJid,
+      process.cwd(),
+    );
+    if (result.ok) {
+      await channel.sendMessage(chatJid, result.url);
+    } else {
+      await channel.sendMessage(
+        chatJid,
+        `Remote Control failed: ${result.error}`,
+      );
+    }
+  } else {
+    const result = stopRemoteControl();
+    if (result.ok) {
+      await channel.sendMessage(chatJid, 'Remote Control session ended.');
+    } else {
+      await channel.sendMessage(chatJid, result.error);
+    }
+  }
 }
 
-/** @internal - exported for testing */
-export function _setRegisteredGroups(
-  groups: Record<string, RegisteredGroup>,
-): void {
-  registeredGroups = groups;
+/** Build channel callback opts for message storage + remote control. */
+function buildChannelOpts() {
+  return {
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      // Remote control commands — intercept before storage
+      const trimmed = msg.content.trim();
+      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+
+      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+        const cfg = loadSenderAllowlist();
+        if (
+          shouldDropMessage(chatJid, cfg) &&
+          !isSenderAllowed(chatJid, msg.sender, cfg)
+        ) {
+          return;
+        }
+      }
+      storeMessage(msg);
+    },
+    onChatMetadata: (
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
+    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    registeredGroups: () => registeredGroups,
+  };
 }
 
-/**
- * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
- */
+/** Inject internal callbacks into a channel that supports _setOpts. */
+function injectChannelOpts(channel: Channel): void {
+  if (
+    '_setOpts' in channel &&
+    typeof (channel as any)._setOpts === 'function'
+  ) {
+    (channel as any)._setOpts(buildChannelOpts());
+  }
+}
+
+/** Copy default CLAUDE.md templates to group folders. */
+function copyGroupTemplates(): void {
+  const sdkRoot = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '..',
+  );
+  const templateDir = path.join(sdkRoot, 'groups');
+  if (!fs.existsSync(templateDir)) return;
+
+  for (const name of ['global', 'main']) {
+    const src = path.join(templateDir, name, 'CLAUDE.md');
+    const dst = path.join(GROUPS_DIR, name, 'CLAUDE.md');
+    if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      const content = fs.readFileSync(src, 'utf-8');
+      fs.writeFileSync(dst, content.replaceAll('{{ASSISTANT_NAME}}', ASSISTANT_NAME));
+    }
+  }
+}
+
+// --- Message processing ---
+
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
@@ -194,7 +409,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
@@ -207,8 +421,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
@@ -219,7 +431,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const resetIdleTimer = () => {
@@ -238,20 +449,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
 
@@ -268,8 +476,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
@@ -277,7 +483,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       );
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
@@ -299,7 +504,6 @@ async function runAgent(
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
-  // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
@@ -315,7 +519,6 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
@@ -324,7 +527,6 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
@@ -392,11 +594,9 @@ async function startMessageLoop(): Promise<void> {
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
 
-        // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
         saveState();
 
-        // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
         for (const msg of messages) {
           const existing = messagesByGroup.get(msg.chat_jid);
@@ -420,9 +620,6 @@ async function startMessageLoop(): Promise<void> {
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
@@ -434,8 +631,6 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
@@ -453,14 +648,12 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
               ?.catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -472,10 +665,6 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
-/**
- * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
- */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
@@ -490,156 +679,6 @@ function recoverPendingMessages(): void {
   }
 }
 
-async function ensureContainerSystemRunning(): Promise<void> {
-  ensureRuntimeReady();
-  await cleanupOrphans();
-}
-
-async function main(): Promise<void> {
-  await ensureContainerSystemRunning();
-  initDatabase();
-  logger.info('Database initialized');
-  loadState();
-
-  // Ensure OneCLI agents exist for all registered groups.
-  // Recovers from missed creates (e.g. OneCLI was down at registration time).
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
-  }
-
-  restoreRemoteControl();
-
-  // Graceful shutdown handlers
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-
-  // Handle /remote-control and /remote-control-end commands
-  async function handleRemoteControl(
-    command: string,
-    chatJid: string,
-    msg: NewMessage,
-  ): Promise<void> {
-    const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
-      logger.warn(
-        { chatJid, sender: msg.sender },
-        'Remote control rejected: not main group',
-      );
-      return;
-    }
-
-    const channel = findChannel(channels, chatJid);
-    if (!channel) return;
-
-    if (command === '/remote-control') {
-      const result = await startRemoteControl(
-        msg.sender,
-        chatJid,
-        process.cwd(),
-      );
-      if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
-      } else {
-        await channel.sendMessage(
-          chatJid,
-          `Remote Control failed: ${result.error}`,
-        );
-      }
-    } else {
-      const result = stopRemoteControl();
-      if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
-      } else {
-        await channel.sendMessage(chatJid, result.error);
-      }
-    }
-  }
-
-  // Channel callbacks — builds on shared buildChannelOpts() but adds
-  // remote control interception (only relevant for direct-run mode)
-  const baseOpts = buildChannelOpts();
-  const channelOpts = {
-    ...baseOpts,
-    onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, 'Remote control command error'),
-        );
-        return;
-      }
-      baseOpts.onMessage(chatJid, msg);
-    },
-  };
-
-  // Create and connect all registered channels.
-  for (const channelName of getRegisteredChannelNames()) {
-    const factory = getChannelFactory(channelName)!;
-    const channel = factory(channelOpts);
-    if (!channel) {
-      logger.warn(
-        { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
-      );
-      continue;
-    }
-    channels.push(channel);
-    await channel.connect();
-  }
-  if (channels.length === 0) {
-    logger.fatal('No channels connected');
-    process.exit(1);
-  }
-
-  startSubsystems();
-}
-
-// --- Shared helpers (used by both main() and SDK entry points) ---
-
-/** Build the channel callback opts for message storage. */
-function buildChannelOpts() {
-  return {
-    onMessage: (chatJid: string, msg: NewMessage) => {
-      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
-        const cfg = loadSenderAllowlist();
-        if (
-          shouldDropMessage(chatJid, cfg) &&
-          !isSenderAllowed(chatJid, msg.sender, cfg)
-        ) {
-          return;
-        }
-      }
-      storeMessage(msg);
-    },
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
-  };
-}
-
-/** Inject internal callbacks into a channel that supports _setOpts. */
-function injectChannelOpts(channel: Channel): void {
-  if (
-    '_setOpts' in channel &&
-    typeof (channel as any)._setOpts === 'function'
-  ) {
-    (channel as any)._setOpts(buildChannelOpts());
-  }
-}
-
-/** Start scheduler, IPC watcher, queue, and message loop. */
 function startSubsystems(): void {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -664,7 +703,7 @@ function startSubsystems(): void {
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
-    registerGroup,
+    registerGroup: internalRegisterGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
@@ -695,115 +734,6 @@ function startSubsystems(): void {
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
-}
-
-// --- SDK entry points (@internal) ---
-
-/** Copy default CLAUDE.md templates to group folders, replacing {{ASSISTANT_NAME}}. */
-function copyGroupTemplates(): void {
-  const sdkRoot = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    '..',
-  );
-  const templateDir = path.join(sdkRoot, 'groups');
-  if (!fs.existsSync(templateDir)) return;
-
-  for (const name of ['global', 'main']) {
-    const src = path.join(templateDir, name, 'CLAUDE.md');
-    const dst = path.join(GROUPS_DIR, name, 'CLAUDE.md');
-    if (fs.existsSync(src) && !fs.existsSync(dst)) {
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      const content = fs.readFileSync(src, 'utf-8');
-      fs.writeFileSync(dst, content.replaceAll('{{ASSISTANT_NAME}}', ASSISTANT_NAME));
-    }
-  }
-}
-
-/** @internal */
-export async function _startFromSDK(
-  sdkChannels: Channel[],
-  sdkGroups: Map<string, RegisteredGroup>,
-): Promise<void> {
-  copyGroupTemplates();
-  await ensureContainerSystemRunning();
-  initDatabase();
-  logger.info('Database initialized');
-  loadState();
-
-  for (const [jid, group] of sdkGroups) {
-    setRegisteredGroup(jid, group);
-    registeredGroups[jid] = group;
-  }
-
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
-  }
-
-  restoreRemoteControl();
-
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-
-  for (const channel of sdkChannels) {
-    injectChannelOpts(channel);
-    channels.push(channel);
-    await channel.connect();
-  }
-
-  if (channels.length > 0) {
-    logger.info({ count: channels.length }, 'Initial channels connected');
-  } else {
-    logger.info('No initial channels — waiting for dynamic registration');
-  }
-
-  startSubsystems();
-}
-
-/** @internal */
-export async function _registerChannelFromSDK(channel: Channel): Promise<void> {
-  injectChannelOpts(channel);
-  channels.push(channel);
-  await channel.connect();
-  logger.info({ channel: channel.name }, 'Channel registered dynamically');
-}
-
-/** @internal */
-export function _registerGroupFromSDK(
-  jid: string,
-  group: RegisteredGroup,
-): void {
-  setRegisteredGroup(jid, group);
-  registeredGroups[jid] = group;
-  ensureOneCLIAgent(jid, group);
-  logger.info(
-    { jid, name: group.name, folder: group.folder },
-    'Group registered dynamically',
-  );
-}
-
-/** @internal */
-export async function _stopFromSDK(): Promise<void> {
-  await queue.shutdown(10000);
-  for (const ch of channels) await ch.disconnect();
-}
-
-// Guard: only run when executed directly, not when imported as SDK
-const isDirectRun =
-  process.argv[1] &&
-  new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
-
-if (isDirectRun) {
-  main().catch((err) => {
-    logger.error({ err }, 'Failed to start AgentLite');
-    process.exit(1);
+    throw err;
   });
 }

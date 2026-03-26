@@ -225,7 +225,7 @@ if (data.sender && data.chatJid.startsWith('tg:')) {
 
 Note: The assistant name prefix is handled by `formatOutbound()` in the router — Telegram channels have `prefixAssistantName = false` so no prefix is added for `tg:` JIDs.
 
-3. **Initialize pool in `main()` in `src/index.ts`** — after creating the Telegram channel, add:
+3. **Initialize pool in `main()` in `src/orchestrator.ts`** — after creating the Telegram channel, add:
 
 ```typescript
 if (TELEGRAM_BOT_POOL.length > 0) {
@@ -376,7 +376,7 @@ To remove Agent Swarm support while keeping basic Telegram:
 
 1. Remove `TELEGRAM_BOT_POOL` from `src/config.ts`
 2. Remove pool code from `src/telegram.ts` (`poolApis`, `senderBotMap`, `initBotPool`, `sendPoolMessage`)
-3. Remove pool routing from IPC handler in `src/index.ts` (revert to plain `sendMessage`)
+3. Remove pool routing from IPC handler in `src/orchestrator.ts` (revert to plain `sendMessage`)
 4. Remove `initBotPool` call from `main()`
 5. Remove `sender` param from MCP tool in `container/agent-runner/src/ipc-mcp-stdio.ts`
 6. Remove Agent Teams section from group CLAUDE.md files

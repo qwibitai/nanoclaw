@@ -33,7 +33,7 @@ git merge upstream/skill/compact
 This adds:
 - `src/session-commands.ts` (extract and authorize session commands)
 - `src/session-commands.test.ts` (unit tests for command parsing and auth)
-- Session command interception in `src/index.ts` (both `processGroupMessages` and `startMessageLoop`)
+- Session command interception in `src/orchestrator.ts` (both `processGroupMessages` and `startMessageLoop`)
 - Slash command handling in `container/agent-runner/src/index.ts`
 
 ### Validate

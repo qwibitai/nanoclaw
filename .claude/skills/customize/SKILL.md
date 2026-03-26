@@ -18,7 +18,7 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/orchestrator.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
@@ -40,7 +40,7 @@ Questions to ask:
 
 Implementation pattern:
 1. Create `src/channels/{name}.ts` implementing the `Channel` interface from `src/types.ts` (see `src/channels/whatsapp.ts` for reference)
-2. Add the channel instance to `main()` in `src/index.ts` and wire callbacks (`onMessage`, `onChatMetadata`)
+2. Add the channel instance to `main()` in `src/orchestrator.ts` and wire callbacks (`onMessage`, `onChatMetadata`)
 3. Messages are stored via the `onMessage` callback; routing is automatic via `ownsJid()`
 
 ### Adding a New MCP Integration
@@ -73,7 +73,7 @@ Questions to ask:
 
 Implementation:
 1. Commands are handled by the agent naturally — add instructions to `groups/CLAUDE.md` or the group's `CLAUDE.md`
-2. For trigger-level routing changes, modify `processGroupMessages()` in `src/index.ts`
+2. For trigger-level routing changes, modify `processGroupMessages()` in `src/orchestrator.ts`
 
 ### Changing Deployment
 
@@ -106,5 +106,5 @@ User: "Add Telegram as an input channel"
 1. Ask: "Should Telegram use the same @Andy trigger, or a different one?"
 2. Ask: "Should Telegram messages create separate conversation contexts, or share with WhatsApp groups?"
 3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/whatsapp.ts`)
-4. Add the channel to `main()` in `src/index.ts`
+4. Add the channel to `main()` in `src/orchestrator.ts`
 5. Tell user how to authenticate and test

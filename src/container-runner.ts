@@ -18,11 +18,33 @@ import { BOX_IMAGE, BOX_ROOTFS_PATH, BOX_MEMORY_MIB, BOX_CPUS, PACKAGE_ROOT } fr
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { getRuntime } from './box-runtime.js';
-import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+// Lazy OneCLI — dynamically imported so it's not a hard dependency
+let _onecli: any = null;
+async function getOneCLI(): Promise<any> {
+  if (!_onecli) {
+    try {
+      const { OneCLI } = await import('@onecli-sh/sdk');
+      _onecli = new OneCLI({ url: ONECLI_URL });
+    } catch {
+      return null;
+    }
+  }
+  return _onecli;
+}
+
+// LLM credential resolver — set via SDK, bypasses OneCLI when provided
+type CredentialResolver = () => Promise<Record<string, string>>;
+let _credentialResolver: CredentialResolver | null = null;
+
+/** Configure LLM options. Called by orchestrator during start(). */
+export function setLLMOptions(llm: {
+  credentials?: CredentialResolver;
+}): void {
+  _credentialResolver = llm.credentials ?? null;
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -213,6 +235,15 @@ async function extractOnecliEnv(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<Record<string, string>> {
+  const onecli = await getOneCLI();
+  if (!onecli) {
+    logger.warn(
+      { containerName },
+      'OneCLI SDK not available — box will have no credentials',
+    );
+    return {};
+  }
+
   const tempArgs: string[] = [];
   const applied = await onecli.applyContainerConfig(tempArgs, {
     addHostMapping: false,
@@ -264,10 +295,15 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Build environment variables
-  const onecliEnv = await extractOnecliEnv(containerName, agentIdentifier);
+  // Build environment variables — use credential resolver if set, else OneCLI
+  let credentialEnv: Record<string, string>;
+  if (_credentialResolver) {
+    credentialEnv = await _credentialResolver();
+  } else {
+    credentialEnv = await extractOnecliEnv(containerName, agentIdentifier);
+  }
   const boxEnv: Record<string, string> = {
-    ...onecliEnv,
+    ...credentialEnv,
     TZ: TIMEZONE,
     AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',

@@ -128,7 +128,7 @@ claude
 完整架构详情请见 [docs/SPEC.md](docs/SPEC.md)。
 
 关键文件：
-- `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
+- `src/orchestrator.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/registry.ts` - 渠道注册表（启动时自注册）
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由

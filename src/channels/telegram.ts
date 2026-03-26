@@ -305,7 +305,7 @@ export class TelegramChannel implements Channel {
   }
 }
 
-registerChannel('telegram', (opts: ChannelOpts) => {
+registerChannel('telegram', (opts?: ChannelOpts) => {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';

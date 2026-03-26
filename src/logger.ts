@@ -5,12 +5,15 @@ export const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-// Route uncaught errors through pino so they get timestamps in stderr
-process.on('uncaughtException', (err) => {
-  logger.fatal({ err }, 'Uncaught exception');
-  process.exit(1);
-});
+/** Install process-level error handlers that route through pino.
+ *  Only called by the CLI entry point — SDK consumers own their own handlers. */
+export function installProcessHandlers(): void {
+  process.on('uncaughtException', (err) => {
+    logger.fatal({ err }, 'Uncaught exception');
+    process.exit(1);
+  });
 
-process.on('unhandledRejection', (reason) => {
-  logger.error({ err: reason }, 'Unhandled rejection');
-});
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ err: reason }, 'Unhandled rejection');
+  });
+}

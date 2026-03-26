@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>{{NODE_PATH}}</string>
-        <string>{{PROJECT_ROOT}}/dist/index.js</string>
+        <string>{{PROJECT_ROOT}}/dist/cli.js</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{PROJECT_ROOT}}</string>

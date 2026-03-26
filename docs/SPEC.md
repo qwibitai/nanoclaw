@@ -200,7 +200,7 @@ Channels self-register using a barrel-import pattern:
    // ... each skill adds its import here
    ```
 
-3. At startup, the orchestrator (`src/index.ts`) loops through registered channels and connects whichever ones return a valid instance:
+3. At startup, the orchestrator (`src/orchestrator.ts`) loops through registered channels and connects whichever ones return a valid instance:
 
    ```typescript
    for (const name of getRegisteredChannelNames()) {
@@ -220,7 +220,7 @@ Channels self-register using a barrel-import pattern:
 | `src/channels/registry.ts` | Channel factory registry |
 | `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
 | `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
-| `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
+| `src/orchestrator.ts` | Orchestrator — instantiates channels, runs message loop |
 | `src/router.ts` | Finds the owning channel for a JID, formats messages |
 
 ### Adding a New Channel
@@ -665,7 +665,7 @@ When NanoClaw starts, it:
     <key>ProgramArguments</key>
     <array>
         <string>{{NODE_PATH}}</string>
-        <string>{{PROJECT_ROOT}}/dist/index.js</string>
+        <string>{{PROJECT_ROOT}}/dist/cli.js</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{{PROJECT_ROOT}}</string>
@@ -781,5 +781,5 @@ Run manually for verbose output:
 ```bash
 npm run dev
 # or
-node dist/index.js
+node dist/cli.js
 ```

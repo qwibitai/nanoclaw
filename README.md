@@ -69,7 +69,7 @@ For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
 - `src/sdk.ts` - AgentLite SDK class (public API)
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/orchestrator.ts` - Orchestrator: state, message loop, agent invocation
 - `src/box-runtime.ts` - BoxLite VM runtime management
 - `src/container-runner.ts` - Spawns streaming agent VMs
 - `src/channels/registry.ts` - Channel registry

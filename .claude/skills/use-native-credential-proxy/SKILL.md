@@ -11,10 +11,10 @@ This skill replaces the OneCLI gateway with NanoClaw's built-in credential proxy
 
 ### Check if already applied
 
-Check if `src/credential-proxy.ts` is imported in `src/index.ts`:
+Check if `src/credential-proxy.ts` is imported in `src/orchestrator.ts`:
 
 ```bash
-grep "credential-proxy" src/index.ts
+grep "credential-proxy" src/orchestrator.ts
 ```
 
 If it shows an import for `startCredentialProxy`, the native proxy is already active. Skip to Phase 3 (Setup).
@@ -56,7 +56,7 @@ git merge upstream/skill/native-credential-proxy || {
 
 This merges in:
 - `src/credential-proxy.ts` and `src/credential-proxy.test.ts` (the proxy implementation)
-- Restored credential proxy usage in `src/index.ts`, `src/container-runner.ts`, `src/container-runtime.ts`, `src/config.ts`
+- Restored credential proxy usage in `src/orchestrator.ts`, `src/container-runner.ts`, `src/container-runtime.ts`, `src/config.ts`
 - Removed `@onecli-sh/sdk` dependency
 - Restored `CREDENTIAL_PROXY_PORT` config (default 3001)
 - Restored platform-aware proxy bind address detection

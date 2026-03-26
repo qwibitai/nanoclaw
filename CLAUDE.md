@@ -10,8 +10,9 @@ Single Node.js process. The `AgentLite` SDK class is the public API — register
 
 | File | Purpose |
 |------|---------|
-| `src/sdk.ts` | AgentLite SDK class (public API) |
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation, SDK exports |
+| `src/sdk.ts` | AgentLite SDK class (public API, library entry point) |
+| `src/orchestrator.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/cli.ts` | CLI entry point (bin): process handlers, channel auto-discovery |
 | `src/box-runtime.ts` | BoxLite VM runtime management |
 | `src/container-runner.ts` | Spawns agent VMs with volume mounts |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |

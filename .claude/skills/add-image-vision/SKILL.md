@@ -43,7 +43,7 @@ This merges in:
 - `src/image.ts` (image download, resize via sharp, base64 encoding)
 - `src/image.test.ts` (8 unit tests)
 - Image attachment handling in `src/channels/whatsapp.ts`
-- Image passing to agent in `src/index.ts` and `src/container-runner.ts`
+- Image passing to agent in `src/orchestrator.ts` and `src/container-runner.ts`
 - Image content block support in `container/agent-runner/src/index.ts`
 - `sharp` npm dependency in `package.json`
 

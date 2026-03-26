@@ -33,6 +33,11 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 let PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
+/** Get the current project root directory. */
+export function getProjectRoot(): string {
+  return PROJECT_ROOT;
+}
+
 /** Override the project root directory (used by SDK's workdir option).
  *  Updates all derived paths via ESM live bindings. */
 export function setProjectRoot(dir: string): void {

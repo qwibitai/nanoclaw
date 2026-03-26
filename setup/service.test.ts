@@ -23,7 +23,7 @@ function generatePlist(
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
-        <string>${projectRoot}/dist/index.js</string>
+        <string>${projectRoot}/dist/cli.js</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${projectRoot}</string>
@@ -58,7 +58,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
+ExecStart=${nodePath} ${projectRoot}/dist/cli.js
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
@@ -91,13 +91,13 @@ describe('plist generation', () => {
     expect(plist).toContain('<string>/opt/node/bin/node</string>');
   });
 
-  it('points to dist/index.js', () => {
+  it('points to dist/cli.js', () => {
     const plist = generatePlist(
       '/usr/local/bin/node',
       '/home/user/nanoclaw',
       '/home/user',
     );
-    expect(plist).toContain('/home/user/nanoclaw/dist/index.js');
+    expect(plist).toContain('/home/user/nanoclaw/dist/cli.js');
   });
 
   it('sets log paths', () => {
@@ -161,7 +161,7 @@ describe('systemd unit generation', () => {
       false,
     );
     expect(unit).toContain(
-      'ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js',
+      'ExecStart=/usr/bin/node /srv/nanoclaw/dist/cli.js',
     );
   });
 });
@@ -176,7 +176,7 @@ describe('WSL nohup fallback', () => {
     const wrapper = `#!/bin/bash
 set -euo pipefail
 cd ${JSON.stringify(projectRoot)}
-nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot)}/dist/index.js >> ${JSON.stringify(projectRoot)}/logs/nanoclaw.log 2>> ${JSON.stringify(projectRoot)}/logs/nanoclaw.error.log &
+nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot)}/dist/cli.js >> ${JSON.stringify(projectRoot)}/logs/nanoclaw.log 2>> ${JSON.stringify(projectRoot)}/logs/nanoclaw.error.log &
 echo $! > ${JSON.stringify(pidFile)}`;
 
     expect(wrapper).toContain('#!/bin/bash');

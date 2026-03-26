@@ -1,4 +1,5 @@
-import { AgentLite, TelegramChannel } from '../src/index.js';
+import { AgentLite } from '../src/sdk.js';
+import { TelegramChannel } from '../src/channels/telegram.js';
 
 const agent_lite = new AgentLite();
 

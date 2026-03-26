@@ -49,7 +49,7 @@ This adds:
 - `src/status-tracker.ts` (forward-only emoji state machine for message lifecycle signaling, with persistence and retry)
 - `src/status-tracker.test.ts` (unit tests for StatusTracker)
 - `container/skills/reactions/SKILL.md` (agent-facing documentation for the `react_to_message` MCP tool)
-- Reaction support in `src/db.ts`, `src/channels/whatsapp.ts`, `src/types.ts`, `src/ipc.ts`, `src/index.ts`, `src/group-queue.ts`, and `container/agent-runner/src/ipc-mcp-stdio.ts`
+- Reaction support in `src/db.ts`, `src/channels/whatsapp.ts`, `src/types.ts`, `src/ipc.ts`, `src/orchestrator.ts`, `src/group-queue.ts`, and `container/agent-runner/src/ipc-mcp-stdio.ts`
 
 ### Run database migration
 
