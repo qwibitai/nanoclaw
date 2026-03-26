@@ -420,6 +420,7 @@ async function runAgent(
       id: t.id,
       groupFolder: t.group_folder,
       prompt: t.prompt,
+      script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
