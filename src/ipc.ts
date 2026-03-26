@@ -401,6 +401,7 @@ export async function processTaskIpc(
     resume_prompt?: string;
     session_key?: string;
     gateId?: string;
+    threadId?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -1010,9 +1011,15 @@ export async function processTaskIpc(
           created_at: new Date().toISOString(),
         });
 
-        // Send gate notification to the group
+        // Send gate notification to the group — use threadId so the
+        // approval prompt appears in the same thread as the conversation.
         const gateMsg = `⚠️ **Gate: ${data.label}**\n${data.summary}\n\nReply \`approve\` or \`cancel\`.`;
-        await deps.sendMessage(data.chatJid || gateChatJid, gateMsg);
+        await deps.sendMessage(
+          data.chatJid || gateChatJid,
+          gateMsg,
+          undefined,
+          data.threadId,
+        );
 
         logger.info(
           { gateId, label: data.label, sourceGroup },

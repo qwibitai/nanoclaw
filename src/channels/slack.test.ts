@@ -64,7 +64,9 @@ vi.mock('@slack/bolt', () => ({
       },
       conversations: {
         list: vi.fn().mockResolvedValue({
-          channels: [],
+          channels: [
+            { id: 'C0123456789', name: 'test-channel', is_member: true },
+          ],
           response_metadata: {},
         }),
       },
@@ -97,12 +99,15 @@ vi.mock('../env.js', () => ({
     SLACK_BOT_TOKEN: 'xoxb-test-token',
     SLACK_APP_TOKEN: 'xapp-test-token',
   }),
+  readEnvFileMatching: vi.fn().mockReturnValue({
+    SLACK_BOT_TOKEN: 'xoxb-test-token',
+  }),
 }));
 
 import { SlackChannel } from './slack.js';
 import type { ChannelOpts } from './registry.js';
 import { updateChatName } from '../db.js';
-import { readEnvFile } from '../env.js';
+import { readEnvFile, readEnvFileMatching } from '../env.js';
 import { transformTablesInText } from '../table-renderer.js';
 
 // --- Test helpers ---
@@ -716,24 +721,34 @@ describe('SlackChannel', () => {
   // --- ownsJid ---
 
   describe('ownsJid', () => {
-    it('owns slack: JIDs', () => {
+    it('owns slack: JIDs for channels discovered during sync', async () => {
       const channel = new SlackChannel(createTestOpts());
+      await channel.connect(); // syncChannelMetadata populates knownChannelIds with C0123456789
       expect(channel.ownsJid('slack:C0123456789')).toBe(true);
     });
 
-    it('owns slack: DM JIDs', () => {
+    it('owns thread JIDs for known channels', async () => {
       const channel = new SlackChannel(createTestOpts());
-      expect(channel.ownsJid('slack:D0123456789')).toBe(true);
+      await channel.connect();
+      expect(
+        channel.ownsJid('slack:C0123456789:thread:1704067200.000000'),
+      ).toBe(true);
+    });
+
+    it('does not own slack: JIDs for unknown channels', async () => {
+      const channel = new SlackChannel(createTestOpts());
+      await channel.connect();
+      expect(channel.ownsJid('slack:CUNKNOWN999')).toBe(false);
+    });
+
+    it('does not own any slack: JIDs before connect', () => {
+      const channel = new SlackChannel(createTestOpts());
+      expect(channel.ownsJid('slack:C0123456789')).toBe(false);
     });
 
     it('does not own WhatsApp group JIDs', () => {
       const channel = new SlackChannel(createTestOpts());
       expect(channel.ownsJid('12345@g.us')).toBe(false);
-    });
-
-    it('does not own WhatsApp DM JIDs', () => {
-      const channel = new SlackChannel(createTestOpts());
-      expect(channel.ownsJid('12345@s.whatsapp.net')).toBe(false);
     });
 
     it('does not own Telegram JIDs', () => {
@@ -754,7 +769,7 @@ describe('SlackChannel', () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
 
-      currentApp().client.conversations.list.mockResolvedValue({
+      currentApp().client.conversations.list.mockResolvedValueOnce({
         channels: [
           { id: 'C001', name: 'general', is_member: true },
           { id: 'C002', name: 'random', is_member: true },
@@ -832,6 +847,34 @@ describe('SlackChannel', () => {
         'SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set in .env',
       );
     });
+
+    it('reads suffixed env vars when config.suffix is provided', () => {
+      vi.mocked(readEnvFile).mockReturnValueOnce({
+        SLACK_BOT_TOKEN_SUNDAY: 'xoxb-sunday-token',
+        SLACK_APP_TOKEN_SUNDAY: 'xapp-sunday-token',
+      });
+
+      const channel = new SlackChannel(createTestOpts(), {
+        suffix: 'SUNDAY',
+        instanceName: 'slack:sunday',
+      });
+      expect(channel.name).toBe('slack:sunday');
+    });
+
+    it('throws with suffixed key names when suffixed tokens are missing', () => {
+      vi.mocked(readEnvFile).mockReturnValueOnce({
+        SLACK_BOT_TOKEN_SUNDAY: '',
+        SLACK_APP_TOKEN_SUNDAY: '',
+      });
+
+      expect(
+        () =>
+          new SlackChannel(createTestOpts(), {
+            suffix: 'SUNDAY',
+            instanceName: 'slack:sunday',
+          }),
+      ).toThrow('SLACK_BOT_TOKEN_SUNDAY and SLACK_APP_TOKEN_SUNDAY');
+    });
   });
 
   // --- syncChannelMetadata pagination ---
@@ -870,9 +913,21 @@ describe('SlackChannel', () => {
   // --- Channel properties ---
 
   describe('channel properties', () => {
-    it('has name "slack"', () => {
+    it('has name "slack" by default', () => {
       const channel = new SlackChannel(createTestOpts());
       expect(channel.name).toBe('slack');
+    });
+
+    it('uses instanceName from config', () => {
+      vi.mocked(readEnvFile).mockReturnValueOnce({
+        SLACK_BOT_TOKEN_SUNDAY: 'xoxb-sunday-token',
+        SLACK_APP_TOKEN_SUNDAY: 'xapp-sunday-token',
+      });
+      const channel = new SlackChannel(createTestOpts(), {
+        suffix: 'SUNDAY',
+        instanceName: 'slack:sunday',
+      });
+      expect(channel.name).toBe('slack:sunday');
     });
   });
 

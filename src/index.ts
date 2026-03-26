@@ -960,8 +960,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   // Add 💭 on the trigger message for new threads so the user knows it's being worked on.
   // Removed on first agent output. Only for top-level messages that will become threads.
+  // Skip for Slack — it already uses 👀 → ✅ inline acknowledgment (adding 💭 doubles up).
   const thinkingReactionMsg =
-    isThreadEnabled && effectiveThreadId && !threadId
+    isThreadEnabled &&
+    effectiveThreadId &&
+    !threadId &&
+    !chatJid.startsWith('slack:')
       ? effectiveThreadId
       : undefined;
   if (thinkingReactionMsg) {

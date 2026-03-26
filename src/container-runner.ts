@@ -2531,6 +2531,14 @@ function readSecrets(
     delete secrets[githubTokenKey];
   }
 
+  // GitHub org restriction: when tools includes 'github-orgs:OrgName', pass
+  // GITHUB_ALLOWED_ORGS to the entrypoint so git credentials are URL-scoped.
+  // Multiple orgs: use separate entries e.g. ['github-orgs:Prairie-Dev', 'github-orgs:davekim917'].
+  const { scopes: githubOrgScopes } = extractToolScopes(tools, 'github-orgs');
+  if (githubOrgScopes.length > 0) {
+    secrets.GITHUB_ALLOWED_ORGS = githubOrgScopes.join(',');
+  }
+
   // Normalize scoped dbt keys to their generic names
   for (const [scoped, generic] of [
     [dbtScopedEmail, 'DBT_CLOUD_EMAIL'],

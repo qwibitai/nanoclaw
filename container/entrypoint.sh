@@ -19,8 +19,25 @@ fi
 
 # Configure git/gh auth if GITHUB_TOKEN is present in secrets
 GH_TOKEN=$(node -e 'try{const d=JSON.parse(require("fs").readFileSync("/tmp/input.json","utf8"));if(d.secrets?.GITHUB_TOKEN)process.stdout.write(d.secrets.GITHUB_TOKEN)}catch{}' 2>/dev/null)
+GH_ORGS=$(node -e 'try{const d=JSON.parse(require("fs").readFileSync("/tmp/input.json","utf8"));if(d.secrets?.GITHUB_ALLOWED_ORGS)process.stdout.write(d.secrets.GITHUB_ALLOWED_ORGS)}catch{}' 2>/dev/null)
 if [ -n "$GH_TOKEN" ]; then
-  git config --global credential.helper '!f() { echo username=x-access-token; echo password='"$GH_TOKEN"'; }; f'
-  echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
+  if [ -n "$GH_ORGS" ]; then
+    # URL-scoped credentials: only provide token for allowed orgs.
+    # Prevents cloning repos outside the allowed organizations.
+    IFS=',' read -ra ORGS <<< "$GH_ORGS"
+    for org in "${ORGS[@]}"; do
+      git config --global "credential.https://github.com/${org}/.helper" \
+        '!f() { echo username=x-access-token; echo password='"$GH_TOKEN"'; }; f'
+    done
+  else
+    # Global credential helper — all github.com repos get the token
+    git config --global credential.helper '!f() { echo username=x-access-token; echo password='"$GH_TOKEN"'; }; f'
+  fi
+  # Only give gh CLI global auth when org-scoping is NOT active.
+  # gh uses its own auth store (~/.config/gh/) independent of git credential helpers,
+  # which would bypass the URL-scoped credential restriction.
+  if [ -z "$GH_ORGS" ]; then
+    echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
+  fi
 fi
 node /tmp/dist/index.js < /tmp/input.json

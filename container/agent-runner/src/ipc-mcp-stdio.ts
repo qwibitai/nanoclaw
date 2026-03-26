@@ -1260,6 +1260,7 @@ Tips:
     const data = {
       type: 'request_gate',
       chatJid,
+      threadId,
       label: args.label,
       summary: args.summary,
       context_data: args.context_data,

@@ -13,7 +13,7 @@ import {
 import { downloadAttachment } from '../attachment-downloader.js';
 import { getRouterState, setRouterState, updateChatName } from '../db.js';
 import { ContainerConfig, Attachment } from '../types.js';
-import { readEnvFile } from '../env.js';
+import { readEnvFile, readEnvFileMatching } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
@@ -35,8 +35,16 @@ interface AutoRegisterTemplate {
   requiresTrigger: boolean;
 }
 
+/** Configuration for a Slack channel instance (multi-workspace support). */
+export interface SlackInstanceConfig {
+  /** Env var suffix, e.g. 'SUNDAY' → reads SLACK_BOT_TOKEN_SUNDAY. Empty string for default. */
+  suffix: string;
+  /** Channel name in the registry, e.g. 'slack' or 'slack:sunday'. */
+  instanceName: string;
+}
+
 export class SlackChannel implements Channel {
-  name = 'slack';
+  name: string;
 
   private app: App;
   private botToken: string;
@@ -63,25 +71,31 @@ export class SlackChannel implements Channel {
 
   private opts: ChannelOpts;
 
+  // Channel IDs this instance owns (populated during syncChannelMetadata).
+  // Used by ownsJid() to route outbound messages to the correct Slack App.
+  private knownChannelIds = new Set<string>();
+
   /** Extract Slack channel ID from a JID (handles both base and thread JIDs). */
   private resolveChannelId(jid: string): string {
     const parsed = parseThreadJid(jid);
     return parsed ? parsed.parentId : jid.replace(/^slack:/, '');
   }
 
-  constructor(opts: ChannelOpts) {
+  constructor(opts: ChannelOpts, config?: SlackInstanceConfig) {
     this.opts = opts;
+    this.name = config?.instanceName ?? 'slack';
 
     // Read tokens from .env (not process.env — keeps secrets off the environment
     // so they don't leak to child processes, matching NanoClaw's security pattern)
-    const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN']);
-    const botToken = env.SLACK_BOT_TOKEN;
-    const appToken = env.SLACK_APP_TOKEN;
+    const suffix = config?.suffix ? `_${config.suffix}` : '';
+    const botTokenKey = `SLACK_BOT_TOKEN${suffix}`;
+    const appTokenKey = `SLACK_APP_TOKEN${suffix}`;
+    const env = readEnvFile([botTokenKey, appTokenKey]);
+    const botToken = env[botTokenKey];
+    const appToken = env[appTokenKey];
 
     if (!botToken || !appToken) {
-      throw new Error(
-        'SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set in .env',
-      );
+      throw new Error(`${botTokenKey} and ${appTokenKey} must be set in .env`);
     }
 
     this.botToken = botToken;
@@ -101,6 +115,7 @@ export class SlackChannel implements Channel {
       // Only handle the bot itself joining
       if (event.user !== this.botUserId) return;
 
+      this.knownChannelIds.add(event.channel);
       const jid = `slack:${event.channel}`;
       const groups = this.opts.registeredGroups();
       if (groups[jid]) return; // Already registered
@@ -155,6 +170,19 @@ export class SlackChannel implements Channel {
       } catch (err) {
         logger.warn({ jid, err }, 'Failed to send auto-register greeting');
       }
+
+      // Pre-populate user name cache for this channel so outbound @mentions work
+      try {
+        const members = await this.app.client.conversations.members({
+          channel: event.channel,
+          limit: 200,
+        });
+        for (const userId of members.members || []) {
+          await this.resolveUserName(userId);
+        }
+      } catch {
+        // ignore — will resolve lazily on first message
+      }
     });
 
     // Use app.event('message') instead of app.message() to capture all
@@ -173,6 +201,10 @@ export class SlackChannel implements Channel {
       // Skip messages with no content at all (no text, attachments, or blocks)
       if (!msg.text && !msgAny.attachments?.length && !msgAny.blocks?.length)
         return;
+
+      // Ensure this channel is in knownChannelIds (handles DMs and channels
+      // joined after syncChannelMetadata ran at startup).
+      this.knownChannelIds.add(msg.channel);
 
       const baseJid = `slack:${msg.channel}`;
       // thread_ts is present when the message is inside a thread.
@@ -364,16 +396,18 @@ export class SlackChannel implements Channel {
       logger.warn({ err }, 'Connected to Slack but failed to get bot user ID');
     }
 
-    // Load or auto-discover auto-register config for workspace-wide registration
+    // Sync channel metadata (populates knownChannelIds) BEFORE marking connected
+    // so that ownsJid() works correctly for outbound routing from the start.
+    await this.syncChannelMetadata();
+
+    // Load or auto-discover auto-register config for workspace-wide registration.
+    // Must run AFTER syncChannelMetadata so knownChannelIds is populated for auto-discover.
     this.loadAutoRegisterConfig();
 
     this.connected = true;
 
     // Flush any messages queued before connection
     await this.flushOutgoingQueue();
-
-    // Sync channel names on startup
-    await this.syncChannelMetadata();
   }
 
   async sendMessage(
@@ -569,7 +603,9 @@ export class SlackChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('slack:');
+    if (!jid.startsWith('slack:')) return false;
+    const channelId = this.resolveChannelId(jid);
+    return this.knownChannelIds.has(channelId);
   }
 
   async disconnect(): Promise<void> {
@@ -737,6 +773,7 @@ export class SlackChannel implements Channel {
   async syncChannelMetadata(): Promise<void> {
     try {
       logger.info('Syncing channel metadata from Slack...');
+      this.knownChannelIds.clear();
       let cursor: string | undefined;
       let count = 0;
 
@@ -751,6 +788,7 @@ export class SlackChannel implements Channel {
         for (const ch of result.channels || []) {
           if (ch.id && ch.name && ch.is_member) {
             updateChatName(`slack:${ch.id}`, ch.name);
+            this.knownChannelIds.add(ch.id);
             count++;
           }
         }
@@ -1013,26 +1051,42 @@ export class SlackChannel implements Channel {
             { teamId: this.teamId },
             'Slack auto-register config loaded',
           );
+          return; // This instance's template exists — done
         }
-        return;
+        // This instance's teamId is not in stored config — fall through
+        // to auto-discover so new workspaces can bootstrap their template.
       } catch {
         // Corrupted — fall through to auto-discover
       }
     }
 
-    // Auto-discover: find existing Slack channels with assistantName override
+    // Auto-discover: find existing Slack channels with assistantName override.
+    // Merge into existing stored config so multiple workspace instances don't
+    // overwrite each other's templates.
     const groups = this.opts.registeredGroups();
     for (const [jid, group] of Object.entries(groups)) {
       if (!jid.startsWith('slack:') || !group.containerConfig?.assistantName)
         continue;
-      // Use this channel's config as the template
-      this.autoRegisterConfig = {
-        [this.teamId]: {
-          folder: group.folder,
-          containerConfig: { ...group.containerConfig },
-          requiresTrigger: group.requiresTrigger !== false,
-        },
+      // Only claim channels this instance owns
+      const channelId = this.resolveChannelId(jid);
+      if (!this.knownChannelIds.has(channelId)) continue;
+
+      // Merge into existing config rather than overwriting
+      let existingConfig: Record<string, AutoRegisterTemplate> = {};
+      const existingStored = getRouterState('slack_auto_register');
+      if (existingStored) {
+        try {
+          existingConfig = JSON.parse(existingStored);
+        } catch {
+          // Corrupted — start fresh
+        }
+      }
+      existingConfig[this.teamId] = {
+        folder: group.folder,
+        containerConfig: { ...group.containerConfig },
+        requiresTrigger: group.requiresTrigger !== false,
       };
+      this.autoRegisterConfig = existingConfig;
       setRouterState(
         'slack_auto_register',
         JSON.stringify(this.autoRegisterConfig),
@@ -1059,8 +1113,13 @@ export class SlackChannel implements Channel {
       );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        const channelId = item.jid.replace(/^slack:/, '');
-        const threadTs = this.replyThreadTs.get(item.jid);
+        const parsed = parseThreadJid(item.jid);
+        const channelId = parsed
+          ? parsed.parentId
+          : item.jid.replace(/^slack:/, '');
+        const threadTs = parsed
+          ? parsed.threadId
+          : this.replyThreadTs.get(item.jid);
         const flushedText = this.replaceMentions(item.text);
         const { text: transformed, slackAttachmentBlocks } =
           transformTablesInText('slack', flushedText);
@@ -1084,11 +1143,43 @@ export class SlackChannel implements Channel {
   }
 }
 
-registerChannel('slack', (opts: ChannelOpts) => {
-  try {
-    return new SlackChannel(opts);
-  } catch {
-    logger.warn('Slack: SLACK_BOT_TOKEN or SLACK_APP_TOKEN not set');
-    return null;
+/**
+ * Discover and register all Slack workspace instances.
+ * Scans .env for SLACK_BOT_TOKEN (default) and SLACK_BOT_TOKEN_<SUFFIX> patterns.
+ * Each matching pair of (BOT_TOKEN, APP_TOKEN) creates a separate SlackChannel instance.
+ */
+function discoverAndRegisterSlackInstances(): void {
+  const allSlackVars = readEnvFileMatching((key) =>
+    key.startsWith('SLACK_BOT_TOKEN'),
+  );
+
+  const suffixes: string[] = [];
+  for (const key of Object.keys(allSlackVars)) {
+    if (key === 'SLACK_BOT_TOKEN') {
+      suffixes.push('');
+    } else if (key.startsWith('SLACK_BOT_TOKEN_')) {
+      suffixes.push(key.slice('SLACK_BOT_TOKEN_'.length));
+    }
   }
-});
+
+  if (suffixes.length === 0) {
+    logger.info('Slack: No SLACK_BOT_TOKEN* found in .env — skipping');
+    return;
+  }
+
+  for (const suffix of suffixes) {
+    const instanceName = suffix ? `slack:${suffix.toLowerCase()}` : 'slack';
+    registerChannel(instanceName, (opts: ChannelOpts) => {
+      try {
+        return new SlackChannel(opts, { suffix, instanceName });
+      } catch {
+        logger.warn(
+          `Slack (${instanceName}): credentials not set — skipping`,
+        );
+        return null;
+      }
+    });
+  }
+}
+
+discoverAndRegisterSlackInstances();
