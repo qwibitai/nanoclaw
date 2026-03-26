@@ -243,6 +243,9 @@ function buildEnvFile(containerName: string): string | null {
   const falKey = readEnvFile(['FAL_KEY']).FAL_KEY;
   if (falKey) envLines.push(`FAL_KEY=${falKey}`);
 
+  const elevenKey = readEnvFile(['ELEVENLABS_API_KEY']).ELEVENLABS_API_KEY;
+  if (elevenKey) envLines.push(`ELEVENLABS_API_KEY=${elevenKey}`);
+
   const mpToken = readEnvFile(['MP_ACCESS_TOKEN']).MP_ACCESS_TOKEN;
   if (mpToken) envLines.push(`MP_ACCESS_TOKEN=${mpToken}`);
 

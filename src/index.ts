@@ -847,7 +847,12 @@ async function main(): Promise<void> {
       }
       // Fallback: send as document if channel doesn't support native video
       if (channel.sendDocument) {
-        return channel.sendDocument(jid, filePath, filePath.split('/').pop() || 'video.mp4', caption);
+        return channel.sendDocument(
+          jid,
+          filePath,
+          filePath.split('/').pop() || 'video.mp4',
+          caption,
+        );
       }
       return channel.sendMessage(
         jid,

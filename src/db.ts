@@ -669,7 +669,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 export function trackImageGeneration(params: {
   group_folder: string;
   prompt: string;
-  type: 'text2img' | 'edit';
+  type: string;
   model?: string;
   cost_usd?: number;
 }): void {

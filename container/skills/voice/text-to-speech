@@ -1,24 +1,93 @@
 #!/usr/bin/env bash
-# text-to-speech: convert text to audio using OpenAI TTS API
-# Usage: text-to-speech "text to speak" [voice]
-# Voices: alloy, echo, fable, onyx, nova, shimmer (default: onyx)
+# text-to-speech: convert text to audio using ElevenLabs (primary) or OpenAI (fallback)
+# Usage: text-to-speech "text to speak" [voice-name]
+# Voices: antonio (default), jc, brian, daniel, enrique, custom
 set -euo pipefail
 
-TEXT="${1:?Usage: text-to-speech \"text\" \"male|female\"}"
-GENDER="${2:-male}"
-if [[ "$GENDER" == "female" ]]; then
-  VOICE="nova"
-else
-  VOICE="onyx"
-fi
+TEXT="${1:?Usage: text-to-speech \"text\" [voice-name]}"
+VOICE_NAME="${2:-antonio}"
 OUTPUT_DIR="/workspace/group"
 OUTPUT_FILE="${OUTPUT_DIR}/tts-$(date +%s%3N).ogg"
 
+# --- Voice catalog ---
+declare -A VOICES=(
+  [antonio]="htFfPSZGJwjBv1CL0aMD"
+  [jc]="4XUsiqPDK4UACIM2BILe"
+  [brian]="XgQWNZcJ8SRkxXwwhPTo"
+  [daniel]="T7BErSAR6r6NDaGdTLKB"
+  [enrique]="gbTn1bmCvNgk0QEAVyfM"
+)
+
+# Check for custom cloned voice in group config
+VOICE_CONFIG="/workspace/group/voice_config.json"
+if [[ "$VOICE_NAME" == "custom" || "$VOICE_NAME" == "cloned" ]] && [[ -f "$VOICE_CONFIG" ]]; then
+  VOICE_ID=$(python3 -c "import json; print(json.load(open('$VOICE_CONFIG')).get('voice_id',''))" 2>/dev/null || true)
+elif [[ -n "${VOICES[$VOICE_NAME]+x}" ]]; then
+  VOICE_ID="${VOICES[$VOICE_NAME]}"
+else
+  # Unknown voice name, default to antonio
+  VOICE_ID="${VOICES[antonio]}"
+  echo "WARNING: Unknown voice '$VOICE_NAME', using antonio" >&2
+fi
+
+# --- ElevenLabs (primary) ---
+if [[ -n "${ELEVENLABS_API_KEY:-}" && -n "${VOICE_ID:-}" ]]; then
+  RESPONSE_CODE=$(curl -sS -w "%{http_code}" -o "$OUTPUT_FILE" \
+    -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=opus_48000_64" \
+    -H "xi-api-key: $ELEVENLABS_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c "
+import json, sys
+print(json.dumps({
+    'text': sys.argv[1],
+    'model_id': 'eleven_multilingual_v2',
+    'voice_settings': {
+        'stability': 0.35,
+        'similarity_boost': 0.85,
+        'style': 0.6,
+        'use_speaker_boost': True
+    }
+}))
+" "$TEXT")")
+
+  if [[ "$RESPONSE_CODE" == "200" ]]; then
+    # Track via IPC (non-fatal)
+    {
+      IPC_DIR="/workspace/ipc/messages"
+      mkdir -p "$IPC_DIR"
+      TRACK_FILE="${IPC_DIR}/imgtrack-$(date +%s%3N).json"
+      # ElevenLabs: ~1 credit per char, Creator plan = 110k chars for $11
+      CHAR_COUNT=${#TEXT}
+      COST=$(python3 -c "print(round(${CHAR_COUNT} * 0.0001, 4))")
+      python3 -c "
+import json, sys
+json.dump({
+    'type': 'track_image_gen',
+    'gen_type': 'tts',
+    'prompt': sys.argv[1][:100],
+    'model': 'elevenlabs-v2',
+    'cost_usd': float(sys.argv[2])
+}, open(sys.argv[3], 'w'))
+" "$TEXT" "$COST" "$TRACK_FILE"
+    } || true
+
+    echo "$OUTPUT_FILE"
+    exit 0
+  else
+    ERROR=$(cat "$OUTPUT_FILE" 2>/dev/null || echo "HTTP $RESPONSE_CODE")
+    rm -f "$OUTPUT_FILE"
+    echo "WARNING: ElevenLabs failed ($RESPONSE_CODE), falling back to OpenAI" >&2
+    echo "$ERROR" >&2
+  fi
+fi
+
+# --- OpenAI fallback ---
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "ERROR: OPENAI_API_KEY not set" >&2
+  echo "ERROR: No TTS API key available (ELEVENLABS_API_KEY or OPENAI_API_KEY)" >&2
   exit 1
 fi
 
+VOICE="onyx"
 RESPONSE_CODE=$(curl -sS -w "%{http_code}" -o "$OUTPUT_FILE" \
   -X POST "https://api.openai.com/v1/audio/speech" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \

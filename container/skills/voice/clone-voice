@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# clone-voice: upload audio to ElevenLabs to create a cloned voice
+# Usage: clone-voice /path/to/audio.ogg "voice-name"
+set -euo pipefail
+
+AUDIO_PATH="${1:?Usage: clone-voice /path/to/audio.ogg \"voice-name\"}"
+VOICE_NAME="${2:-ghosty-custom}"
+VOICE_CONFIG="/workspace/group/voice_config.json"
+
+if [[ -z "${ELEVENLABS_API_KEY:-}" ]]; then
+  echo "ERROR: ELEVENLABS_API_KEY not set" >&2
+  exit 1
+fi
+
+if [[ ! -f "$AUDIO_PATH" ]]; then
+  echo "ERROR: Audio file not found: $AUDIO_PATH" >&2
+  exit 1
+fi
+
+# Upload to ElevenLabs
+RESPONSE=$(curl -sS -X POST "https://api.elevenlabs.io/v1/voices/add" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -F "name=${VOICE_NAME}" \
+  -F "files=@${AUDIO_PATH}" \
+  -F "description=Cloned voice for NanoClaw group")
+
+# Extract voice_id
+VOICE_ID=$(python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'voice_id' in d:
+    print(d['voice_id'])
+elif 'detail' in d:
+    print('ERROR:' + str(d['detail']), file=sys.stderr)
+    sys.exit(1)
+else:
+    print('ERROR: Unexpected response', file=sys.stderr)
+    sys.exit(1)
+" <<< "$RESPONSE")
+
+if [[ -z "$VOICE_ID" ]]; then
+  echo "ERROR: Failed to clone voice: $RESPONSE" >&2
+  exit 1
+fi
+
+# Save to group config
+python3 -c "
+import json, sys
+config = {'voice_id': sys.argv[1], 'name': sys.argv[2]}
+json.dump(config, open(sys.argv[3], 'w'), indent=2)
+" "$VOICE_ID" "$VOICE_NAME" "$VOICE_CONFIG"
+
+echo "Voice cloned successfully!"
+echo "Voice ID: $VOICE_ID"
+echo "Name: $VOICE_NAME"
+echo "Config saved to: $VOICE_CONFIG"
+echo "Use 'text-to-speech \"texto\" custom' to use this voice."

@@ -352,6 +352,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Profile picture updated via IPC',
                   );
                 }
+              } else if (data.type === 'track_video_gen') {
+                trackImageGeneration({
+                  group_folder: sourceGroup,
+                  prompt: data.prompt || '',
+                  type: 'text2video',
+                  model: data.model,
+                  cost_usd: data.cost_usd,
+                });
+                logger.info(
+                  { sourceGroup, gen_type: data.gen_type },
+                  'Video generation tracked',
+                );
               } else if (data.type === 'track_image_gen') {
                 trackImageGeneration({
                   group_folder: sourceGroup,
