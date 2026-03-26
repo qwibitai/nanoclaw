@@ -220,6 +220,19 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // System prompt file — always mounted read-only so agents cannot modify it.
+  // Only the user (on the host) can change its contents.
+  // The agent runner reads it at /workspace/system-prompt.md and prepends it
+  // to every invocation's system prompt.
+  const systemPromptFile = path.join(projectRoot, 'system-prompt.md');
+  if (fs.existsSync(systemPromptFile)) {
+    mounts.push({
+      hostPath: systemPromptFile,
+      containerPath: '/workspace/system-prompt.md',
+      readonly: true,
+    });
+  }
+
   return mounts;
 }
 
