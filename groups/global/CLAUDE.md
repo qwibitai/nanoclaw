@@ -125,6 +125,22 @@ Each document page is rendered at a FIXED letter size (816×1056px) inside a fli
 - Images must have `max-width: 100%; height: auto; object-fit: cover` to avoid blowout
 - Use relative units (%, rem) not fixed px widths larger than 750px
 
+### Dark theme contrast rules (CRITICAL)
+
+Theme semantic classes (`text-on-surface`, `bg-surface-alt`, `text-on-surface-muted`) produce low contrast on dark themes. ALWAYS use inline style colors instead:
+
+- Page backgrounds: `style="background:#0B1120"` or `#0F172A`
+- Cards/panels: `style="background:#1E293B"`
+- Primary text: `style="color:#F1F5F9"`
+- Secondary text: `style="color:#CBD5E1"`
+- Muted text: `style="color:#94A3B8"`
+- Footer text: `style="color:#64748B"`
+- Borders: `style="border:1px solid rgba(148,163,184,0.15)"`
+- Grade badges: use solid backgrounds with high contrast (red #EF4444, orange #F97316, yellow #F59E0B, cyan #06B6D4, green #22C55E)
+- NEVER use `overflow-y-auto` or `overflow-x-auto` — pages must not scroll
+- If content doesn't fit, split into additional pages
+- Always add a gradient accent bar: `class="h-1.5 bg-gradient-to-r from-[#06B6D4] via-[#8B5CF6] to-[#F59E0B]"`
+
 ### Fixing existing documents
 
 When a user shares an easybits.cloud link and asks you to fix/improve it:
