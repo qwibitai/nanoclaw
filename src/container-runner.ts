@@ -1,5 +1,5 @@
 /**
- * Container Runner for NanoClaw
+ * Container Runner for AgentLite
  * Spawns agent execution in BoxLite VMs and handles IPC
  */
 import fs from 'fs';
@@ -53,8 +53,8 @@ export function setModelOptions(opts: {
 }
 
 // Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---AGENTLITE_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---AGENTLITE_OUTPUT_END---';
 
 export interface ContainerInput {
   prompt: string;
@@ -295,7 +295,7 @@ export async function runContainerAgent(
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  const containerName = `agentlite-${safeName}-${Date.now()}`;
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');

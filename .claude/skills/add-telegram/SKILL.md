@@ -5,7 +5,7 @@ description: Add Telegram as a channel. Can replace WhatsApp entirely or run alo
 
 # Add Telegram Channel
 
-This skill adds Telegram support to NanoClaw, then walks through interactive setup.
+This skill adds Telegram support to AgentLite, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
@@ -32,7 +32,7 @@ git remote -v
 If `telegram` is missing, add it:
 
 ```bash
-git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
+git remote add telegram https://github.com/qwibitai/agentlite-telegram.git
 ```
 
 ### Merge the skill branch
@@ -115,8 +115,8 @@ Tell the user:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.agentlite  # macOS
+# Linux: systemctl --user restart agentlite
 ```
 
 ## Phase 4: Registration
@@ -162,7 +162,7 @@ Tell the user:
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/agentlite.log
 ```
 
 ## Troubleshooting
@@ -173,7 +173,7 @@ Check:
 1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
 2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
-4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+4. Service is running: `launchctl list | grep agentlite` (macOS) or `systemctl --user status agentlite` (Linux)
 
 ### Bot only responds to @mentions in groups
 
@@ -185,21 +185,21 @@ Group Privacy is enabled (default). Fix:
 
 If `/chatid` doesn't work:
 - Verify token: `curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"`
-- Check bot is started: `tail -f logs/nanoclaw.log`
+- Check bot is started: `tail -f logs/agentlite.log`
 
 ## After Setup
 
 If running `npm run dev` while the service is active:
 ```bash
 # macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.agentlite.plist
 npm run dev
 # When done testing:
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.agentlite.plist
 # Linux:
-# systemctl --user stop nanoclaw
+# systemctl --user stop agentlite
 # npm run dev
-# systemctl --user start nanoclaw
+# systemctl --user start agentlite
 ```
 
 ## Agent Swarms (Teams)
@@ -219,4 +219,4 @@ To remove Telegram integration:
 3. Remove `TELEGRAM_BOT_TOKEN` from `.env`
 4. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
 5. Uninstall: `npm uninstall grammy`
-6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.agentlite` (macOS) or `npm run build && systemctl --user restart agentlite` (Linux)

@@ -1,11 +1,11 @@
 ---
 name: add-gmail
-description: Add Gmail integration to NanoClaw. Can be configured as a tool (agent reads/sends emails when triggered from WhatsApp) or as a full channel (emails can trigger the agent, schedule tasks, and receive replies). Guides through GCP OAuth setup and implements the integration.
+description: Add Gmail integration to AgentLite. Can be configured as a tool (agent reads/sends emails when triggered from WhatsApp) or as a full channel (emails can trigger the agent, schedule tasks, and receive replies). Guides through GCP OAuth setup and implements the integration.
 ---
 
 # Add Gmail Integration
 
-This skill adds Gmail support to NanoClaw — either as a tool (read, send, search, draft) or as a full channel that polls the inbox.
+This skill adds Gmail support to AgentLite — either as a tool (read, send, search, draft) or as a full channel that polls the inbox.
 
 ## Phase 1: Pre-flight
 
@@ -33,7 +33,7 @@ git remote -v
 If `gmail` is missing, add it:
 
 ```bash
-git remote add gmail https://github.com/qwibitai/nanoclaw-gmail.git
+git remote add gmail https://github.com/qwibitai/agentlite-gmail.git
 ```
 
 ### Merge the skill branch
@@ -97,7 +97,7 @@ Tell the user:
 > 2. Go to **APIs & Services > Library**, search "Gmail API", click **Enable**
 > 3. Go to **APIs & Services > Credentials**, click **+ CREATE CREDENTIALS > OAuth client ID**
 >    - If prompted for consent screen: choose "External", fill in app name and email, save
->    - Application type: **Desktop app**, name: anything (e.g., "NanoClaw Gmail")
+>    - Application type: **Desktop app**, name: anything (e.g., "AgentLite Gmail")
 > 4. Click **DOWNLOAD JSON** and save as `gcp-oauth.keys.json`
 >
 > Where did you save the file? (Give me the full path, or paste the file contents here)
@@ -143,8 +143,8 @@ Then compile and restart:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.agentlite  # macOS
+# Linux: systemctl --user restart agentlite
 ```
 
 ## Phase 4: Verify
@@ -159,14 +159,14 @@ Tell the user:
 
 ### Test channel mode (Channel mode only)
 
-Tell the user to send themselves a test email. The agent should pick it up within a minute. Monitor: `tail -f logs/nanoclaw.log | grep -iE "(gmail|email)"`.
+Tell the user to send themselves a test email. The agent should pick it up within a minute. Monitor: `tail -f logs/agentlite.log | grep -iE "(gmail|email)"`.
 
 Once verified, offer filter customization via `AskUserQuestion` — by default, only emails in the Primary inbox trigger the agent (Promotions, Social, Updates, and Forums are excluded). The user can keep this default or narrow further by sender, label, or keywords. No code changes needed for filters.
 
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/agentlite.log
 ```
 
 ## Troubleshooting
@@ -206,7 +206,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 2. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
 3. Rebuild and restart
 4. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.agentlite` (macOS) or `systemctl --user restart agentlite` (Linux)
 
 ### Channel mode
 
@@ -217,4 +217,4 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 5. Uninstall: `npm uninstall googleapis`
 6. Rebuild and restart
 7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.agentlite` (macOS) or `systemctl --user restart agentlite` (Linux)

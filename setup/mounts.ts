@@ -26,7 +26,7 @@ function parseArgs(args: string[]): { empty: boolean; json: string } {
 export async function run(args: string[]): Promise<void> {
   const { empty, json } = parseArgs(args);
   const homeDir = os.homedir();
-  const configDir = path.join(homeDir, '.config', 'nanoclaw');
+  const configDir = path.join(homeDir, '.config', 'agentlite');
   const configFile = path.join(configDir, 'mount-allowlist.json');
 
   if (isRoot()) {

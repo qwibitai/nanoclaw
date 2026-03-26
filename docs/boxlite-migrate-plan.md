@@ -2,7 +2,7 @@
 
 ## Context
 
-NanoClaw previously used Docker to run agent containers via `spawn('docker', ['run', ...])`. This document describes the migration to BoxLite (`@boxlite-ai/boxlite`), an embedded VM runtime library.
+AgentLite previously used Docker to run agent containers via `spawn('docker', ['run', ...])`. This document describes the migration to BoxLite (`@boxlite-ai/boxlite`), an embedded VM runtime library.
 
 **Why BoxLite?**
 - **Embedded library** (no daemon) vs Docker's client-server model
@@ -60,7 +60,7 @@ JsExecution (running command)
 |    |     '-> execSync('docker info')  <-- CHANGE: remove                        |
 |    |                                                                            |
 |    |-> cleanupOrphans()  [container-runtime.ts]                                 |
-|    |     |-> execSync('docker ps --filter name=nanoclaw-')  <-- CHANGE          |
+|    |     |-> execSync('docker ps --filter name=agentlite-')  <-- CHANGE          |
 |    |     '-> execSync('docker stop -t 1 {name}')  <-- CHANGE                   |
 |    |                                                                            |
 |    '-> processMessages() -> runContainerAgent()  [container-runner.ts]          |
@@ -144,7 +144,7 @@ JsExecution (running command)
 |    |     '-> JsBoxlite.withDefaultConfig() -> JsBoxlite singleton               |
 |    |                                                                            |
 |    |-> cleanupOrphans()  [box-runtime.ts]  * REWRITTEN                          |
-|    |     |-> runtime.listInfo() -> JsBoxInfo[] -> filter nanoclaw-* names       |
+|    |     |-> runtime.listInfo() -> JsBoxInfo[] -> filter agentlite-* names       |
 |    |     '-> runtime.remove(name, true)                                         |
 |    |                                                                            |
 |    '-> processMessages() -> runContainerAgent()  [container-runner.ts]          |
@@ -282,7 +282,7 @@ Subsequent runs reuse the provisioned box state (BoxLite boxes are stateful).
 The agent-runner communicates via:
 
 - **Stdin**: Initial `ContainerInput` JSON (prompt, sessionId, groupFolder, etc.)
-- **Stdout**: Results wrapped in `---NANOCLAW_OUTPUT_START---` / `---NANOCLAW_OUTPUT_END---` markers
+- **Stdout**: Results wrapped in `---AGENTLITE_OUTPUT_START---` / `---AGENTLITE_OUTPUT_END---` markers
 - **IPC files** (`/workspace/ipc/input/`): Follow-up messages as JSON files, `_close` sentinel for shutdown
 - **IPC files** (`/workspace/ipc/`): Task snapshots, group lists, outbound messages
 

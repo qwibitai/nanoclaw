@@ -2,9 +2,9 @@
 
 ## Overview
 
-This document covers **feature skills** — skills that add capabilities via git branch merges. This is the most complex skill type and the primary way NanoClaw is extended.
+This document covers **feature skills** — skills that add capabilities via git branch merges. This is the most complex skill type and the primary way AgentLite is extended.
 
-NanoClaw has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full taxonomy:
+AgentLite has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full taxonomy:
 
 | Type | Location | How it works |
 |------|----------|-------------|
@@ -17,15 +17,15 @@ NanoClaw has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING
 
 Feature skills are distributed as git branches on the upstream repository. Applying a skill is a `git merge`. Updating core is a `git merge`. Everything is standard git.
 
-This replaces the previous `skills-engine/` system (three-way file merging, `.nanoclaw/` state, manifest files, replay, backup/restore) with plain git operations and Claude for conflict resolution.
+This replaces the previous `skills-engine/` system (three-way file merging, `.agentlite/` state, manifest files, replay, backup/restore) with plain git operations and Claude for conflict resolution.
 
 ## How It Works
 
 ### Repository structure
 
-The upstream repo (`qwibitai/nanoclaw`) maintains:
+The upstream repo (`boxlite-ai/agentlite`) maintains:
 
-- `main` — core NanoClaw (no skill code)
+- `main` — core AgentLite (no skill code)
 - `skill/discord` — main + Discord integration
 - `skill/telegram` — main + Telegram integration
 - `skill/slack` — main + Slack integration
@@ -39,20 +39,20 @@ Each skill branch contains all the code changes for that skill: new files, modif
 Skills are split into two categories:
 
 **Operational skills** (on `main`, always available):
-- `/setup`, `/debug`, `/update-nanoclaw`, `/customize`, `/update-skills`
+- `/setup`, `/debug`, `/update-agentlite`, `/customize`, `/update-skills`
 - These are instruction-only SKILL.md files — no code changes, just workflows
 - Live in `.claude/skills/` on `main`, immediately available to every user
 
 **Feature skills** (in marketplace, installed on demand):
 - `/add-discord`, `/add-telegram`, `/add-slack`, `/add-gmail`, etc.
 - Each has a SKILL.md with setup instructions and a corresponding `skill/*` branch with code
-- Live in the marketplace repo (`qwibitai/nanoclaw-skills`)
+- Live in the marketplace repo (`boxlite-ai/agentlite-skills`)
 
 Users never interact with the marketplace directly. The operational skills `/setup` and `/customize` handle plugin installation transparently:
 
 ```bash
 # Claude runs this behind the scenes — users don't see it
-claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
+claude plugin install agentlite-skills@agentlite-skills --scope project
 ```
 
 Skills are hot-loaded after `claude plugin install` — no restart needed. This means `/setup` can install the marketplace plugin, then immediately run any feature skill, all in one session.
@@ -70,15 +70,15 @@ Dependent skills (e.g., `telegram-swarm` depends on `telegram`) are only offered
 
 ### Marketplace configuration
 
-NanoClaw's `.claude/settings.json` registers the official marketplace:
+AgentLite's `.claude/settings.json` registers the official marketplace:
 
 ```json
 {
   "extraKnownMarketplaces": {
-    "nanoclaw-skills": {
+    "agentlite-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "boxlite-ai/agentlite-skills"
       }
     }
   }
@@ -88,11 +88,11 @@ NanoClaw's `.claude/settings.json` registers the official marketplace:
 The marketplace repo uses Claude Code's plugin structure:
 
 ```
-qwibitai/nanoclaw-skills/
+boxlite-ai/agentlite-skills/
   .claude-plugin/
     marketplace.json              # Plugin catalog
   plugins/
-    nanoclaw-skills/              # Single plugin bundling all official skills
+    agentlite-skills/              # Single plugin bundling all official skills
       .claude-plugin/
         plugin.json               # Plugin manifest
       skills/
@@ -105,7 +105,7 @@ qwibitai/nanoclaw-skills/
         ...
 ```
 
-Multiple skills are bundled in one plugin — installing `nanoclaw-skills` makes all feature skills available at once. Individual skills don't need separate installation.
+Multiple skills are bundled in one plugin — installing `agentlite-skills` makes all feature skills available at once. Individual skills don't need separate installation.
 
 Each SKILL.md tells Claude to merge the corresponding skill branch as step 1, then walks through interactive setup (env vars, bot creation, etc.).
 
@@ -161,7 +161,7 @@ done
 This requires no state — it uses git history to determine which skills were previously merged and whether they have new commits.
 
 This logic is available in two ways:
-- Built into `/update-nanoclaw` — after merging main, optionally check for skill updates
+- Built into `/update-agentlite` — after merging main, optionally check for skill updates
 - Standalone `/update-skills` — check and merge skill updates independently
 
 ### Conflict resolution
@@ -213,11 +213,11 @@ A GitHub Action runs on every push to `main`:
 
 ### New users (recommended)
 
-1. Fork `qwibitai/nanoclaw` on GitHub (click the Fork button)
+1. Fork `boxlite-ai/agentlite` on GitHub (click the Fork button)
 2. Clone your fork:
    ```bash
-   git clone https://github.com/<you>/nanoclaw.git
-   cd nanoclaw
+   git clone https://github.com/<you>/agentlite.git
+   cd agentlite
    ```
 3. Run Claude Code:
    ```bash
@@ -229,17 +229,17 @@ Forking is recommended because it gives users a remote to push their customizati
 
 ### Existing users migrating from clone
 
-Users who previously ran `git clone https://github.com/qwibitai/nanoclaw.git` and have local customizations:
+Users who previously ran `git clone https://github.com/boxlite-ai/agentlite.git` and have local customizations:
 
-1. Fork `qwibitai/nanoclaw` on GitHub
+1. Fork `boxlite-ai/agentlite` on GitHub
 2. Reroute remotes:
    ```bash
    git remote rename origin upstream
-   git remote add origin https://github.com/<you>/nanoclaw.git
+   git remote add origin https://github.com/<you>/agentlite.git
    git push --force origin main
    ```
    The `--force` is needed because the fresh fork's main is at upstream's latest, but the user wants their (possibly behind) version. The fork was just created so there's nothing to lose.
-3. From this point, `origin` = their fork, `upstream` = qwibitai/nanoclaw
+3. From this point, `origin` = their fork, `upstream` = boxlite-ai/agentlite
 
 ### Existing users migrating from the old skills engine
 
@@ -261,7 +261,7 @@ Users who previously applied skills via the `skills-engine/` system have skill c
 4. Claude assists by diffing your old fork against the new one to identify custom changes
 
 In both cases:
-- Delete the `.nanoclaw/` directory (no longer needed)
+- Delete the `.agentlite/` directory (no longer needed)
 - The `skills-engine/` code will be removed from upstream once all skills are migrated
 - `/update-skills` only tracks skills applied via branch merge — old-engine skills won't appear in update checks
 
@@ -301,11 +301,11 @@ git merge upstream/main
 git push origin main
 ```
 
-This is the same as the existing `/update-nanoclaw` skill's merge path.
+This is the same as the existing `/update-agentlite` skill's merge path.
 
 ### Updating skills
 
-Run `/update-skills` or let `/update-nanoclaw` check after a core update. For each previously-merged skill branch that has new commits, Claude offers to merge the updates.
+Run `/update-skills` or let `/update-agentlite` check after a core update. For each previously-merged skill branch that has new commits, Claude offers to merge the updates.
 
 ### Contributing back to upstream
 
@@ -316,7 +316,7 @@ git fetch upstream main
 git checkout -b my-fix upstream/main
 # Make changes
 git push origin my-fix
-# Create PR from my-fix to qwibitai/nanoclaw:main
+# Create PR from my-fix to boxlite-ai/agentlite:main
 ```
 
 Standard fork contribution workflow. Their custom changes stay on their main and don't leak into the PR.
@@ -327,7 +327,7 @@ The flow below is for **feature skills** (branch-based). For utility skills (sel
 
 ### Contributor flow (feature skills)
 
-1. Fork `qwibitai/nanoclaw`
+1. Fork `boxlite-ai/agentlite`
 2. Branch from `main`
 3. Make the code changes (new channel file, modified integration points, updated package.json, .env.example additions, etc.)
 4. Open a PR to `main`
@@ -345,7 +345,7 @@ When a skill PR is reviewed and approved:
    ```
 2. Force-push to the contributor's PR branch, replacing it with a single commit that adds the contributor to `CONTRIBUTORS.md` (removing all code changes)
 3. Merge the slimmed PR into `main` (just the contributor addition)
-4. Add the skill's SKILL.md to the marketplace repo (`qwibitai/nanoclaw-skills`)
+4. Add the skill's SKILL.md to the marketplace repo (`boxlite-ai/agentlite-skills`)
 
 This way:
 - The contributor gets merge credit (their PR is merged)
@@ -374,41 +374,41 @@ Anyone can maintain their own fork with skill branches and their own marketplace
 
 A community contributor:
 
-1. Maintains a fork of NanoClaw (e.g., `alice/nanoclaw`)
+1. Maintains a fork of AgentLite (e.g., `alice/agentlite`)
 2. Creates `skill/*` branches on their fork with their custom skills
-3. Creates a marketplace repo (e.g., `alice/nanoclaw-skills`) with a `.claude-plugin/marketplace.json` and plugin structure
+3. Creates a marketplace repo (e.g., `alice/agentlite-skills`) with a `.claude-plugin/marketplace.json` and plugin structure
 
 ### Adding a community marketplace
 
-If the community contributor is trusted, they can open a PR to add their marketplace to NanoClaw's `.claude/settings.json`:
+If the community contributor is trusted, they can open a PR to add their marketplace to AgentLite's `.claude/settings.json`:
 
 ```json
 {
   "extraKnownMarketplaces": {
-    "nanoclaw-skills": {
+    "agentlite-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "boxlite-ai/agentlite-skills"
       }
     },
-    "alice-nanoclaw-skills": {
+    "alice-agentlite-skills": {
       "source": {
         "source": "github",
-        "repo": "alice/nanoclaw-skills"
+        "repo": "alice/agentlite-skills"
       }
     }
   }
 }
 ```
 
-Once merged, all NanoClaw users automatically discover the community marketplace alongside the official one.
+Once merged, all AgentLite users automatically discover the community marketplace alongside the official one.
 
 ### Installing community skills
 
 `/setup` and `/customize` ask users whether they want to enable community skills. If yes, Claude installs community marketplace plugins via `claude plugin install`:
 
 ```bash
-claude plugin install alice-skills@alice-nanoclaw-skills --scope project
+claude plugin install alice-skills@alice-agentlite-skills --scope project
 ```
 
 Community skills are hot-loaded and immediately available — no restart needed. Dependent skills are only offered after their prerequisites are met (e.g., community Telegram add-ons only after Telegram is installed).
@@ -421,20 +421,20 @@ Users can also browse and install community plugins manually via `/plugin`.
 - **Multiple marketplaces coexist.** Users see skills from all trusted marketplaces in `/plugin`.
 - **Community skills use the same merge pattern.** The SKILL.md just points to a different remote:
   ```bash
-  git remote add alice https://github.com/alice/nanoclaw.git
+  git remote add alice https://github.com/alice/agentlite.git
   git fetch alice skill/my-cool-feature
   git merge alice/skill/my-cool-feature
   ```
-- **Users can also add marketplaces manually.** Even without being listed in settings.json, users can run `/plugin marketplace add alice/nanoclaw-skills` to discover skills from any source.
+- **Users can also add marketplaces manually.** Even without being listed in settings.json, users can run `/plugin marketplace add alice/agentlite-skills` to discover skills from any source.
 - **CI is per-fork.** Each community maintainer runs their own CI to keep their skill branches merged-forward. They can use the same GitHub Action as the upstream repo.
 
 ## Flavors
 
-A flavor is a curated fork of NanoClaw — a combination of skills, custom changes, and configuration tailored for a specific use case (e.g., "NanoClaw for Sales," "NanoClaw Minimal," "NanoClaw for Developers").
+A flavor is a curated fork of AgentLite — a combination of skills, custom changes, and configuration tailored for a specific use case (e.g., "AgentLite for Sales," "AgentLite Minimal," "AgentLite for Developers").
 
 ### Creating a flavor
 
-1. Fork `qwibitai/nanoclaw`
+1. Fork `boxlite-ai/agentlite`
 2. Merge in the skills you want
 3. Make custom changes (trigger word, prompts, integrations, etc.)
 4. Your fork's `main` IS the flavor
@@ -443,15 +443,15 @@ A flavor is a curated fork of NanoClaw — a combination of skills, custom chang
 
 During `/setup`, users are offered a choice of flavors before any configuration happens. The setup skill reads `flavors.yaml` from the repo (shipped with upstream, always up to date) and presents options:
 
-AskUserQuestion: "Start with a flavor or default NanoClaw?"
-- Default NanoClaw
-- NanoClaw for Sales — Gmail + Slack + CRM (maintained by alice)
-- NanoClaw Minimal — Telegram-only, lightweight (maintained by bob)
+AskUserQuestion: "Start with a flavor or default AgentLite?"
+- Default AgentLite
+- AgentLite for Sales — Gmail + Slack + CRM (maintained by alice)
+- AgentLite Minimal — Telegram-only, lightweight (maintained by bob)
 
 If a flavor is chosen:
 
 ```bash
-git remote add <flavor-name> https://github.com/alice/nanoclaw.git
+git remote add <flavor-name> https://github.com/alice/agentlite.git
 git fetch <flavor-name> main
 git merge <flavor-name>/main
 ```
@@ -462,7 +462,7 @@ Then setup continues normally (dependencies, auth, container, service).
 
 After installation, the user's fork has three remotes:
 - `origin` — their fork (push customizations here)
-- `upstream` — `qwibitai/nanoclaw` (core updates)
+- `upstream` — `boxlite-ai/agentlite` (core updates)
 - `<flavor-name>` — the flavor fork (flavor updates)
 
 ### Updating a flavor
@@ -480,13 +480,13 @@ The flavor maintainer keeps their fork updated (merging upstream, updating skill
 
 ```yaml
 flavors:
-  - name: NanoClaw for Sales
-    repo: alice/nanoclaw
+  - name: AgentLite for Sales
+    repo: alice/agentlite
     description: Gmail + Slack + CRM integration, daily pipeline summaries
     maintainer: alice
 
-  - name: NanoClaw Minimal
-    repo: bob/nanoclaw
+  - name: AgentLite Minimal
+    repo: bob/agentlite
     description: Telegram-only, no container overhead
     maintainer: bob
 ```
@@ -497,7 +497,7 @@ Anyone can PR to add their flavor. The file is available locally when `/setup` r
 
 - **During setup** — flavor selection is offered as part of the initial setup flow
 - **`/browse-flavors` skill** — reads `flavors.yaml` and presents options at any time
-- **GitHub topics** — flavor forks can tag themselves with `nanoclaw-flavor` for searchability
+- **GitHub topics** — flavor forks can tag themselves with `agentlite-flavor` for searchability
 - **Discord / website** — community-curated lists
 
 ## Migration
@@ -528,9 +528,9 @@ Migration from the old skills engine to branches is complete. All feature skills
 - `scripts/fix-skill-drift.ts`, `scripts/validate-all-skills.ts`
 - `.github/workflows/skill-drift.yml`, `.github/workflows/skill-pr.yml`
 - All `add/`, `modify/`, `tests/`, and `manifest.yaml` from skill directories
-- `.nanoclaw/` state directory
+- `.agentlite/` state directory
 
-Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
+Operational skills (`setup`, `debug`, `update-agentlite`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
 
 ## What Changes
 
@@ -538,16 +538,16 @@ Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-sk
 
 Before:
 ```bash
-git clone https://github.com/qwibitai/NanoClaw.git
-cd NanoClaw
+git clone https://github.com/qwibitai/AgentLite.git
+cd AgentLite
 claude
 ```
 
 After:
 ```
-1. Fork qwibitai/nanoclaw on GitHub
-2. git clone https://github.com/<you>/nanoclaw.git
-3. cd nanoclaw
+1. Fork boxlite-ai/agentlite on GitHub
+2. git clone https://github.com/<you>/agentlite.git
+3. cd agentlite
 4. claude
 5. /setup
 ```
@@ -556,9 +556,9 @@ After:
 
 Updates to the setup flow:
 
-- Check if `upstream` remote exists; if not, add it: `git remote add upstream https://github.com/qwibitai/nanoclaw.git`
+- Check if `upstream` remote exists; if not, add it: `git remote add upstream https://github.com/boxlite-ai/agentlite.git`
 - Check if `origin` points to the user's fork (not qwibitai). If it points to qwibitai, guide them through the fork migration.
-- **Install marketplace plugin:** `claude plugin install nanoclaw-skills@nanoclaw-skills --scope project` — makes all feature skills available (hot-loaded, no restart)
+- **Install marketplace plugin:** `claude plugin install agentlite-skills@agentlite-skills --scope project` — makes all feature skills available (hot-loaded, no restart)
 - **Ask which channels to add:** present channel options (Discord, Telegram, Slack, WhatsApp, Gmail), run corresponding `/add-*` skills for selected channels
 - **Offer dependent skills:** after a channel is set up, offer relevant add-ons (e.g., Agent Swarm after Telegram, voice transcription after WhatsApp)
 - **Optionally enable community marketplaces:** ask if the user wants community skills, install those marketplace plugins too
@@ -570,10 +570,10 @@ Marketplace configuration so the official marketplace is auto-registered:
 ```json
 {
   "extraKnownMarketplaces": {
-    "nanoclaw-skills": {
+    "agentlite-skills": {
       "source": {
         "source": "github",
-        "repo": "qwibitai/nanoclaw-skills"
+        "repo": "boxlite-ai/agentlite-skills"
       }
     }
   }
@@ -582,7 +582,7 @@ Marketplace configuration so the official marketplace is auto-registered:
 
 ### Skills directory on main
 
-The `.claude/skills/` directory on `main` retains only operational skills (setup, debug, update-nanoclaw, customize, update-skills). Feature skills (add-discord, add-telegram, etc.) live in the marketplace repo, installed via `claude plugin install` during `/setup` or `/customize`.
+The `.claude/skills/` directory on `main` retains only operational skills (setup, debug, update-agentlite, customize, update-skills). Feature skills (add-discord, add-telegram, etc.) live in the marketplace repo, installed via `claude plugin install` during `/setup` or `/customize`.
 
 ### Skills engine removal
 
@@ -593,20 +593,20 @@ The following can be removed:
 - `scripts/uninstall-skill.ts`
 - `scripts/fix-skill-drift.ts`
 - `scripts/validate-all-skills.ts`
-- `.nanoclaw/` — state directory
+- `.agentlite/` — state directory
 - `add/` and `modify/` subdirectories from all skill directories
 - Feature skill SKILL.md files from `.claude/skills/` on main (they now live in the marketplace)
 
-Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
+Operational skills (`setup`, `debug`, `update-agentlite`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
 
 ### New infrastructure
 
-- **Marketplace repo** (`qwibitai/nanoclaw-skills`) — single Claude Code plugin bundling SKILL.md files for all feature skills
+- **Marketplace repo** (`boxlite-ai/agentlite-skills`) — single Claude Code plugin bundling SKILL.md files for all feature skills
 - **CI GitHub Action** — merge-forward `main` into all `skill/*` branches on every push to `main`, using Claude (Haiku) for conflict resolution
 - **`/update-skills` skill** — checks for and applies skill branch updates using git history
 - **`CONTRIBUTORS.md`** — tracks skill contributors
 
-### Update skill (`/update-nanoclaw`)
+### Update skill (`/update-agentlite`)
 
 The update skill gets simpler with the branch-based approach. The old skills engine required replaying all applied skills after merging core updates — that entire step disappears. Skill changes are already in the user's git history, so `git merge upstream/main` just works.
 
@@ -639,27 +639,27 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 
 > **Skills are now git branches**
 >
-> We've simplified how skills work in NanoClaw. Instead of a custom skills engine, skills are now git branches that you merge in.
+> We've simplified how skills work in AgentLite. Instead of a custom skills engine, skills are now git branches that you merge in.
 >
 > **What this means for you:**
 > - Applying a skill: `git fetch upstream skill/discord && git merge upstream/skill/discord`
 > - Updating core: `git fetch upstream main && git merge upstream/main`
 > - Checking for skill updates: `/update-skills`
-> - No more `.nanoclaw/` state directory or skills engine
+> - No more `.agentlite/` state directory or skills engine
 >
 > **We now recommend forking instead of cloning.** This gives you a remote to push your customizations to.
 >
 > **If you currently have a clone with local changes**, migrate to a fork:
-> 1. Fork `qwibitai/nanoclaw` on GitHub
+> 1. Fork `boxlite-ai/agentlite` on GitHub
 > 2. Run:
 >    ```
 >    git remote rename origin upstream
->    git remote add origin https://github.com/<you>/nanoclaw.git
+>    git remote add origin https://github.com/<you>/agentlite.git
 >    git push --force origin main
 >    ```
 >    This works even if you're way behind — just push your current state.
 >
-> **If you previously applied skills via the old system**, your code changes are already in your working tree — nothing to redo. You can delete the `.nanoclaw/` directory. Future skills and updates use the branch-based approach.
+> **If you previously applied skills via the old system**, your code changes are already in your working tree — nothing to redo. You can delete the `.agentlite/` directory. Future skills and updates use the branch-based approach.
 >
 > **Discovering skills:** Skills are now available through Claude Code's plugin marketplace. Run `/plugin` in Claude Code to browse and install available skills.
 
@@ -668,10 +668,10 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > **Contributing skills**
 >
 > To contribute a skill:
-> 1. Fork `qwibitai/nanoclaw`
+> 1. Fork `boxlite-ai/agentlite`
 > 2. Branch from `main` and make your code changes
 > 3. Open a regular PR
 >
 > That's it. We'll create a `skill/<name>` branch from your PR, add you to CONTRIBUTORS.md, and add the SKILL.md to the marketplace. CI automatically keeps skill branches merged-forward with `main` using Claude to resolve any conflicts.
 >
-> **Want to run your own skill marketplace?** Maintain skill branches on your fork and create a marketplace repo. Open a PR to add it to NanoClaw's auto-discovered marketplaces — or users can add it manually via `/plugin marketplace add`.
+> **Want to run your own skill marketplace?** Maintain skill branches on your fork and create a marketplace repo. Open a PR to add it to AgentLite's auto-discovered marketplaces — or users can add it manually via `/plugin marketplace add`.

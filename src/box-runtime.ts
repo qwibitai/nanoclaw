@@ -1,5 +1,5 @@
 /**
- * BoxLite runtime abstraction for NanoClaw.
+ * BoxLite runtime abstraction for AgentLite.
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  * Replaces the previous container-runtime.ts (Docker-based).
  */
@@ -62,14 +62,14 @@ export function ensureRuntimeReady(): void {
   }
 }
 
-/** Kill orphaned NanoClaw boxes from previous runs. */
+/** Kill orphaned AgentLite boxes from previous runs. */
 export async function cleanupOrphans(): Promise<void> {
   try {
     const rt = getRuntime();
     const boxes = await rt.listInfo();
     const orphans = boxes.filter(
       (b: { name?: string; state: { running: boolean } }) =>
-        b.name && b.name.startsWith('nanoclaw-') && b.state.running,
+        b.name && b.name.startsWith('agentlite-') && b.state.running,
     );
     for (const box of orphans) {
       try {

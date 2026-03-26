@@ -5,7 +5,7 @@ description: Replace OneCLI gateway with the built-in credential proxy. For user
 
 # Use Native Credential Proxy
 
-This skill replaces the OneCLI gateway with NanoClaw's built-in credential proxy. Containers get credentials injected via a local HTTP proxy that reads from `.env` — no external services needed.
+This skill replaces the OneCLI gateway with AgentLite's built-in credential proxy. Containers get credentials injected via a local HTTP proxy that reads from `.env` — no external services needed.
 
 ## Phase 1: Pre-flight
 
@@ -27,7 +27,7 @@ grep "@onecli-sh/sdk" package.json
 
 If `@onecli-sh/sdk` appears, OneCLI is the active credential provider. Proceed with Phase 2 to replace it.
 
-If neither check matches, you may be on an older version. Run `/update-nanoclaw` first, then retry.
+If neither check matches, you may be on an older version. Run `/update-agentlite` first, then retry.
 
 ## Phase 2: Apply Code Changes
 
@@ -40,7 +40,7 @@ git remote -v
 If `upstream` is missing, add it:
 
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/qwibitai/agentlite.git
 ```
 
 ### Merge the skill branch
@@ -119,14 +119,14 @@ npm run build
 ```
 
 Then restart the service:
-- macOS: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-- Linux: `systemctl --user restart nanoclaw`
-- WSL/manual: stop and re-run `bash start-nanoclaw.sh`
+- macOS: `launchctl kickstart -k gui/$(id -u)/com.agentlite`
+- Linux: `systemctl --user restart agentlite`
+- WSL/manual: stop and re-run `bash start-agentlite.sh`
 
 2. Check logs for successful proxy startup:
 
 ```bash
-tail -20 logs/nanoclaw.log | grep "Credential proxy"
+tail -20 logs/agentlite.log | grep "Credential proxy"
 ```
 
 Expected: `Credential proxy started` with port and auth mode.

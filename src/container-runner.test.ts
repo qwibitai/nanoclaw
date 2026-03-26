@@ -1,20 +1,20 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // Sentinel markers must match container-runner.ts
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---AGENTLITE_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---AGENTLITE_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  PACKAGE_ROOT: '/tmp/nanoclaw-test-package',
+  PACKAGE_ROOT: '/tmp/agentlite-test-package',
   BOX_IMAGE: 'agentlite-agent:latest',
   BOX_ROOTFS_PATH: '',
   BOX_MEMORY_MIB: 2048,
   BOX_CPUS: 2,
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
-  DATA_DIR: '/tmp/nanoclaw-test-data',
-  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  DATA_DIR: '/tmp/agentlite-test-data',
+  GROUPS_DIR: '/tmp/agentlite-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',

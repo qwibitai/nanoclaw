@@ -65,13 +65,13 @@ export function setProjectRoot(dir: string): void {
 export const MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
-  'nanoclaw',
+  'agentlite',
   'mount-allowlist.json',
 );
 export const SENDER_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
-  'nanoclaw',
+  'agentlite',
   'sender-allowlist.json',
 );
 export let STORE_DIR = path.resolve(PROJECT_ROOT, 'store');

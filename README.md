@@ -95,7 +95,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 **How do I debug issues?**
 
-Check `groups/{name}/logs/container-*.log` for agent execution logs, or `logs/nanoclaw.log` for the orchestrator log.
+Check `groups/{name}/logs/container-*.log` for agent execution logs, or `logs/agentlite.log` for the orchestrator log.
 
 ## License
 

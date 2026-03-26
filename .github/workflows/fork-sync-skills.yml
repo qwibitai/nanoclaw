@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   sync-and-merge:
-    if: github.repository != 'qwibitai/nanoclaw'
+    if: github.repository != 'boxlite-ai/agentlite'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1
@@ -50,7 +50,7 @@ jobs:
         id: sync
         run: |
           # Add upstream remote
-          git remote add upstream https://github.com/qwibitai/nanoclaw.git
+          git remote add upstream https://github.com/boxlite-ai/agentlite.git
           git fetch upstream main
 
           # Check if upstream has new commits
@@ -209,7 +209,7 @@ jobs:
               repo: context.repo.repo,
               title: `Upstream sync failed — merge conflict or build failure`,
               body: [
-                'The automated sync with `qwibitai/nanoclaw` main failed.',
+                'The automated sync with `boxlite-ai/agentlite` main failed.',
                 '',
                 'This usually means upstream made changes that conflict with this fork\'s channel code.',
                 '',

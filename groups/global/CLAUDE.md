@@ -16,7 +16,7 @@ You are {{ASSISTANT_NAME}}, a personal assistant. You help with tasks, answer qu
 
 Your output is sent to the user or group.
 
-You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
+You also have `mcp__agentlite__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
 ### Internal thoughts
 

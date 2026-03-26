@@ -9,7 +9,7 @@ uname -m
 node -p "process.versions.node.split('.')[0]"
 ```
 
-Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP addresses.
+Write `/tmp/agentlite-diagnostics.json`. No paths, usernames, hostnames, or IP addresses.
 
 ```json
 {
@@ -18,7 +18,7 @@ Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP ad
   "distinct_id": "<uuid>",
   "properties": {
     "success": true,
-    "nanoclaw_version": "1.2.21",
+    "agentlite_version": "1.2.21",
     "os_platform": "darwin",
     "arch": "arm64",
     "node_major_version": 22,
@@ -33,14 +33,14 @@ Show the entire JSON to the user and ask via AskUserQuestion: **Yes** / **No** /
 
 **Yes**:
 ```bash
-curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/nanoclaw-diagnostics.json
-rm /tmp/nanoclaw-diagnostics.json
+curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/agentlite-diagnostics.json
+rm /tmp/agentlite-diagnostics.json
 ```
 
-**No**: `rm /tmp/nanoclaw-diagnostics.json`
+**No**: `rm /tmp/agentlite-diagnostics.json`
 
 **Never ask again**:
 1. Replace contents of `.claude/skills/setup/diagnostics.md` with `# Diagnostics — opted out`
-2. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
-3. Remove the `## 9. Diagnostics` section from `.claude/skills/setup/SKILL.md` and the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`
-4. `rm /tmp/nanoclaw-diagnostics.json`
+2. Replace contents of `.claude/skills/update-agentlite/diagnostics.md` with `# Diagnostics — opted out`
+3. Remove the `## 9. Diagnostics` section from `.claude/skills/setup/SKILL.md` and the `## Diagnostics` section from `.claude/skills/update-agentlite/SKILL.md`
+4. `rm /tmp/agentlite-diagnostics.json`

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-claw — NanoClaw CLI
-Run a NanoClaw agent container from the command line.
+claw — AgentLite CLI
+Run a AgentLite agent container from the command line.
 
 Usage:
   claw "What is 2+2?"
@@ -36,27 +36,27 @@ def dbg(*args):
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-def _find_nanoclaw_dir() -> Path:
-    """Locate the NanoClaw installation directory.
+def _find_agentlite_dir() -> Path:
+    """Locate the AgentLite installation directory.
 
     Resolution order:
-    1. NANOCLAW_DIR env var
-    2. The directory containing this script (if it looks like a NanoClaw install)
-    3. ~/src/nanoclaw (legacy default)
+    1. AGENTLITE_DIR env var
+    2. The directory containing this script (if it looks like a AgentLite install)
+    3. ~/src/agentlite (legacy default)
     """
-    if env := os.environ.get("NANOCLAW_DIR"):
+    if env := os.environ.get("AGENTLITE_DIR"):
         return Path(env).expanduser()
-    # If this script lives inside the NanoClaw tree (e.g. scripts/claw), walk up
+    # If this script lives inside the AgentLite tree (e.g. scripts/claw), walk up
     here = Path(__file__).resolve()
     for parent in [here.parent, here.parent.parent]:
         if (parent / "store" / "messages.db").exists() or (parent / ".env").exists():
             return parent
-    return Path.home() / "src" / "nanoclaw"
+    return Path.home() / "src" / "agentlite"
 
-NANOCLAW_DIR = _find_nanoclaw_dir()
-DB_PATH      = NANOCLAW_DIR / "store" / "messages.db"
-ENV_FILE     = NANOCLAW_DIR / ".env"
-IMAGE        = "nanoclaw-agent:latest"
+AGENTLITE_DIR = _find_agentlite_dir()
+DB_PATH      = AGENTLITE_DIR / "store" / "messages.db"
+ENV_FILE     = AGENTLITE_DIR / ".env"
+IMAGE        = "agentlite-agent:latest"
 
 SECRET_KEYS = [
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -163,7 +163,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
             dbg(f"stdout: {line}")
             # Kill the container as soon as we see the closing sentinel —
             # the Node.js event loop often keeps the process alive indefinitely.
-            if line.strip() == "---NANOCLAW_OUTPUT_END---":
+            if line.strip() == "---AGENTLITE_OUTPUT_END---":
                 dbg("output sentinel found, terminating container")
                 done.set()
                 try:
@@ -193,7 +193,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
 
     # Parse output block
     match = re.search(
-        r"---NANOCLAW_OUTPUT_START---\n(.*?)\n---NANOCLAW_OUTPUT_END---",
+        r"---AGENTLITE_OUTPUT_START---\n(.*?)\n---AGENTLITE_OUTPUT_END---",
         stdout,
         re.DOTALL,
     )
@@ -224,7 +224,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
 def main():
     parser = argparse.ArgumentParser(
         prog="claw",
-        description="Run a NanoClaw agent from the command line.",
+        description="Run a AgentLite agent from the command line.",
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to send")
     parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")

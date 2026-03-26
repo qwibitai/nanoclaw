@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   merge-forward:
-    if: github.repository == 'qwibitai/nanoclaw'
+    if: github.repository == 'boxlite-ai/agentlite'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -154,20 +154,20 @@ jobs:
           github-token: ${{ secrets.FORK_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const forks = [
-              'nanoclaw-whatsapp',
-              'nanoclaw-telegram',
-              'nanoclaw-discord',
-              'nanoclaw-slack',
-              'nanoclaw-gmail',
-              'nanoclaw-docker-sandboxes',
-              'nanoclaw-docker-sandbox',
-              'nanoclaw-docker-sandbox-windows',
+              'agentlite-whatsapp',
+              'agentlite-telegram',
+              'agentlite-discord',
+              'agentlite-slack',
+              'agentlite-gmail',
+              'agentlite-docker-sandboxes',
+              'agentlite-docker-sandbox',
+              'agentlite-docker-sandbox-windows',
             ];
             const sha = context.sha.substring(0, 7);
             for (const repo of forks) {
               try {
                 await github.rest.repos.createDispatchEvent({
-                  owner: 'qwibitai',
+                  owner: 'boxlite-ai',
                   repo,
                   event_type: 'upstream-main-updated',
                   client_payload: { sha: context.sha },

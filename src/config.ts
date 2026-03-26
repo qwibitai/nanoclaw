@@ -67,13 +67,13 @@ export function getProjectRoot(): string {
 export let MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
-  'nanoclaw',
+  'agentlite',
   'mount-allowlist.json',
 );
 export let SENDER_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
-  'nanoclaw',
+  'agentlite',
   'sender-allowlist.json',
 );
 export let STORE_DIR = '';

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
+  <img src="assets/agentlite-logo.png" alt="AgentLite" width="400">
 </p>
 
 <p align="center">
@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
+  <a href="https://agentlite.dev">agentlite.dev</a>&nbsp; • &nbsp;
   <a href="README.md">English</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
@@ -21,40 +21,40 @@
 
 **macOS (Apple Silicon)**
 ```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
+curl -fsSL https://agentlite.dev/install-docker-sandboxes.sh | bash
 ```
 
 **Windows (WSL)**
 ```bash
-curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
+curl -fsSL https://agentlite.dev/install-docker-sandboxes-windows.sh | bash
 ```
 
 > 現在、macOS（Apple Silicon）とWindows（x86）に対応しています。Linux対応は近日公開予定。
 
-<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">発表記事を読む →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">手動セットアップガイド →</a></p>
+<p align="center"><a href="https://agentlite.dev/blog/agentlite-docker-sandboxes">発表記事を読む →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">手動セットアップガイド →</a></p>
 
 ---
 
-## NanoClawを作った理由
+## AgentLiteを作った理由
 
 [OpenClaw](https://github.com/openclaw/openclaw)は素晴らしいプロジェクトですが、理解しきれない複雑なソフトウェアに自分の生活へのフルアクセスを与えたまま安心して眠れるとは思えませんでした。OpenClawは約50万行のコード、53の設定ファイル、70以上の依存関係を持っています。セキュリティはアプリケーションレベル（許可リスト、ペアリングコード）であり、真のOS レベルの分離ではありません。すべてが共有メモリを持つ1つのNodeプロセスで動作します。
 
-NanoClawは同じコア機能を提供しますが、理解できる規模のコードベースで実現しています：1つのプロセスと少数のファイル。Claudeエージェントは単なるパーミッションチェックの背後ではなく、ファイルシステム分離された独自のLinuxコンテナで実行されます。
+AgentLiteは同じコア機能を提供しますが、理解できる規模のコードベースで実現しています：1つのプロセスと少数のファイル。Claudeエージェントは単なるパーミッションチェックの背後ではなく、ファイルシステム分離された独自のLinuxコンテナで実行されます。
 
 ## クイックスタート
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
+gh repo fork boxlite-ai/agentlite --clone
+cd agentlite
 claude
 ```
 
 <details>
 <summary>GitHub CLIなしの場合</summary>
 
-1. GitHub上で[qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw)をフォーク（Forkボタンをクリック）
-2. `git clone https://github.com/<あなたのユーザー名>/nanoclaw.git`
-3. `cd nanoclaw`
+1. GitHub上で[boxlite-ai/agentlite](https://github.com/boxlite-ai/agentlite)をフォーク（Forkボタンをクリック）
+2. `git clone https://github.com/<あなたのユーザー名>/agentlite.git`
+3. `cd agentlite`
 4. `claude`
 
 </details>
@@ -65,11 +65,11 @@ claude
 
 ## 設計思想
 
-**理解できる規模。** 1つのプロセス、少数のソースファイル、マイクロサービスなし。NanoClawのコードベース全体を理解したい場合は、Claude Codeに説明を求めるだけです。
+**理解できる規模。** 1つのプロセス、少数のソースファイル、マイクロサービスなし。AgentLiteのコードベース全体を理解したい場合は、Claude Codeに説明を求めるだけです。
 
 **分離によるセキュリティ。** エージェントはLinuxコンテナ（macOSではApple Container、またはDocker）で実行され、明示的にマウントされたものだけが見えます。コマンドはホストではなくコンテナ内で実行されるため、Bashアクセスは安全です。
 
-**個人ユーザー向け。** NanoClawはモノリシックなフレームワークではなく、各ユーザーのニーズに正確にフィットするソフトウェアです。肥大化するのではなく、オーダーメイドになるよう設計されています。自分のフォークを作成し、Claude Codeにニーズに合わせて変更させます。
+**個人ユーザー向け。** AgentLiteはモノリシックなフレームワークではなく、各ユーザーのニーズに正確にフィットするソフトウェアです。肥大化するのではなく、オーダーメイドになるよう設計されています。自分のフォークを作成し、Claude Codeにニーズに合わせて変更させます。
 
 **カスタマイズ＝コード変更。** 設定ファイルの肥大化なし。動作を変えたい？コードを変更するだけ。コードベースは変更しても安全な規模です。
 
@@ -80,7 +80,7 @@ claude
 
 **機能追加ではなくスキル。** コードベースに機能（例：Telegram対応）を追加する代わりに、コントリビューターは`/add-telegram`のような[Claude Codeスキル](https://code.claude.com/docs/en/skills)を提出し、あなたのフォークを変換します。あなたが必要なものだけを正確に実行するクリーンなコードが手に入ります。
 
-**最高のハーネス、最高のモデル。** NanoClawはClaude Agent SDK上で動作します。つまり、Claude Codeを直接実行しているということです。Claude Codeは高い能力を持ち、そのコーディングと問題解決能力によってNanoClawを変更・拡張し、各ユーザーに合わせてカスタマイズできます。
+**最高のハーネス、最高のモデル。** AgentLiteはClaude Agent SDK上で動作します。つまり、Claude Codeを直接実行しているということです。Claude Codeは高い能力を持ち、そのコーディングと問題解決能力によってAgentLiteを変更・拡張し、各ユーザーに合わせてカスタマイズできます。
 
 ## サポート機能
 
@@ -89,7 +89,7 @@ claude
 - **メインチャネル** - 管理制御用のプライベートチャネル（セルフチャット）。各グループは完全に分離。
 - **スケジュールタスク** - Claudeを実行し、メッセージを返せる定期ジョブ。
 - **Webアクセス** - Webからのコンテンツ検索・取得。
-- **コンテナ分離** - エージェントは[Dockerサンドボックス](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes)（マイクロVM分離）、Apple Container（macOS）、またはDocker（macOS/Linux）でサンドボックス化。
+- **コンテナ分離** - エージェントは[Dockerサンドボックス](https://agentlite.dev/blog/agentlite-docker-sandboxes)（マイクロVM分離）、Apple Container（macOS）、またはDocker（macOS/Linux）でサンドボックス化。
 - **エージェントスウォーム** - 複雑なタスクで協力する専門エージェントチームを起動。
 - **オプション連携** - Gmail（`/add-gmail`）などをスキルで追加。
 
@@ -112,7 +112,7 @@ claude
 
 ## カスタマイズ
 
-NanoClawは設定ファイルを使いません。変更するには、Claude Codeに伝えるだけです：
+AgentLiteは設定ファイルを使いません。変更するには、Claude Codeに伝えるだけです：
 
 - 「トリガーワードを@Bobに変更して」
 - 「今後はレスポンスをもっと短く直接的にして」
@@ -127,7 +127,7 @@ NanoClawは設定ファイルを使いません。変更するには、Claude Co
 
 **機能を追加するのではなく、スキルを追加してください。**
 
-Telegram対応を追加したい場合、コアコードベースにTelegramを追加するPRを作成しないでください。代わりに、NanoClawをフォークし、ブランチでコード変更を行い、PRを開いてください。あなたのPRから`skill/telegram`ブランチを作成し、他のユーザーが自分のフォークにマージできるようにします。
+Telegram対応を追加したい場合、コアコードベースにTelegramを追加するPRを作成しないでください。代わりに、AgentLiteをフォークし、ブランチでコード変更を行い、PRを開いてください。あなたのPRから`skill/telegram`ブランチを作成し、他のユーザーが自分のフォークにマージできるようにします。
 
 ユーザーは自分のフォークで`/add-telegram`を実行するだけで、あらゆるユースケースに対応しようとする肥大化したシステムではなく、必要なものだけを正確に実行するクリーンなコードが手に入ります。
 
@@ -185,11 +185,11 @@ Dockerはクロスプラットフォーム対応（macOS、Linux、さらにWSL2
 
 **なぜ設定ファイルがないのか？**
 
-設定の肥大化を避けたいからです。すべてのユーザーがNanoClawをカスタマイズし、汎用的なシステムを設定するのではなく、コードが必要なことを正確に実行するようにすべきです。設定ファイルが欲しい場合は、Claudeに追加するよう伝えることができます。
+設定の肥大化を避けたいからです。すべてのユーザーがAgentLiteをカスタマイズし、汎用的なシステムを設定するのではなく、コードが必要なことを正確に実行するようにすべきです。設定ファイルが欲しい場合は、Claudeに追加するよう伝えることができます。
 
 **サードパーティやオープンソースモデルを使えますか？**
 
-はい。NanoClawはClaude API互換のモデルエンドポイントに対応しています。`.env`ファイルで以下の環境変数を設定してください：
+はい。AgentLiteはClaude API互換のモデルエンドポイントに対応しています。`.env`ファイルで以下の環境変数を設定してください：
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
@@ -205,7 +205,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 **問題のデバッグ方法は？**
 
-Claude Codeに聞いてください。「スケジューラーが動いていないのはなぜ？」「最近のログには何がある？」「このメッセージに返信がなかったのはなぜ？」これがNanoClawの基盤となるAIネイティブなアプローチです。
+Claude Codeに聞いてください。「スケジューラーが動いていないのはなぜ？」「最近のログには何がある？」「このメッセージに返信がなかったのはなぜ？」これがAgentLiteの基盤となるAIネイティブなアプローチです。
 
 **セットアップがうまくいかない場合は？**
 

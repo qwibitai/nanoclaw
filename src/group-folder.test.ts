@@ -3,8 +3,8 @@ import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./config.js', () => ({
-  GROUPS_DIR: '/tmp/nanoclaw-test/groups',
-  DATA_DIR: '/tmp/nanoclaw-test/data',
+  GROUPS_DIR: '/tmp/agentlite-test/groups',
+  DATA_DIR: '/tmp/agentlite-test/data',
 }));
 
 import {

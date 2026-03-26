@@ -1,6 +1,6 @@
 # Contributors
 
-Thanks to everyone who has contributed to NanoClaw!
+Thanks to everyone who has contributed to AgentLite!
 
 - [Alakazam03](https://github.com/Alakazam03) — Vaibhav Aggarwal
 - [tydev-new](https://github.com/tydev-new)
