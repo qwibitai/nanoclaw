@@ -2516,6 +2516,11 @@ function readSecrets(
     // Exa API key — MCP auth is via query param, not HTTP header,
     // so the OneCLI proxy can't inject it. Pass via secrets instead.
     ...(isToolEnabled(tools, 'exa') ? ['EXA_API_KEY'] : []),
+    // Omni skills plugin uses env vars in curl commands (REST API).
+    // The MCP server auth is handled by the proxy, but the skills need these.
+    ...(isToolEnabled(tools, 'omni')
+      ? ['OMNI_BASE_URL', 'OMNI_API_KEY']
+      : []),
   ];
   const secrets = readEnvFile(envKeys);
 

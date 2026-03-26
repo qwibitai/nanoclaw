@@ -1227,7 +1227,7 @@ async function main(): Promise<void> {
   // non-HTTP secrets (dbt login, gcloud paths) remain in containerInput.secrets.
   // Export any remaining secrets that CLI tools might need as env vars.
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    if (key.startsWith('DBT_CLOUD_') || key === 'GOOGLE_APPLICATION_CREDENTIALS') {
+    if (key.startsWith('DBT_CLOUD_') || key.startsWith('OMNI_') || key === 'GOOGLE_APPLICATION_CREDENTIALS') {
       process.env[key] = value;
     }
   }
