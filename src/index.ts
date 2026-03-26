@@ -155,7 +155,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     }
   }
 
-
   // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
   ensureOneCLIAgent(jid, group);
 
