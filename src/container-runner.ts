@@ -228,13 +228,7 @@ function buildVolumeMounts(
       group.name,
       isMain,
     );
-    for (const m of validatedMounts) {
-      mounts.push({
-        hostPath: m.hostPath,
-        containerPath: m.containerPath,
-        readonly: m.readonly,
-      });
-    }
+    mounts.push(...validatedMounts);
   }
 
   return mounts;
