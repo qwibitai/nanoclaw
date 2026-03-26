@@ -1,8 +1,15 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
-import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  NewMessage,
+  OnChatMetadata,
+  OnInboundMessage,
+  RegisteredGroup,
+} from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
 
 const log = logger.child({ channel: 'whatsapp-cloud' });
@@ -18,15 +25,18 @@ export class WhatsAppCloudChannel implements Channel {
   private phoneNumberId: string;
   private accessToken: string;
   private verifyToken: string;
+  private appSecret: string | undefined;
   private port: number;
   private onMessage: OnInboundMessage;
   private onChatMetadata: OnChatMetadata;
   private registeredGroups: () => Record<string, RegisteredGroup>;
+  private _warnedNoAppSecret = false;
 
   constructor(opts: {
     phoneNumberId: string;
     accessToken: string;
     verifyToken: string;
+    appSecret?: string;
     port: number;
     onMessage: OnInboundMessage;
     onChatMetadata: OnChatMetadata;
@@ -35,6 +45,7 @@ export class WhatsAppCloudChannel implements Channel {
     this.phoneNumberId = opts.phoneNumberId;
     this.accessToken = opts.accessToken;
     this.verifyToken = opts.verifyToken;
+    this.appSecret = opts.appSecret;
     this.port = opts.port;
     this.onMessage = opts.onMessage;
     this.onChatMetadata = opts.onChatMetadata;
@@ -70,14 +81,44 @@ export class WhatsAppCloudChannel implements Channel {
         }
 
         if (req.method === 'POST') {
-          let body = '';
+          const chunks: Buffer[] = [];
           req.on('data', (chunk: Buffer) => {
-            body += chunk;
+            chunks.push(chunk);
           });
           req.on('end', () => {
+            const rawBody = Buffer.concat(chunks);
+
+            // Verify x-hub-signature-256 if app secret is configured
+            if (this.appSecret) {
+              const sigHeader = req.headers['x-hub-signature-256'];
+              const expected =
+                'sha256=' +
+                crypto
+                  .createHmac('sha256', this.appSecret)
+                  .update(rawBody)
+                  .digest('hex');
+              if (
+                !sigHeader ||
+                !crypto.timingSafeEqual(
+                  Buffer.from(sigHeader as string),
+                  Buffer.from(expected),
+                )
+              ) {
+                log.warn('Webhook signature verification failed — rejecting');
+                res.writeHead(401);
+                res.end();
+                return;
+              }
+            } else if (!this._warnedNoAppSecret) {
+              log.warn(
+                'WHATSAPP_APP_SECRET not set — webhook payloads are not signature-verified. Set it to prevent payload forgery.',
+              );
+              this._warnedNoAppSecret = true;
+            }
+
             res.writeHead(200);
             res.end();
-            this.handleWebhookPayload(body).catch((err) =>
+            this.handleWebhookPayload(rawBody.toString()).catch((err) =>
               log.error({ err }, 'Error handling webhook payload'),
             );
           });
@@ -90,7 +131,10 @@ export class WhatsAppCloudChannel implements Channel {
 
       this.server.listen(this.port, () => {
         this.connected = true;
-        log.info({ port: this.port }, 'WhatsApp Cloud webhook server listening');
+        log.info(
+          { port: this.port },
+          'WhatsApp Cloud webhook server listening',
+        );
         resolve();
       });
 
@@ -132,16 +176,27 @@ export class WhatsAppCloudChannel implements Channel {
           const contacts = value.contacts ?? [];
           const contact = contacts.find((c: any) => c.wa_id === from);
           const senderName = contact?.profile?.name ?? from;
-          const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+          const timestamp = new Date(
+            Number(msg.timestamp) * 1000,
+          ).toISOString();
 
           // Report chat metadata for discovery
-          this.onChatMetadata(jid, timestamp, senderName, 'whatsapp-cloud', false);
+          this.onChatMetadata(
+            jid,
+            timestamp,
+            senderName,
+            'whatsapp-cloud',
+            false,
+          );
 
           // Only deliver to registered groups
           const group = this.registeredGroups()[jid];
           if (!group) {
-            log.debug({ jid, senderName }, 'Message from unregistered WhatsApp chat');
-            return;
+            log.debug(
+              { jid, senderName },
+              'Message from unregistered WhatsApp chat — skipping',
+            );
+            continue;
           }
 
           const newMessage: NewMessage = {
@@ -214,17 +269,26 @@ registerChannel('whatsapp-cloud', (opts: ChannelOpts) => {
     'WHATSAPP_PHONE_NUMBER_ID',
     'WHATSAPP_ACCESS_TOKEN',
     'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
+    'WHATSAPP_APP_SECRET',
     'WHATSAPP_WEBHOOK_PORT',
   ]);
 
   const phoneNumberId =
-    process.env.WHATSAPP_PHONE_NUMBER_ID || envVars.WHATSAPP_PHONE_NUMBER_ID || '';
+    process.env.WHATSAPP_PHONE_NUMBER_ID ||
+    envVars.WHATSAPP_PHONE_NUMBER_ID ||
+    '';
   const accessToken =
     process.env.WHATSAPP_ACCESS_TOKEN || envVars.WHATSAPP_ACCESS_TOKEN || '';
   const verifyToken =
-    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || envVars.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '';
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ||
+    envVars.WHATSAPP_WEBHOOK_VERIFY_TOKEN ||
+    '';
+  const appSecret =
+    process.env.WHATSAPP_APP_SECRET || envVars.WHATSAPP_APP_SECRET || '';
   const port = Number(
-    process.env.WHATSAPP_WEBHOOK_PORT || envVars.WHATSAPP_WEBHOOK_PORT || '3001',
+    process.env.WHATSAPP_WEBHOOK_PORT ||
+      envVars.WHATSAPP_WEBHOOK_PORT ||
+      '3001',
   );
 
   if (!phoneNumberId || !accessToken || !verifyToken) {
@@ -236,6 +300,7 @@ registerChannel('whatsapp-cloud', (opts: ChannelOpts) => {
     phoneNumberId,
     accessToken,
     verifyToken,
+    appSecret: appSecret || undefined,
     port,
     onMessage: opts.onMessage,
     onChatMetadata: opts.onChatMetadata,
