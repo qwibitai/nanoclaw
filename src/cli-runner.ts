@@ -653,6 +653,10 @@ export async function runCliInteractive(
   for (const [key, value] of Object.entries(secrets)) {
     env[key] = value;
   }
+  // CRITICAL: Remove ANTHROPIC_API_KEY so the CLI uses the OAuth token
+  // (Max subscription, free) instead of the API key (credits).
+  // Tool-specific secrets (Google, SMTP, etc.) are kept for MCP tools.
+  delete env.ANTHROPIC_API_KEY;
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
