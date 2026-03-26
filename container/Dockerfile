@@ -63,6 +63,11 @@ RUN chown -R node:node /workspace && chmod 777 /home/node
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
 
+# Install gstack skills (Garry Tan's open-source engineering team skill pack)
+RUN git clone https://github.com/garrytan/gstack.git /home/node/.claude/skills/gstack \
+    && cd /home/node/.claude/skills/gstack \
+    && ./setup
+
 # Set working directory to group workspace
 WORKDIR /workspace/group
 
