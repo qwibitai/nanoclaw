@@ -6,6 +6,10 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask as createDevTask,
+  dispatchAndRun,
+} from './dev-tasks.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -171,6 +175,10 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For create_dev_task
+    title?: string;
+    description?: string;
+    dispatch?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -446,6 +454,57 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'create_dev_task':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized create_dev_task attempt blocked',
+        );
+        break;
+      }
+      if (data.title) {
+        try {
+          const task = createDevTask({
+            title: data.title,
+            description: data.description,
+            source: 'chat',
+          });
+          logger.info(
+            { taskId: task.id, title: task.title, sourceGroup },
+            'DevTask created via IPC',
+          );
+
+          // Optionally dispatch immediately
+          if (data.dispatch) {
+            try {
+              await dispatchAndRun(task.id);
+              logger.info(
+                { taskId: task.id },
+                'DevTask dispatched via IPC',
+              );
+            } catch (err) {
+              logger.error(
+                { taskId: task.id, err },
+                'Failed to dispatch DevTask via IPC',
+              );
+            }
+          }
+
+          // Send confirmation back to the chat
+          if (data.targetJid) {
+            const msg = data.dispatch
+              ? `Created task #${task.id}: ${task.title} — dispatching now`
+              : `Created task #${task.id}: ${task.title}`;
+            await deps.sendMessage(data.targetJid, msg);
+          }
+        } catch (err) {
+          logger.error({ err }, 'Failed to create DevTask via IPC');
+        }
+      } else {
+        logger.warn({ data }, 'create_dev_task missing title');
       }
       break;
 
