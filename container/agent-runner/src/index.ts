@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerAttachment {
@@ -88,6 +88,12 @@ if (!IPC_INPUT_SUBDIR) {
 const IPC_INPUT_DIR = `/workspace/ipc/input/${IPC_INPUT_SUBDIR}`;
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// Module-level reference to sdkEnv so IPC handlers can apply model/effort switches.
+// Set once in main() before the query loop starts.
+let sdkEnvRef: Record<string, string | undefined> = {};
+// Tracks the previous model for one-shot switches (revert after query completes).
+let pendingOneshotRevert: string | null | undefined;
 
 /**
  * Returns channel-type-specific message formatting instructions based on the JID prefix.
@@ -470,6 +476,16 @@ function drainIpcInput(): IpcMessage[] {
             text: data.text,
             attachments: data.attachments,
           });
+        } else if (data.type === 'model_switch' && data.model) {
+          if (data.oneshot && pendingOneshotRevert === undefined) {
+            // Save previous model for revert after next query (only if not already pending)
+            pendingOneshotRevert = sdkEnvRef['CLAUDE_CODE_USE_MODEL'] || null;
+          }
+          sdkEnvRef['CLAUDE_CODE_USE_MODEL'] = data.model;
+          log(`Model switched via IPC: ${data.model}${data.oneshot ? ' (one-shot)' : ''}`);
+        } else if (data.type === 'effort_switch' && data.effort) {
+          sdkEnvRef['CLAUDE_CODE_USE_EFFORT'] = data.effort;
+          log(`Effort switched via IPC: ${data.effort}`);
         }
         try { fs.unlinkSync(filePath); } catch { /* ignore delete failures */ }
       } catch (err) {
@@ -934,16 +950,22 @@ function discoverPlugins(): Array<{ type: 'local'; path: string }> {
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
  */
+/** Invariant context for the container's query loop (set once in main). */
+interface QueryContext {
+  mcpServerPath: string;
+  containerInput: ContainerInput;
+  sdkEnv: Record<string, string | undefined>;
+  systemPromptOption: { type: 'preset'; preset: 'claude_code'; append: string } | undefined;
+  plugins: Array<{ type: 'local'; path: string }>;
+}
+
 async function runQuery(
   prompt: string | ContentBlock[],
   sessionId: string | undefined,
-  mcpServerPath: string,
-  containerInput: ContainerInput,
-  sdkEnv: Record<string, string | undefined>,
-  systemPromptOption: { type: 'preset'; preset: 'claude_code'; append: string } | undefined,
-  plugins: Array<{ type: 'local'; path: string }>,
+  ctx: QueryContext,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  const { mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins } = ctx;
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -1027,13 +1049,15 @@ async function runQuery(
       allowedTools: buildAllowedTools(containerInput.tools),
       disallowedTools: buildDisallowedTools(containerInput.tools),
       env: sdkEnv,
-      ...(containerInput.model ? { model: containerInput.model } : {}),
+      // Read model/effort from sdkEnv (mutated by IPC model_switch/effort_switch),
+      // not from containerInput which is static from launch time.
+      ...(sdkEnv['CLAUDE_CODE_USE_MODEL'] ? { model: sdkEnv['CLAUDE_CODE_USE_MODEL'] } : {}),
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: buildMcpServers(containerInput, mcpServerPath),
       ...(plugins.length > 0 ? { plugins } : {}),
-      ...(effort ? { effort } : {}),
+      ...(sdkEnv['CLAUDE_CODE_USE_EFFORT'] || effort ? { effort: (sdkEnv['CLAUDE_CODE_USE_EFFORT'] || effort) as EffortLevel } : {}),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName, containerInput.threadId)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createBlockSnowflakeConnectorHook(), createSanitizeBashHook()] }],
@@ -1244,6 +1268,9 @@ async function main(): Promise<void> {
     log(`Using model: ${containerInput.model}`);
   }
 
+  // Expose sdkEnv to IPC handlers so model/effort switches can be applied mid-session
+  sdkEnvRef = sdkEnv;
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
@@ -1440,17 +1467,25 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
+  const queryCtx: QueryContext = { mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins };
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, queryCtx, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // Revert one-shot model switch after query completes
+      if (pendingOneshotRevert !== undefined) {
+        sdkEnvRef['CLAUDE_CODE_USE_MODEL'] = pendingOneshotRevert || undefined;
+        log(`One-shot model reverted to: ${pendingOneshotRevert || 'default'}`);
+        pendingOneshotRevert = undefined;
       }
 
       // If _close was consumed during the query, exit immediately.

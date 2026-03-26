@@ -8,6 +8,10 @@ import {
   MAX_THREADS_PER_GROUP,
 } from './config.js';
 import { ContainerAttachment } from './container-runner.js';
+
+// Monotonic counter for IPC filenames — ensures correct ordering when
+// multiple files are written in the same millisecond (e.g., control + text).
+let ipcFileSeq = 0;
 import { resolveGroupIpcInputPath } from './group-folder.js';
 import { logger } from './logger.js';
 
@@ -302,6 +306,38 @@ export class GroupQueue {
     return state?.activeThreads.get(threadKey);
   }
 
+  /** Write a JSON payload to the IPC input directory using atomic rename. */
+  private writeIpcFile(
+    inputDir: string,
+    payload: Record<string, unknown>,
+  ): boolean {
+    try {
+      const filename = `${Date.now()}-${String(ipcFileSeq++).padStart(4, '0')}.json`;
+      const filepath = path.join(inputDir, filename);
+      const tempPath = `${filepath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(payload));
+      fs.renameSync(tempPath, filepath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Resolve the active thread slot for IPC operations. */
+  private resolveIpcSlot(
+    groupJid: string,
+    threadId: string | undefined,
+  ): { slot: ThreadSlot; inputDir: string } | null {
+    const threadKey = this.resolveThreadKey(threadId);
+    const state = this.getGroup(groupJid);
+    const slot = state.activeThreads.get(threadKey);
+    if (!slot || !slot.groupFolder || slot.isTaskContainer) return null;
+    return {
+      slot,
+      inputDir: resolveGroupIpcInputPath(slot.groupFolder, threadKey),
+    };
+  }
+
   /**
    * Send a follow-up message to a specific thread's container via IPC file.
    * Returns true if the message was written, false if no active container.
@@ -312,29 +348,29 @@ export class GroupQueue {
     text: string,
     attachments?: ContainerAttachment[],
   ): boolean {
-    const threadKey = this.resolveThreadKey(threadId);
-    const state = this.getGroup(groupJid);
-    const slot = state.activeThreads.get(threadKey);
-    if (!slot || !slot.groupFolder || slot.isTaskContainer) return false;
-    slot.idleWaiting = false;
-    slot.onActivity?.(); // Reset idle timer on piped messages
-
-    const inputDir = resolveGroupIpcInputPath(slot.groupFolder, threadKey);
-    try {
-      // Dir already created by runContainerAgent before container launch
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      const payload: Record<string, unknown> = { type: 'message', text };
-      if (attachments && attachments.length > 0) {
-        payload.attachments = attachments;
-      }
-      fs.writeFileSync(tempPath, JSON.stringify(payload));
-      fs.renameSync(tempPath, filepath);
-      return true;
-    } catch {
-      return false;
+    const resolved = this.resolveIpcSlot(groupJid, threadId);
+    if (!resolved) return false;
+    resolved.slot.idleWaiting = false;
+    resolved.slot.onActivity?.();
+    const payload: Record<string, unknown> = { type: 'message', text };
+    if (attachments && attachments.length > 0) {
+      payload.attachments = attachments;
     }
+    return this.writeIpcFile(resolved.inputDir, payload);
+  }
+
+  /**
+   * Send a control message (non-text) to a thread's container via IPC.
+   * Used for model/effort switches that the container handles internally.
+   */
+  sendControlMessage(
+    groupJid: string,
+    threadId: string | undefined,
+    payload: Record<string, unknown>,
+  ): boolean {
+    const resolved = this.resolveIpcSlot(groupJid, threadId);
+    if (!resolved) return false;
+    return this.writeIpcFile(resolved.inputDir, payload);
   }
 
   /**

@@ -1580,7 +1580,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          let formatted = formatMessages(messagesToSend, TIMEZONE);
 
           // Collect attachments for piped messages
           const pipeAttachments: ContainerAttachment[] = [];
@@ -1605,6 +1605,96 @@ async function startMessageLoop(): Promise<void> {
           const canPipe =
             queue.isThreadActive(parentJid, incomingThreadId) &&
             (!isThreadEnabled || !!incomingThreadId);
+
+          // Intercept model/effort switch flags before piping.
+          // Send a control IPC so the container updates its model/effort
+          // for the next query, then pipe the stripped prompt text normally.
+          if (canPipe) {
+            const pipeModelOverride = extractModelOverride(messagesToSend);
+            const pipeEffortOverride = extractEffortOverride(messagesToSend);
+
+            if (pipeModelOverride || pipeEffortOverride) {
+              const sessionKey = buildSessionKey(
+                group.folder,
+                incomingThreadId,
+              );
+
+              if (pipeModelOverride) {
+                if (pipeModelOverride.reset) {
+                  setSessionModel(sessionKey, null);
+                  queue.sendControlMessage(parentJid, incomingThreadId, {
+                    type: 'model_switch',
+                    model: resolveModel(group),
+                  });
+                } else {
+                  if (pipeModelOverride.sticky) {
+                    setSessionModel(
+                      sessionKey,
+                      pipeModelOverride.model,
+                      group.folder,
+                      incomingThreadId,
+                    );
+                  }
+                  queue.sendControlMessage(parentJid, incomingThreadId, {
+                    type: 'model_switch',
+                    model: pipeModelOverride.model,
+                    oneshot: !pipeModelOverride.sticky,
+                  });
+                }
+                const label = pipeModelOverride.reset
+                  ? `reverted to default (${resolveModel(group)})`
+                  : pipeModelOverride.sticky
+                    ? `${pipeModelOverride.model} for this session`
+                    : `${pipeModelOverride.model} for this message`;
+                channel
+                  .sendMessage(chatJid, `✅ Switched to ${label}.`, incomingThreadId)
+                  .catch((err: unknown) =>
+                    logger.warn({ chatJid, err }, 'Failed to send model switch confirmation'),
+                  );
+              }
+
+              if (pipeEffortOverride) {
+                if (pipeEffortOverride.reset) {
+                  setSessionEffort(sessionKey, null);
+                } else if (pipeEffortOverride.sticky) {
+                  setSessionEffort(sessionKey, pipeEffortOverride.effort);
+                }
+                queue.sendControlMessage(parentJid, incomingThreadId, {
+                  type: 'effort_switch',
+                  effort: pipeEffortOverride.reset
+                    ? DEFAULT_EFFORT
+                    : pipeEffortOverride.effort,
+                });
+              }
+
+              // Strip flags from the piped text so the agent sees clean prompt
+              formatted = formatted
+                .replace(MODEL_ONESHOT_PATTERN, '')
+                .replace(MODEL_FLAG_PATTERN, '')
+                .replace(EFFORT_ONESHOT_PATTERN, '')
+                .replace(EFFORT_FLAG_PATTERN, '')
+                .trim();
+
+              logger.info(
+                {
+                  chatJid,
+                  model: pipeModelOverride?.model,
+                  effort: pipeEffortOverride?.effort,
+                },
+                'Model/effort switch sent to running container via IPC',
+              );
+
+              // Flag-only message (no prompt text after stripping) — control
+              // already sent, just advance cursor and skip further processing.
+              if (!formatted) {
+                lastAgentTimestamp[chatJid] =
+                  messagesToSend[messagesToSend.length - 1].timestamp;
+                for (const msg of messagesToSend)
+                  attachmentCache.delete(msg.id);
+                continue;
+              }
+            }
+          }
 
           if (
             canPipe &&

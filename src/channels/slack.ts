@@ -1173,9 +1173,7 @@ function discoverAndRegisterSlackInstances(): void {
       try {
         return new SlackChannel(opts, { suffix, instanceName });
       } catch {
-        logger.warn(
-          `Slack (${instanceName}): credentials not set — skipping`,
-        );
+        logger.warn(`Slack (${instanceName}): credentials not set — skipping`);
         return null;
       }
     });
