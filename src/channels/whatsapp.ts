@@ -321,8 +321,21 @@ export class WhatsAppChannel implements Channel {
                     '.log',
                   ].includes(ext);
                 const isPdf = mime === 'application/pdf' || ext === '.pdf';
+                const isMedia =
+                  mime.startsWith('video/') ||
+                  mime.startsWith('audio/') ||
+                  [
+                    '.mp4',
+                    '.mp3',
+                    '.ogg',
+                    '.wav',
+                    '.m4a',
+                    '.webm',
+                    '.mov',
+                    '.avi',
+                  ].includes(ext);
 
-                if (isPdf || isText) {
+                if (isPdf || isText || isMedia) {
                   const buffer = await downloadMediaMessage(msg, 'buffer', {});
                   const groupDir = path.join(
                     GROUPS_DIR,
@@ -342,6 +355,14 @@ export class WhatsAppChannel implements Channel {
                   if (isPdf) {
                     const pdfRef = `[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
                     content = caption ? `${caption}\n\n${pdfRef}` : pdfRef;
+                  } else if (isMedia) {
+                    const mediaType = mime.startsWith('video/')
+                      ? 'Video'
+                      : 'Audio';
+                    const mediaRef = `[${mediaType}: attachments/${filename} (${sizeKB}KB)]`;
+                    content = caption
+                      ? `${caption}\n\n${mediaRef}`
+                      : mediaRef;
                   } else {
                     const textContent = (buffer as Buffer).toString('utf-8');
                     const docRef = `[Document: attachments/${filename} (${sizeKB}KB)]\n\n${textContent}`;
