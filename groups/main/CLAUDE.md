@@ -267,7 +267,7 @@ The task will run in that group's context with access to their files and memory.
 
 ## Task Scripts
 
-For any recurring task, use `schedule_task`. Tasks that wake the agent frequently — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether you need to act, add a `script` — it runs first, and you only wake up when the check passes. This keeps agent invocations to a minimum. If it's unclear whether the user wants a response every time or only when something requires attention, ask.
+For any recurring task, use `schedule_task`. Frequent agent invocations — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether action is needed, add a `script` — it runs first, and the agent is only called when the check passes. This keeps invocations to a minimum.
 
 ### How it works
 
