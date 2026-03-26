@@ -59,6 +59,7 @@ import { BodyParseError, parseJsonBody } from './cors.js';
 import {
   getInstalledSkills,
   getInstallJob,
+  getSkillDetail,
   searchMarketplace,
   startSkillInstall,
 } from './skills.js';
@@ -523,6 +524,19 @@ export async function handleRoute(
     const all = getInstalledSkills();
     const data = all.slice(offset, offset + limit);
     json(res, 200, { data, total: all.length, limit, offset });
+    return true;
+  }
+
+  // GET /api/skills/:name/detail
+  const skillDetailMatch = pathname.match(/^\/api\/skills\/([^/]+)\/detail$/);
+  if (skillDetailMatch && method === 'GET') {
+    const skillName = decodeURIComponent(skillDetailMatch[1]);
+    const detail = getSkillDetail(skillName);
+    if (!detail) {
+      json(res, 404, { error: 'Skill not found' });
+      return true;
+    }
+    json(res, 200, detail);
     return true;
   }
 

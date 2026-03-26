@@ -125,7 +125,27 @@ export function getCapabilities(deps: CapabilityDeps): Capabilities {
     },
     channels: getRegisteredChannelNames(),
     groups: groups.map((g) => ({ ...g, channel: channelFromJid(g.jid) })),
+    folders: [],
   };
+
+  // Aggregate groups by folder for channel-agnostic presentation
+  const folderMap = new Map<
+    string,
+    { folder: string; name: string; channels: Array<{ jid: string; channel: string; name: string }> }
+  >();
+  for (const g of result.groups) {
+    const existing = folderMap.get(g.folder);
+    if (existing) {
+      existing.channels.push({ jid: g.jid, channel: g.channel, name: g.name });
+    } else {
+      folderMap.set(g.folder, {
+        folder: g.folder,
+        name: g.name,
+        channels: [{ jid: g.jid, channel: g.channel, name: g.name }],
+      });
+    }
+  }
+  result.folders = [...folderMap.values()];
 
   cachedCapabilities = { data: result, timestamp: Date.now() };
   return result;

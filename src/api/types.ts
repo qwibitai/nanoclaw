@@ -41,6 +41,11 @@ export interface Capabilities {
   };
   channels: string[];
   groups: Array<{ jid: string; name: string; folder: string; channel: string }>;
+  folders: Array<{
+    folder: string;
+    name: string;
+    channels: Array<{ jid: string; channel: string; name: string }>;
+  }>;
 }
 
 // WebSocket protocol types

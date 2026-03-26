@@ -477,3 +477,118 @@ export function startSkillInstall(
 export function getInstallJob(jobId: string): SkillInstallJob | undefined {
   return installJobs.get(jobId);
 }
+
+// --- Skill detail (file content + directory tree) ---
+
+export interface SkillFileEntry {
+  name: string;
+  type: 'file' | 'directory';
+  children?: SkillFileEntry[];
+}
+
+export interface SkillDetail {
+  name: string;
+  description: string;
+  path: string;
+  category: InstalledSkill['category'];
+  group?: string;
+  content: string; // SKILL.md markdown (frontmatter stripped)
+  files: SkillFileEntry[];
+}
+
+/**
+ * Recursively build a file tree for a directory.
+ */
+function buildFileTree(dir: string): SkillFileEntry[] {
+  const entries: SkillFileEntry[] = [];
+  try {
+    const items = fs.readdirSync(dir, { withFileTypes: true });
+    for (const item of items) {
+      if (item.name.startsWith('.')) continue;
+      if (item.isDirectory()) {
+        entries.push({
+          name: item.name,
+          type: 'directory',
+          children: buildFileTree(path.join(dir, item.name)),
+        });
+      } else {
+        entries.push({ name: item.name, type: 'file' });
+      }
+    }
+  } catch {
+    // read failed
+  }
+  // Sort: directories first, then files, alphabetically within each group
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return entries;
+}
+
+/**
+ * Strip YAML frontmatter from markdown content.
+ */
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
+}
+
+/**
+ * Get full detail for a skill by name: SKILL.md content + file tree.
+ */
+export function getSkillDetail(skillName: string): SkillDetail | null {
+  const skills = getInstalledSkills();
+  const skill = skills.find((s) => s.name === skillName);
+  if (!skill) return null;
+
+  const projectRoot = process.cwd();
+  const absolutePath = path.resolve(projectRoot, skill.path);
+
+  // Verify path is within expected boundaries (prevent traversal)
+  if (!absolutePath.startsWith(projectRoot) && !absolutePath.startsWith(os.homedir())) {
+    return null;
+  }
+
+  let content = '';
+  let files: SkillFileEntry[] = [];
+
+  try {
+    const stat = fs.statSync(absolutePath);
+    if (stat.isDirectory()) {
+      // Skill is a directory — read SKILL.md and build file tree
+      const mdCandidates = ['SKILL.md', 'skill.md'];
+      for (const candidate of mdCandidates) {
+        const mdPath = path.join(absolutePath, candidate);
+        if (fs.existsSync(mdPath)) {
+          content = stripFrontmatter(fs.readFileSync(mdPath, 'utf-8'));
+          break;
+        }
+      }
+      // Fallback: read first .md file
+      if (!content) {
+        const mdFiles = fs.readdirSync(absolutePath).filter((f) => f.endsWith('.md'));
+        if (mdFiles[0]) {
+          content = stripFrontmatter(
+            fs.readFileSync(path.join(absolutePath, mdFiles[0]), 'utf-8'),
+          );
+        }
+      }
+      files = buildFileTree(absolutePath);
+    } else if (stat.isFile()) {
+      // Standalone .md file — read it directly, no file tree
+      content = stripFrontmatter(fs.readFileSync(absolutePath, 'utf-8'));
+    }
+  } catch {
+    // File/directory read failed
+  }
+
+  return {
+    name: skill.name,
+    description: skill.description,
+    path: skill.path,
+    category: skill.category,
+    group: skill.group,
+    content,
+    files,
+  };
+}
