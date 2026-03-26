@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
+  <a href="https://docs.nanoclaw.dev">docs</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
@@ -121,7 +122,7 @@ Skills we'd like to see:
 
 ## Requirements
 
-- macOS or Linux
+- macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
@@ -134,7 +135,7 @@ Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Respon
 
 Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
 
-For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
+For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
@@ -153,13 +154,13 @@ Key files:
 
 Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
 
-**Can I run this on Linux?**
+**Can I run this on Linux or Windows?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Just run `/setup`.
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
 
 **Why no configuration files?**
 
@@ -203,7 +204,7 @@ Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
+See [CHANGELOG.md](CHANGELOG.md) for breaking changes, or the [full release history](https://docs.nanoclaw.dev/changelog) on the documentation site.
 
 ## License
 
