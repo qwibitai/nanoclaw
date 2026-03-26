@@ -11,25 +11,24 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { OneCLI } from '@onecli-sh/sdk';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
-const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -228,80 +227,31 @@ function buildVolumeMounts(
   return mounts;
 }
 
-async function buildContainerArgs(
+function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   isMain: boolean,
-  agentIdentifier?: string,
-): Promise<string[]> {
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
 
-    // Apple Container only supports directory mounts, not file mounts.
-    // OneCLI SDK injects `-v /path/to/file.pem:/tmp/target.pem:ro` mounts
-    // for CA certs. Convert these to a single directory mount.
-    // Also replace host.docker.internal (not resolvable in Apple Container)
-    // with the gateway IP 192.168.64.1.
-    if (CONTAINER_RUNTIME_BIN === 'container') {
-      const certDir = path.join(os.tmpdir(), `nanoclaw-certs-${Date.now()}`);
-      fs.mkdirSync(certDir, { recursive: true });
-
-      // Find and remove -v file mounts for .pem cert files
-      let i = 0;
-      while (i < args.length) {
-        if (args[i] === '-v' && i + 1 < args.length) {
-          const match = args[i + 1].match(
-            /^(.+\.pem):\/tmp\/(onecli-.+\.pem):ro$/,
-          );
-          if (match) {
-            const [, srcFile, fileName] = match;
-            try {
-              fs.copyFileSync(srcFile, path.join(certDir, fileName));
-            } catch {
-              /* cert may not exist yet */
-            }
-            args.splice(i, 2);
-            continue;
-          }
-        }
-        i++;
-      }
-
-      // Mount the cert directory
-      args.push(...readonlyMountArgs(certDir, '/tmp/onecli-certs'));
-
-      // Update env vars: cert paths and host.docker.internal → gateway IP
-      for (let j = 0; j < args.length; j++) {
-        if (args[j] === '-e' && j + 1 < args.length) {
-          args[j + 1] = args[j + 1]
-            .replace(
-              /^SSL_CERT_FILE=\/tmp\/onecli-combined-ca\.pem$/,
-              'SSL_CERT_FILE=/tmp/onecli-certs/onecli-combined-ca.pem',
-            )
-            .replace(
-              /^NODE_EXTRA_CA_CERTS=\/tmp\/onecli-gateway-ca\.pem$/,
-              'NODE_EXTRA_CA_CERTS=/tmp/onecli-certs/onecli-gateway-ca.pem',
-            )
-            .replace(/host\.docker\.internal/g, '192.168.64.1');
-        }
-      }
-    }
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
   // Runtime-specific args for host gateway resolution
@@ -351,16 +301,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Main group uses the default OneCLI agent; others use their own agent.
-  const agentIdentifier = input.isMain
-    ? undefined
-    : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
-    mounts,
-    containerName,
-    input.isMain,
-    agentIdentifier,
-  );
+  const containerArgs = buildContainerArgs(mounts, containerName, input.isMain);
 
   logger.debug(
     {
