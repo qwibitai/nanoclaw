@@ -18,6 +18,7 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
 - `claw ps` — list, inspect, and manage running NanoClaw containers
+- `claw molt` — export/import NanoClaw installs via the [molt](https://github.com/kenbolton/molt) migration tool (optional dependency)
 
 ## Prerequisites
 
@@ -124,6 +125,30 @@ claw ps --tail
 
 # Remove stale unnamed containers
 claw ps --kill-zombies
+```
+
+### Migration (claw molt)
+
+Requires [molt](https://github.com/kenbolton/molt) installed and available in `PATH`.
+
+```bash
+# Export this NanoClaw install to a bundle (source defaults to NANOCLAW_DIR)
+claw molt export --out ~/my-nanoclaw.molt
+
+# Import a bundle into this install (dest and --arch default to this install)
+claw molt import ~/my-nanoclaw.molt
+
+# Import with folder renames
+claw molt import ~/my-nanoclaw.molt --rename family=household
+
+# Dry run
+claw molt import ~/my-nanoclaw.molt --dry-run
+
+# List available molt drivers
+claw molt archs
+
+# Pass any other molt command through directly
+claw molt --help
 ```
 
 ## Troubleshooting

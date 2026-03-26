@@ -12,21 +12,23 @@ Usage:
   claw --list-groups
   echo "prompt text" | claw --pipe -g <channel_name>
   cat prompt.txt | claw --pipe
-
   claw ps                         List running NanoClaw containers
   claw ps [filter]                Filter containers by name substring
   claw ps --all                   Also show unnamed/zombie containers
   claw ps --logs [filter]         Dump logs for matching containers
   claw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
   claw ps --kill-zombies          Stop and remove unnamed containers
+  claw molt export [--out <file.molt>]         Export this install to a bundle
+  claw molt import <file.molt> [--rename k=v]  Import bundle into this install
+  claw molt archs                              List installed molt drivers
+  claw molt <args...>                          Passthrough to molt binary
 """
-
-from __future__ import annotations
 
 import argparse
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -130,48 +132,8 @@ def find_group(groups: list[dict], query: str) -> dict | None:
     return None
 
 
-def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
-    """Return list of (host_path, container_path, readonly) tuples."""
-    groups_dir  = NANOCLAW_DIR / "groups"
-    data_dir    = NANOCLAW_DIR / "data"
-    sessions_dir = data_dir / "sessions" / folder
-    ipc_dir     = data_dir / "ipc" / folder
-
-    # Ensure required dirs exist
-    group_dir = groups_dir / folder
-    group_dir.mkdir(parents=True, exist_ok=True)
-    (sessions_dir / ".claude").mkdir(parents=True, exist_ok=True)
-    for sub in ("messages", "tasks", "input"):
-        (ipc_dir / sub).mkdir(parents=True, exist_ok=True)
-
-    agent_runner_src = sessions_dir / "agent-runner-src"
-    project_agent_runner = NANOCLAW_DIR / "container" / "agent-runner" / "src"
-    if not agent_runner_src.exists() and project_agent_runner.exists():
-        import shutil
-        shutil.copytree(project_agent_runner, agent_runner_src)
-
-    mounts: list[tuple[str, str, bool]] = []
-    if is_main:
-        mounts.append((str(NANOCLAW_DIR), "/workspace/project", True))
-    mounts.append((str(group_dir),           "/workspace/group",    False))
-    mounts.append((str(sessions_dir / ".claude"), "/home/node/.claude", False))
-    mounts.append((str(ipc_dir),             "/workspace/ipc",      False))
-    if agent_runner_src.exists():
-        mounts.append((str(agent_runner_src), "/app/src",           False))
-    return mounts
-
-
-def run_container(runtime: str, image: str, payload: dict,
-                  folder: str | None = None, is_main: bool = False,
-                  timeout: int = 300) -> None:
-    cmd = [runtime, "run", "-i", "--rm"]
-    if folder:
-        for host, container, readonly in build_mounts(folder, is_main):
-            if readonly:
-                cmd += ["--mount", f"type=bind,source={host},target={container},readonly"]
-            else:
-                cmd += ["-v", f"{host}:{container}"]
-    cmd.append(image)
+def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -> None:
+    cmd = [runtime, "run", "-i", "--rm", image]
     dbg(f"cmd: {' '.join(cmd)}")
 
     # Show payload sans secrets
@@ -216,12 +178,7 @@ def run_container(runtime: str, image: str, payload: dict,
                 dbg("output sentinel found, terminating container")
                 done.set()
                 try:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        dbg("graceful stop timed out, force killing container")
-                        proc.kill()
+                    proc.kill()
                 except ProcessLookupError:
                     pass
                 return
@@ -251,8 +208,6 @@ def run_container(runtime: str, image: str, payload: dict,
         stdout,
         re.DOTALL,
     )
-    success = False
-
     if match:
         try:
             data = json.loads(match.group(1))
@@ -262,7 +217,6 @@ def run_container(runtime: str, image: str, payload: dict,
                 session_id = data.get("newSessionId") or data.get("sessionId")
                 if session_id:
                     print(f"\n[session: {session_id}]", file=sys.stderr)
-                success = True
             else:
                 print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
                 sys.exit(1)
@@ -272,11 +226,76 @@ def run_container(runtime: str, image: str, payload: dict,
         # No structured output — print raw stdout
         print(stdout)
 
-    if success:
-        return
-
     if proc.returncode not in (0, None):
         sys.exit(proc.returncode)
+
+
+# ── molt wrapper (claw molt) ─────────────────────────────────────────────────
+
+def find_molt() -> str:
+    """Locate the molt binary, or exit with a helpful message."""
+    if path := shutil.which("molt"):
+        return path
+    # Check well-known locations relative to the NanoClaw install
+    for candidate in [
+        NANOCLAW_DIR / "bin" / "molt",
+        Path.home() / ".molt" / "molt",
+        Path.home() / "go" / "bin" / "molt",
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    sys.exit(
+        "error: 'molt' not found in PATH.\n"
+        "Install molt: https://github.com/kenbolton/molt"
+    )
+
+
+def cmd_molt(molt_args: list[str]) -> None:
+    """Dispatch to molt, filling in smart defaults for this NanoClaw install."""
+    molt = find_molt()
+
+    if not molt_args or molt_args[0] in ("-h", "--help"):
+        result = subprocess.run([molt] + molt_args)
+        sys.exit(result.returncode)
+
+    subcmd = molt_args[0]
+    rest = molt_args[1:]
+
+    if subcmd == "export":
+        # Insert NANOCLAW_DIR as source if no positional arg was given.
+        positionals = [a for a in rest if not a.startswith("-")]
+        if not positionals:
+            rest = [str(NANOCLAW_DIR)] + rest
+        result = subprocess.run([molt, "export"] + rest)
+        sys.exit(result.returncode)
+
+    if subcmd == "import":
+        # Parse just enough to fill in defaults; pass everything else through.
+        imp = argparse.ArgumentParser(prog="claw molt import", add_help=False)
+        imp.add_argument("bundle")
+        imp.add_argument("dest", nargs="?")
+        imp.add_argument("--arch")
+        imp.add_argument("--rename", action="append", default=[])
+        imp.add_argument("--dry-run", dest="dry_run", action="store_true")
+        imp.add_argument("-v", "--verbose", action="store_true")
+        parsed, extra = imp.parse_known_args(rest)
+
+        dest = parsed.dest or str(NANOCLAW_DIR)
+        arch = parsed.arch or "nanoclaw"
+        cmd = [molt, "import", parsed.bundle, dest, "--arch", arch]
+        for r in parsed.rename:
+            cmd += ["--rename", r]
+        if parsed.dry_run:
+            cmd.append("--dry-run")
+        if parsed.verbose:
+            cmd.append("--verbose")
+        cmd += extra
+        result = subprocess.run(cmd)
+        sys.exit(result.returncode)
+
+    # Passthrough for: archs, upgrade, and anything else.
+    result = subprocess.run([molt, subcmd] + rest)
+    sys.exit(result.returncode)
 
 
 # ── Container listing (claw ps) ──────────────────────────────────────────────
@@ -286,7 +305,7 @@ _APPLE_EPOCH_OFFSET = 978307200
 
 
 def human_age(secs: float) -> str:
-    secs = int(secs)
+    secs = int(max(0, secs))  # guard against clock skew / negative values
     if secs < 60:
         return f"{secs}s"
     if secs < 3600:
@@ -331,7 +350,8 @@ def fetch_containers(runtime: str) -> list[dict]:
                                 "named": cid.startswith("nanoclaw-")})
         return containers
     else:
-        # Docker returns NDJSON (one JSON object per line)
+        # Docker returns NDJSON (one JSON object per line).
+        # Requires Docker 25+ for --format json; older versions use --format '{{json .}}'.
         result = subprocess.run(
             ["docker", "ps", "--filter", "name=nanoclaw-", "--format", "json"],
             capture_output=True, text=True,
@@ -358,13 +378,14 @@ def fetch_containers(runtime: str) -> list[dict]:
         return containers
 
 
-def cmd_ps(ps_args, runtime: str) -> None:
+def cmd_ps(ps_args: argparse.Namespace, runtime: str) -> None:
     containers = fetch_containers(runtime)
     filt = ps_args.filter or ""
     named = [c for c in containers if c["named"]]
     unnamed = [c for c in containers if not c["named"]]
 
     if ps_args.logs:
+        # --all is silently ignored with --logs (zombie containers don't have useful logs)
         matches = [c for c in named if not filt or filt in c["id"]]
         if not matches:
             print("No matching containers.")
@@ -376,6 +397,7 @@ def cmd_ps(ps_args, runtime: str) -> None:
         return
 
     if ps_args.tail:
+        # --all is silently ignored with --tail (zombie containers don't have useful logs)
         matches = [c for c in named if not filt or filt in c["id"]]
         if not matches:
             print("No matching containers.")
@@ -433,10 +455,11 @@ def cmd_ps(ps_args, runtime: str) -> None:
     # Default: list named containers
     visible = [c for c in named if not filt or filt in c["id"]]
     if visible:
-        print(f"{'CONTAINER':<56} {'STATUS':<10} AGE")
-        print("-" * 78)
+        col_w = max((len(c["id"]) for c in visible), default=9) + 2
+        print(f"{'CONTAINER':<{col_w}} {'STATUS':<10} AGE")
+        print("-" * (col_w + 20))
         for c in sorted(visible, key=lambda x: x["id"]):
-            print(f"{c['id']:<56} {c['state']:<10} {c['age']}")
+            print(f"{c['id']:<{col_w}} {c['state']:<10} {c['age']}")
     elif filt:
         print(f'No containers matching "{filt}".')
     else:
@@ -455,6 +478,11 @@ def cmd_ps(ps_args, runtime: str) -> None:
 def main():
     global VERBOSE
 
+    # ── claw molt subcommand ──────────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "molt":
+        cmd_molt(sys.argv[2:])
+        return  # unreachable (cmd_molt calls sys.exit)
+
     # ── claw ps subcommand ────────────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "ps":
         ps_parser = argparse.ArgumentParser(
@@ -466,9 +494,9 @@ def main():
                                help="Show unnamed/zombie containers (ignored with --logs/--tail)")
         mode = ps_parser.add_mutually_exclusive_group()
         mode.add_argument("--logs", action="store_true",
-                          help="Dump logs for matching containers")
+                          help="Dump logs for matching containers (ignores --all)")
         mode.add_argument("--tail", action="store_true",
-                          help="Follow logs (multiplexed with [label] prefix, Ctrl-C to stop)")
+                          help="Follow logs, multiplexed with [label] prefix (ignores --all; Ctrl-C to stop)")
         mode.add_argument("--kill-zombies", dest="kill_zombies", action="store_true",
                           help="Stop and remove unnamed nanoclaw-agent containers")
         ps_parser.add_argument("--runtime", choices=["docker", "container"],
@@ -483,7 +511,10 @@ def main():
     parser = argparse.ArgumentParser(
         prog="claw",
         description="Run a NanoClaw agent from the command line.",
-        epilog="Container management: run 'claw ps --help' for listing, logs, and zombie cleanup.",
+        epilog=(
+            "Container management: run 'claw ps --help' for listing, logs, and zombie cleanup.\n"
+            "Migration: run 'claw molt --help' for export/import with the molt tool."
+        ),
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to send")
     parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
@@ -531,7 +562,6 @@ def main():
     # Resolve group → jid
     jid = args.jid
     group_name = None
-    group_folder = None
     is_main = False
 
     if args.group:
@@ -540,7 +570,6 @@ def main():
             sys.exit(f"error: group '{args.group}' not found. Run --list-groups to see options.")
         jid = g["jid"]
         group_name = g["name"]
-        group_folder = g["folder"]
         is_main = g["is_main"]
     elif not jid:
         # Default: main group
@@ -548,7 +577,6 @@ def main():
         if mains:
             jid = mains[0]["jid"]
             group_name = mains[0]["name"]
-            group_folder = mains[0]["folder"]
             is_main = True
         else:
             sys.exit("error: no group specified and no main group found. Use -g or -j.")
@@ -572,9 +600,7 @@ def main():
         payload["resumeAt"] = "latest"
 
     print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
-    run_container(runtime, args.image, payload,
-                  folder=group_folder, is_main=is_main,
-                  timeout=args.timeout)
+    run_container(runtime, args.image, payload, timeout=args.timeout)
 
 
 if __name__ == "__main__":
