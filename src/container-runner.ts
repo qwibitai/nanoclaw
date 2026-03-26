@@ -148,8 +148,14 @@ function buildVolumeMounts(
       JSON.stringify(
         {
           env: {
+            // Enable agent swarms (subagent orchestration)
+            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
             CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+            // Load CLAUDE.md from additional mounted directories
+            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+            // Enable Claude's memory feature (persists user preferences between sessions)
+            // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
           },
         },
@@ -250,12 +256,11 @@ async function extractOnecliEnv(
   }
 
   const tempArgs: string[] = [];
-  const applied = await onecli.applyContainerConfig(tempArgs, {
+  const onecliApplied = await onecli.applyContainerConfig(tempArgs, {
     addHostMapping: false,
     agent: agentIdentifier,
   });
-
-  if (applied) {
+  if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
@@ -614,6 +619,9 @@ export async function runContainerAgent(
       ].join('\n'),
     );
 
+    // Timeout after output = idle cleanup, not failure.
+    // The agent already sent its response; this is just the
+    // container being reaped after the idle period expired.
     if (hadStreamingOutput) {
       logger.info(
         { group: group.name, containerName, duration, code },
@@ -747,9 +755,15 @@ export async function runContainerAgent(
     return output;
   } catch (err) {
     logger.error(
-      { group: group.name, stdout, stderr, error: err },
+      { 
+        group: group.name, 
+        stdout, 
+        stderr, 
+        error: err, 
+      },
       'Failed to parse box output',
     );
+
     return {
       status: 'error',
       result: null,
@@ -771,9 +785,11 @@ export function writeTasksSnapshot(
     next_run: string | null;
   }>,
 ): void {
+  // Write filtered tasks to the group's IPC directory
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
+  // Main sees all tasks, others only see their own
   const filteredTasks = isMain
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
@@ -789,6 +805,11 @@ export interface AvailableGroup {
   isRegistered: boolean;
 }
 
+/**
+ * Write available groups snapshot for the container to read.
+ * Only main group can see all available groups (for activation).
+ * Non-main groups only see their own registration status.
+ */
 export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
@@ -798,6 +819,7 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
+  // Main sees all groups; others see nothing (they can't activate groups)
   const visibleGroups = isMain ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
