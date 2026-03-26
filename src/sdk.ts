@@ -140,16 +140,6 @@ export class AgentLite {
   }
 
   /**
-   * Get the number of connected channels.
-   */
-  channelCount(): number {
-    if (this._orchestrator) {
-      return this._orchestrator.channelCount();
-    }
-    return this._channels.length;
-  }
-
-  /**
    * Stop the orchestrator gracefully.
    */
   async stop(): Promise<void> {

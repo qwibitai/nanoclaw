@@ -175,10 +175,6 @@ export function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
-/** Get the number of connected channels. */
-export function channelCount(): number {
-  return channels.length;
-}
 
 // --- Exports for testing ---
 

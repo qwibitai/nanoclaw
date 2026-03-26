@@ -41,6 +41,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Auto-discover and register channels from the registry
+  let registered = 0;
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory();
@@ -52,9 +53,10 @@ async function main(): Promise<void> {
       continue;
     }
     await agent.registerChannel(channel);
+    registered++;
   }
 
-  if (agent.channelCount() === 0) {
+  if (registered === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
   }
