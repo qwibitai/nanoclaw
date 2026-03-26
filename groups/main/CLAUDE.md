@@ -262,3 +262,42 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Task Scripts
+
+When scheduling tasks that check a condition before acting (new PRs, website changes, API status), use the `script` parameter. The script runs first — if there's nothing to do, you don't wake up.
+
+### How it works
+
+1. You provide a bash `script` alongside the `prompt` when scheduling
+2. When the task fires, the script runs first (30-second timeout)
+3. Script prints JSON to stdout: `{ "wakeAgent": true/false, "data": {...} }`
+4. If `wakeAgent: false` — nothing happens, task waits for next run
+5. If `wakeAgent: true` — you wake up and receive the script's data + prompt
+
+### Always test your script first
+
+Before scheduling, run the script in your sandbox to verify it works:
+
+```bash
+bash -c 'node --input-type=module -e "
+  const r = await fetch(\"https://api.github.com/repos/owner/repo/pulls?state=open\");
+  const prs = await r.json();
+  console.log(JSON.stringify({ wakeAgent: prs.length > 0, data: prs.slice(0, 5) }));
+"'
+```
+
+### When NOT to use scripts
+
+If a task requires your judgment every time (daily briefings, reminders, reports), skip the script — just use a regular prompt.
+
+### Frequent task guidance
+
+If a user wants tasks running more than ~2x daily and a script can't reduce agent wake-ups:
+
+- Explain that each wake-up uses API credits and risks rate limits
+- Suggest restructuring with a script that checks the condition first
+- If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
+- Help the user find the minimum viable frequency
