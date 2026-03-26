@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run reload-service",
+    "reload-service": "systemctl --user restart nanoclaw 2>/dev/null || true",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
@@ -16,6 +17,7 @@
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
+    "lint:migrations": "node scripts/lint-migrations.js --all",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -1,4 +1,5 @@
-import { spawn } from 'child_process';
+import { execFile } from 'child_process';
+import type { ExecFileException } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -8,18 +9,26 @@ import { auditLog } from './utils/audit-log.js';
 
 const HOST_EXEC_DIR = path.join(DATA_DIR, 'ipc', 'host-exec');
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB
 
+/**
+ * Explicit binary allowlist. Only binaries listed here may be invoked via
+ * host-exec. Args are passed as an argv array (no shell interpolation).
+ */
 const ALLOWED_COMMANDS = new Set([
   'systemctl',
-  'cat',
-  'grep',
   'journalctl',
   'curl',
-  'cloudflared',
+  'cat',
   'ls',
   'find',
+  'grep',
+  'df',
+  'free',
+  'ps',
   'git',
-  'npm',
+  'node',
+  'jq',
 ]);
 
 /** Allowed git subcommands (read-only operations only). */
@@ -33,9 +42,6 @@ const GIT_BLOCKED_PATTERNS = [
   'clean',
   'checkout',
 ];
-
-/** Allowed npm subcommands. */
-const NPM_ALLOWED_SUBCOMMANDS = new Set(['build', 'install', 'ci', 'run']);
 
 interface HostExecRequest {
   id: string;
@@ -58,6 +64,18 @@ export function validateCommandArgs(
   command: string,
   args: string[],
 ): string | null {
+  if (command === 'systemctl') {
+    // Block self-targeting: reject any systemctl call that targets the nanoclaw service
+    const nanoclaw_patterns = ['nanoclaw', 'com.nanoclaw'];
+    const targetsNanoclaw = args.some((arg) =>
+      nanoclaw_patterns.some((pattern) => arg.includes(pattern)),
+    );
+    if (targetsNanoclaw) {
+      return 'systemctl cannot target the nanoclaw service';
+    }
+    return null;
+  }
+
   if (command === 'git') {
     // Find the subcommand (first arg that doesn't start with -)
     const subcommand = args.find((a) => !a.startsWith('-'));
@@ -74,17 +92,6 @@ export function validateCommandArgs(
     // Block --force flag
     if (args.includes('--force') || args.includes('-f')) {
       return 'git --force flag is not allowed';
-    }
-    return null;
-  }
-
-  if (command === 'npm') {
-    const subcommand = args.find((a) => !a.startsWith('-'));
-    if (!subcommand) {
-      return 'npm requires a subcommand (allowed: build, install, ci, run)';
-    }
-    if (!NPM_ALLOWED_SUBCOMMANDS.has(subcommand)) {
-      return `npm subcommand '${subcommand}' is not allowed (allowed: build, install, ci, run)`;
     }
     return null;
   }
@@ -208,39 +215,34 @@ function executeCommand(req: HostExecRequest): void {
   });
   log.info({ args, timeout }, 'Executing host command');
 
-  const child = spawn(req.command, args, {
-    timeout,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // execFile passes argv as an array — no shell interpolation, no injection risk.
+  execFile(
+    req.command,
+    args,
+    { timeout, maxBuffer: MAX_BUFFER },
+    (error: ExecFileException | null, stdout: string, stderr: string) => {
+      let exitCode: number;
+      let stderrOut = stderr;
 
-  const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
+      if (!error) {
+        exitCode = 0;
+      } else if (error.killed) {
+        exitCode = 124;
+        stderrOut += `\nProcess killed: timeout after ${timeout}ms`;
+      } else {
+        exitCode = typeof error.code === 'number' ? error.code : 1;
+      }
 
-  child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-  child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+      const result: HostExecResult = {
+        stdout,
+        stderr: stderrOut,
+        exit_code: exitCode,
+      };
 
-  child.on('close', (code, signal) => {
-    const exitCode = signal === 'SIGTERM' ? 124 : (code ?? 1);
-    const result: HostExecResult = {
-      stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-      stderr: Buffer.concat(stderrChunks).toString('utf-8'),
-      exit_code: exitCode,
-    };
-    if (signal === 'SIGTERM') {
-      result.stderr += `\nProcess killed: timeout after ${timeout}ms`;
-    }
-    log.info({ exit_code: exitCode }, 'Host command completed');
-    writeResult(resultPath, result);
-  });
-
-  child.on('error', (err) => {
-    log.error({ err }, 'Failed to spawn host command');
-    writeResult(resultPath, {
-      stdout: '',
-      stderr: `spawn error: ${err.message}`,
-      exit_code: 1,
-    });
-  });
+      log.info({ exit_code: exitCode }, 'Host command completed');
+      writeResult(resultPath, result);
+    },
+  );
 }
 
 function writeResult(resultPath: string, result: HostExecResult): void {

@@ -47,6 +47,7 @@ import { initSkillRegistry, shutdownSkillRegistry } from './skill-registry.js';
 import {
   startDispatchLoop,
   startStallDetector,
+  startSprintRetroWatcherSubsystem,
   stopAgencyHqSubsystems,
 } from './agency-hq-dispatcher.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -348,6 +349,9 @@ export async function initApp(): Promise<void> {
   );
   startStallDetector(schedulerDeps).catch((err) =>
     logger.error({ err }, 'Failed to start stall detector'),
+  );
+  startSprintRetroWatcherSubsystem(schedulerDeps).catch((err) =>
+    logger.error({ err }, 'Failed to start sprint retro watcher'),
   );
   startUptimeMonitor({
     registeredGroups: () => state.registeredGroups,

@@ -214,3 +214,59 @@ TASKEOF
 ```
 
 For more complex multi-repo tasks, the human can invoke `/orchestrate` from dev-inbox directly.
+
+## Parallel Dispatch Architecture
+
+NanoClaw dispatches Agency HQ `ready` tasks in parallel across **4 concurrent worker slots**.
+
+### How it works
+
+Tasks in `ready` status are picked up by the dispatch loop every 60 seconds. When parallel dispatch is active, each task is assigned to an available worker slot:
+
+| Slot JID | Description |
+|---|---|
+| `internal:dev-inbox:0` | Worker slot 0 |
+| `internal:dev-inbox:1` | Worker slot 1 |
+| `internal:dev-inbox:2` | Worker slot 2 |
+| `internal:dev-inbox:3` | Worker slot 3 |
+
+Each slot runs as an isolated container in `context_mode: isolated`. A sprint with 6 tasks will dispatch up to 4 simultaneously on the first tick, then the remaining 2 on the next available tick.
+
+### Slot state machine
+
+```
+free → acquiring → executing → releasing → free
+```
+
+- **acquiring**: task claimed, worktree created, local task registered
+- **executing**: container process running
+- **releasing**: container exited, results being written back to Agency HQ
+- **free**: slot available for next task
+
+Slot state is stored via Agency HQ API (`DISPATCH_SLOTS_PG=true`) at:
+- `GET /api/v1/dispatch-slots` — view all slot states
+- `POST /api/v1/dispatch-slots/claim` — claim a slot (atomic)
+- `PUT /api/v1/dispatch-slots/:id/executing` — mark executing
+- `PUT /api/v1/dispatch-slots/:id/releasing` — mark releasing
+- `PUT /api/v1/dispatch-slots/:id/free` — release slot
+
+### Branch isolation
+
+Tasks with the same `assigned_to` branch cannot occupy slots simultaneously — prevents concurrent modifications to the same branch.
+
+### Configuration (NanoClaw .env)
+
+```bash
+DISPATCH_PARALLEL=true   # Force-enable parallel (bypasses organic metrics gate)
+DISPATCH_PARALLEL=false  # Kill switch — force sequential single-worker mode
+# (unset)               # Automatic — notification metrics gate decides
+DISPATCH_SLOTS_PG=true   # Use Agency HQ API for slot state (recommended)
+```
+
+### Activation
+
+Parallel dispatch is activated at startup via `DISPATCH_PARALLEL=true`. Without this, the automatic metrics gate requires ≥3 organic notification agents over ≥7 days. The force-enable bypasses this gate for environments with limited notification history.
+
+### Recovery
+
+On startup, any slots stuck in `acquiring`/`executing`/`releasing` from a previous crash are recovered: the corresponding Agency HQ tasks are reverted to `ready` and slots are freed.

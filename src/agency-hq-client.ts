@@ -11,6 +11,8 @@ export interface AgencyHqTask {
   sprint_id?: string;
   assigned_to?: string;
   scheduled_dispatch_at?: string;
+  /** ISO-8601 timestamp: task will not be dispatched before this time (set after 3 failures). */
+  dispatch_blocked_until?: string;
   status: string;
   dispatch_attempts?: number;
   dispatched_at?: string;

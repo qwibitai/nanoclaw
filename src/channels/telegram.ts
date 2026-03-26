@@ -234,6 +234,48 @@ export class TelegramChannel implements Channel {
     this.bot!.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot!.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
+    // Handle decision vote callbacks from inline keyboard buttons
+    this.bot!.on('callback_query:data', async (ctx) => {
+      const data = ctx.callbackQuery.data || '';
+      const match = data.match(/^decision:(approve|reject|defer):(.+)$/);
+      if (!match) {
+        await ctx.answerCallbackQuery('Unknown action');
+        return;
+      }
+
+      const [, action, decisionId] = match;
+      const statusMap: Record<string, string> = {
+        approve: 'approved',
+        reject: 'rejected',
+        defer: 'proposed',
+      };
+      const labels: Record<string, string> = {
+        approve: '✅ Approved',
+        reject: '❌ Rejected',
+        defer: '⏸ Deferred',
+      };
+      const status = statusMap[action];
+
+      try {
+        const agencyHqUrl = process.env.AGENCY_HQ_URL || 'http://localhost:3040';
+        const resp = await fetch(`${agencyHqUrl}/api/v1/decisions/${decisionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        if (!resp.ok) throw new Error(`Agency HQ returned ${resp.status}`);
+
+        await ctx.answerCallbackQuery(`${labels[action]}!`);
+        // Remove inline keyboard from the original message
+        await ctx.editMessageReplyMarkup();
+        await ctx.reply(`${labels[action]} — decision updated.`);
+        logger.info({ decisionId, action }, 'Decision vote processed');
+      } catch (err) {
+        logger.error({ err, decisionId, action }, 'Failed to process decision vote');
+        await ctx.answerCallbackQuery('Error updating decision — try again');
+      }
+    });
+
     // Handle errors gracefully
     this.bot!.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');

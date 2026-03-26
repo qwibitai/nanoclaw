@@ -9,6 +9,16 @@ import {
 import { dispatchTime } from './stall-detector.js';
 import { createCorrelationLogger } from './logger.js';
 import { SchedulerDependencies, runScheduledTask } from './task-scheduler.js';
+import {
+  claimSlot,
+  freeSlot,
+  flushOnShutdown,
+  markSlotExecuting,
+  markSlotReleasing,
+  PARALLEL_DISPATCH_WORKERS,
+  workerSlotJid,
+} from './dispatch-pool.js';
+import { createWorktree, removeWorktree } from './worktree-manager.js';
 
 /** Prevents concurrent dispatch loop runs (two ticks racing for the same ready tasks). */
 let dispatchRunning = false;
@@ -22,9 +32,53 @@ export const dispatchRetryCount = new Map<string, number>();
  * Backoff schedule (applied after each dispatch failure):
  *   Failure 1 → skip 1 tick before retry
  *   Failure 2 → skip 3 ticks before retry
- *   Failure 3 → mark task as blocked (no more retries)
+ *   Failure 3 → set dispatch_blocked_until (no more retries until reset)
  */
 export const dispatchSkipTicks = new Map<string, number>();
+
+// --- Parallel dispatch ---
+
+/**
+ * Whether parallel dispatch is enabled (set after notification metrics
+ * prerequisite gate passes at startup).
+ */
+let parallelDispatchEnabled = false;
+
+/**
+ * Returns true when the DISPATCH_PARALLEL=false env var kill switch is active.
+ *
+ * When active, parallel dispatch is forcibly disabled regardless of the
+ * notification metrics gate result. Set DISPATCH_PARALLEL=false to trigger
+ * an emergency rollback to sequential single-worker dispatch without a deploy.
+ */
+export function isParallelDispatchKillSwitchActive(): boolean {
+  return process.env.DISPATCH_PARALLEL === 'false';
+}
+
+/**
+ * Enable parallel dispatch (called when notification metrics gate passes).
+ *
+ * No-ops silently if the DISPATCH_PARALLEL=false kill switch is active —
+ * the caller logs the kill switch state separately at startup.
+ */
+export function enableParallelDispatch(): void {
+  if (isParallelDispatchKillSwitchActive()) {
+    // Kill switch overrides the metrics gate — stay in sequential mode.
+    return;
+  }
+  parallelDispatchEnabled = true;
+}
+
+/** Reset all parallel dispatch state (used in tests and on shutdown). */
+export function resetDispatchLoopState(): void {
+  parallelDispatchEnabled = false;
+  flushOnShutdown();
+}
+
+// Keep lockedWorkerSlots exported for backward-compat with tests and
+// agency-hq-dispatcher.ts _testInternals, but it is no longer the
+// source of truth — dispatch-pool.ts owns slot state.
+export const lockedWorkerSlots = new Set<string>();
 
 const DEFAULT_PLANNING_PERSONA = 'agency/leadership/engineering-manager';
 
@@ -176,6 +230,19 @@ export async function dispatchReadyTasks(
         }
       }
 
+      // dispatch_blocked_until: skip if this task has been blocked until a
+      // future timestamp (set after 3 consecutive dispatch failures).
+      if (task.dispatch_blocked_until) {
+        const blockedUntil = new Date(task.dispatch_blocked_until).getTime();
+        if (blockedUntil > Date.now()) {
+          log.debug(
+            { taskId: task.id, blockedUntil: task.dispatch_blocked_until },
+            'Skipping task blocked until future time',
+          );
+          continue;
+        }
+      }
+
       // Exponential backoff: skip ticks if the task is cooling down from a prior failure
       const remainingSkips = dispatchSkipTicks.get(task.id) ?? 0;
       if (remainingSkips > 0) {
@@ -187,20 +254,50 @@ export async function dispatchReadyTasks(
         continue;
       }
 
-      // Check retry count — mark blocked after 3 consecutive failures
+      // Check retry count — set dispatch_blocked_until after 3 consecutive failures
       const retries = dispatchRetryCount.get(task.id) ?? 0;
       if (retries >= 3) {
         log.warn(
           { taskId: task.id, retries },
-          'Task exceeded max dispatch retries, marking blocked',
+          'Task exceeded max dispatch retries, setting dispatch_blocked_until',
         );
         await markBlocked(task, log);
         continue;
       }
 
+      // Pick dispatch JID: parallel worker slot (via DispatchPool) or sequential target
+      let dispatchJid: string;
+      let slotId: number | null = null;
+
+      if (parallelDispatchEnabled) {
+        // Slot is NOT claimed here — claimSlot happens inside dispatchTask
+        // after we know the localTaskId. We just check availability first.
+        // Use workerSlotJid(0) as a sentinel check; actual claim is in dispatchTask.
+        // Check if any slot is available (optimistic — the real claim is atomic in SQLite).
+        let hasAvailableSlot = false;
+        for (let i = 0; i < PARALLEL_DISPATCH_WORKERS; i++) {
+          if (!lockedWorkerSlots.has(workerSlotJid(i))) {
+            hasAvailableSlot = true;
+            break;
+          }
+        }
+        if (!hasAvailableSlot) {
+          log.debug(
+            { taskId: task.id },
+            'All worker slots busy (in-memory check), skipping task (will retry next tick)',
+          );
+          continue;
+        }
+        // Use a placeholder JID; actual slot JID resolved in dispatchTask
+        dispatchJid = 'internal:dev-inbox:pending';
+      } else {
+        dispatchJid = target.jid;
+        slotId = null;
+      }
+
       const dispatched = await dispatchTask(
         task,
-        target.jid,
+        dispatchJid,
         target.folder,
         deps,
         isStopping,
@@ -238,6 +335,8 @@ async function dispatchTask(
   isStopping: () => boolean,
   parentLog: ReturnType<typeof createCorrelationLogger>,
 ): Promise<boolean> {
+  const isWorkerSlot = parallelDispatchEnabled;
+
   const log = createCorrelationLogger(undefined, {
     op: 'dispatch-loop',
     taskId: task.id,
@@ -293,7 +392,7 @@ async function dispatchTask(
   }
 
   // Build prompt and create local task
-  const prompt = await buildPrompt(task, sprintGoal);
+  const basePrompt = await buildPrompt(task, sprintGoal);
   const now = new Date().toISOString();
   const localTaskId = `ahq-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -304,6 +403,68 @@ async function dispatchTask(
     log.info(
       { taskId: task.id, staleCount },
       'Cleaned up stale dispatch entries',
+    );
+  }
+
+  // --- Phase 1: Create worktree (when task targets a repository) ---
+  let worktreePath: string | null = null;
+  if (task.repository) {
+    worktreePath = createWorktree(process.cwd(), task.id);
+    if (worktreePath) {
+      log.info({ taskId: task.id, worktreePath }, 'Worktree created for dispatch');
+    }
+  }
+
+  // Inject worktree context into the prompt so the agent knows where to work.
+  const prompt = worktreePath
+    ? basePrompt + [
+        '',
+        '## Isolated Git Worktree',
+        '',
+        `This dispatch has an isolated git worktree at: \`${worktreePath}\``,
+        'Start all code changes from this directory. Your work is branch-isolated from other concurrent dispatches.',
+        `Run \`cd ${worktreePath}\` before making any edits.`,
+      ].join('\n')
+    : basePrompt;
+
+  // --- Phase 1b: Acquire slot (acquiring state) ---
+  let claim: { slotId: number; slotIndex: number; slotJid: string; worktreePath: string | null } | null = null;
+
+  if (isWorkerSlot) {
+    const branchId = task.assigned_to && task.assigned_to !== 'hold'
+      ? task.assigned_to
+      : null;
+
+    claim = await claimSlot(task.id, branchId, localTaskId, worktreePath);
+    if (claim === null) {
+      log.debug(
+        { taskId: task.id },
+        'No slot available (all busy or branch collision), skipping',
+      );
+      // Clean up the worktree we created since we're not dispatching.
+      if (worktreePath) {
+        removeWorktree(process.cwd(), worktreePath);
+      }
+      // Roll back in-progress status since we couldn't claim a slot
+      agencyFetch(`/tasks/${task.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'ready' }),
+      }).catch((err) =>
+        log.warn({ err, taskId: task.id }, 'Failed to revert task to ready'),
+      );
+      // Don't count this as a retry failure
+      dispatchRetryCount.set(task.id, count - 1);
+      return false;
+    }
+    // Update targetJid to the claimed slot's JID
+    targetJid = claim.slotJid;
+
+    // Keep in-memory set in sync for the optimistic pre-check
+    lockedWorkerSlots.add(claim.slotJid);
+
+    log.debug(
+      { taskId: task.id, workerSlot: claim.slotJid, slotId: claim.slotId },
+      'Worker slot acquired',
     );
   }
 
@@ -322,6 +483,13 @@ async function dispatchTask(
     });
   } catch (err) {
     log.error({ err }, 'Failed to create local task');
+    if (worktreePath) {
+      removeWorktree(process.cwd(), worktreePath);
+    }
+    if (claim) {
+      await freeSlot(claim.slotId, task.id);
+      lockedWorkerSlots.delete(claim.slotJid);
+    }
     return false;
   }
 
@@ -344,63 +512,101 @@ async function dispatchTask(
     created_at: now,
   };
 
+  const capturedClaim = claim;
+
   deps.queue.enqueueTask(targetJid, localTaskId, async () => {
-    const result = await runScheduledTask(localTask, deps);
-
-    // Write result back to Agency HQ (programmatic — doesn't rely on agent)
-    const resultPayload = result
-      ? { summary: result.slice(0, 2000) }
-      : { summary: 'Task completed (no output captured)' };
-
-    // Fetch existing context so we merge rather than replace
-    let existingContext: Record<string, unknown> = {};
+    // --- Phase 2: executing → releasing → free ---
     try {
-      const getRes = await agencyFetch(`/tasks/${task.id}`);
-      if (getRes.ok) {
-        const getJson = (await getRes.json()) as {
-          success: boolean;
-          data: { context?: Record<string, unknown> };
-        };
-        existingContext = getJson.data?.context ?? {};
-      } else {
+      // Mark executing when container starts (via onProcess callback)
+      // We hook into runScheduledTask's onProcess by pre-transitioning here
+      // since the container is about to start.
+      if (capturedClaim) {
+        await markSlotExecuting(capturedClaim.slotId, task.id);
+      }
+
+      const result = await runScheduledTask(localTask, deps);
+
+      // --- Phase 3: Releasing (writing results back to Agency HQ) ---
+      if (capturedClaim) {
+        await markSlotReleasing(capturedClaim.slotId, task.id);
+      }
+
+      // Write result back to Agency HQ (programmatic — doesn't rely on agent)
+      const resultPayload = result
+        ? { summary: result.slice(0, 2000) }
+        : { summary: 'Task completed (no output captured)' };
+
+      // Fetch existing context so we merge rather than replace
+      let existingContext: Record<string, unknown> = {};
+      try {
+        const getRes = await agencyFetch(`/tasks/${task.id}`);
+        if (getRes.ok) {
+          const getJson = (await getRes.json()) as {
+            success: boolean;
+            data: { context?: Record<string, unknown> };
+          };
+          existingContext = getJson.data?.context ?? {};
+        } else {
+          log.warn(
+            { status: getRes.status, taskId: task.id },
+            'Failed to fetch existing context, will replace',
+          );
+        }
+      } catch (err) {
         log.warn(
-          { status: getRes.status, taskId: task.id },
-          'Failed to fetch existing context, will replace',
+          { err, taskId: task.id },
+          'Failed to GET task for context merge, will replace',
         );
       }
-    } catch (err) {
-      log.warn(
-        { err, taskId: task.id },
-        'Failed to GET task for context merge, will replace',
-      );
-    }
 
-    const mergedContext = { ...existingContext, result: resultPayload };
+      const mergedContext = { ...existingContext, result: resultPayload };
 
-    try {
-      const res = await agencyFetch(`/tasks/${task.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          context: mergedContext,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
+      try {
+        const res = await agencyFetch(`/tasks/${task.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            context: mergedContext,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          log.error(
+            { status: res.status, body, taskId: task.id },
+            'Failed to write result back to Agency HQ',
+          );
+        } else {
+          log.info({ taskId: task.id }, 'Result written back to Agency HQ');
+        }
+      } catch (err) {
         log.error(
-          { status: res.status, body, taskId: task.id },
-          'Failed to write result back to Agency HQ',
+          { err, taskId: task.id },
+          'Failed to PUT result to Agency HQ',
         );
-      } else {
-        log.info({ taskId: task.id }, 'Result written back to Agency HQ');
       }
-    } catch (err) {
-      log.error({ err, taskId: task.id }, 'Failed to PUT result to Agency HQ');
-    }
 
-    // Clean up dispatch tracking (task succeeded — clear all backoff state)
-    dispatchRetryCount.delete(task.id);
-    dispatchSkipTicks.delete(task.id);
-    dispatchTime.delete(task.id);
+      // Clean up dispatch tracking (task succeeded — clear all backoff state)
+      dispatchRetryCount.delete(task.id);
+      dispatchSkipTicks.delete(task.id);
+      dispatchTime.delete(task.id);
+    } finally {
+      // --- Phase 4: Free slot (from any state) ---
+      if (capturedClaim) {
+        // Clean up the worktree before freeing the slot.
+        if (capturedClaim.worktreePath) {
+          removeWorktree(process.cwd(), capturedClaim.worktreePath);
+        }
+        await freeSlot(capturedClaim.slotId, task.id);
+        lockedWorkerSlots.delete(capturedClaim.slotJid);
+        log.debug(
+          {
+            workerSlot: capturedClaim.slotJid,
+            slotId: capturedClaim.slotId,
+            worktreePath: capturedClaim.worktreePath,
+          },
+          'Worker slot freed',
+        );
+      }
+    }
   });
 
   log.info({ taskId: task.id, localTaskId }, 'Task dispatched successfully');
@@ -411,11 +617,23 @@ async function markBlocked(
   task: AgencyHqTask,
   log: ReturnType<typeof createCorrelationLogger>,
 ): Promise<void> {
+  // Set dispatch_blocked_until to 24 hours from now.
+  // This is a softer block than status=blocked — the task stays in its current
+  // state but won't be retried until the timestamp passes.
+  const blockedUntil = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+
   try {
     await agencyFetch(`/tasks/${task.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ status: 'blocked' }),
+      body: JSON.stringify({
+        status: 'blocked',
+        dispatch_blocked_until: blockedUntil,
+      }),
     });
+    log.warn(
+      { taskId: task.id, blockedUntil },
+      'Task marked blocked with dispatch_blocked_until',
+    );
   } catch (err) {
     log.error({ err, taskId: task.id }, 'Failed to mark task blocked');
   }

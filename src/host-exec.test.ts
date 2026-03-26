@@ -3,6 +3,47 @@ import { describe, it, expect } from 'vitest';
 import { validateCommandArgs } from './host-exec.js';
 
 describe('validateCommandArgs', () => {
+  describe('systemctl', () => {
+    it('allows systemctl status for other services', () => {
+      expect(
+        validateCommandArgs('systemctl', ['--user', 'status', 'agency-hq']),
+      ).toBeNull();
+    });
+
+    it('allows systemctl restart for other services', () => {
+      expect(
+        validateCommandArgs('systemctl', ['--user', 'restart', 'agency-hq']),
+      ).toBeNull();
+    });
+
+    it('blocks systemctl targeting nanoclaw by service name', () => {
+      const result = validateCommandArgs('systemctl', [
+        '--user',
+        'stop',
+        'nanoclaw',
+      ]);
+      expect(result).toContain('cannot target the nanoclaw service');
+    });
+
+    it('blocks systemctl targeting com.nanoclaw (launchd unit name)', () => {
+      const result = validateCommandArgs('systemctl', [
+        '--user',
+        'restart',
+        'com.nanoclaw',
+      ]);
+      expect(result).toContain('cannot target the nanoclaw service');
+    });
+
+    it('blocks systemctl targeting a nanoclaw variant', () => {
+      const result = validateCommandArgs('systemctl', [
+        '--user',
+        'start',
+        'nanoclaw.service',
+      ]);
+      expect(result).toContain('cannot target the nanoclaw service');
+    });
+  });
+
   describe('git', () => {
     it('allows git pull', () => {
       expect(validateCommandArgs('git', ['pull'])).toBeNull();
@@ -76,55 +117,21 @@ describe('validateCommandArgs', () => {
     });
   });
 
-  describe('npm', () => {
-    it('allows npm install', () => {
-      expect(validateCommandArgs('npm', ['install'])).toBeNull();
-    });
-
-    it('allows npm build', () => {
-      expect(validateCommandArgs('npm', ['build'])).toBeNull();
-    });
-
-    it('allows npm ci', () => {
-      expect(validateCommandArgs('npm', ['ci'])).toBeNull();
-    });
-
-    it('allows npm run', () => {
-      expect(validateCommandArgs('npm', ['run', 'build'])).toBeNull();
-    });
-
-    it('allows npm install with flags', () => {
-      expect(
-        validateCommandArgs('npm', ['install', '--production']),
-      ).toBeNull();
-    });
-
-    it('blocks npm publish', () => {
-      const result = validateCommandArgs('npm', ['publish']);
-      expect(result).toContain('not allowed');
-      expect(result).toContain('publish');
-    });
-
-    it('blocks npm unpublish', () => {
-      const result = validateCommandArgs('npm', ['unpublish']);
-      expect(result).toContain('not allowed');
-    });
-
-    it('blocks npm adduser', () => {
-      const result = validateCommandArgs('npm', ['adduser']);
-      expect(result).toContain('not allowed');
-    });
-
-    it('rejects npm with no subcommand', () => {
-      expect(validateCommandArgs('npm', [])).toContain('requires a subcommand');
-    });
-  });
-
   describe('other commands', () => {
     it('returns null for commands without arg restrictions', () => {
       expect(validateCommandArgs('cat', ['/etc/hostname'])).toBeNull();
       expect(validateCommandArgs('ls', ['-la'])).toBeNull();
       expect(validateCommandArgs('curl', ['https://example.com'])).toBeNull();
+      expect(validateCommandArgs('df', ['-h'])).toBeNull();
+      expect(validateCommandArgs('free', ['-m'])).toBeNull();
+      expect(validateCommandArgs('ps', ['aux'])).toBeNull();
+      expect(validateCommandArgs('jq', ['.', '/tmp/data.json'])).toBeNull();
+      expect(
+        validateCommandArgs('node', ['--version']),
+      ).toBeNull();
+      expect(
+        validateCommandArgs('journalctl', ['--user', '-u', 'agency-hq', '-n', '50']),
+      ).toBeNull();
     });
   });
 });

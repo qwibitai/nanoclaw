@@ -94,6 +94,21 @@ export const AGENCY_HQ_URL =
 export const DISPATCH_LOOP_INTERVAL = 60_000;
 export const STALL_DETECTOR_INTERVAL = 15 * 60_000;
 export const STALL_THRESHOLD_MS = 15 * 60_000;
+/** Orphaned in-progress tasks older than this are reconciled back to ready on startup. */
+export const DISPATCH_ORPHAN_THRESHOLD_MS = parseInt(
+  process.env.DISPATCH_ORPHAN_THRESHOLD_MS || String(5 * 60_000),
+  10,
+);
+/** dispatch_blocked_until penalty applied to reconciled orphan tasks (default: 5 min). */
+export const DISPATCH_ORPHAN_PENALTY_MS = parseInt(
+  process.env.DISPATCH_ORPHAN_PENALTY_MS || String(5 * 60_000),
+  10,
+);
+/** How long to wait for in-flight dispatch workers to finish on SIGTERM before reverting them (default: 30s). */
+export const DISPATCH_DRAIN_TIMEOUT_MS = parseInt(
+  process.env.DISPATCH_DRAIN_TIMEOUT_MS || String(30_000),
+  10,
+);
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

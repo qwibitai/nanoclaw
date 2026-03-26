@@ -107,6 +107,14 @@ export async function runScheduledTask(
       result: null,
       error,
     });
+    await deps
+      .sendMessage(
+        task.chat_jid,
+        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: ${error}`,
+      )
+      .catch((alertErr) =>
+        log.warn({ alertErr }, 'Failed to send task failure alert'),
+      );
     return null;
   }
   fs.mkdirSync(groupDir, { recursive: true });
@@ -136,6 +144,14 @@ export async function runScheduledTask(
       },
       error: `Group not found: ${task.group_folder}`,
     });
+    await deps
+      .sendMessage(
+        task.chat_jid,
+        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nError: Group not found: ${task.group_folder}`,
+      )
+      .catch((alertErr) =>
+        log.warn({ alertErr }, 'Failed to send task failure alert'),
+      );
     return null;
   }
 
@@ -253,6 +269,28 @@ export async function runScheduledTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  if (error) {
+    // For once tasks (no nextRun), override 'completed' status to 'failed'
+    // so failures are distinguishable from successful completions.
+    if (nextRun === null) {
+      updateTask(task.id, { status: 'failed' });
+    }
+    const truncatedError =
+      error.length > 300 ? `${error.slice(0, 297)}...` : error;
+    const truncatedPrompt =
+      task.prompt.length > 80
+        ? `${task.prompt.slice(0, 77)}...`
+        : task.prompt;
+    await deps
+      .sendMessage(
+        task.chat_jid,
+        `⚠️ *Scheduled task failed*\nTask: \`${task.id}\`\nPrompt: ${truncatedPrompt}\nError: ${truncatedError}`,
+      )
+      .catch((alertErr) =>
+        log.warn({ alertErr }, 'Failed to send task failure alert'),
+      );
+  }
 
   return result;
 }

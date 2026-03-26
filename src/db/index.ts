@@ -4,6 +4,7 @@ import path from 'path';
 
 import { STORE_DIR } from '../config.js';
 
+import { _setDispatchSlotsDb } from './dispatch-slots.js';
 import { _setGroupsDb } from './groups.js';
 import { _setMessagesDb } from './messages.js';
 import { migrateJsonState, runMigrations } from './migrations.js';
@@ -18,6 +19,7 @@ function setAllDbs(database: Database.Database): void {
   _setSessionsDb(database);
   _setGroupsDb(database);
   _setTasksDb(database);
+  _setDispatchSlotsDb(database);
 }
 
 export function initDatabase(): void {
@@ -85,3 +87,16 @@ export {
 } from './tasks.js';
 
 export { _setMigrationsDir } from './migrations.js';
+
+export {
+  SlotRecord,
+  SlotState,
+  getActiveSlotForTask,
+  getActiveSlots,
+  insertAcquiringSlot,
+  pruneFreedSlots,
+  recoverStaleSlotRecords,
+  transitionToExecuting,
+  transitionToFree,
+  transitionToReleasing,
+} from './dispatch-slots.js';
