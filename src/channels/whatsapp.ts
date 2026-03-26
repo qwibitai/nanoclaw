@@ -16,8 +16,15 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, getLatestMessage, setLastGroupSync, storeReaction, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnInboundMessage,
@@ -242,7 +249,8 @@ export class WhatsAppChannel implements Channel {
           const chatJid = await this.translateJid(rawChatJid);
           const groups = this.opts.registeredGroups();
           if (!groups[chatJid]) continue;
-          const reactorJid = reaction.key?.participant || reaction.key?.remoteJid || '';
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
           const emoji = reaction.text || '';
           const timestamp = reaction.senderTimestampMs
             ? new Date(Number(reaction.senderTimestampMs)).toISOString()
@@ -262,7 +270,7 @@ export class WhatsAppChannel implements Channel {
               reactor: reactorJid.split('@')[0],
               emoji: emoji || '(removed)',
             },
-            emoji ? 'Reaction added' : 'Reaction removed'
+            emoji ? 'Reaction added' : 'Reaction removed',
           );
         } catch (err) {
           logger.error({ err }, 'Failed to process reaction');
@@ -303,8 +311,13 @@ export class WhatsAppChannel implements Channel {
 
   async sendReaction(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
   ): Promise<void> {
     if (!this.connected) {
       logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
@@ -320,7 +333,7 @@ export class WhatsAppChannel implements Channel {
           messageId: messageKey.id?.slice(0, 10) + '...',
           emoji: emoji || '(removed)',
         },
-        emoji ? 'Reaction sent' : 'Reaction removed'
+        emoji ? 'Reaction sent' : 'Reaction removed',
       );
     } catch (err) {
       logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
@@ -455,3 +468,5 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));

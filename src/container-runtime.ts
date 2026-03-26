@@ -12,7 +12,11 @@ import { logger } from './logger.js';
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
 /** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+export const CONTAINER_HOST_GATEWAY =
+  os.platform() === 'linux' &&
+  !fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')
+    ? '127.0.0.1'
+    : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.
@@ -30,21 +34,21 @@ function detectProxyBindHost(): string {
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
   if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
-  // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
-  const ifaces = os.networkInterfaces();
-  const docker0 = ifaces['docker0'];
-  if (docker0) {
-    const ipv4 = docker0.find((a) => a.family === 'IPv4');
-    if (ipv4) return ipv4.address;
-  }
-  return '0.0.0.0';
+  // Bare-metal Linux: containers use --network=host so the proxy can bind to
+  // loopback — containers see 127.0.0.1 as the host directly.
+  return '127.0.0.1';
 }
 
-/** CLI args needed for the container to resolve the host gateway. */
+/** CLI args needed for the container to reach the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
+  // On bare-metal Linux, use host networking so containers can reach the
+  // credential proxy on 127.0.0.1 without hitting the INPUT chain firewall.
+  // WSL uses Docker Desktop (bridge works fine there — skip host networking).
+  if (
+    os.platform() === 'linux' &&
+    !fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')
+  ) {
+    return ['--network=host'];
   }
   return [];
 }

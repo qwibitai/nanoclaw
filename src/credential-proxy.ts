@@ -11,8 +11,8 @@
  *             subsequent requests carry the temp key which is valid as-is.
  */
 import { createServer, Server } from 'http';
-import { request as httpsRequest } from 'https';
-import { request as httpRequest, RequestOptions } from 'http';
+import { request as httpsRequest, Agent as HttpsAgent } from 'https';
+import { request as httpRequest, Agent as HttpAgent, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -42,6 +42,9 @@ export function startCredentialProxy(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
   const isHttps = upstreamUrl.protocol === 'https:';
+  const agent = isHttps
+    ? new HttpsAgent({ keepAlive: true, keepAliveMsecs: 10000 })
+    : new HttpAgent({ keepAlive: true, keepAliveMsecs: 10000 });
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {
@@ -86,12 +89,20 @@ export function startCredentialProxy(
             path: req.url,
             method: req.method,
             headers,
+            agent,
           } as RequestOptions,
           (upRes) => {
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
           },
         );
+
+        // Enable TCP keepalive probes on the upstream socket so NAT/firewall
+        // devices don't drop idle streaming connections during long tool calls
+        // (e.g. WebSearch). Probes fire every 10s after 5s of inactivity.
+        upstream.on('socket', (socket) => {
+          socket.setKeepAlive(true, 5000);
+        });
 
         upstream.on('error', (err) => {
           logger.error(
