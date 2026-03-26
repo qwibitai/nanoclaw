@@ -226,6 +226,11 @@ async function readSecrets(): Promise<Record<string, string>> {
     'AIRTABLE_API_KEY',
     'AIRTABLE_BASE_ID',
     'GITHUB_TOKEN',
+    // X (Twitter) API credentials
+    'X_API_KEY',
+    'X_API_KEY_SECRET',
+    'X_ACCESS_TOKEN',
+    'X_ACCESS_TOKEN_SECRET',
   ]);
 
   // OAuth token from credentials file (auto-refreshing) or .env fallback
