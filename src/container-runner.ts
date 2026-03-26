@@ -434,7 +434,7 @@ export async function runContainerAgent(
           let startIdx: number;
           while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
             const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-            if (endIdx === -1) break;
+            if (endIdx === -1) break; // Incomplete pair, wait for more data
 
             const jsonStr = parseBuffer
               .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
@@ -477,6 +477,8 @@ export async function runContainerAgent(
         const trimmed = line.trim();
         if (trimmed) logger.debug({ container: group.folder }, trimmed);
 
+        // Don't reset timeout on stderr — SDK writes debug logs continuously.
+        // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
         if (stderrTruncated) continue;
         const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
         if (line.length > remaining) {
@@ -551,7 +553,6 @@ export async function runContainerAgent(
     };
   }
 
-  // Write log file
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const logFile = path.join(logsDir, `container-${timestamp}.log`);
   const isVerbose =
