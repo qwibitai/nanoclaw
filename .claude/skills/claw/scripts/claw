@@ -18,6 +18,9 @@ Usage:
   claw ps --logs [filter]         Dump logs for matching containers
   claw ps --tail [filter]         Follow logs (multiplexed, Ctrl-C to stop)
   claw ps --kill-zombies          Stop and remove unnamed containers
+  claw sessions [filter]          List groups with a saved session ID
+  claw history [-g group] [-n N]  Print recent messages for a group
+  claw rebuild [--tag TAG]        Build the nanoclaw-agent container image
   claw molt export [--out <file.molt>]         Export this install to a bundle
   claw molt import <file.molt> [--rename k=v]  Import bundle into this install
   claw molt archs                              List installed molt drivers
@@ -298,6 +301,116 @@ def cmd_molt(molt_args: list[str]) -> None:
     sys.exit(result.returncode)
 
 
+# ── Session listing (claw sessions) ─────────────────────────────────────────
+
+
+def cmd_sessions(filt: str | None) -> None:
+    """List groups that have a saved session ID."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        """
+        SELECT s.group_folder, rg.name, s.session_id
+        FROM sessions s
+        LEFT JOIN registered_groups rg ON rg.folder = s.group_folder
+        ORDER BY s.group_folder
+        """
+    ).fetchall()
+    conn.close()
+    if filt:
+        q = filt.lower()
+        rows = [r for r in rows if q in r[0].lower() or (r[1] and q in r[1].lower())]
+    if not rows:
+        print("No sessions found." if not filt else f'No sessions matching "{filt}".')
+        return
+    col_w = max(len(r[0]) for r in rows) + 2
+    name_w = max((len(r[1] or "") for r in rows), default=0) + 2
+    print(f"{'FOLDER':<{col_w}} {'NAME':<{name_w}} SESSION ID")
+    print("-" * (col_w + name_w + 38))
+    for folder, name, sid in rows:
+        print(f"{folder:<{col_w}} {(name or ''):<{name_w}} {sid}")
+
+
+# ── Message history (claw history) ───────────────────────────────────────────
+
+
+def cmd_history(group: str | None, jid: str | None, count: int) -> None:
+    """Print recent messages for a group from the local database."""
+    if not DB_PATH.exists():
+        sys.exit(f"error: database not found at {DB_PATH}")
+    groups = get_groups(DB_PATH)
+    agent_name = "Agent"
+
+    if group:
+        g = find_group(groups, group)
+        if g is None:
+            sys.exit(f"error: group '{group}' not found. Run --list-groups to see options.")
+        target_jid = g["jid"]
+        label = g["name"]
+        agent_name = g.get("agent_name") or "Agent"
+    elif jid:
+        target_jid = jid
+        label = jid
+    else:
+        mains = [g for g in groups if g["is_main"]]
+        if not mains:
+            sys.exit("error: no main group found. Use -g or -j.")
+        target_jid = mains[0]["jid"]
+        label = mains[0]["name"]
+        agent_name = mains[0].get("agent_name") or "Agent"
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        """
+        SELECT sender_name, content, timestamp, is_from_me, is_bot_message
+        FROM messages
+        WHERE chat_jid = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        (target_jid, count),
+    ).fetchall()
+    conn.close()
+
+    rows = list(reversed(rows))
+    print(f"Last {len(rows)} messages — {label}")
+    print("-" * 60)
+    for sender_name, content, ts, is_from_me, is_bot in rows:
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            ts_str = dt.strftime("%m-%d %H:%M")
+        except Exception:
+            ts_str = (ts or "")[:16]
+        if is_bot:
+            who = agent_name
+        elif is_from_me:
+            who = sender_name or "You"
+        else:
+            who = sender_name or "?"
+        display = (content or "").replace("\n", " ")
+        if len(display) > 120:
+            display = display[:117] + "..."
+        print(f"[{ts_str}] {who}: {display}")
+
+
+# ── Container rebuild (claw rebuild) ─────────────────────────────────────────
+
+
+def cmd_rebuild(tag: str, clean: bool, runtime: str) -> None:
+    """Build (or rebuild) the nanoclaw-agent container image."""
+    build_sh = NANOCLAW_DIR / "container" / "build.sh"
+    if not build_sh.exists():
+        sys.exit(f"error: build script not found at {build_sh}")
+    if clean:
+        print(f"Pruning {runtime} builder cache...")
+        subprocess.run([runtime, "builder", "prune", "-f"], check=True)
+    env = os.environ.copy()
+    env["CONTAINER_RUNTIME"] = runtime
+    result = subprocess.run([str(build_sh), tag], env=env)
+    sys.exit(result.returncode)
+
+
 # ── Container listing (claw ps) ──────────────────────────────────────────────
 
 # Apple Container timestamps are seconds since 2001-01-01 (Core Data epoch).
@@ -483,6 +596,42 @@ def main():
         cmd_molt(sys.argv[2:])
         return  # unreachable (cmd_molt calls sys.exit)
 
+    # ── claw sessions subcommand ──────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "sessions":
+        filt = sys.argv[2] if len(sys.argv) > 2 else None
+        cmd_sessions(filt)
+        return
+
+    # ── claw history subcommand ───────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "history":
+        hist_parser = argparse.ArgumentParser(
+            prog="claw history",
+            description="Print recent messages for a group from the local database.",
+        )
+        hist_parser.add_argument("-g", "--group", help="Group name or folder (fuzzy match)")
+        hist_parser.add_argument("-j", "--jid", help="Chat JID (exact)")
+        hist_parser.add_argument("-n", "--count", type=int, default=20, metavar="N",
+                                 help="Number of messages to show (default: 20)")
+        hist_args = hist_parser.parse_args(sys.argv[2:])
+        cmd_history(hist_args.group, hist_args.jid, hist_args.count)
+        return
+
+    # ── claw rebuild subcommand ───────────────────────────────────────────────
+    if len(sys.argv) > 1 and sys.argv[1] == "rebuild":
+        rb_parser = argparse.ArgumentParser(
+            prog="claw rebuild",
+            description="Build the nanoclaw-agent container image.",
+        )
+        rb_parser.add_argument("--tag", default="latest", help="Image tag (default: latest)")
+        rb_parser.add_argument("--clean", action="store_true",
+                               help="Prune builder cache before building")
+        rb_parser.add_argument("--runtime", choices=["docker", "container"],
+                               help="Container runtime (default: auto-detect)")
+        rb_args = rb_parser.parse_args(sys.argv[2:])
+        runtime = detect_runtime(rb_args.runtime)
+        cmd_rebuild(rb_args.tag, rb_args.clean, runtime)
+        return  # unreachable (cmd_rebuild calls sys.exit)
+
     # ── claw ps subcommand ────────────────────────────────────────────────────
     if len(sys.argv) > 1 and sys.argv[1] == "ps":
         ps_parser = argparse.ArgumentParser(
@@ -513,7 +662,9 @@ def main():
         description="Run a NanoClaw agent from the command line.",
         epilog=(
             "Container management: run 'claw ps --help' for listing, logs, and zombie cleanup.\n"
-            "Migration: run 'claw molt --help' for export/import with the molt tool."
+            "Session history: 'claw sessions' lists saved session IDs; 'claw history' shows recent messages.\n"
+            "Rebuild image: 'claw rebuild --help'.\n"
+            "Migration: 'claw molt --help' for export/import with the molt tool."
         ),
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to send")

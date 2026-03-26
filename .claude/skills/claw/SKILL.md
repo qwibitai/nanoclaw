@@ -18,6 +18,9 @@ description: Install the claw CLI tool — run NanoClaw agent containers from th
 - Prints the agent's response to stdout; session ID to stderr
 - Verbose mode (`-v`) shows the command, redacted payload, and exit code
 - `claw ps` — list, inspect, and manage running NanoClaw containers
+- `claw sessions` — list groups with a saved session ID (for use with `-s`)
+- `claw history` — print recent messages for a group from the local database
+- `claw rebuild` — build (or rebuild) the `nanoclaw-agent` container image
 - `claw molt` — export/import NanoClaw installs via the [molt](https://github.com/kenbolton/molt) migration tool (optional dependency)
 
 ## Prerequisites
@@ -125,6 +128,51 @@ claw ps --tail
 
 # Remove stale unnamed containers
 claw ps --kill-zombies
+```
+
+### Session management (claw sessions)
+
+```bash
+# List all groups with a saved session ID
+claw sessions
+
+# Filter by group name or folder substring
+claw sessions main
+```
+
+Use the session ID with `-s` to resume a previous conversation:
+
+```bash
+claw -s <session-id> "Continue where we left off"
+```
+
+### Message history (claw history)
+
+```bash
+# Last 20 messages for the main group
+claw history
+
+# Last 20 messages for a specific group (fuzzy match)
+claw history -g family
+
+# Show more messages
+claw history -n 50
+
+# By exact JID
+claw history -j "120363336345536173@g.us"
+```
+
+### Rebuilding the container image (claw rebuild)
+
+```bash
+# Rebuild with the default tag (nanoclaw-agent:latest)
+claw rebuild
+
+# Build with a custom tag
+claw rebuild --tag dev
+
+# Prune builder cache first, then rebuild (use when COPY steps serve stale files)
+claw rebuild --clean
 ```
 
 ### Migration (claw molt)
