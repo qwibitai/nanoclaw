@@ -29,7 +29,6 @@ import type { ProgressEvent } from './container-runner.js';
 const MAX_SSE_CONNECTIONS = 100;
 const clients = new Set<ServerResponse>();
 const activeSessions = new Map<string, ActiveSession>();
-let cachedHtml: Buffer | null = null;
 
 // --- Static file serving (bundled mode) ---
 
@@ -362,7 +361,6 @@ function serveStaticFile(pathname: string, res: ServerResponse): boolean {
 
 export function startWebUI(
   port: number,
-  htmlPath: string,
   deps: WebUIDeps,
   token: string,
 ): Promise<WebUIHandle> {
@@ -422,23 +420,14 @@ export function startWebUI(
     // CORS runs first on all requests
     if (handleCors(req, res)) return; // Was a preflight OPTIONS — already handled
 
-    // Serve HTML unauthenticated — login form is handled client-side
+    // Redirect / to /ui/
     if (pathname === '/' && req.method === 'GET') {
-      if (!cachedHtml) {
-        try {
-          cachedHtml = fs.readFileSync(htmlPath);
-        } catch {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Web UI HTML not found');
-          return;
-        }
-      }
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(cachedHtml);
+      res.writeHead(301, { Location: '/ui/' });
+      res.end();
       return;
     }
 
-    // Static file serving for bundled SPA (unauthenticated, like / )
+    // Static file serving for bundled SPA (unauthenticated)
     if (pathname === '/ui' || pathname.startsWith('/ui/')) {
       // Redirect /ui to /ui/
       if (pathname === '/ui') {

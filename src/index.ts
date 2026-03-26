@@ -973,17 +973,33 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   // Send host-side model switch confirmation so it doesn't depend on agent compliance.
   if (overrideResult && !overrideResult.reset) {
-    const label = overrideResult.sticky ? 'for this session' : 'for this message';
+    const label = overrideResult.sticky
+      ? 'for this session'
+      : 'for this message';
     channel
-      .sendMessage(chatJid, `✅ Switched to ${model} ${label}.`, effectiveThreadId)
+      .sendMessage(
+        chatJid,
+        `✅ Switched to ${model} ${label}.`,
+        effectiveThreadId,
+      )
       .catch((err: unknown) =>
-        logger.warn({ chatJid, err }, 'Failed to send model switch confirmation'),
+        logger.warn(
+          { chatJid, err },
+          'Failed to send model switch confirmation',
+        ),
       );
   } else if (overrideResult?.reset) {
     channel
-      .sendMessage(chatJid, `✅ Model reverted to default (${model}).`, effectiveThreadId)
+      .sendMessage(
+        chatJid,
+        `✅ Model reverted to default (${model}).`,
+        effectiveThreadId,
+      )
       .catch((err: unknown) =>
-        logger.warn({ chatJid, err }, 'Failed to send model reset confirmation'),
+        logger.warn(
+          { chatJid, err },
+          'Failed to send model reset confirmation',
+        ),
       );
   }
 
