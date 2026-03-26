@@ -357,7 +357,7 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            // Sticker handling — download and save for reuse
+            // Sticker handling — download, save for reuse, and process for vision
             if (normalized?.stickerMessage) {
               try {
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
@@ -367,8 +367,14 @@ export class WhatsAppChannel implements Channel {
                 const filename = `sticker-${Date.now()}.webp`;
                 const filePath = path.join(stickerDir, filename);
                 fs.writeFileSync(filePath, buffer as Buffer);
-                content = content
-                  ? `${content}\n[Sticker: stickers/${filename}]`
+                // Process sticker through vision pipeline so agent can see it
+                const visionResult = await processImage(
+                  buffer as Buffer,
+                  groupDir,
+                  '',
+                );
+                content = visionResult
+                  ? `[Sticker: stickers/${filename}] ${visionResult.content}`
                   : `[Sticker: stickers/${filename}]`;
                 logger.info({ jid: chatJid, filename }, 'Sticker saved');
               } catch (err) {
