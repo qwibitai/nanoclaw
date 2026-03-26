@@ -11,11 +11,43 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/**
+ * Detect if we are running under Apple Container (macOS-native runtime).
+ * Identified by the presence of the bridge100 interface it creates.
+ */
+function isAppleContainer(): boolean {
+  if (os.platform() !== 'darwin') return false;
+  const ifaces = os.networkInterfaces();
+  return Object.keys(ifaces).some((name) => name.startsWith('bridge'));
+}
+
+/**
+ * Hostname/IP containers use to reach the host machine.
+ * Apple Container: host is the bridge IP (192.168.64.1); host.docker.internal is unavailable.
+ * Docker Desktop (macOS/WSL): host.docker.internal resolves via the Docker VM.
+ * Linux: host.docker.internal added via --add-host.
+ */
+export const CONTAINER_HOST_GATEWAY =
+  process.env.CONTAINER_HOST_GATEWAY || detectHostGateway();
+
+function detectHostGateway(): string {
+  if (isAppleContainer()) {
+    // Find the host's IP on the Apple Container bridge network (bridge100)
+    const ifaces = os.networkInterfaces();
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      if (name.startsWith('bridge') && addrs) {
+        const ipv4 = addrs.find((a) => a.family === 'IPv4');
+        if (ipv4) return ipv4.address;
+      }
+    }
+  }
+  return 'host.docker.internal';
+}
 
 /**
  * Address the credential proxy binds to.
+ * Apple Container (macOS): bridge IP (e.g. 192.168.64.1) — containers reach the host
+ *   via this IP, so the proxy must bind there rather than loopback.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
@@ -24,6 +56,7 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
+  if (isAppleContainer()) return detectHostGateway();
   if (os.platform() === 'darwin') return '127.0.0.1';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.

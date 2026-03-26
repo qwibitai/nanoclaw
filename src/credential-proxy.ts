@@ -13,11 +13,32 @@
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
 export type AuthMode = 'api-key' | 'oauth';
+
+/** Read the current OAuth token from ~/.claude/.credentials.json if valid, else null. */
+function readClaudeCredentials(): string | null {
+  try {
+    const credFile =
+      process.env.CLAUDE_CREDENTIALS_FILE ||
+      path.join(os.homedir(), '.claude', '.credentials.json');
+    const raw = fs.readFileSync(credFile, 'utf-8');
+    const creds = JSON.parse(raw);
+    const oauth = creds?.claudeAiOauth;
+    if (!oauth?.accessToken) return null;
+    // Only use if not expired (with 60s buffer)
+    if (oauth.expiresAt && Date.now() > oauth.expiresAt - 60_000) return null;
+    return oauth.accessToken as string;
+  } catch {
+    return null;
+  }
+}
 
 export interface ProxyConfig {
   authMode: AuthMode;
@@ -35,7 +56,7 @@ export function startCredentialProxy(
   ]);
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
+  const fallbackOauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   const upstreamUrl = new URL(
@@ -73,6 +94,8 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
+            const oauthToken =
+              readClaudeCredentials() || fallbackOauthToken;
             if (oauthToken) {
               headers['authorization'] = `Bearer ${oauthToken}`;
             }

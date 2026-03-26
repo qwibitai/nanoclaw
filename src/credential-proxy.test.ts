@@ -52,6 +52,8 @@ describe('credential-proxy', () => {
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    // Prevent readClaudeCredentials from reading the real credentials file
+    process.env.CLAUDE_CREDENTIALS_FILE = '/nonexistent/.credentials.json';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
@@ -68,6 +70,7 @@ describe('credential-proxy', () => {
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    delete process.env.CLAUDE_CREDENTIALS_FILE;
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
