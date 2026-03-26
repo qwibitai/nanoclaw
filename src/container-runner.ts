@@ -59,6 +59,15 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function isRuntimeAgentRunnerSource(relPath: string): boolean {
+  const base = path.basename(relPath);
+  return !(
+    /\.test\.[cm]?tsx?$/i.test(base) ||
+    /\.spec\.[cm]?tsx?$/i.test(base) ||
+    /\.bak(?:\.|$)/i.test(base)
+  );
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -193,6 +202,16 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
+  if (fs.existsSync(groupAgentRunnerDir)) {
+    for (const entry of fs.readdirSync(groupAgentRunnerDir)) {
+      if (!isRuntimeAgentRunnerSource(entry)) {
+        fs.rmSync(path.join(groupAgentRunnerDir, entry), {
+          force: true,
+          recursive: true,
+        });
+      }
+    }
+  }
   if (fs.existsSync(agentRunnerSrc)) {
     const srcIndex = path.join(agentRunnerSrc, 'index.ts');
     const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
@@ -202,7 +221,13 @@ function buildVolumeMounts(
       (fs.existsSync(srcIndex) &&
         fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
     if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, {
+        recursive: true,
+        filter: (src) => {
+          const relPath = path.relative(agentRunnerSrc, src);
+          return relPath === '' || isRuntimeAgentRunnerSource(relPath);
+        },
+      });
     }
   }
   mounts.push({

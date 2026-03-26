@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import fs from 'fs';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -45,6 +46,8 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
+      rmSync: vi.fn(),
     },
   };
 });
@@ -117,6 +120,20 @@ const testInput = {
   isMain: false,
 };
 
+function resetFsMocks() {
+  vi.mocked(fs.existsSync).mockImplementation(() => false);
+  vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+  vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
+  vi.mocked(fs.readFileSync).mockImplementation(() => '' as any);
+  vi.mocked(fs.readdirSync).mockImplementation(() => [] as any);
+  vi.mocked(fs.statSync).mockImplementation(
+    () => ({ isDirectory: () => false, mtimeMs: 0 }) as any,
+  );
+  vi.mocked(fs.copyFileSync).mockImplementation(() => undefined);
+  vi.mocked(fs.cpSync).mockImplementation(() => undefined);
+  vi.mocked(fs.rmSync).mockImplementation(() => undefined as any);
+}
+
 function emitOutputMarker(
   proc: ReturnType<typeof createFakeProcess>,
   output: ContainerOutput,
@@ -127,6 +144,8 @@ function emitOutputMarker(
 
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    resetFsMocks();
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
   });
@@ -255,5 +274,95 @@ describe('container-runner timeout behavior', () => {
         error: 'internal stream ended unexpectedly',
       }),
     );
+  });
+});
+
+describe('agent-runner source sync', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFsMocks();
+    fakeProc = createFakeProcess();
+  });
+
+  it('copies only runtime agent-runner sources into the per-group cache', async () => {
+    const existsSync = vi.mocked(fs.existsSync);
+    existsSync.mockImplementation((target) => {
+      const normalized = String(target);
+      if (normalized.endsWith('/container/skills')) return false;
+      if (normalized.endsWith('/container/agent-runner/src')) return true;
+      if (normalized.endsWith('/container/agent-runner/src/index.ts')) return true;
+      return false;
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const cpSync = vi.mocked(fs.cpSync);
+    expect(cpSync).toHaveBeenCalledWith(
+      expect.stringContaining('/container/agent-runner/src'),
+      expect.stringContaining('/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src'),
+      expect.objectContaining({
+        recursive: true,
+        filter: expect.any(Function),
+      }),
+    );
+
+    const filter = cpSync.mock.calls[0]?.[2]?.filter as ((src: string) => boolean);
+    expect(filter('/repo/container/agent-runner/src/index.ts')).toBe(true);
+    expect(filter('/repo/container/agent-runner/src/index.test.ts')).toBe(false);
+    expect(filter('/repo/container/agent-runner/src/index.ts.bak.20260311_092703')).toBe(false);
+
+    await new Promise(setImmediate);
+    fakeProc.emit('close', 0);
+    await resultPromise;
+  });
+
+  it('prunes stale test and backup files from the per-group cache before launch', async () => {
+    const groupCacheDir = '/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src';
+    const cachedIndex = `${groupCacheDir}/index.ts`;
+    const sourceIndex = `${process.cwd()}/container/agent-runner/src/index.ts`;
+
+    const existsSync = vi.mocked(fs.existsSync);
+    existsSync.mockImplementation((target) => {
+      const normalized = String(target);
+      if (normalized.endsWith('/container/skills')) return false;
+      if (normalized.endsWith('/container/agent-runner/src')) return true;
+      if (normalized === sourceIndex) return true;
+      if (normalized === groupCacheDir) return true;
+      if (normalized === cachedIndex) return true;
+      return false;
+    });
+
+    vi.mocked(fs.readdirSync).mockImplementation((target) => {
+      if (String(target) === groupCacheDir) {
+        return ['index.ts', 'index.test.ts', 'index.ts.bak.20260311_092703'] as any;
+      }
+      return [] as any;
+    });
+
+    vi.mocked(fs.statSync).mockImplementation((target) => {
+      if (String(target) === sourceIndex) {
+        return { mtimeMs: 100, isDirectory: () => false } as any;
+      }
+      if (String(target) === cachedIndex) {
+        return { mtimeMs: 200, isDirectory: () => false } as any;
+      }
+      return { mtimeMs: 0, isDirectory: () => false } as any;
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    expect(vi.mocked(fs.rmSync)).toHaveBeenCalledWith(
+      `${groupCacheDir}/index.test.ts`,
+      { force: true, recursive: true },
+    );
+    expect(vi.mocked(fs.rmSync)).toHaveBeenCalledWith(
+      `${groupCacheDir}/index.ts.bak.20260311_092703`,
+      { force: true, recursive: true },
+    );
+    expect(vi.mocked(fs.cpSync)).not.toHaveBeenCalled();
+
+    await new Promise(setImmediate);
+    fakeProc.emit('close', 0);
+    await resultPromise;
   });
 });
