@@ -38,6 +38,7 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -223,6 +224,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const onRateLimited = () => {
     if (rateLimitNotified) return;
     rateLimitNotified = true;
+    // Clear session so the next invocation starts fresh after the rate limit resets,
+    // preventing the agent from resuming a stale incomplete task.
+    delete sessions[group.folder];
+    deleteSession(group.folder);
     channel
       .sendMessage(
         chatJid,
