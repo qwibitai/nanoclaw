@@ -644,10 +644,10 @@ export async function runCliInteractive(
     '--mcp-config', mcpConfigFile,
   ];
 
-  // Resume session if available
-  if (input.sessionId) {
-    args.push('--resume', input.sessionId);
-  }
+  // NOTE: Do NOT pass --resume with container session IDs.
+  // CLI and container sessions are incompatible (different environments).
+  // Each CLI invocation starts fresh. Conversation context is maintained
+  // via the CLAUDE.md memory system and workspace files.
 
   const env: Record<string, string> = { ...process.env as Record<string, string> };
   for (const [key, value] of Object.entries(secrets)) {
