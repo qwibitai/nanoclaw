@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
 
 describe('nanoclaw skill script', () => {
   it('exits zero after successful structured output even if the runtime is terminated', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-skill-test-'));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-skill-test-'),
+    );
     const binDir = path.join(tempDir, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
 
