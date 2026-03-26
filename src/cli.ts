@@ -9,7 +9,11 @@
  */
 
 import { installProcessHandlers, logger } from './logger.js';
-import { loadEnvConfig, buildOptionsFromEnv } from './config_cli.js';
+import {
+  loadEnvConfig,
+  buildOptionsFromEnv,
+  applyCliOverrides,
+} from './config_cli.js';
 import { AgentLite } from './sdk.js';
 
 // CLI owns the process lifecycle: install error + signal handlers
@@ -17,6 +21,7 @@ installProcessHandlers();
 
 // Load .env config (SDK mode skips this — consumers set config explicitly)
 loadEnvConfig();
+applyCliOverrides();
 
 // Self-register built-in channels (Telegram, etc.)
 import './channels/index.js';

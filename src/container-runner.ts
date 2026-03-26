@@ -41,13 +41,15 @@ async function getOneCLI(): Promise<any> {
   return _onecli;
 }
 
-// LLM credential resolver — set via SDK, bypasses OneCLI when provided
+// Model credential resolver — set via SDK, bypasses OneCLI when provided
 type CredentialResolver = () => Promise<Record<string, string>>;
 let _credentialResolver: CredentialResolver | null = null;
 
-/** Configure LLM options. Called by orchestrator during start(). */
-export function setLLMOptions(llm: { credentials?: CredentialResolver }): void {
-  _credentialResolver = llm.credentials ?? null;
+/** Configure model options. Called by orchestrator during start(). */
+export function setModelOptions(opts: {
+  credentials?: CredentialResolver;
+}): void {
+  _credentialResolver = opts.credentials ?? null;
 }
 
 // Sentinel markers for robust output parsing (must match agent-runner)

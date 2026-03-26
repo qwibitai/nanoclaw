@@ -15,46 +15,22 @@ import { fileURLToPath } from 'url';
 
 import { isValidTimezone } from './timezone.js';
 
-// ─── SDK options types ──────────────────────────────────────────────
+import type { AgentLiteOptions } from './options.js';
 
-/** Container resource and runtime options. */
-export interface ContainerOptions {
-  image?: string;
-  rootfsPath?: string;
-  memoryMib?: number;
-  cpus?: number;
-  timeout?: number;
-  maxOutputSize?: number;
-  maxConcurrent?: number;
+/** Internal config overrides (not part of public SDK API). Used by CLI. */
+export interface InternalConfigOverrides {
+  timezone?: string;
+  boxImage?: string;
+  boxRootfsPath?: string;
+  boxMemoryMib?: number;
+  boxCpus?: number;
+  containerTimeout?: number;
+  containerMaxOutputSize?: number;
+  maxConcurrentContainers?: number;
   idleTimeout?: number;
-}
-
-/** Security file path overrides. */
-export interface SecurityOptions {
+  onecliUrl?: string;
   mountAllowlistPath?: string;
   senderAllowlistPath?: string;
-}
-
-/** Options accepted by the AgentLite SDK constructor. All optional with defaults. */
-export interface AgentLiteOptions {
-  /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
-  name?: string;
-  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to process.cwd(). */
-  workdir?: string;
-  /** Read-only package assets root (container/, groups/ templates, OCI image). Defaults to package root. */
-  assetsRoot?: string;
-  /** IANA timezone (e.g. 'Asia/Shanghai'). Defaults to system timezone or UTC. */
-  timezone?: string;
-  /** Container resource and runtime configuration. */
-  container?: ContainerOptions;
-  /** Security file path overrides. */
-  security?: SecurityOptions;
-  /** OneCLI credential gateway URL. Defaults to http://localhost:10254. */
-  onecliUrl?: string;
-  /** LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
-  llm?: {
-    credentials?: () => Promise<Record<string, string>>;
-  };
 }
 
 // ─── Package root (immutable) ───────────────────────────────────────
@@ -162,11 +138,6 @@ export function applyConfig(opts: AgentLiteOptions): void {
     TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(opts.name)}\\b`, 'i');
   }
 
-  // Timezone
-  if (opts.timezone) {
-    TIMEZONE = resolveTimezone(opts.timezone);
-  }
-
   // Paths
   if (opts.workdir) {
     PROJECT_ROOT = path.resolve(opts.workdir);
@@ -179,36 +150,29 @@ export function applyConfig(opts: AgentLiteOptions): void {
     ASSETS_ROOT = path.resolve(opts.assetsRoot);
     BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
   }
+}
 
-  // Container
-  if (opts.container) {
-    const c = opts.container;
-    if (c.image !== undefined) BOX_IMAGE = c.image;
-    if (c.rootfsPath !== undefined) BOX_ROOTFS_PATH = c.rootfsPath;
-    if (c.memoryMib !== undefined) BOX_MEMORY_MIB = c.memoryMib;
-    if (c.cpus !== undefined) BOX_CPUS = c.cpus;
-    if (c.timeout !== undefined) CONTAINER_TIMEOUT = c.timeout;
-    if (c.maxOutputSize !== undefined)
-      CONTAINER_MAX_OUTPUT_SIZE = c.maxOutputSize;
-    if (c.maxConcurrent !== undefined)
-      MAX_CONCURRENT_CONTAINERS = Math.max(1, c.maxConcurrent);
-    if (c.idleTimeout !== undefined) IDLE_TIMEOUT = c.idleTimeout;
-  }
-
-  // Security
-  if (opts.security) {
-    if (opts.security.mountAllowlistPath !== undefined) {
-      MOUNT_ALLOWLIST_PATH = opts.security.mountAllowlistPath;
-    }
-    if (opts.security.senderAllowlistPath !== undefined) {
-      SENDER_ALLOWLIST_PATH = opts.security.senderAllowlistPath;
-    }
-  }
-
-  // OneCLI
-  if (opts.onecliUrl !== undefined) {
-    ONECLI_URL = opts.onecliUrl;
-  }
+/**
+ * Apply internal config overrides (not part of public SDK API).
+ * Used by CLI to forward env-based values to config vars.
+ */
+export function applyInternalConfig(o: InternalConfigOverrides): void {
+  if (o.timezone) TIMEZONE = resolveTimezone(o.timezone);
+  if (o.boxImage !== undefined) BOX_IMAGE = o.boxImage;
+  if (o.boxRootfsPath !== undefined) BOX_ROOTFS_PATH = o.boxRootfsPath;
+  if (o.boxMemoryMib !== undefined) BOX_MEMORY_MIB = o.boxMemoryMib;
+  if (o.boxCpus !== undefined) BOX_CPUS = o.boxCpus;
+  if (o.containerTimeout !== undefined) CONTAINER_TIMEOUT = o.containerTimeout;
+  if (o.containerMaxOutputSize !== undefined)
+    CONTAINER_MAX_OUTPUT_SIZE = o.containerMaxOutputSize;
+  if (o.maxConcurrentContainers !== undefined)
+    MAX_CONCURRENT_CONTAINERS = Math.max(1, o.maxConcurrentContainers);
+  if (o.idleTimeout !== undefined) IDLE_TIMEOUT = o.idleTimeout;
+  if (o.onecliUrl !== undefined) ONECLI_URL = o.onecliUrl;
+  if (o.mountAllowlistPath !== undefined)
+    MOUNT_ALLOWLIST_PATH = o.mountAllowlistPath;
+  if (o.senderAllowlistPath !== undefined)
+    SENDER_ALLOWLIST_PATH = o.senderAllowlistPath;
 }
 
 // ─── Deprecated setters (kept for backward compat) ──────────────────
