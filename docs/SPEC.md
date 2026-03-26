@@ -225,12 +225,12 @@ Channels self-register using a barrel-import pattern:
 
 ### Adding a New Channel
 
-To add a new channel, contribute a skill to `.claude/skills/add-<name>/` that:
+To add a new channel, contribute a skill branch (`skill/<name>`) with code changes and a SKILL.md to the [nanoclaw-skills](https://github.com/qwibitai/nanoclaw-skills) marketplace. The code should:
 
-1. Adds a `src/channels/<name>.ts` file implementing the `Channel` interface
-2. Calls `registerChannel(name, factory)` at module load
-3. Returns `null` from the factory if credentials are missing
-4. Adds an import line to `src/channels/index.ts`
+1. Add a `src/channels/<name>.ts` file implementing the `Channel` interface
+2. Call `registerChannel(name, factory)` at module load
+3. Return `null` from the factory if credentials are missing
+4. Add an import line to `src/channels/index.ts`
 
 See existing skills (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`) for the pattern.
 
