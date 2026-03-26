@@ -115,5 +115,139 @@ mcpServer.tool(
   },
 );
 
+server.tool(
+  'ollama_pull_model',
+  'Pull (download) a model from the Ollama registry by name. Returns the final status once the pull is complete. Use model names like "llama3.2", "mistral", "gemma2:9b".',
+  {
+    model: z.string().describe('Model name to pull, e.g. "llama3.2", "mistral", "gemma2:9b"'),
+  },
+  async (args) => {
+    log(`Pulling model: ${args.model}...`);
+    writeStatus('pulling', `Pulling ${args.model}`);
+    try {
+      const res = await ollamaFetch('/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: args.model, stream: false }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        return {
+          content: [{ type: 'text' as const, text: `Ollama error (${res.status}): ${errorText}` }],
+          isError: true,
+        };
+      }
+      const data = await res.json() as { status: string };
+      log(`Pull complete: ${args.model} — ${data.status}`);
+      writeStatus('done', `Pulled ${args.model}`);
+      return { content: [{ type: 'text' as const, text: `Pull complete: ${args.model} — ${data.status}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to pull model: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'ollama_delete_model',
+  'Delete a locally installed Ollama model to free up disk space.',
+  {
+    model: z.string().describe('Model name to delete, e.g. "llama3.2", "mistral:latest"'),
+  },
+  async (args) => {
+    log(`Deleting model: ${args.model}...`);
+    writeStatus('deleting', `Deleting ${args.model}`);
+    try {
+      const res = await ollamaFetch('/api/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: args.model }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        return {
+          content: [{ type: 'text' as const, text: `Ollama error (${res.status}): ${errorText}` }],
+          isError: true,
+        };
+      }
+      log(`Deleted: ${args.model}`);
+      writeStatus('done', `Deleted ${args.model}`);
+      return { content: [{ type: 'text' as const, text: `Deleted model: ${args.model}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to delete model: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'ollama_show_model',
+  'Show details for a locally installed Ollama model: modelfile, parameters, template, system prompt, and architecture info (context length, parameter count, etc.).',
+  {
+    model: z.string().describe('Model name to inspect, e.g. "llama3.2", "mistral:latest"'),
+  },
+  async (args) => {
+    log(`Showing model info: ${args.model}...`);
+    try {
+      const res = await ollamaFetch('/api/show', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: args.model }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        return {
+          content: [{ type: 'text' as const, text: `Ollama error (${res.status}): ${errorText}` }],
+          isError: true,
+        };
+      }
+      const data = await res.json();
+      return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to show model info: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'ollama_list_running',
+  'List Ollama models currently loaded in memory with their memory usage, processor type (CPU/GPU), and time until they are unloaded.',
+  {},
+  async () => {
+    log('Listing running models...');
+    try {
+      const res = await ollamaFetch('/api/ps');
+      if (!res.ok) {
+        return {
+          content: [{ type: 'text' as const, text: `Ollama API error: ${res.status} ${res.statusText}` }],
+          isError: true,
+        };
+      }
+      const data = await res.json() as { models?: Array<{ name: string; size_vram: number; processor: string; expires_at: string }> };
+      const models = data.models || [];
+      if (models.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No models currently loaded in memory.' }] };
+      }
+      const list = models
+        .map(m => `- ${m.name} (${(m.size_vram / 1e9).toFixed(1)}GB ${m.processor}, unloads at ${m.expires_at})`)
+        .join('\n');
+      log(`${models.length} model(s) running`);
+      return { content: [{ type: 'text' as const, text: `Models loaded in memory:\n${list}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to list running models: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 await mcpServer.connect(transport);
