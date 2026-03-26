@@ -153,7 +153,44 @@ Verify the secret was registered:
 onecli secrets list
 ```
 
-Tell the user: "Migrated your credentials from `.env` to the OneCLI Agent Vault. The raw keys have been removed from `.env` — they're now managed by OneCLI and will be injected at request time without entering containers."
+Tell the user: "Migrated your Anthropic credentials from `.env` to the OneCLI Agent Vault. The raw keys have been removed from `.env` — they're now managed by OneCLI and will be injected at request time without entering containers."
+
+### Offer to migrate other service credentials
+
+After handling Anthropic credentials (whether migrated or freshly registered), scan `.env` again for any remaining credential variables. Look for variables whose names contain `_TOKEN`, `_KEY`, `_SECRET`, or `_PASSWORD`, excluding non-credential entries like `ONECLI_URL` and other config values.
+
+Common examples from NanoClaw skills:
+
+| .env variable | Secret name | Host pattern |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | `Telegram` | `api.telegram.org` |
+| `SLACK_BOT_TOKEN` | `Slack Bot` | `slack.com` |
+| `SLACK_APP_TOKEN` | `Slack App` | `slack.com` |
+| `DISCORD_BOT_TOKEN` | `Discord` | `discord.com` |
+| `OPENAI_API_KEY` | `OpenAI` | `api.openai.com` |
+| `PARALLEL_API_KEY` | `Parallel` | `api.parallel.ai` |
+
+If any such variables are found with non-empty values, present them to the user:
+
+AskUserQuestion (multiSelect): "These other credentials are still in `.env`. Would you like to move any of them to the OneCLI Agent Vault as well? Credentials in the vault are never exposed to containers and can have rate limits and policies applied."
+
+- One option per credential found (e.g., "TELEGRAM_BOT_TOKEN" — description: "Telegram bot token, will be proxied through the vault")
+- **Skip — keep them in .env** — description: "Leave these credentials in .env for now. You can move them later."
+
+For each credential the user selects:
+
+```bash
+onecli secrets create --name <SecretName> --type api_key --value <value> --host-pattern <host>
+```
+
+If a variable isn't in the table above, use a reasonable secret name derived from the variable name (e.g., `MY_SERVICE_KEY` becomes `My Service`) and ask the user what host pattern to use: "What API host does this credential authenticate against? (e.g., `api.example.com`)"
+
+After migration, remove the migrated lines from `.env` using the Edit tool. Keep any credentials the user chose not to migrate.
+
+Verify all secrets were registered:
+```bash
+onecli secrets list
+```
 
 ### If no credentials found in .env
 
