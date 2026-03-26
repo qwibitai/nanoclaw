@@ -131,29 +131,9 @@ Always check these before answering:
 - `owner-info.md` — Owner email and notification preferences.
 - `playbook.md` — Your own learning notes (you write this).
 
-## Automated Follow-ups
-
-When the follow-up scheduled task fires, check for stale leads and follow up:
-
-1. Use `query-contacts.ts follow-up --days 3` to find leads needing attention
-2. Check each lead's `channel_source` before choosing how to follow up:
-   - **WhatsApp source** → Send follow-up via WhatsApp (send_message)
-   - **SMS/Quo source** → Add a note for manual follow-up (can't cold-text from Quo)
-   - **Email source** → Use the send-email tool
-3. Maximum 3 follow-up touches per lead — the query enforces this automatically
-4. After each follow-up, log the outreach so it's tracked
-5. Tailor the message based on pipeline stage (check `pipeline.ts get --contact-id <id>`)
-
 ## Self-Learning
 
-After each conversation, update `playbook.md` with patterns you notice:
-
-- Common Questions — What do people keep asking?
-- Objections & Responses — What pushback comes up and what works?
-- Lead Patterns — What types of rentals are most popular?
-- Things to Improve — Where did you struggle or feel unsure?
-
-This helps you get better over time.
+After each conversation, update `playbook.md` with patterns: common questions, objections & responses, rental trends, things to improve.
 
 ## Tools Available
 
@@ -188,50 +168,17 @@ Inbound SMS contacts are automatically created in the CRM. When you learn more a
 
 ### Deal Pipeline
 
-Track every inquiry through the pipeline. On first contact, create a deal:
-```
-pipeline create --contact-id <id> --group sheridan-rentals --source sms
-```
+Track every inquiry through stages: new → qualified → appointment_booked → proposal → closed_won/closed_lost.
 
-Move deals through stages as the conversation progresses:
-- **new** → First inquiry received
-- **qualified** → Know what they need, when, and duration
-- **appointment_booked** → Pickup date confirmed, deposit requested
-- **proposal** → Deposit paid, booking created on calendar
-- **closed_won** → Rental completed, equipment returned
-- **closed_lost** → Customer cancelled or went with someone else
-
-Always include a `--note` when moving stages.
+- Create on first contact: `pipeline.ts create --contact-id <id> --group sheridan-rentals --source sms`
+- Move stages: `pipeline.ts move --deal-id <id> --stage <stage> --note "reason"`
+- Check before responding: `pipeline.ts get --contact-id <id>`
+- Qualified = know what they need, dates, and duration
+- Always include a `--note` when moving stages
 
 ### Follow-Up Behavior
 
-When the follow-up scheduled task fires:
-1. Use `crm-query follow-up` to find stale leads (max 3 touches total)
-2. Check the contact's `channel_source` to pick the right channel:
-   - SMS/Quo source → note for manual follow-up (can't cold-text from Quo)
-   - WhatsApp source → reply via WhatsApp (`send_message`)
-   - Email source → use the send-email tool
-3. Tailor the follow-up based on their pipeline stage
-4. After sending, log the outreach
-
-### Reply Tracking
-
-When someone replies to an inquiry follow-up:
-1. Update their deal stage accordingly
-2. Log the interaction in conversation notes
-
-## Deal Pipeline
-
-Track every inquiry through the pipeline using the CRM pipeline tool:
-
-1. **On first contact** — Create a deal: `pipeline.ts create --contact-id <id> --group sheridan-rentals --source sms`
-2. **After qualifying** (know what they need, dates, duration) — Move to qualified
-3. **After checking availability and confirming dates** — Move to appointment_booked
-4. **After confirming pricing and requesting deposit** — Move to proposal
-5. **After deposit received / booking confirmed** — Move to closed_won
-6. **If they ghost or cancel** — Move to closed_lost with a note
-
-Always check `pipeline.ts get --contact-id <id>` before responding to a returning customer so you know their booking history.
+Follow-up task uses `crm-query follow-up` (max 3 touches). Check `channel_source` for channel: WhatsApp → send_message, Email → send-email tool, SMS/Quo → note for manual follow-up.
 
 ## Memory
 
@@ -261,59 +208,10 @@ When content posting or SEO tasks fire:
 - Update `content-calendar.md` after every post
 - Read `seo-assets.md` for website SEO targets and GBP settings
 
-## Facebook Page Posting — Weekly Approval Workflow
+## Facebook Page Posting
 
 The goal is to build page credibility, followers, and engagement organically — this unlocks Facebook Marketplace access.
 
-### Weekly Post Generation (Sunday 6 PM CT)
-A scheduled task (`sheridan-fb-posts-weekly`) generates next week's 5 Facebook posts (Mon-Fri) and sends them to the group chat for owner approval.
-
-When the task fires:
-1. **Tiered competitor & inspiration scan**: Read `competitors.md` which has 3 tiers:
-   - **Tier 1 (Direct Competitors)**: Scan ALL pages — find content gaps to exploit
-   - **Tier 2 (Local Houston Crushers)**: Scan 3-5 pages (rotate weekly) — learn hooks, photo styles, and formats that get Houston audiences to engage. This is the most valuable tier.
-   - **Tier 3 (National Brands)**: Scan 1-2 pages — learn polished formats worth adapting
-   Use `trend-scraper.ts scan --platform facebook --query "<page_id>"` for each. Note what's getting engagement and update "Latest Scan Notes" in competitors.md.
-2. Read `brand-voice.md`, `content-calendar.md` (check log to avoid topic repeats within 2 weeks), `viral-patterns.md`, and `asset-catalog.md`
-3. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
-4. **Select a photo** for each post from `asset-catalog.md` using the theme-to-photo mapping. Record the Drive file ID alongside each post.
-   - **If asset-catalog.md has no photos yet**: Note "NO PHOTO" in the Drive File ID column of `pending-posts.md` and generate the post as text-only. When photos become available, update `asset-catalog.md` and future posts will automatically include them.
-5. **For each Facebook post, also generate an Instagram caption version**: same photo reference, but longer caption (150-300 chars), include 15-20 relevant hashtags from the hashtag strategy in `brand-voice.md`, and note the Instagram location ID from `houston-places.md`.
-6. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo (or "NO PHOTO"), place-id from `houston-places.md`, and the Instagram caption version alongside the Facebook version.
-7. Send WhatsApp preview of all 5 posts for owner review
-
-### Handling Approval Messages
-When the owner replies with approval (e.g., "approved", "looks good", "approve all"):
-- Update `pending-posts.md` top-level Status to "approved"
-- Update each day's Status from "pending" to "approved"
-- Confirm: "All 5 posts approved and queued for this week."
-
-When the owner requests changes (e.g., "change Wednesday to..." or "I don't like Tuesday's"):
-- Update the specific day's content in `pending-posts.md`
-- Reply with the updated post for confirmation
-- Do NOT approve other days unless the owner says so
-
-### Daily Posting (Weekdays 9 AM CT)
-A scheduled task (`sheridan-fb-post-daily`) reads `pending-posts.md` and posts today's approved content:
-1. Find today's entry by date
-2. If approved:
-   a. If Drive file ID is present (not "NO PHOTO"):
-      - Download the photo from Drive: `drive.ts download --file-id <id> --output /tmp/fb-photo.jpg`
-      - Post with photo and location: `post-facebook.ts --message "..." --source /tmp/fb-photo.jpg --place-id <tomball_place_id>`
-   b. If Drive file ID is "NO PHOTO" (no photos available in asset-catalog.md):
-      - Post text-only with geo-tag: `post-facebook.ts --message "..." --place-id <tomball_place_id>`
-      - Do NOT pass `--source`. Text-only posts should follow the "40-80 chars + engagement hook" format from content-creation guidelines.
-      - The post still goes through the normal pending-posts.md approval workflow.
-   c. Record the post_id in `pending-posts.md` and `content-calendar.md` log
-   d. **After posting to Facebook, also post to Instagram** using `post-instagram.ts` with the Instagram caption version and the same image URL. Use `--image-url` with the Facebook post's photo URL (after Facebook hosting makes it public). Use `--location-id` with the Instagram location ID from `houston-places.md`. Record the Instagram post_id in `pending-posts.md`.
-3. If not approved → skip and notify: "Skipping today's post — not yet approved"
-4. If already posted → skip silently
-
-### Weekly Performance Review (Saturday 10 AM CT)
-A scheduled task (`sheridan-fb-review-weekly`) measures engagement on this week's posts:
-1. Collect post_ids from `pending-posts.md` and `content-calendar.md`
-2. Fetch insights via `read-facebook-insights.ts`
-3. Compare hook types, themes, and engagement across the week
-4. Update `content-learnings.md` with the week's best/worst performers and key insight
-5. Update `viral-patterns.md` if new patterns emerge
-6. Send WhatsApp performance summary
+Read `/workspace/global/fb-posting-workflow.md` for the full weekly approval and posting workflow.
+Task names for this group: `sheridan-fb-posts-weekly`, `sheridan-fb-post-daily`, `sheridan-fb-review-weekly`.
+Use Tomball place-id from `houston-places.md` for geo-tags.

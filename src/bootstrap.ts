@@ -158,7 +158,7 @@ Keep the report concise. Only flag things that need attention.`);
 - Note any unread Gmail messages requiring attention
 
 Format as a clean, scannable snapshot. Use sections with headers. Keep it concise but complete. If a data source is unavailable, note it briefly and move on.`,
-    { model: 'claude-sonnet-4-6', budget_usd: 0.50 });
+    { budget_usd: 0.50 });
 
   seedTask('sams-club-weekly-prices', '0 10 * * 1',
     `Run the weekly Sam's Club price update:
@@ -190,7 +190,7 @@ Still happy to help if you're interested! Let me know if you have any questions.
 For Sheridan Rentals:
 "Hi [name], following up on your trailer rental inquiry. We still have availability
 if you're interested. Happy to answer any questions about the equipment."`,
-    { model: 'claude-sonnet-4-6', budget_usd: 0.30 });
+    { budget_usd: 0.30 });
 
   seedTask('review-solicitation', '0 11 * * *',
     `Check for recently completed services that should get a review request:
@@ -211,7 +211,7 @@ a Google review would mean a lot to us.
 [Include Google review link if available]"
 
 Only send ONE review request per customer. Check notes for "review requested" before sending.`,
-    { model: 'claude-sonnet-4-6', budget_usd: 0.20 });
+    { budget_usd: 0.20 });
 
   seedTask('weekly-revenue-dashboard', '0 9 * * 1',
     `Generate the weekly revenue and conversion dashboard for Blayk. Cover BOTH businesses:
@@ -240,7 +240,7 @@ Only send ONE review request per customer. Check notes for "review requested" be
 
 Format as a clean, executive-style dashboard. Use numbers, not paragraphs.
 Update the Google Sheet "Revenue Dashboard" tab if it exists.`,
-    { model: 'claude-sonnet-4-6', budget_usd: 0.50 });
+    { budget_usd: 0.50 });
 }
 
 // ── CLI readiness check ───────────────────────────────────────────
