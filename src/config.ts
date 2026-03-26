@@ -53,9 +53,9 @@ export let POLL_INTERVAL = 2000;
 export let SCHEDULER_POLL_INTERVAL = 60000;
 export let IPC_POLL_INTERVAL = 1000;
 
-// Absolute paths needed for container mounts.
-// PROJECT_ROOT can be overridden via applyConfig({ workdir }) for SDK usage.
-let PROJECT_ROOT = process.cwd();
+// Absolute paths — set by applyConfig({ workdir }) before any access.
+// No process.cwd() default: Electron embeds can't rely on cwd at import time.
+let PROJECT_ROOT = '';
 const HOME_DIR = process.env.HOME || os.homedir();
 
 /** Get the current project root directory. */
@@ -76,23 +76,16 @@ export let SENDER_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'sender-allowlist.json',
 );
-export let STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export let GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export let DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-
-// Assets root: read-only package assets (container/, groups/ templates, OCI image).
-// Defaults to PACKAGE_ROOT. Can be overridden for packaged apps (e.g., Electron).
-let ASSETS_ROOT = PACKAGE_ROOT;
-
-/** Get the current assets root directory. */
-export function getAssetsRoot(): string {
-  return ASSETS_ROOT;
-}
+export let STORE_DIR = '';
+export let GROUPS_DIR = '';
+export let DATA_DIR = '';
 
 export let BOX_IMAGE = 'ghcr.io/boxlite-ai/agentlite-agent:latest';
-// Path to OCI layout directory exported by container/build.sh.
-// When set, BoxLite uses this local rootfs instead of pulling from a registry.
-export let BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
+// Optional path to a local OCI layout directory. When set, BoxLite uses this
+// rootfs instead of pulling BOX_IMAGE from a registry. Only set via
+// applyInternalConfig({ boxRootfsPath }) — no default, since the OCI image
+// is a build artifact that may not exist.
+export let BOX_ROOTFS_PATH = '';
 export let BOX_MEMORY_MIB = 2048;
 export let BOX_CPUS = 2;
 export let CONTAINER_TIMEOUT = 1_800_000;
@@ -138,18 +131,12 @@ export function applyConfig(opts: AgentLiteOptions): void {
     TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(opts.name)}\\b`, 'i');
   }
 
-  // Paths
-  if (opts.workdir) {
-    PROJECT_ROOT = path.resolve(opts.workdir);
-    STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-    GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-    DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-  }
-
-  if (opts.assetsRoot) {
-    ASSETS_ROOT = path.resolve(opts.assetsRoot);
-    BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
-  }
+  // Paths — workdir is resolved at call time (not import time) so Electron
+  // embeds get a real filesystem path instead of an ASAR-relative cwd.
+  PROJECT_ROOT = path.resolve(opts.workdir ?? process.cwd());
+  STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+  GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+  DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 }
 
 /**
@@ -185,9 +172,4 @@ export function setProjectRoot(dir: string): void {
 /** @deprecated Use applyConfig({ name }) instead. */
 export function setAssistantName(name: string): void {
   applyConfig({ name });
-}
-
-/** @deprecated Use applyConfig({ assetsRoot }) instead. */
-export function setAssetsRoot(dir: string): void {
-  applyConfig({ assetsRoot: dir });
 }

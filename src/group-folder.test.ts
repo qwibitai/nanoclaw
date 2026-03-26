@@ -1,6 +1,11 @@
 import path from 'path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./config.js', () => ({
+  GROUPS_DIR: '/tmp/nanoclaw-test/groups',
+  DATA_DIR: '/tmp/nanoclaw-test/data',
+}));
 
 import {
   isValidGroupFolder,
