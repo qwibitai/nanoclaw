@@ -19,6 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.84",
     "@types/ws": "^8.18.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "apns2": "^12.2.0",

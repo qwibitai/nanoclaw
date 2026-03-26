@@ -572,6 +572,68 @@ export async function recoverTasksOnStartup(): Promise<void> {
   }
 }
 
+// --- Orchestration ---
+
+export interface DispatchCallbacks {
+  onProgress?: (taskId: number, message: string) => void;
+  onComplete?: (task: DevTask) => void;
+  onError?: (taskId: number, error: Error) => void;
+}
+
+/**
+ * Dispatch a task and run the full session lifecycle.
+ * This is the main entry point — creates the worktree, spawns the session,
+ * and handles completion/escalation asynchronously.
+ *
+ * Returns immediately after dispatch. The session runs in the background.
+ */
+export async function dispatchAndRun(
+  id: number,
+  callbacks: DispatchCallbacks = {},
+): Promise<DevTask> {
+  const { task, session } = dispatchTask(id);
+
+  // Import lazily to avoid circular dependency
+  const { spawnClaudeSession } = await import('./claude-session.js');
+
+  // Run session asynchronously — don't await, fire and forget
+  spawnClaudeSession(task, session.worktreePath, {
+    abortController: session.abortController,
+    onProgress: (progress) => {
+      callbacks.onProgress?.(task.id, progress.message);
+    },
+    onComplete: (result) => {
+      try {
+        let completedTask: DevTask;
+        if (result.status === 'pr_ready' && result.prUrl) {
+          completedTask = completeSession(task.id, {
+            status: 'pr_ready',
+            prUrl: result.prUrl,
+          });
+        } else {
+          completedTask = completeSession(task.id, {
+            status: 'needs_session',
+          });
+        }
+        callbacks.onComplete?.(completedTask);
+      } catch (err) {
+        logger.error({ taskId: task.id, err }, 'Error in session completion');
+        callbacks.onError?.(task.id, err as Error);
+      }
+    },
+  }).catch((err) => {
+    logger.error({ taskId: task.id, err }, 'Session failed unexpectedly');
+    try {
+      completeSession(task.id, { status: 'needs_session' });
+    } catch {
+      // Task may be gone
+    }
+    callbacks.onError?.(task.id, err);
+  });
+
+  return task;
+}
+
 /** Reset dispatch state (for tests). */
 export function _resetDispatchState(): void {
   activeSessions.clear();
