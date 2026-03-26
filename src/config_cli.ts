@@ -160,13 +160,8 @@ export let TIMEZONE = resolveConfigTimezone();
 
 // ─── CLI env → SDK options adapter ──────────────────────────────────
 
-import type { AgentLiteOptions } from './config.js';
-
-function parseOptionalInt(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const n = parseInt(value, 10);
-  return isNaN(n) ? undefined : n;
-}
+import type { AgentLiteOptions } from './options.js';
+import { applyInternalConfig } from './config.js';
 
 /**
  * Build AgentLiteOptions from .env + process.env.
@@ -176,17 +171,36 @@ function parseOptionalInt(value: string | undefined): number | undefined {
 export function buildOptionsFromEnv(): AgentLiteOptions {
   return {
     name: process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || undefined,
+  };
+}
+
+function parseOptionalInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = parseInt(value, 10);
+  return isNaN(n) ? undefined : n;
+}
+
+/**
+ * Apply CLI env-based overrides to internal config vars.
+ * These options are not part of the public SDK API — the CLI sets them
+ * directly via applyInternalConfig().
+ * Must be called after loadEnvConfig().
+ */
+export function applyCliOverrides(): void {
+  applyInternalConfig({
     timezone: process.env.TZ || envConfig.TZ || undefined,
     onecliUrl: process.env.ONECLI_URL || envConfig.ONECLI_URL || undefined,
-    container: {
-      image: process.env.BOX_IMAGE || undefined,
-      rootfsPath: process.env.BOX_ROOTFS_PATH || undefined,
-      memoryMib: parseOptionalInt(process.env.BOX_MEMORY_MIB),
-      cpus: parseOptionalInt(process.env.BOX_CPUS),
-      timeout: parseOptionalInt(process.env.CONTAINER_TIMEOUT),
-      maxOutputSize: parseOptionalInt(process.env.CONTAINER_MAX_OUTPUT_SIZE),
-      maxConcurrent: parseOptionalInt(process.env.MAX_CONCURRENT_CONTAINERS),
-      idleTimeout: parseOptionalInt(process.env.IDLE_TIMEOUT),
-    },
-  };
+    boxImage: process.env.BOX_IMAGE || undefined,
+    boxRootfsPath: process.env.BOX_ROOTFS_PATH || undefined,
+    boxMemoryMib: parseOptionalInt(process.env.BOX_MEMORY_MIB),
+    boxCpus: parseOptionalInt(process.env.BOX_CPUS),
+    containerTimeout: parseOptionalInt(process.env.CONTAINER_TIMEOUT),
+    containerMaxOutputSize: parseOptionalInt(
+      process.env.CONTAINER_MAX_OUTPUT_SIZE,
+    ),
+    maxConcurrentContainers: parseOptionalInt(
+      process.env.MAX_CONCURRENT_CONTAINERS,
+    ),
+    idleTimeout: parseOptionalInt(process.env.IDLE_TIMEOUT),
+  });
 }

@@ -13,8 +13,7 @@
  *
  * const agent = new AgentLite({
  *   workdir: './agentlite-data',
- *   container: { memoryMib: 4096, maxConcurrent: 3 },
- *   llm: { credentials: async () => ({ ANTHROPIC_API_KEY: 'sk-...' }) },
+ *   model: { credentials: async () => ({ ANTHROPIC_API_KEY: 'sk-...' }) },
  * });
  * await agent.start();
  *
@@ -23,41 +22,18 @@
  * ```
  */
 
-import {
-  ASSISTANT_NAME,
-  applyConfig,
-  type AgentLiteOptions,
-} from './config.js';
+import { ASSISTANT_NAME, applyConfig } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
+import type { AgentLiteOptions, GroupOptions } from './options.js';
 
 // Type-only re-exports (zero runtime cost — erased at compile time)
 export type {
   AgentLiteOptions,
-  ContainerOptions,
-  SecurityOptions,
-} from './config.js';
-export type { Channel, RegisteredGroup, NewMessage } from './types.js';
-export type { ContainerOutput } from './container-runner.js';
-
-/** Resolves credentials to env vars injected into agent containers.
- *  Called once per container spawn. Return a map like { ANTHROPIC_API_KEY: 'sk-...' }. */
-export type CredentialResolver = () => Promise<Record<string, string>>;
-
-/** LLM configuration for agent containers. */
-export interface LLMOptions {
-  /** Resolve credentials to env vars injected into each agent container.
-   *  If not set, falls back to OneCLI gateway. */
-  credentials?: CredentialResolver;
-}
-
-/** Simplified group options for SDK registration. */
-export interface GroupOptions {
-  name: string;
-  isMain?: boolean;
-  folder?: string;
-  trigger?: string;
-  requiresTrigger?: boolean;
-}
+  ModelOptions,
+  CredentialResolver,
+  GroupOptions,
+} from './options.js';
+export type { Channel, RegisteredGroup } from './types.js';
 
 export class AgentLite {
   private _channels: Channel[] = [];
@@ -92,7 +68,7 @@ export class AgentLite {
     await orchestrator.start({
       channels: this._channels,
       groups: this._groups,
-      llm: this._options.llm,
+      model: this._options.model,
     });
   }
 

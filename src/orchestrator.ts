@@ -15,7 +15,7 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
-  setLLMOptions,
+  setModelOptions,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -91,8 +91,8 @@ export interface StartOptions {
   channels?: Channel[];
   /** Pre-registered groups. */
   groups?: Map<string, RegisteredGroup>;
-  /** LLM configuration. If not provided, falls back to OneCLI gateway. */
-  llm?: {
+  /** Model/LLM configuration. If not provided, falls back to OneCLI gateway. */
+  model?: {
     credentials?: () => Promise<Record<string, string>>;
   };
 }
@@ -109,9 +109,9 @@ export async function start(options: StartOptions = {}): Promise<void> {
   ensureRuntimeReady();
   await cleanupOrphans();
 
-  // Configure LLM credentials for container injection
-  if (options.llm) {
-    setLLMOptions(options.llm);
+  // Configure model credentials for container injection
+  if (options.model) {
+    setModelOptions(options.model);
   }
   initDatabase();
   logger.info('Database initialized');

@@ -1,0 +1,38 @@
+/**
+ * SDK option types — the public type surface for AgentLite consumers.
+ *
+ * Kept separate from config.ts (runtime config vars) and sdk.ts (class impl)
+ * so the API surface is easy to review and doesn't pull in runtime logic.
+ */
+
+/** Resolves credentials to env vars injected into agent containers.
+ *  Called once per container spawn. Return a map like { ANTHROPIC_API_KEY: 'sk-...' }. */
+export type CredentialResolver = () => Promise<Record<string, string>>;
+
+/** Model/LLM configuration for agent containers. */
+export interface ModelOptions {
+  /** Resolve credentials to env vars injected into each agent container.
+   *  If not set, falls back to OneCLI gateway. */
+  credentials?: CredentialResolver;
+}
+
+/** Options accepted by the AgentLite SDK constructor. All optional with defaults. */
+export interface AgentLiteOptions {
+  /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
+  name?: string;
+  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to process.cwd(). */
+  workdir?: string;
+  /** Read-only package assets root (container/, groups/ templates, OCI image). Defaults to package root. */
+  assetsRoot?: string;
+  /** Model/LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
+  model?: ModelOptions;
+}
+
+/** Simplified group options for SDK registration. */
+export interface GroupOptions {
+  name: string;
+  isMain?: boolean;
+  folder?: string;
+  trigger?: string;
+  requiresTrigger?: boolean;
+}
