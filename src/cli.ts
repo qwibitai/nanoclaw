@@ -9,7 +9,7 @@
  */
 
 import { installProcessHandlers, logger } from './logger.js';
-import { loadEnvConfig } from './config.js';
+import { loadEnvConfig, buildOptionsFromEnv } from './config_cli.js';
 import { AgentLite } from './sdk.js';
 
 // CLI owns the process lifecycle: install error + signal handlers
@@ -26,7 +26,10 @@ import {
 } from './channels/registry.js';
 
 async function main(): Promise<void> {
-  const agent = new AgentLite();
+  // Build SDK options from .env + process.env — then pass to AgentLite
+  // just like any other SDK consumer would. The CLI is just an adapter.
+  const options = buildOptionsFromEnv();
+  const agent = new AgentLite(options);
   await agent.start();
 
   // Graceful shutdown on signals (CLI-only — SDK consumers handle their own lifecycle)

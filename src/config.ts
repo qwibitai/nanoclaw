@@ -1,9 +1,63 @@
+/**
+ * AgentLite SDK configuration facade.
+ *
+ * All config vars are `export let` with pure defaults (no process.env reads).
+ * SDK consumers call applyConfig() once during start() to set everything.
+ * Other modules import from here — ESM live bindings ensure they see updates.
+ *
+ * CLI mode uses config_cli.ts (the original config file) to read .env and
+ * process.env, then converts them into AgentLiteOptions passed to applyConfig().
+ * In SDK mode, config_cli.ts is never imported — zero side effects.
+ */
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
+
+// ─── SDK options types ──────────────────────────────────────────────
+
+/** Container resource and runtime options. */
+export interface ContainerOptions {
+  image?: string;
+  rootfsPath?: string;
+  memoryMib?: number;
+  cpus?: number;
+  timeout?: number;
+  maxOutputSize?: number;
+  maxConcurrent?: number;
+  idleTimeout?: number;
+}
+
+/** Security file path overrides. */
+export interface SecurityOptions {
+  mountAllowlistPath?: string;
+  senderAllowlistPath?: string;
+}
+
+/** Options accepted by the AgentLite SDK constructor. All optional with defaults. */
+export interface AgentLiteOptions {
+  /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
+  name?: string;
+  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to process.cwd(). */
+  workdir?: string;
+  /** Read-only package assets root (container/, groups/ templates, OCI image). Defaults to package root. */
+  assetsRoot?: string;
+  /** IANA timezone (e.g. 'Asia/Shanghai'). Defaults to system timezone or UTC. */
+  timezone?: string;
+  /** Container resource and runtime configuration. */
+  container?: ContainerOptions;
+  /** Security file path overrides. */
+  security?: SecurityOptions;
+  /** OneCLI credential gateway URL. Defaults to http://localhost:10254. */
+  onecliUrl?: string;
+  /** LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
+  llm?: {
+    credentials?: () => Promise<Record<string, string>>;
+  };
+}
+
+// ─── Package root (immutable) ───────────────────────────────────────
 
 // Package root: where the agentlite package is installed (resolved from this module's location).
 // Used as the default assets root for container/, groups/ templates, etc.
@@ -12,35 +66,19 @@ export const PACKAGE_ROOT = path.resolve(
   '..',
 );
 
-// Env config is NOT loaded at import time — SDK consumers call loadEnvConfig()
-// explicitly (via CLI) so the library is side-effect-free when embedded.
-let envConfig: Record<string, string> = {};
+// ─── Mutable config vars (ESM live bindings) ────────────────────────
+// All `export let` — consumers see updated values after applyConfig().
+// Defaults are pure (no process.env reads at import time) so the SDK
+// is side-effect-free when embedded.
 
-/** Load .env config values. Called by CLI before constructing AgentLite.
- *  SDK mode skips this — consumers set config explicitly. */
-export function loadEnvConfig(baseDir?: string): void {
-  envConfig = readEnvFile(
-    ['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'ONECLI_URL', 'TZ'],
-    baseDir,
-  );
-  // Re-derive values that depend on envConfig
-  if (!_assistantNameOverridden) {
-    ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-    TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(ASSISTANT_NAME)}\\b`, 'i');
-  }
-  ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
-  TIMEZONE = resolveConfigTimezone();
-}
-
-export let ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || 'Andy';
-export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-export const POLL_INTERVAL = 2000;
-export const SCHEDULER_POLL_INTERVAL = 60000;
+export let ASSISTANT_NAME = 'Andy';
+export let ASSISTANT_HAS_OWN_NUMBER = false;
+export let POLL_INTERVAL = 2000;
+export let SCHEDULER_POLL_INTERVAL = 60000;
+export let IPC_POLL_INTERVAL = 1000;
 
 // Absolute paths needed for container mounts.
-// PROJECT_ROOT can be overridden via setProjectRoot() for SDK usage.
+// PROJECT_ROOT can be overridden via applyConfig({ workdir }) for SDK usage.
 let PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
@@ -49,23 +87,14 @@ export function getProjectRoot(): string {
   return PROJECT_ROOT;
 }
 
-/** Override the project root directory (used by SDK's workdir option).
- *  Updates all derived paths via ESM live bindings. */
-export function setProjectRoot(dir: string): void {
-  PROJECT_ROOT = path.resolve(dir);
-  STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-  GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-  DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-}
-
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(
+export let MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
   'nanoclaw',
   'mount-allowlist.json',
 );
-export const SENDER_ALLOWLIST_PATH = path.join(
+export let SENDER_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
   'nanoclaw',
@@ -84,45 +113,17 @@ export function getAssetsRoot(): string {
   return ASSETS_ROOT;
 }
 
-/** Override the assets root directory.
- *  Updates BOX_ROOTFS_PATH (unless overridden by env var). */
-export function setAssetsRoot(dir: string): void {
-  ASSETS_ROOT = path.resolve(dir);
-  if (!process.env.BOX_ROOTFS_PATH) {
-    BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
-  }
-}
-
-export const BOX_IMAGE =
-  process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
+export let BOX_IMAGE = 'ghcr.io/boxlite-ai/agentlite-agent:latest';
 // Path to OCI layout directory exported by container/build.sh.
 // When set, BoxLite uses this local rootfs instead of pulling from a registry.
-export let BOX_ROOTFS_PATH = process.env.BOX_ROOTFS_PATH || path.join(
-  ASSETS_ROOT,
-  'container',
-  'oci-image',
-);
-export const BOX_MEMORY_MIB = parseInt(
-  process.env.BOX_MEMORY_MIB || '2048',
-  10,
-);
-export const BOX_CPUS = parseInt(process.env.BOX_CPUS || '2', 10);
-export const CONTAINER_TIMEOUT = parseInt(
-  process.env.CONTAINER_TIMEOUT || '1800000',
-  10,
-);
-export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
-  process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
-  10,
-); // 10MB default
-export let ONECLI_URL =
-  process.env.ONECLI_URL || 'http://localhost:10254';
-export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
-export const MAX_CONCURRENT_CONTAINERS = Math.max(
-  1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
-);
+export let BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
+export let BOX_MEMORY_MIB = 2048;
+export let BOX_CPUS = 2;
+export let CONTAINER_TIMEOUT = 1_800_000;
+export let CONTAINER_MAX_OUTPUT_SIZE = 10_485_760; // 10MB default
+export let ONECLI_URL = 'http://localhost:10254';
+export let IDLE_TIMEOUT = 1_800_000; // 30min default — how long to keep container alive after last result
+export let MAX_CONCURRENT_CONTAINERS = 5;
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -133,27 +134,92 @@ export let TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
-let _assistantNameOverridden = false;
-
-/** Override the assistant name (used by SDK). Updates TRIGGER_PATTERN too. */
-export function setAssistantName(name: string): void {
-  _assistantNameOverridden = true;
-  ASSISTANT_NAME = name;
-  TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
-}
-
-// Timezone for scheduled tasks, message formatting, etc.
-// Resolved at import time from process.env and Intl (no .env needed).
-// Re-derived when loadEnvConfig() is called (CLI adds .env TZ).
-function resolveConfigTimezone(): string {
-  const candidates = [
-    process.env.TZ,
-    envConfig.TZ,
-    Intl.DateTimeFormat().resolvedOptions().timeZone,
-  ];
-  for (const tz of candidates) {
-    if (tz && isValidTimezone(tz)) return tz;
-  }
+function resolveTimezone(tz?: string): string {
+  if (tz && isValidTimezone(tz)) return tz;
+  try {
+    const sys = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (sys && isValidTimezone(sys)) return sys;
+  } catch { /* ignore */ }
   return 'UTC';
 }
-export let TIMEZONE = resolveConfigTimezone();
+
+export let TIMEZONE = resolveTimezone();
+
+// ─── applyConfig — the single entry point for SDK ───────────────────
+
+/**
+ * Apply resolved options to all config vars.
+ * Called once by AgentLite.start() — every module that imports from
+ * config.ts sees the updated values via ESM live bindings.
+ * No other module needs to change.
+ */
+export function applyConfig(opts: AgentLiteOptions): void {
+  // Identity
+  if (opts.name) {
+    ASSISTANT_NAME = opts.name;
+    TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(opts.name)}\\b`, 'i');
+  }
+
+  // Timezone
+  if (opts.timezone) {
+    TIMEZONE = resolveTimezone(opts.timezone);
+  }
+
+  // Paths
+  if (opts.workdir) {
+    PROJECT_ROOT = path.resolve(opts.workdir);
+    STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+    GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+    DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+  }
+
+  if (opts.assetsRoot) {
+    ASSETS_ROOT = path.resolve(opts.assetsRoot);
+    BOX_ROOTFS_PATH = path.join(ASSETS_ROOT, 'container', 'oci-image');
+  }
+
+  // Container
+  if (opts.container) {
+    const c = opts.container;
+    if (c.image !== undefined) BOX_IMAGE = c.image;
+    if (c.rootfsPath !== undefined) BOX_ROOTFS_PATH = c.rootfsPath;
+    if (c.memoryMib !== undefined) BOX_MEMORY_MIB = c.memoryMib;
+    if (c.cpus !== undefined) BOX_CPUS = c.cpus;
+    if (c.timeout !== undefined) CONTAINER_TIMEOUT = c.timeout;
+    if (c.maxOutputSize !== undefined) CONTAINER_MAX_OUTPUT_SIZE = c.maxOutputSize;
+    if (c.maxConcurrent !== undefined) MAX_CONCURRENT_CONTAINERS = Math.max(1, c.maxConcurrent);
+    if (c.idleTimeout !== undefined) IDLE_TIMEOUT = c.idleTimeout;
+  }
+
+  // Security
+  if (opts.security) {
+    if (opts.security.mountAllowlistPath !== undefined) {
+      MOUNT_ALLOWLIST_PATH = opts.security.mountAllowlistPath;
+    }
+    if (opts.security.senderAllowlistPath !== undefined) {
+      SENDER_ALLOWLIST_PATH = opts.security.senderAllowlistPath;
+    }
+  }
+
+  // OneCLI
+  if (opts.onecliUrl !== undefined) {
+    ONECLI_URL = opts.onecliUrl;
+  }
+}
+
+// ─── Deprecated setters (kept for backward compat) ──────────────────
+
+/** @deprecated Use applyConfig({ workdir }) instead. */
+export function setProjectRoot(dir: string): void {
+  applyConfig({ workdir: dir });
+}
+
+/** @deprecated Use applyConfig({ name }) instead. */
+export function setAssistantName(name: string): void {
+  applyConfig({ name });
+}
+
+/** @deprecated Use applyConfig({ assetsRoot }) instead. */
+export function setAssetsRoot(dir: string): void {
+  applyConfig({ assetsRoot: dir });
+}

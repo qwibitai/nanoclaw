@@ -11,18 +11,27 @@
  * import { AgentLite } from '@boxlite-ai/agentlite';
  * import { TelegramChannel } from '@boxlite-ai/agentlite/channels/telegram';
  *
- * const agent = new AgentLite({ workdir: './agentlite-data' });
+ * const agent = new AgentLite({
+ *   workdir: './agentlite-data',
+ *   container: { memoryMib: 4096, maxConcurrent: 3 },
+ *   llm: { credentials: async () => ({ ANTHROPIC_API_KEY: 'sk-...' }) },
+ * });
  * await agent.start();
  *
- * await agent.registerChannel(new TelegramChannel({ token: process.env.TELEGRAM_BOT_TOKEN }));
+ * await agent.registerChannel(new TelegramChannel({ token: '123:ABC' }));
  * agent.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
  * ```
  */
 
-import { ASSISTANT_NAME, setProjectRoot, setAssistantName } from './config.js';
+import {
+  ASSISTANT_NAME,
+  applyConfig,
+  type AgentLiteOptions,
+} from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
 
 // Type-only re-exports (zero runtime cost — erased at compile time)
+export type { AgentLiteOptions, ContainerOptions, SecurityOptions } from './config.js';
 export type { Channel, RegisteredGroup, NewMessage } from './types.js';
 export type { ContainerOutput } from './container-runner.js';
 
@@ -35,16 +44,6 @@ export interface LLMOptions {
   /** Resolve credentials to env vars injected into each agent container.
    *  If not set, falls back to OneCLI gateway. */
   credentials?: CredentialResolver;
-}
-
-/** Options for the AgentLite SDK. */
-export interface AgentLiteOptions {
-  /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
-  name?: string;
-  /** Directory for agentlite data (store/, groups/, data/, .boxlite/). Defaults to process.cwd(). */
-  workdir?: string;
-  /** LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
-  llm?: LLMOptions;
 }
 
 /** Simplified group options for SDK registration. */
@@ -77,12 +76,10 @@ export class AgentLite {
     if (this._started) throw new Error('AgentLite already started');
     this._started = true;
 
-    if (this._options.name) {
-      setAssistantName(this._options.name);
-    }
-    if (this._options.workdir) {
-      setProjectRoot(this._options.workdir);
-    }
+    // Apply all options to config module — every downstream import
+    // sees updated values via ESM live bindings. One call, zero
+    // changes needed in orchestrator/container-runner/ipc/etc.
+    applyConfig(this._options);
 
     // Dynamic import — the orchestrator (and its native deps) load here, not at import time
     const orchestrator = await import('./orchestrator.js');
