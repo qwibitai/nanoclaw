@@ -971,6 +971,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         logger.debug({ chatJid, err }, 'Failed to add thinking reaction'),
       );
   }
+  // Send host-side model switch confirmation so it doesn't depend on agent compliance.
+  if (overrideResult && !overrideResult.reset) {
+    const label = overrideResult.sticky ? 'for this session' : 'for this message';
+    channel
+      .sendMessage(chatJid, `✅ Switched to ${model} ${label}.`, effectiveThreadId)
+      .catch((err: unknown) =>
+        logger.warn({ chatJid, err }, 'Failed to send model switch confirmation'),
+      );
+  } else if (overrideResult?.reset) {
+    channel
+      .sendMessage(chatJid, `✅ Model reverted to default (${model}).`, effectiveThreadId)
+      .catch((err: unknown) =>
+        logger.warn({ chatJid, err }, 'Failed to send model reset confirmation'),
+      );
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -2188,7 +2204,6 @@ async function main(): Promise<void> {
   // Start web UI for real-time agent activity monitoring
   webUI = await startWebUI(
     WEB_UI_PORT,
-    path.resolve('src', 'web-ui.html'),
     {
       sendMessage: (groupJid, threadId, text) =>
         queue.sendMessage(groupJid, threadId, text),
