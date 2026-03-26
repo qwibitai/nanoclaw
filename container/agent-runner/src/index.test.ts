@@ -170,4 +170,47 @@ describe('agent-runner transport handling', () => {
     ]);
     expect(result.encounteredError).toBe(true);
   });
+
+  it('emits an explicit error when transport throws before any result', async () => {
+    vi.stubEnv('NANOCLAW_AGENT_RUNNER_AUTOSTART', '0');
+
+    const mod = await import('./index.js');
+    const outputs: Array<{
+      status: 'success' | 'error';
+      result: string | null;
+      newSessionId?: string;
+      error?: string;
+    }> = [];
+
+    async function* fakeQuery() {
+      throw new Error('Claude Code process exited with code 1');
+    }
+
+    const result = await mod.runQuery(
+      'hello',
+      undefined,
+      '/tmp/mcp.js',
+      {
+        prompt: 'hello',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      {},
+      undefined,
+      {
+        queryImpl: fakeQuery as any,
+        emitOutput: (output) => outputs.push(output),
+      },
+    );
+
+    expect(outputs).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        result: null,
+        error: 'Claude Code process exited with code 1',
+      }),
+    ]);
+    expect(result.encounteredError).toBe(true);
+  });
 });
