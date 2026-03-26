@@ -87,18 +87,20 @@ function buildVolumeMounts(
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // TODO: Re-enable project root mount when SDK supports configurable workdir.
-    // Previously mounted process.cwd() read-only at /workspace/project so the
-    // main agent could read CLAUDE.md, configs, etc. Disabled for SDK mode
-    // because cwd is the user's app, not agentlite.
-    //
+    // Main gets the project root read-only. Writable paths the agent needs
+    // (group folder, IPC, .claude/) are mounted separately below.
+    // Read-only prevents the agent from modifying host application code
+    // (src/, dist/, package.json, etc.) which would bypass the sandbox
+    // entirely on next restart.
     // mounts.push({
     //   hostPath: packageRoot,
     //   containerPath: '/workspace/project',
     //   readonly: true,
     // });
-    //
-    // const envFile = path.join(packageRoot, '.env');
+
+    // Shadow .env so the agent cannot read secrets from the mounted project root.
+    // Credentials are injected by the OneCLI gateway, never exposed to containers.
+    // const envFile = path.join(projectRoot, '.env');
     // if (fs.existsSync(envFile)) {
     //   mounts.push({
     //     hostPath: '/dev/null',
@@ -107,6 +109,7 @@ function buildVolumeMounts(
     //   });
     // }
 
+    // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
