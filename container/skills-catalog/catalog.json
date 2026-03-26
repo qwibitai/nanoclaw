@@ -48,7 +48,7 @@
     {
       "name": "agent-browser",
       "source": "local",
-      "description": "Browse the web for any task \u2014 research topics, read articles, interact with web apps, fill forms, take screenshots, extract data, and test web pages. Use whenever a browser would be useful, not just when the user explicitly asks.",
+      "description": "Browse the web for any task — research topics, read articles, interact with web apps, fill forms, take screenshots, extract data, and test web pages. Use whenever a browser would be useful, not just when the user explicitly asks.",
       "categories": [
         "coding",
         "general"
@@ -559,7 +559,7 @@
     {
       "name": "github-ops",
       "source": "local",
-      "description": "Perform GitHub operations \u2014 create repos, open PRs, manage issues, clone, commit, push, review code, fork repos. Use when asked to do anything involving GitHub, git hosting, code review, or repository management.",
+      "description": "Perform GitHub operations — create repos, open PRs, manage issues, clone, commit, push, review code, fork repos. Use when asked to do anything involving GitHub, git hosting, code review, or repository management.",
       "categories": [
         "coding",
         "general"
@@ -640,6 +640,15 @@
       "path": "/skills-catalog/local/materials-simulation-skills/skills/core-numerical/linear-solvers"
     },
     {
+      "name": "market-data",
+      "source": "local",
+      "description": "Fetch real-time quotes, historical OHLCV, and fundamental metrics for stocks. Use when you need current prices, price history, or financial ratios for any ticker. Foundation skill for all stock analysis tasks.",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/market-data"
+    },
+    {
       "name": "memory-systems",
       "source": "plugin:agent-architecture",
       "description": ">",
@@ -683,16 +692,6 @@
         "general"
       ],
       "path": "/skills-catalog/plugins/context-engineering-fundamentals/memory-systems"
-    },
-    {
-      "name": "market-data",
-      "source": "local",
-      "description": "Fetch real-time quotes, historical OHLCV, and fundamental metrics for stocks. Use when you need current prices, price history, or financial ratios for any ticker. Foundation skill for all stock analysis tasks.",
-      "categories": [
-        "finance",
-        "general"
-      ],
-      "path": "/skills-catalog/local/market-data"
     },
     {
       "name": "mesh-generation",
@@ -769,9 +768,8 @@
     {
       "name": "notion",
       "source": "local",
-      "description": "Read and write Notion pages and databases. Use when asked to search Notion, read a page, create notes, update content, or query a database.",
+      "description": "Read and write Notion pages and databases. Use when asked to search Notion, read a page, create notes, update content, or query a database. Requires NOTION_TOKEN env var.",
       "categories": [
-        "productivity",
         "general"
       ],
       "path": "/skills-catalog/local/notion"
@@ -871,7 +869,7 @@
     {
       "name": "pptx",
       "source": "local",
-      "description": "\"Use this skill any time a .pptx file is involved in any way \u2014 as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \\\"deck,\\\" \\\"slides,\\\" \\\"presentation,\\\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill.\"",
+      "description": "\"Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \\\"deck,\\\" \\\"slides,\\\" \\\"presentation,\\\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill.\"",
       "categories": [
         "general",
         "creative"
@@ -1061,6 +1059,15 @@
       "path": "/skills-catalog/plugins/superpowers/systematic-debugging"
     },
     {
+      "name": "technical-analysis",
+      "source": "local",
+      "description": "Compute RSI, MACD, Bollinger Bands, EMA, and ATR for any stock ticker and return a signal summary. Use when you need technical indicators or want to know if a stock is overbought/oversold, trending, or showing bullish/bearish signals.",
+      "categories": [
+        "general"
+      ],
+      "path": "/skills-catalog/local/technical-analysis"
+    },
+    {
       "name": "test-driven-development",
       "source": "plugin:superpowers",
       "description": "Use when implementing any feature or bugfix, before writing implementation code",
@@ -1163,7 +1170,7 @@
     {
       "name": "visual-explainer",
       "source": "local",
-      "description": "Generate beautiful, self-contained HTML pages that visually explain systems, code changes, plans, and data. Use when the user asks for a diagram, architecture overview, diff review, plan review, project recap, comparison table, or any visual explanation of technical concepts. Also use proactively when you are about to render a complex ASCII table (4+ rows or 3+ columns) \u2014 present it as a styled HTML page instead.",
+      "description": "Generate beautiful, self-contained HTML pages that visually explain systems, code changes, plans, and data. Use when the user asks for a diagram, architecture overview, diff review, plan review, project recap, comparison table, or any visual explanation of technical concepts. Also use proactively when you are about to render a complex ASCII table (4+ rows or 3+ columns) — present it as a styled HTML page instead.",
       "categories": [
         "general"
       ],
@@ -1208,22 +1215,12 @@
     {
       "name": "xlsx",
       "source": "local",
-      "description": "\"Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path \u2014 even casually (like \\\"the xlsx in my downloads\\\") \u2014 and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.\"",
+      "description": "\"Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \\\"the xlsx in my downloads\\\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.\"",
       "categories": [
         "general",
         "creative"
       ],
       "path": "/skills-catalog/local/xlsx"
-    },
-    {
-      "name": "technical-analysis",
-      "source": "local",
-      "description": "Compute RSI, MACD, Bollinger Bands, EMA, and ATR for any stock ticker and return a signal summary. Use when you need technical indicators or want to know if a stock is overbought/oversold, trending, or showing bullish/bearish signals.",
-      "categories": [
-        "finance",
-        "general"
-      ],
-      "path": "/skills-catalog/local/technical-analysis"
     },
     {
       "name": "fundamental-analysis",
