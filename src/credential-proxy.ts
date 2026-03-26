@@ -12,7 +12,11 @@
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest, Agent as HttpsAgent } from 'https';
-import { request as httpRequest, Agent as HttpAgent, RequestOptions } from 'http';
+import {
+  request as httpRequest,
+  Agent as HttpAgent,
+  RequestOptions,
+} from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
