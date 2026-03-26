@@ -52,6 +52,11 @@ The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
 - `cancel_task` — cancel and delete a task
 - `update_task` — update an existing task
 - `register_group` — register a new chat/group (main only)
+- `li_visit_profile`, `li_connect`, `li_withdraw_request`, `li_message`, `li_follow`, `li_unfollow` — LinkedIn profile actions
+- `li_like_post`, `li_react_post`, `li_comment_post`, `li_share_post` — LinkedIn post actions
+- `li_endorse_skill` — LinkedIn skill endorsement
+- `li_scrape_search`, `li_scrape_profile`, `li_scrape_post_engagers` — LinkedIn scraping → Notion
+- `li_run_campaign`, `li_bulk_message`, `li_get_campaign_stats` — LinkedIn outreach campaigns
 
 ### 4. Container skills (Bash tools)
 

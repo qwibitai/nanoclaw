@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const LI_RESULTS_DIR = path.join(IPC_DIR, 'li_results');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -335,6 +336,254 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
   },
+);
+
+// ─── LinkedIn Automation Tools ────────────────────────────────────────────────
+
+function writeLiIpcFile(data: object): void {
+  fs.mkdirSync(TASKS_DIR, { recursive: true });
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+  const filepath = path.join(TASKS_DIR, filename);
+  const tempPath = `${filepath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+  fs.renameSync(tempPath, filepath);
+}
+
+async function waitForLiResult(requestId: string, maxWait = 180000): Promise<{ success: boolean; message: string; data?: unknown }> {
+  const resultFile = path.join(LI_RESULTS_DIR, `${requestId}.json`);
+  const pollInterval = 1000;
+  let elapsed = 0;
+  while (elapsed < maxWait) {
+    if (fs.existsSync(resultFile)) {
+      try {
+        const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+        fs.unlinkSync(resultFile);
+        return result;
+      } catch {
+        return { success: false, message: 'Failed to read result file' };
+      }
+    }
+    await new Promise(r => setTimeout(r, pollInterval));
+    elapsed += pollInterval;
+  }
+  return { success: false, message: 'Request timed out (3 min)' };
+}
+
+function makeLiId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function liDispatch(type: string, requestId: string, payload: object): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  writeLiIpcFile({ type, requestId, groupFolder, timestamp: new Date().toISOString(), ...payload });
+  const result = await waitForLiResult(requestId);
+  const text = result.data
+    ? `${result.message}\n\n${JSON.stringify(result.data, null, 2)}`
+    : result.message;
+  return { content: [{ type: 'text' as const, text }], isError: !result.success || undefined };
+}
+
+const liMainOnly = { content: [{ type: 'text' as const, text: 'LinkedIn tools are only available in the main group.' }], isError: true as const };
+
+server.tool('li_visit_profile',
+  'Visit a LinkedIn profile page. Registers as a profile view. Updates lead status to Visited in Notion.',
+  { profile_url: z.string().describe('LinkedIn profile URL (e.g. https://linkedin.com/in/johndoe)') },
+  async ({ profile_url }: { profile_url: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_visit_profile', makeLiId('li-visit'), { profileUrl: profile_url });
+  }
+);
+
+server.tool('li_connect',
+  'Send a LinkedIn connection request. Optionally include a personalized note (max 300 chars). Respects daily limit.',
+  {
+    profile_url: z.string().describe('LinkedIn profile URL'),
+    note: z.string().optional().describe('Optional personalized note (max 300 chars)'),
+  },
+  async ({ profile_url, note }: { profile_url: string; note?: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_connect', makeLiId('li-connect'), { profileUrl: profile_url, note });
+  }
+);
+
+server.tool('li_withdraw_request',
+  'Withdraw a pending LinkedIn connection request.',
+  { profile_url: z.string().describe('LinkedIn profile URL of the pending request to withdraw') },
+  async ({ profile_url }: { profile_url: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_withdraw_request', makeLiId('li-withdraw'), { profileUrl: profile_url });
+  }
+);
+
+server.tool('li_message',
+  'Send a direct message to a 1st-degree LinkedIn connection. Respects daily message limit.',
+  {
+    profile_url: z.string().describe('LinkedIn profile URL'),
+    message: z.string().describe('The message to send'),
+  },
+  async ({ profile_url, message }: { profile_url: string; message: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_message', makeLiId('li-msg'), { profileUrl: profile_url, message });
+  }
+);
+
+server.tool('li_follow',
+  'Follow a LinkedIn person or company page.',
+  { profile_url: z.string().describe('LinkedIn profile or company page URL') },
+  async ({ profile_url }: { profile_url: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_follow', makeLiId('li-follow'), { profileUrl: profile_url });
+  }
+);
+
+server.tool('li_unfollow',
+  'Unfollow a LinkedIn person or company page.',
+  { profile_url: z.string().describe('LinkedIn profile or company page URL') },
+  async ({ profile_url }: { profile_url: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_unfollow', makeLiId('li-unfollow'), { profileUrl: profile_url });
+  }
+);
+
+server.tool('li_like_post',
+  'Like a LinkedIn post.',
+  { post_url: z.string().describe('LinkedIn post URL') },
+  async ({ post_url }: { post_url: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_like_post', makeLiId('li-like'), { postUrl: post_url });
+  }
+);
+
+server.tool('li_react_post',
+  'React to a LinkedIn post with a specific reaction: like, celebrate, support, funny, love, insightful, or curious.',
+  {
+    post_url: z.string().describe('LinkedIn post URL'),
+    reaction: z.enum(['like', 'celebrate', 'support', 'funny', 'love', 'insightful', 'curious']).describe('Reaction type'),
+  },
+  async ({ post_url, reaction }: { post_url: string; reaction: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_react_post', makeLiId('li-react'), { postUrl: post_url, reaction });
+  }
+);
+
+server.tool('li_comment_post',
+  'Comment on a LinkedIn post.',
+  {
+    post_url: z.string().describe('LinkedIn post URL'),
+    comment: z.string().describe('The comment text to post'),
+  },
+  async ({ post_url, comment }: { post_url: string; comment: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_comment_post', makeLiId('li-comment'), { postUrl: post_url, comment });
+  }
+);
+
+server.tool('li_share_post',
+  'Share or repost a LinkedIn post, optionally with your own commentary.',
+  {
+    post_url: z.string().describe('LinkedIn post URL'),
+    commentary: z.string().optional().describe('Optional commentary to add when sharing'),
+  },
+  async ({ post_url, commentary }: { post_url: string; commentary?: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_share_post', makeLiId('li-share'), { postUrl: post_url, commentary });
+  }
+);
+
+server.tool('li_endorse_skill',
+  "Endorse a specific skill on someone's LinkedIn profile.",
+  {
+    profile_url: z.string().describe('LinkedIn profile URL'),
+    skill: z.string().describe('The skill name to endorse (must match exactly)'),
+  },
+  async ({ profile_url, skill }: { profile_url: string; skill: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_endorse_skill', makeLiId('li-endorse'), { profileUrl: profile_url, skill });
+  }
+);
+
+server.tool('li_scrape_search',
+  'Search LinkedIn for people matching a query and save them as leads to Notion.',
+  {
+    query: z.string().describe('Search query (e.g. "Head of Growth SaaS London")'),
+    max_leads: z.number().optional().describe('Max number of leads to scrape (default: 25, max: 100)'),
+    campaign: z.string().optional().describe('Campaign name to tag these leads with in Notion'),
+  },
+  async ({ query, max_leads, campaign }: { query: string; max_leads?: number; campaign?: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_scrape_search', makeLiId('li-search'), { query, maxLeads: max_leads, campaign });
+  }
+);
+
+server.tool('li_scrape_profile',
+  'Scrape a single LinkedIn profile and save all data to Notion.',
+  {
+    profile_url: z.string().describe('LinkedIn profile URL'),
+    campaign: z.string().optional().describe('Campaign tag for this lead'),
+    source: z.string().optional().describe('Where this lead came from (e.g. Search, Event, Referral)'),
+  },
+  async ({ profile_url, campaign, source }: { profile_url: string; campaign?: string; source?: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_scrape_profile', makeLiId('li-scrape-profile'), { profileUrl: profile_url, campaign, source });
+  }
+);
+
+server.tool('li_scrape_post_engagers',
+  'Extract people who reacted to or commented on a LinkedIn post and save them as leads to Notion.',
+  {
+    post_url: z.string().describe('LinkedIn post URL'),
+    max_leads: z.number().optional().describe('Max leads to scrape (default: 50)'),
+    campaign: z.string().optional().describe('Campaign tag'),
+    type: z.enum(['reactions', 'comments']).optional().describe('Scrape reactions (default) or comments'),
+  },
+  async ({ post_url, max_leads, campaign, type }: { post_url: string; max_leads?: number; campaign?: string; type?: 'reactions' | 'comments' }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_scrape_post_engagers', makeLiId('li-post-engagers'), { postUrl: post_url, maxLeads: max_leads, campaign, type });
+  }
+);
+
+server.tool('li_run_campaign',
+  'Run an automated LinkedIn outreach campaign. Processes leads from Notion and runs visit → connect → message sequence.',
+  {
+    steps: z.array(z.enum(['visit', 'connect', 'message'])).describe('Steps to run in order'),
+    connect_note: z.string().optional().describe('Connection request note. Use {name} for first name.'),
+    message_text: z.string().optional().describe('Message to send. Use {name} for first name.'),
+    campaign: z.string().optional().describe('Only process leads in this campaign'),
+    from_status: z.enum(['New', 'Visited', 'Requested', 'Connected', 'Messaged', 'Replied', 'Archived']).optional().describe('Process leads with this status (default: New)'),
+    max_leads: z.number().optional().describe('Max leads to process this run (default: 10)'),
+  },
+  async (args: { steps: string[]; connect_note?: string; message_text?: string; campaign?: string; from_status?: string; max_leads?: number }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_run_campaign', makeLiId('li-campaign'), {
+      steps: args.steps,
+      connectNote: args.connect_note,
+      messageText: args.message_text,
+      campaign: args.campaign,
+      fromStatus: args.from_status,
+      maxLeads: args.max_leads,
+    });
+  }
+);
+
+server.tool('li_bulk_message',
+  'Send a personalized message to all Connected leads in Notion. Use {name} for first name personalization.',
+  {
+    message_text: z.string().describe('Message template. Use {name} for recipient first name.'),
+    campaign: z.string().optional().describe('Only message leads in this campaign'),
+    max_messages: z.number().optional().describe('Max messages to send this run (default: 20)'),
+  },
+  async ({ message_text, campaign, max_messages }: { message_text: string; campaign?: string; max_messages?: number }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_bulk_message', makeLiId('li-bulk-msg'), { messageText: message_text, campaign, maxMessages: max_messages });
+  }
+);
+
+server.tool('li_get_campaign_stats',
+  'Get LinkedIn outreach stats from Notion — counts of leads by status.',
+  { campaign: z.string().optional().describe('Filter stats to a specific campaign') },
+  async ({ campaign }: { campaign?: string }) => {
+    if (!isMain) return liMainOnly;
+    return liDispatch('li_get_campaign_stats', makeLiId('li-stats'), { campaign });
+  }
 );
 
 // Start the stdio transport

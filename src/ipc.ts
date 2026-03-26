@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
+import { handleLinkedInIpc } from './ipc-linkedin.js';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
@@ -458,7 +459,16 @@ export async function processTaskIpc(
       }
       break;
 
-    default:
-      logger.warn({ type: data.type }, 'Unknown IPC task type');
+    default: {
+      const handledByLI = await handleLinkedInIpc(
+        data as { type: string; requestId: string; [key: string]: unknown },
+        sourceGroup,
+        isMain,
+        DATA_DIR,
+      );
+      if (!handledByLI) {
+        logger.warn({ type: data.type }, 'Unknown IPC task type');
+      }
+    }
   }
 }
