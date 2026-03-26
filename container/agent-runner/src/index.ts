@@ -386,6 +386,13 @@ function getAllMcpServers(containerInput: ContainerInput, mcpServerPath: string)
         SMATCH_CLUB_ID: process.env.SMATCH_CLUB_ID || '',
       },
     },
+    brightdata: {
+      command: 'npx',
+      args: ['-y', '@brightdata/mcp'],
+      env: {
+        API_TOKEN: process.env.BRIGHTDATA_API_TOKEN || '',
+      },
+    },
   };
 }
 

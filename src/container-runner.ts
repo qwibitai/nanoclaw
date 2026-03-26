@@ -284,6 +284,9 @@ function buildEnvFile(containerName: string): string | null {
     envLines.push(`SMATCH_CLUB_ID=${smatchEnv.SMATCH_CLUB_ID || ''}`);
   }
 
+  const bdToken = readEnvFile(['BRIGHTDATA_API_TOKEN']).BRIGHTDATA_API_TOKEN;
+  if (bdToken) envLines.push(`BRIGHTDATA_API_TOKEN=${bdToken}`);
+
   if (envLines.length === 0) return null;
 
   const envFilePath = path.join(DATA_DIR, `env-${containerName}`);
