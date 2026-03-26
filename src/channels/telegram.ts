@@ -51,7 +51,11 @@ export class TelegramChannel implements Channel {
 
   constructor(botToken: string, opts?: TelegramChannelOpts) {
     this.botToken = botToken;
-    this.opts = opts ?? { onMessage: () => {}, onChatMetadata: () => {}, registeredGroups: () => ({}) };
+    this.opts = opts ?? {
+      onMessage: () => {},
+      onChatMetadata: () => {},
+      registeredGroups: () => ({}),
+    };
   }
 
   /** @internal Inject callbacks (used by SDK to wire up message storage) */

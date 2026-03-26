@@ -5,6 +5,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
   POLL_INTERVAL,
@@ -22,10 +23,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import {
-  cleanupOrphans,
-  ensureRuntimeReady,
-} from './box-runtime.js';
+import { cleanupOrphans, ensureRuntimeReady } from './box-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -633,7 +631,10 @@ function buildChannelOpts() {
 
 /** Inject internal callbacks into a channel that supports _setOpts. */
 function injectChannelOpts(channel: Channel): void {
-  if ('_setOpts' in channel && typeof (channel as any)._setOpts === 'function') {
+  if (
+    '_setOpts' in channel &&
+    typeof (channel as any)._setOpts === 'function'
+  ) {
     (channel as any)._setOpts(buildChannelOpts());
   }
 }
@@ -700,11 +701,32 @@ function startSubsystems(): void {
 
 // --- SDK entry points (@internal) ---
 
+/** Copy default CLAUDE.md templates to group folders, replacing {{ASSISTANT_NAME}}. */
+function copyGroupTemplates(): void {
+  const sdkRoot = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '..',
+  );
+  const templateDir = path.join(sdkRoot, 'groups');
+  if (!fs.existsSync(templateDir)) return;
+
+  for (const name of ['global', 'main']) {
+    const src = path.join(templateDir, name, 'CLAUDE.md');
+    const dst = path.join(GROUPS_DIR, name, 'CLAUDE.md');
+    if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      const content = fs.readFileSync(src, 'utf-8');
+      fs.writeFileSync(dst, content.replaceAll('{{ASSISTANT_NAME}}', ASSISTANT_NAME));
+    }
+  }
+}
+
 /** @internal */
 export async function _startFromSDK(
   sdkChannels: Channel[],
   sdkGroups: Map<string, RegisteredGroup>,
 ): Promise<void> {
+  copyGroupTemplates();
   await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -754,11 +776,17 @@ export async function _registerChannelFromSDK(channel: Channel): Promise<void> {
 }
 
 /** @internal */
-export function _registerGroupFromSDK(jid: string, group: RegisteredGroup): void {
+export function _registerGroupFromSDK(
+  jid: string,
+  group: RegisteredGroup,
+): void {
   setRegisteredGroup(jid, group);
   registeredGroups[jid] = group;
   ensureOneCLIAgent(jid, group);
-  logger.info({ jid, name: group.name, folder: group.folder }, 'Group registered dynamically');
+  logger.info(
+    { jid, name: group.name, folder: group.folder },
+    'Group registered dynamically',
+  );
 }
 
 /** @internal */

@@ -8,7 +8,7 @@
  * ```typescript
  * import { AgentLite, TelegramChannel } from '@boxlite-ai/agentlite';
  *
- * const agent_lite = new AgentLite();
+ * const agent_lite = new AgentLite({ workdir: './agentlite-data' });
  * await agent_lite.start();
  *
  * agent_lite.registerChannel(new TelegramChannel({ token: process.env.TELEGRAM_BOT_TOKEN }));
@@ -16,8 +16,16 @@
  * ```
  */
 
-import { ASSISTANT_NAME } from './config.js';
+import { ASSISTANT_NAME, setProjectRoot, setAssistantName } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
+
+/** Options for the AgentLite SDK. */
+export interface AgentLiteOptions {
+  /** Agent name (used for trigger pattern @Name and CLAUDE.md templates). Defaults to 'Andy'. */
+  name?: string;
+  /** Directory for agentlite data (store/, groups/, data/). Defaults to process.cwd(). */
+  workdir?: string;
+}
 
 /** Simplified group options for SDK registration. */
 export interface GroupOptions {
@@ -33,8 +41,11 @@ export class AgentLite {
   private _groups: Map<string, RegisteredGroup> = new Map();
   private _started = false;
   private _mainModule: typeof import('./index.js') | null = null;
+  private _options: AgentLiteOptions;
 
-  constructor() {}
+  constructor(options?: AgentLiteOptions) {
+    this._options = options ?? {};
+  }
 
   /**
    * Start the orchestrator.
@@ -44,6 +55,13 @@ export class AgentLite {
   async start(): Promise<void> {
     if (this._started) throw new Error('AgentLite already started');
     this._started = true;
+
+    if (this._options.name) {
+      setAssistantName(this._options.name);
+    }
+    if (this._options.workdir) {
+      setProjectRoot(this._options.workdir);
+    }
 
     const main = await import('./index.js');
     this._mainModule = main;
@@ -82,7 +100,8 @@ export class AgentLite {
       trigger: options.trigger ?? `@${ASSISTANT_NAME}`,
       added_at: new Date().toISOString(),
       isMain: options.isMain ?? false,
-      requiresTrigger: options.requiresTrigger ?? (options.isMain ? false : true),
+      requiresTrigger:
+        options.requiresTrigger ?? (options.isMain ? false : true),
     };
 
     this._groups.set(jid, group);

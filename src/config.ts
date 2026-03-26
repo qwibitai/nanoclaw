@@ -20,7 +20,7 @@ const envConfig = readEnvFile([
   'TZ',
 ]);
 
-export const ASSISTANT_NAME =
+export let ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
@@ -28,9 +28,19 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+// Absolute paths needed for container mounts.
+// PROJECT_ROOT can be overridden via setProjectRoot() for SDK usage.
+let PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
+
+/** Override the project root directory (used by SDK's workdir option).
+ *  Updates all derived paths via ESM live bindings. */
+export function setProjectRoot(dir: string): void {
+  PROJECT_ROOT = path.resolve(dir);
+  STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+  GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+  DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+}
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -45,11 +55,12 @@ export const SENDER_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'sender-allowlist.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export let STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+export let GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+export let DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
-export const BOX_IMAGE = process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
+export const BOX_IMAGE =
+  process.env.BOX_IMAGE || 'ghcr.io/boxlite-ai/agentlite-agent:latest';
 // Path to OCI layout directory exported by container/build.sh.
 // When set, BoxLite uses this local rootfs instead of pulling from a registry.
 export const BOX_ROOTFS_PATH = process.env.BOX_ROOTFS_PATH || path.join(
@@ -83,10 +94,16 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export const TRIGGER_PATTERN = new RegExp(
+export let TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+/** Override the assistant name (used by SDK). Updates TRIGGER_PATTERN too. */
+export function setAssistantName(name: string): void {
+  ASSISTANT_NAME = name;
+  TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(name)}\\b`, 'i');
+}
 
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.
