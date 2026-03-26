@@ -57,6 +57,13 @@ interface SDKUserMessage {
   session_id: string;
 }
 
+interface SDKResultMessage {
+  type: 'result';
+  subtype: string;
+  result?: string;
+  errors?: string[];
+}
+
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
@@ -118,6 +125,29 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+export function resultMessageToContainerOutput(
+  message: SDKResultMessage,
+  newSessionId?: string,
+): ContainerOutput {
+  if (message.subtype.startsWith('error_')) {
+    const detail = Array.isArray(message.errors)
+      ? message.errors.filter(Boolean).join('; ')
+      : '';
+    return {
+      status: 'error',
+      result: null,
+      newSessionId,
+      error: detail || `SDK result ended with ${message.subtype}`,
+    };
+  }
+
+  return {
+    status: 'success',
+    result: message.result || null,
+    newSessionId,
+  };
 }
 
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
@@ -332,14 +362,25 @@ function waitForIpcMessage(): Promise<string | null> {
  * allowing agent teams subagents to run to completion.
  * Also pipes IPC messages into the stream during the query.
  */
-async function runQuery(
+export async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  deps?: {
+    queryImpl?: typeof query;
+    emitOutput?: (output: ContainerOutput) => void;
+  },
+): Promise<{
+  newSessionId?: string;
+  lastAssistantUuid?: string;
+  closedDuringQuery: boolean;
+  encounteredError: boolean;
+}> {
+  const queryImpl = deps?.queryImpl ?? query;
+  const emitOutput = deps?.emitOutput ?? writeOutput;
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -368,6 +409,7 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let encounteredError = false;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -392,7 +434,7 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  for await (const message of query({
+  for await (const message of queryImpl({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
@@ -452,19 +494,26 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      const output = resultMessageToContainerOutput(
+        message as SDKResultMessage,
+        newSessionId,
+      );
+      log(
+        `Result #${resultCount}: subtype=${message.subtype}${
+          output.result ? ` text=${output.result.slice(0, 200)}` : ''
+        }${output.error ? ` error=${output.error.slice(0, 200)}` : ''}`,
+      );
+      emitOutput(output);
+      if (output.status === 'error') {
+        encounteredError = true;
+        break;
+      }
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, encounteredError };
 }
 
 interface ScriptResult {
@@ -591,6 +640,11 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
+      if (queryResult.encounteredError) {
+        log('Query ended with SDK error result, exiting');
+        break;
+      }
+
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
@@ -634,4 +688,6 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+if (process.env.NANOCLAW_AGENT_RUNNER_AUTOSTART !== '0') {
+  void main();
+}
