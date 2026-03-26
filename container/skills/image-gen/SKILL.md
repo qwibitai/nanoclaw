@@ -54,6 +54,11 @@ Both scripts save to `/workspace/group/` and print the path. Send the result as 
 mcp__nanoclaw__send_message({ text: "Here's your image!", image_path: "/workspace/group/generated-123.png" })
 ```
 
+## Prompt rules
+
+- **Short descriptions (< 20 words):** Expand into a detailed, vivid prompt — add style, lighting, composition, colors, and detail keywords while preserving the user's intent.
+- **Medium/long descriptions (≥ 20 words):** Use the user's description exactly as-is. Do not modify or "improve" it.
+
 ## Important
 
 - Do NOT call curl or APIs directly — always use these scripts

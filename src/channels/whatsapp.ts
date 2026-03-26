@@ -244,7 +244,8 @@ export class WhatsAppChannel implements Channel {
             const contextInfo =
               normalized.extendedTextMessage?.contextInfo ||
               normalized.imageMessage?.contextInfo ||
-              normalized.videoMessage?.contextInfo;
+              normalized.videoMessage?.contextInfo ||
+              normalized.documentMessage?.contextInfo;
             const quoted = contextInfo?.quotedMessage;
             if (quoted) {
               const quotedNorm = normalizeMessageContent(quoted);
@@ -253,6 +254,7 @@ export class WhatsAppChannel implements Channel {
                 quotedNorm?.extendedTextMessage?.text ||
                 quotedNorm?.imageMessage?.caption ||
                 quotedNorm?.videoMessage?.caption ||
+                quotedNorm?.documentMessage?.caption ||
                 '';
               if (quotedText) {
                 const quotedParticipant = contextInfo.participant;
