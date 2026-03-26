@@ -897,16 +897,16 @@ def main():
             add_help=False,
             epilog=(
                 "subcommands:\n"
-                "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
-                "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
-                "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
-                "  claw ps --restart <name>           stop and remove a stuck container\n"
-                "  claw sessions [filter]             list saved session IDs\n"
-                "  claw history [-g group] [-n N]     show recent messages from the DB\n"
-                "  claw watch [-g group]              tail messages in real time\n"
-                "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
-                "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
-                "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
+                "  nanoclaw agent [options] [prompt]      send a prompt (explicit form)\n"
+                "  nanoclaw ps [filter]                   list/manage running containers  (ps --help)\n"
+                "  nanoclaw ps --logs/--tail [filter]     dump or follow container logs\n"
+                "  nanoclaw ps --restart <name>           stop and remove a stuck container\n"
+                "  nanoclaw sessions [filter]             list saved session IDs\n"
+                "  nanoclaw history [-g group] [-n N]     show recent messages from the DB\n"
+                "  nanoclaw watch [-g group]              tail messages in real time\n"
+                "  nanoclaw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+                "  nanoclaw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+                "  nanoclaw molt <subcommand>             export/import via molt  (molt --help)\n"
             ),
         )
         _help_parser.print_help()
@@ -926,16 +926,16 @@ def main():
         add_help=False,
         epilog=(
             "subcommands:\n"
-            "  claw agent [options] [prompt]      send a prompt (explicit form)\n"
-            "  claw ps [filter]                   list/manage running containers  (ps --help)\n"
-            "  claw ps --logs/--tail [filter]     dump or follow container logs\n"
-            "  claw ps --restart <name>           stop and remove a stuck container\n"
-            "  claw sessions [filter]             list saved session IDs\n"
-            "  claw history [-g group] [-n N]     show recent messages from the DB\n"
-            "  claw watch [-g group]              tail messages in real time\n"
-            "  claw groups [add|remove] ...       register or remove groups  (groups --help)\n"
-            "  claw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
-            "  claw molt <subcommand>             export/import via molt  (molt --help)\n"
+            "  nanoclaw agent [options] [prompt]      send a prompt (explicit form)\n"
+            "  nanoclaw ps [filter]                   list/manage running containers  (ps --help)\n"
+            "  nanoclaw ps --logs/--tail [filter]     dump or follow container logs\n"
+            "  nanoclaw ps --restart <name>           stop and remove a stuck container\n"
+            "  nanoclaw sessions [filter]             list saved session IDs\n"
+            "  nanoclaw history [-g group] [-n N]     show recent messages from the DB\n"
+            "  nanoclaw watch [-g group]              tail messages in real time\n"
+            "  nanoclaw groups [add|remove] ...       register or remove groups  (groups --help)\n"
+            "  nanoclaw rebuild [--tag TAG] [--clean] build nanoclaw-agent image\n"
+            "  nanoclaw molt <subcommand>             export/import via molt  (molt --help)\n"
         ),
     )
 
