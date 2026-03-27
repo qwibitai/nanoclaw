@@ -46,7 +46,11 @@ export class OutlookChannel implements Channel {
   private consecutiveErrors = 0;
   private threadMeta = new Map<string, ThreadMeta>();
 
-  constructor(opts: OutlookChannelOpts, userEmail: string, pollIntervalMs = 60000) {
+  constructor(
+    opts: OutlookChannelOpts,
+    userEmail: string,
+    pollIntervalMs = 60000,
+  ) {
     this.opts = opts;
     this.userEmail = userEmail;
     this.pollIntervalMs = pollIntervalMs;
@@ -75,7 +79,9 @@ export class OutlookChannel implements Channel {
 
     const accounts = await this.pca.getTokenCache().getAllAccounts();
     if (accounts.length === 0) {
-      logger.error('Outlook: no cached accounts. Run: npx tsx scripts/outlook-login.ts');
+      logger.error(
+        'Outlook: no cached accounts. Run: npx tsx scripts/outlook-login.ts',
+      );
       return;
     }
 
@@ -100,7 +106,10 @@ export class OutlookChannel implements Channel {
     try {
       const user = await this.client.api('/me').get();
       this.userEmail = user.mail || user.userPrincipalName || this.userEmail;
-      logger.info({ email: this.userEmail, name: user.displayName }, 'Outlook channel connected');
+      logger.info(
+        { email: this.userEmail, name: user.displayName },
+        'Outlook channel connected',
+      );
     } catch (err) {
       logger.error({ err }, 'Outlook: failed to verify connection');
       this.client = null;
@@ -149,18 +158,16 @@ export class OutlookChannel implements Channel {
       : `Re: ${meta.subject}`;
 
     try {
-      await this.client
-        .api('/me/sendMail')
-        .post({
-          message: {
-            subject,
-            body: { contentType: 'text', content: text },
-            toRecipients: [
-              { emailAddress: { address: meta.sender, name: meta.senderName } },
-            ],
-            conversationId: meta.conversationId,
-          },
-        });
+      await this.client.api('/me/sendMail').post({
+        message: {
+          subject,
+          body: { contentType: 'text', content: text },
+          toRecipients: [
+            { emailAddress: { address: meta.sender, name: meta.senderName } },
+          ],
+          conversationId: meta.conversationId,
+        },
+      });
       logger.info({ to: meta.sender, conversationId }, 'Outlook reply sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Outlook reply');
@@ -201,7 +208,10 @@ export class OutlookChannel implements Channel {
 
       return result.accessToken;
     } catch (err) {
-      logger.error({ err }, 'Outlook: silent token acquisition failed — re-run scripts/outlook-login.ts');
+      logger.error(
+        { err },
+        'Outlook: silent token acquisition failed — re-run scripts/outlook-login.ts',
+      );
       return null;
     }
   }
@@ -235,7 +245,10 @@ export class OutlookChannel implements Channel {
       this.consecutiveErrors = 0;
     } catch (err) {
       this.consecutiveErrors++;
-      logger.error({ err, consecutiveErrors: this.consecutiveErrors }, 'Outlook poll failed');
+      logger.error(
+        { err, consecutiveErrors: this.consecutiveErrors },
+        'Outlook poll failed',
+      );
     }
   }
 
@@ -260,11 +273,17 @@ export class OutlookChannel implements Channel {
       body = msg.body.content || '';
     } else if (msg.body?.content) {
       // Strip HTML tags
-      body = msg.body.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      body = msg.body.content
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
     if (!body) {
-      logger.debug({ msgId: msg.id, subject }, 'Skipping Outlook email with no body');
+      logger.debug(
+        { msgId: msg.id, subject },
+        'Skipping Outlook email with no body',
+      );
       return;
     }
 
@@ -290,7 +309,10 @@ export class OutlookChannel implements Channel {
     const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
 
     if (!mainEntry) {
-      logger.debug({ chatJid, subject }, 'No main group registered, skipping Outlook email');
+      logger.debug(
+        { chatJid, subject },
+        'No main group registered, skipping Outlook email',
+      );
       return;
     }
 
@@ -309,25 +331,41 @@ export class OutlookChannel implements Channel {
 
     // Mark as read
     try {
-      await this.client
-        .api(`/me/messages/${msg.id}`)
-        .patch({ isRead: true });
+      await this.client.api(`/me/messages/${msg.id}`).patch({ isRead: true });
     } catch (err) {
-      logger.warn({ msgId: msg.id, err }, 'Failed to mark Outlook email as read');
+      logger.warn(
+        { msgId: msg.id, err },
+        'Failed to mark Outlook email as read',
+      );
     }
 
-    logger.info({ mainJid, from: senderName, subject }, 'Outlook email delivered to main group');
+    logger.info(
+      { mainJid, from: senderName, subject },
+      'Outlook email delivered to main group',
+    );
   }
 }
 
 registerChannel('outlook', (opts: ChannelOpts) => {
-  const secrets = readEnvFile(['MS_TENANT_ID', 'MS_CLIENT_ID', 'MS_USER_EMAIL']);
-  if (!secrets.MS_TENANT_ID || !secrets.MS_CLIENT_ID || !secrets.MS_USER_EMAIL) {
-    logger.warn('Outlook: MS_TENANT_ID, MS_CLIENT_ID, MS_USER_EMAIL required in .env. Skipping.');
+  const secrets = readEnvFile([
+    'MS_TENANT_ID',
+    'MS_CLIENT_ID',
+    'MS_USER_EMAIL',
+  ]);
+  if (
+    !secrets.MS_TENANT_ID ||
+    !secrets.MS_CLIENT_ID ||
+    !secrets.MS_USER_EMAIL
+  ) {
+    logger.warn(
+      'Outlook: MS_TENANT_ID, MS_CLIENT_ID, MS_USER_EMAIL required in .env. Skipping.',
+    );
     return null;
   }
   if (!fs.existsSync(CACHE_PATH)) {
-    logger.warn('Outlook: no cached tokens in ~/.outlook-mcp/. Run: npx tsx scripts/outlook-login.ts');
+    logger.warn(
+      'Outlook: no cached tokens in ~/.outlook-mcp/. Run: npx tsx scripts/outlook-login.ts',
+    );
     return null;
   }
   return new OutlookChannel(opts, secrets.MS_USER_EMAIL);
