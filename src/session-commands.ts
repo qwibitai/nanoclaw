@@ -5,10 +5,14 @@ import { logger } from './logger.js';
  * Extract a session slash command from a message, stripping the trigger prefix if present.
  * Returns the slash command (e.g., '/compact') or null if not a session command.
  */
-export function extractSessionCommand(content: string, triggerPattern: RegExp): string | null {
+export function extractSessionCommand(
+  content: string,
+  triggerPattern: RegExp,
+): string | null {
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
+  if (text === '/clear') return '/clear';
   return null;
 }
 
@@ -16,7 +20,10 @@ export function extractSessionCommand(content: string, triggerPattern: RegExp): 
  * Check if a session command sender is authorized.
  * Allowed: main group (any sender), or trusted/admin sender (is_from_me) in any group.
  */
-export function isSessionCommandAllowed(isMainGroup: boolean, isFromMe: boolean): boolean {
+export function isSessionCommandAllowed(
+  isMainGroup: boolean,
+  isFromMe: boolean,
+): boolean {
   return isMainGroup || isFromMe;
 }
 
@@ -39,6 +46,12 @@ export interface SessionCommandDeps {
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
   /** Whether the denied sender would normally be allowed to interact (for denial messages). */
   canSenderInteract: (msg: NewMessage) => boolean;
+  /** Delete session from DB (for /clear). */
+  deleteSession: (groupFolder: string) => void;
+  /** Delete in-memory session (for /clear). */
+  deleteInMemorySession: (groupFolder: string) => void;
+  /** Group folder name (for /clear DB deletion). */
+  groupFolder: string;
 }
 
 function resultToText(result: string | object | null | undefined): string {
@@ -61,12 +74,21 @@ export async function handleSessionCommand(opts: {
   timezone: string;
   deps: SessionCommandDeps;
 }): Promise<{ handled: false } | { handled: true; success: boolean }> {
-  const { missedMessages, isMainGroup, groupName, triggerPattern, timezone, deps } = opts;
+  const {
+    missedMessages,
+    isMainGroup,
+    groupName,
+    triggerPattern,
+    timezone,
+    deps,
+  } = opts;
 
   const cmdMsg = missedMessages.find(
     (m) => extractSessionCommand(m.content, triggerPattern) !== null,
   );
-  const command = cmdMsg ? extractSessionCommand(cmdMsg.content, triggerPattern) : null;
+  const command = cmdMsg
+    ? extractSessionCommand(cmdMsg.content, triggerPattern)
+    : null;
 
   if (!command || !cmdMsg) return { handled: false };
 
@@ -109,8 +131,13 @@ export async function handleSessionCommand(opts: {
     });
 
     if (preResult === 'error' || hadPreError) {
-      logger.warn({ group: groupName }, 'Pre-compact processing failed, aborting session command');
-      await deps.sendMessage(`Failed to process messages before ${command}. Try again.`);
+      logger.warn(
+        { group: groupName },
+        'Pre-compact processing failed, aborting session command',
+      );
+      await deps.sendMessage(
+        `Failed to process messages before ${command}. Try again.`,
+      );
       if (preOutputSent) {
         // Output was already sent — don't retry or it will duplicate.
         // Advance cursor past pre-compact messages, leave command pending.
@@ -121,7 +148,19 @@ export async function handleSessionCommand(opts: {
     }
   }
 
-  // Forward the literal slash command as the prompt (no XML formatting)
+  if (command === '/clear') {
+    return handleClear(cmdMsg, groupName, deps);
+  }
+
+  // /compact: forward the literal slash command as the prompt
+  return handleCompact(command, cmdMsg, deps);
+}
+
+async function handleCompact(
+  command: string,
+  cmdMsg: NewMessage,
+  deps: SessionCommandDeps,
+): Promise<{ handled: true; success: boolean }> {
   await deps.setTyping(true);
 
   let hadCmdError = false;
@@ -131,7 +170,6 @@ export async function handleSessionCommand(opts: {
     if (text) await deps.sendMessage(text);
   });
 
-  // Advance cursor to the command — messages AFTER it remain pending for next poll.
   deps.advanceCursor(cmdMsg.timestamp);
   await deps.setTyping(false);
 
@@ -140,4 +178,45 @@ export async function handleSessionCommand(opts: {
   }
 
   return { handled: true, success: true };
+}
+
+async function handleClear(
+  cmdMsg: NewMessage,
+  groupName: string,
+  deps: SessionCommandDeps,
+): Promise<{ handled: true; success: boolean }> {
+  await deps.setTyping(true);
+
+  try {
+    // Archive the conversation by sending /clear to the agent-runner,
+    // which fires the PreCompact archive hook then exits without running SDK /compact.
+    let hadArchiveError = false;
+    await deps.runAgent('/clear', async (result) => {
+      if (result.status === 'error') hadArchiveError = true;
+    });
+
+    if (hadArchiveError) {
+      await deps.setTyping(false);
+      await deps.sendMessage('/clear failed. The session is unchanged.');
+      return { handled: true, success: false };
+    }
+
+    // Delete session from DB and in-memory state
+    deps.deleteSession(deps.groupFolder);
+    deps.deleteInMemorySession(deps.groupFolder);
+
+    deps.advanceCursor(cmdMsg.timestamp);
+    await deps.setTyping(false);
+    await deps.sendMessage(
+      'Session cleared. Next message starts a fresh conversation.',
+    );
+
+    logger.info({ group: groupName }, 'Session cleared');
+    return { handled: true, success: true };
+  } catch (err) {
+    logger.error({ group: groupName, err }, 'Failed to clear session');
+    await deps.setTyping(false);
+    await deps.sendMessage('/clear failed. The session is unchanged.');
+    return { handled: true, success: false };
+  }
 }

@@ -627,9 +627,49 @@ async function main(): Promise<void> {
   // --- Slash command handling ---
   // Only known session slash commands are handled here. This prevents
   // accidental interception of user prompts that happen to start with '/'.
-  const KNOWN_SESSION_COMMANDS = new Set(['/compact']);
+  const KNOWN_SESSION_COMMANDS = new Set(['/compact', '/clear']);
   const trimmedPrompt = prompt.trim();
   const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(trimmedPrompt);
+
+  if (isSessionSlashCommand && trimmedPrompt === '/clear') {
+    // /clear: archive the transcript then exit. The host handles DB/in-memory session deletion.
+    log('Handling /clear session command');
+    try {
+      const transcriptDir = path.join(
+        process.env.CLAUDE_CONFIG_DIR || '/home/node/.claude',
+        'sessions',
+      );
+      let archived = false;
+
+      if (sessionId && fs.existsSync(transcriptDir)) {
+        const transcriptPath = path.join(transcriptDir, sessionId, 'transcript.jsonl');
+        if (fs.existsSync(transcriptPath)) {
+          const hook = createPreCompactHook(containerInput.assistantName);
+          await hook(
+            { transcript_path: transcriptPath, session_id: sessionId } as any,
+            undefined as any,
+            undefined as any,
+          );
+          archived = true;
+          log('Conversation archived before clear');
+        }
+      }
+
+      if (!archived) {
+        log('No transcript found to archive (new or empty session)');
+      }
+
+      writeOutput({
+        status: 'success',
+        result: null,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log(`/clear archive error: ${errorMsg}`);
+      writeOutput({ status: 'error', result: null, error: errorMsg });
+    }
+    return;
+  }
 
   if (isSessionSlashCommand) {
     log(`Handling session command: ${trimmedPrompt}`);
