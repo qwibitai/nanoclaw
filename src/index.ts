@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -88,6 +89,33 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+
+  // Backfill vault mount for project-linked groups that are missing it.
+  // Before this fix, createProjectChannel didn't set additionalMounts,
+  // so existing project groups had no vault access (mcpvault MCP broken).
+  const vaultPath = path.join(os.homedir(), 'obsidian-notes');
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!group.projectPath) continue;
+    const mounts = group.containerConfig?.additionalMounts ?? [];
+    const hasVault = mounts.some(
+      (m) => m.containerPath === 'vault' || m.hostPath.includes('obsidian'),
+    );
+    if (!hasVault) {
+      group.containerConfig = {
+        ...group.containerConfig,
+        additionalMounts: [
+          ...mounts,
+          { hostPath: vaultPath, containerPath: 'vault', readonly: false },
+        ],
+      };
+      setRegisteredGroup(jid, group);
+      logger.info(
+        { jid, name: group.name },
+        'Backfilled vault mount for project group',
+      );
+    }
+  }
+
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -160,7 +188,8 @@ async function createProjectChannel(
       );
     }
 
-    // Register the group
+    // Register the group with vault mount so mcpvault MCP tools work.
+    // The project itself is mounted via projectPath → /workspace/project.
     registerGroup(jid, {
       name: `Shoggoth #${created.name}`,
       folder,
@@ -168,6 +197,15 @@ async function createProjectChannel(
       added_at: new Date().toISOString(),
       requiresTrigger: true,
       projectPath: req.projectPath,
+      containerConfig: {
+        additionalMounts: [
+          {
+            hostPath: path.join(os.homedir(), 'obsidian-notes'),
+            containerPath: 'vault',
+            readonly: false,
+          },
+        ],
+      },
     });
 
     return {

@@ -26,14 +26,17 @@ If the researcher says "revise," "improve," "fix," or "address reviewer comments
 
 ## Finding the Project
 
-Paper projects are mounted at `/workspace/extra/<project-name>`. For example, `discontinuous-machines` is at `/workspace/extra/discontinuous-machines`.
+Where you find the project depends on how this channel is set up:
 
-When the researcher names a project (e.g., "Draft the introduction for discontinuous-machines"), `cd` into the corresponding mount before doing anything else:
-```
-cd /workspace/extra/<project-name>
+- **Project-linked channels** (e.g., Discord `#project-discontinuous-machines`): The project is mounted at `/workspace/project`. Check there first.
+- **Main channel with additional mounts**: Projects are at `/workspace/extra/<project-name>`. List `/workspace/extra/` to see available mounts.
+
+```bash
+# Check which mount exists
+ls /workspace/project/CLAUDE.md 2>/dev/null && echo "Project at /workspace/project" || ls /workspace/extra/
 ```
 
-If the project name is ambiguous, list `/workspace/extra/` to see available mounts.
+`cd` into the project directory before doing anything else.
 
 ## Before Writing
 
