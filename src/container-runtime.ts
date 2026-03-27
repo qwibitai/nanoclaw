@@ -28,10 +28,11 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  // Apple Container: containers access the host via vmnet gateway (192.168.64.1),
-  // so the proxy must bind to that interface (or 0.0.0.0).
+  // Apple Container: containers reach the host via vmnet gateway (192.168.64.1),
+  // but that interface only exists once a container is running. Bind to 0.0.0.0
+  // so the proxy starts even before vmnet is up (e.g. after a reboot).
   if (os.platform() === 'darwin' && CONTAINER_RUNTIME_BIN === 'container') {
-    return '192.168.64.1';
+    return '0.0.0.0';
   }
   if (os.platform() === 'darwin') return '127.0.0.1';
 
