@@ -96,6 +96,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Main gets the brain directory with write access so digest tasks can
+    // update the markdown intelligence files
+    const brainDirMain = path.join(GROUPS_DIR, 'global', 'brain');
+    fs.mkdirSync(brainDirMain, { recursive: true });
+    mounts.push({
+      hostPath: brainDirMain,
+      containerPath: '/workspace/brain',
+      readonly: false,
+    });
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -111,6 +121,17 @@ function buildVolumeMounts(
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
+        readonly: true,
+      });
+    }
+
+    // Central brain directory (read-only for non-main)
+    // Contains cross-group intelligence: decisions, action items, insights
+    const brainDir = path.join(GROUPS_DIR, 'global', 'brain');
+    if (fs.existsSync(brainDir)) {
+      mounts.push({
+        hostPath: brainDir,
+        containerPath: '/workspace/brain',
         readonly: true,
       });
     }

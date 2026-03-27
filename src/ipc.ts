@@ -5,7 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, updateTask, addBrainEntry, queryBrainEntries, updateBrainEntry } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -145,6 +145,37 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
+
+      // Process brain operations from this group's IPC directory
+      const brainDir = path.join(ipcBaseDir, sourceGroup, 'brain');
+      try {
+        if (fs.existsSync(brainDir)) {
+          const brainFiles = fs
+            .readdirSync(brainDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of brainFiles) {
+            const filePath = path.join(brainDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              await processTaskIpc(data, sourceGroup, isMain, deps);
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC brain operation',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-brain-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC brain directory');
+      }
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -172,7 +203,17 @@ export async function processTaskIpc(
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
+    listenOnly?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For brain operations
+    entryId?: string;
+    entry_type?: string;
+    content?: string;
+    status?: string;
+    source_group?: string;
+    since?: string;
+    limit?: number;
+    metadata?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -449,12 +490,79 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          listenOnly: data.listenOnly,
         });
       } else {
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'brain_add':
+      if (data.entry_type && data.content) {
+        const validTypes = ['decision', 'action_item', 'insight', 'follow_up'];
+        if (!validTypes.includes(data.entry_type)) {
+          logger.warn(
+            { entry_type: data.entry_type, sourceGroup },
+            'Invalid brain entry_type',
+          );
+          break;
+        }
+        const entryId = addBrainEntry({
+          source_group: data.source_group || sourceGroup,
+          entry_type: data.entry_type as 'decision' | 'action_item' | 'insight' | 'follow_up',
+          content: data.content,
+          status: (data.status as 'open' | 'done' | 'cancelled') || 'open',
+          created_at: new Date().toISOString(),
+          metadata: data.metadata || null,
+        });
+        logger.info(
+          { entryId, entry_type: data.entry_type, sourceGroup },
+          'Brain entry added via IPC',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid brain_add request - missing entry_type or content',
+        );
+      }
+      break;
+
+    case 'brain_query': {
+      // Write results to a response file in IPC dir so agent can read them
+      const entries = queryBrainEntries({
+        entry_type: data.entry_type,
+        source_group: data.source_group,
+        status: data.status,
+        since: data.since,
+        limit: data.limit,
+      });
+      const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'brain-responses');
+      fs.mkdirSync(responseDir, { recursive: true });
+      const responseFile = path.join(responseDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+      fs.writeFileSync(responseFile, JSON.stringify(entries, null, 2));
+      logger.info(
+        { count: entries.length, sourceGroup },
+        'Brain query executed via IPC',
+      );
+      break;
+    }
+
+    case 'brain_update':
+      if (data.entryId) {
+        updateBrainEntry(data.entryId, {
+          status: data.status,
+          content: data.content,
+          metadata: data.metadata,
+        });
+        logger.info(
+          { entryId: data.entryId, sourceGroup },
+          'Brain entry updated via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'Invalid brain_update request - missing entryId');
       }
       break;
 

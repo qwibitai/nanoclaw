@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  listenOnly?: boolean; // True for passive monitoring groups — messages stored but no agent spawned
 }
 
 export interface NewMessage {
