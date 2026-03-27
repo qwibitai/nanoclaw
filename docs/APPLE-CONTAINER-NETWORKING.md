@@ -84,6 +84,26 @@ bridge100 (192.168.64.1) ← host bridge, created by vmnet when container runs
 en0 (your WiFi/Ethernet) → Internet
 ```
 
+## Credential Proxy Binding
+
+The NanoClaw credential proxy injects the Claude Code OAuth token into container requests. On Docker Desktop (macOS), the proxy binds to `127.0.0.1` and Docker routes `host.docker.internal` to loopback — so containers reach it transparently.
+
+Apple Container does **not** resolve `host.docker.internal`. Containers are assigned IPs in `192.168.64.0/24` and the host is at `192.168.64.1` (the `bridge100` interface). NanoClaw auto-detects this:
+
+- `container-runtime.ts` scans for a `bridge*` interface on macOS to identify Apple Container
+- `PROXY_BIND_HOST` is set to the bridge IP (e.g. `192.168.64.1`) so the proxy is reachable from containers
+- `CONTAINER_HOST_GATEWAY` is set to the same IP so containers know where to send auth requests
+
+Both can be overridden via environment variables if needed:
+```bash
+CREDENTIAL_PROXY_HOST=192.168.64.1   # override proxy bind address
+CONTAINER_HOST_GATEWAY=192.168.64.1  # override gateway address in containers
+```
+
+### File bind mounts
+
+Apple Container only supports **directory** bind mounts, not file mounts. The Docker setup shadows `.env` inside the container by mounting `/dev/null` over it — this does not work on Apple Container. NanoClaw skips the shadow on Apple Container; credentials are injected by the proxy and never need to be read from `.env` inside the container.
+
 ## References
 
 - [apple/container#469](https://github.com/apple/container/issues/469) — No network from container on macOS 26
