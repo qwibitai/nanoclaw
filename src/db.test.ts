@@ -6,6 +6,7 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
   getTaskById,
@@ -14,6 +15,7 @@ import {
   storeMessage,
   updateTask,
 } from './db.js';
+import { formatMessages } from './router.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -206,6 +208,92 @@ describe('getMessagesSince', () => {
     const msgs = getMessagesSince('group@g.us', '', 'Andy');
     // 3 user messages (bot message excluded)
     expect(msgs).toHaveLength(3);
+  });
+
+  it('recovers cursor from last bot reply when lastAgentTimestamp is missing', () => {
+    // beforeEach already inserts m3 (bot reply at 00:00:03) and m4 (user at 00:00:04)
+    // Add more old history before the bot reply
+    for (let i = 1; i <= 50; i++) {
+      store({
+        id: `history-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `old message ${i}`,
+        timestamp: `2023-06-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    // New message after the bot reply (m3 at 00:00:03)
+    store({
+      id: 'new-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'new message after bot reply',
+      timestamp: '2024-01-02T00:00:00.000Z',
+    });
+
+    // Recover cursor from the last bot message (m3 from beforeEach)
+    const recovered = getLastBotMessageTimestamp('group@g.us', 'Andy');
+    expect(recovered).toBe('2024-01-01T00:00:03.000Z');
+
+    // Using recovered cursor: only gets messages after the bot reply
+    const msgs = getMessagesSince('group@g.us', recovered!, 'Andy', 10);
+    // m4 (third, 00:00:04) + new-1 — skips all 50 old messages and m1/m2
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toBe('third');
+    expect(msgs[1].content).toBe('new message after bot reply');
+  });
+
+  it('caps messages to configured limit even with recovered cursor', () => {
+    // beforeEach inserts m3 (bot at 00:00:03). Add 30 messages after it.
+    for (let i = 1; i <= 30; i++) {
+      store({
+        id: `pending-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `pending message ${i}`,
+        timestamp: `2024-02-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    const recovered = getLastBotMessageTimestamp('group@g.us', 'Andy');
+    expect(recovered).toBe('2024-01-01T00:00:03.000Z');
+
+    // With limit=10, only the 10 most recent are returned
+    const msgs = getMessagesSince('group@g.us', recovered!, 'Andy', 10);
+    expect(msgs).toHaveLength(10);
+    // Most recent 10: pending-21 through pending-30
+    expect(msgs[0].content).toBe('pending message 21');
+    expect(msgs[9].content).toBe('pending message 30');
+  });
+
+  it('returns last N messages when no bot reply and no cursor exist', () => {
+    // Use a fresh group with no bot messages
+    storeChatMetadata('fresh@g.us', '2024-01-01T00:00:00.000Z');
+    for (let i = 1; i <= 20; i++) {
+      store({
+        id: `fresh-${i}`,
+        chat_jid: 'fresh@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `message ${i}`,
+        timestamp: `2024-02-${String(i).padStart(2, '0')}T12:00:00.000Z`,
+      });
+    }
+
+    const recovered = getLastBotMessageTimestamp('fresh@g.us', 'Andy');
+    expect(recovered).toBeUndefined();
+
+    // No cursor → sinceTimestamp = '' but limit caps the result
+    const msgs = getMessagesSince('fresh@g.us', '', 'Andy', 10);
+    expect(msgs).toHaveLength(10);
+
+    const prompt = formatMessages(msgs, 'Asia/Jerusalem');
+    const messageTagCount = (prompt.match(/<message /g) || []).length;
+    expect(messageTagCount).toBe(10);
   });
 
   it('filters pre-migration bot messages via content prefix backstop', () => {
