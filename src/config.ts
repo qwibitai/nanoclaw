@@ -12,6 +12,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'QUO_API_KEY',
+  'QUO_CHANNEL_ENABLED',
   'QUO_SNAK_PHONE_ID',
   'QUO_SNAK_NUMBER',
   'QUO_SHERIDAN_PHONE_ID',
@@ -77,6 +78,8 @@ export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // --- Quo Phone (OpenPhone) SMS Channel ---
+export const QUO_CHANNEL_ENABLED =
+  (process.env.QUO_CHANNEL_ENABLED || envConfig.QUO_CHANNEL_ENABLED || 'false');
 export const QUO_API_KEY =
   process.env.QUO_API_KEY || envConfig.QUO_API_KEY || '';
 export const QUO_SNAK_PHONE_ID =
@@ -161,8 +164,10 @@ export const GROQ_API_KEY =
 // --- Gmail IMAP Channel ---
 const imapConfig = readEnvFile([
   'IMAP_HOST', 'IMAP_PORT', 'IMAP_USER', 'IMAP_PASS',
-  'EMAIL_SNAK_ADDRESS',
+  'EMAIL_SNAK_ADDRESS', 'GMAIL_CHANNEL_ENABLED',
 ]);
+export const GMAIL_CHANNEL_ENABLED =
+  (process.env.GMAIL_CHANNEL_ENABLED || imapConfig.GMAIL_CHANNEL_ENABLED || 'false');
 export const IMAP_HOST = process.env.IMAP_HOST || imapConfig.IMAP_HOST || '';
 export const IMAP_PORT = parseInt(process.env.IMAP_PORT || imapConfig.IMAP_PORT || '993', 10);
 export const IMAP_USER = process.env.IMAP_USER || imapConfig.IMAP_USER || '';

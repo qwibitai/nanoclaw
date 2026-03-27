@@ -145,7 +145,6 @@ Keep the report concise. Only flag things that need attention.`);
 - Check IDDI for yesterday's sales totals, any expiring products in the next 7 days, and low-stock alerts
 - Check Google Sheets for recent sales performance trends
 - Check the CRM pipeline: any new leads, pending deals, or deals needing follow-up
-- Check Gmail inbox for any unread customer emails about vending
 
 **SHERIDAN RENTALS (Trailers/RVs):**
 - Query the bookings database for today's pickups and returns
@@ -155,10 +154,10 @@ Keep the report concise. Only flag things that need attention.`);
 
 **ACROSS BOTH:**
 - Check Google Calendar for today's appointments
-- Summarize any unanswered Quo SMS messages from either business line
-- Note any unread Gmail messages requiring attention
 
-Format as a clean, scannable snapshot. Use sections with headers. Keep it concise but complete. If a data source is unavailable, note it briefly and move on.`,
+Format as a clean, scannable snapshot. Use sections with headers. Keep it concise but complete. If a data source is unavailable, note it briefly and move on.
+
+Send the digest via WhatsApp only. Do NOT send emails or SMS.`,
     { budget_usd: 0.50 });
 
   seedTask('sams-club-weekly-prices', '0 10 * * 1',
@@ -180,9 +179,9 @@ Use browser automation to check Sam's Club prices. If a product page fails to lo
    This returns conversions stuck in 'inquiry' or 'quoted' stage.
 2. Also check for quoted leads stale >5 days: npx tsx /workspace/project/tools/conversions/track-conversion.ts --action stale --days 5
 3. For each stale entry, compose a brief, friendly follow-up message
-4. Send follow-ups via the appropriate channel (WhatsApp, email, SMS)
+4. Send follow-ups via WhatsApp ONLY. Do NOT send emails or SMS. Skip any conversions that originated from email or SMS channels.
 5. Update the conversion with: npx tsx /workspace/project/tools/conversions/track-conversion.ts --action update --id "<conv_id>" --notes "follow-up sent on [date]"
-6. Report summary: how many follow-ups sent, which businesses, which channels
+6. Report summary: how many follow-ups sent, which businesses
 
 Be natural and helpful — not pushy. Reference their original inquiry. Example:
 "Hi [name], just wanted to check in about the vending machine placement we discussed.
@@ -198,7 +197,7 @@ if you're interested. Happy to answer any questions about the equipment."`,
 
 1. Query completed conversions: npx tsx /workspace/project/tools/conversions/track-conversion.ts --action query --stage completed
    Filter results to entries updated in the last 48 hours.
-2. For each one, send a brief review request via the original channel
+2. For each one, send a brief review request via WhatsApp ONLY. Do NOT send emails or SMS. Skip any conversions that originated from email or SMS channels.
 3. Update to 'reviewed': npx tsx /workspace/project/tools/conversions/track-conversion.ts --action update --id "<conv_id>" --stage reviewed --notes "review requested on [date]"
 
 For Snak Group:
@@ -298,8 +297,8 @@ export async function initChannels(queue: GroupQueue): Promise<WhatsAppChannel> 
   });
   addChannel(whatsapp);
 
-  const { QUO_API_KEY } = await import('./config.js');
-  if (QUO_API_KEY) {
+  const { QUO_API_KEY, QUO_CHANNEL_ENABLED } = await import('./config.js');
+  if (QUO_API_KEY && QUO_CHANNEL_ENABLED === 'true') {
     const { QuoChannel } = await import('./channels/quo.js');
     const quo = new QuoChannel({
       onMessage: (chatJid, msg) => storeMessage(msg),
@@ -338,8 +337,8 @@ export async function initChannels(queue: GroupQueue): Promise<WhatsAppChannel> 
   }
 
   {
-    const { IMAP_USER: imapUser } = await import('./config.js');
-    if (imapUser) {
+    const { IMAP_USER: imapUser, GMAIL_CHANNEL_ENABLED } = await import('./config.js');
+    if (imapUser && GMAIL_CHANNEL_ENABLED === 'true') {
       const { GmailChannel } = await import('./channels/gmail.js');
       const gmail = new GmailChannel({
         onMessage: (chatJid, msg) => storeMessage(msg),

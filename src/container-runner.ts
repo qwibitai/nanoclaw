@@ -176,8 +176,12 @@ function buildVolumeMounts(
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
+  // Skills that must never be synced into containers (outbound email/SMS disabled)
+  const BLOCKED_SKILLS = new Set(['send-email', 'gmail']);
+
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
+      if (BLOCKED_SKILLS.has(skillDir)) continue;
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
@@ -326,12 +330,11 @@ const ALL_SECRET_KEYS = [
   ...SECRETS_TIKTOK,
 ] as const;
 
-// Non-main groups get core + google + email (enough for briefings, CRM, follow-ups)
-// They do NOT get social media keys, lead gen, or IDDI unless explicitly granted
+// Non-main groups get core + google + square (enough for briefings, CRM, follow-ups)
+// They do NOT get email, social media keys, lead gen, or IDDI unless explicitly granted
 const STANDARD_SECRET_KEYS = [
   ...SECRETS_CORE,
   ...SECRETS_GOOGLE,
-  ...SECRETS_EMAIL,
   ...SECRETS_SQUARE,
 ] as const;
 
