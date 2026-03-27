@@ -93,6 +93,23 @@ Build must be clean before proceeding.
 
 ## Phase 3: Configure
 
+### Enable model management tools (optional)
+
+Ask the user:
+
+> Would you like the agent to be able to **manage Ollama models** (pull, delete, inspect, list running)?
+>
+> - **Yes** — adds tools to pull new models, delete old ones, show model info, and check what's loaded in memory
+> - **No** — the agent can only list installed models and generate responses (you manage models yourself on the host)
+
+If the user wants management tools, add to `.env`:
+
+```bash
+OLLAMA_ADMIN_TOOLS=true
+```
+
+If they decline (or don't answer), do not add the variable — management tools will be disabled by default.
+
 ### Set Ollama host (optional)
 
 By default, the MCP server connects to `http://host.docker.internal:11434` (Docker Desktop) with a fallback to `localhost`. To use a custom Ollama host, add to `.env`:
