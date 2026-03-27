@@ -824,6 +824,7 @@ export interface AvailableGroup {
   name: string;
   lastActivity: string;
   isRegistered: boolean;
+  projectPath?: string;
 }
 
 /**

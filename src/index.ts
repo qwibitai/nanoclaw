@@ -157,6 +157,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
       name: c.name,
       lastActivity: c.last_message_time,
       isRegistered: registeredJids.has(c.jid),
+      projectPath: registeredGroups[c.jid]?.projectPath,
     }));
 }
 
