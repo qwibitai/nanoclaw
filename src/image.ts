@@ -28,7 +28,10 @@ export async function processImage(
   if (!buffer || buffer.length === 0) return null;
 
   const resized = await sharp(buffer)
-    .resize(MAX_DIMENSION, MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+    .resize(MAX_DIMENSION, MAX_DIMENSION, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
     .jpeg({ quality: 85 })
     .toBuffer();
 
