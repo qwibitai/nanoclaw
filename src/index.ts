@@ -711,12 +711,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const nextTriggerIdx = missedMessages.findIndex(
         (m, i) => i > anchorIdx && triggerPattern.test(m.content.trim()),
       );
+      // Trim to [anchorIdx, nextTriggerIdx) — messages before the anchor
+      // are stale context from prior conversations (e.g. different users'
+      // threads recovered after a restart) and must not bleed into this thread.
+      const startIdx = anchorIdx;
+      const endIdx =
+        nextTriggerIdx >= 0 ? nextTriggerIdx : missedMessages.length;
+      if (startIdx > 0 || endIdx < missedMessages.length) {
+        missedMessages = missedMessages.slice(startIdx, endIdx);
+        // Re-anchor effectiveThreadId since the array was re-sliced
+        effectiveThreadId = missedMessages[0].id;
+      }
       if (nextTriggerIdx >= 0) {
-        missedMessages = missedMessages.slice(0, nextTriggerIdx);
-        // Signal that there are more triggers waiting in the DB so we re-enqueue
-        // after this run completes. This handles the case where two @triggers
-        // arrive within the debounce window and get coalesced into one
-        // enqueueMessageCheck — without this, the second trigger is never picked up.
         hasMorePendingTriggers = true;
       }
     } else if (missedMessages.length > 1) {
