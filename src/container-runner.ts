@@ -12,10 +12,12 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  HOST_BROWSER_PORT,
   IDLE_TIMEOUT,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { acquireHostBrowser, releaseHostBrowser } from './host-browser.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -292,11 +294,29 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+  // Acquire host browser for main group
+  const needsHostBrowser = !!input.isMain;
+  let hostBrowserAcquired = false;
+  if (needsHostBrowser) {
+    hostBrowserAcquired = await acquireHostBrowser();
+  }
+
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
     agentIdentifier,
   );
+
+  // Inject HOST_BROWSER env var so the container's socat + cdp-cli know the port
+  if (hostBrowserAcquired) {
+    const imageIdx = containerArgs.indexOf(CONTAINER_IMAGE);
+    containerArgs.splice(
+      imageIdx,
+      0,
+      '-e',
+      `HOST_BROWSER=${HOST_BROWSER_PORT}`,
+    );
+  }
 
   logger.debug(
     {
@@ -452,6 +472,7 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      if (hostBrowserAcquired) releaseHostBrowser();
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -657,6 +678,7 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      if (hostBrowserAcquired) releaseHostBrowser();
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

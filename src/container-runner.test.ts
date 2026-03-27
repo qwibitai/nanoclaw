@@ -13,9 +13,15 @@ vi.mock('./config.js', () => ({
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HOST_BROWSER_PORT: 9222,
   IDLE_TIMEOUT: 1800000, // 30min
   ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
+}));
+
+vi.mock('./host-browser.js', () => ({
+  acquireHostBrowser: vi.fn().mockResolvedValue(false),
+  releaseHostBrowser: vi.fn(),
 }));
 
 // Mock logger
