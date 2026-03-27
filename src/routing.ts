@@ -71,7 +71,7 @@ function categorizeComplaint(matches: string[]): string {
   return 'general';
 }
 
-const escalationDetector = new EscalationDetector((msg, matches) => {
+const escalationDetector = new EscalationDetector((msg, matches, urgent) => {
   // Persist complaint to database
   const category = categorizeComplaint(matches);
   try {
@@ -87,10 +87,16 @@ const escalationDetector = new EscalationDetector((msg, matches) => {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to persist complaint');
   }
 
-  // Send WhatsApp alert (existing behavior)
+  // Send WhatsApp alert — urgent gets a louder format
   const mainJid = getMainGroupJid();
   if (mainJid && escalationAlertFn) {
-    const alert = `⚠️ *Customer Issue*\n\nFrom: ${msg.sender} (${msg.channel})\nIssue: ${matches.join(', ')}\n\n"${msg.content.slice(0, 300)}"\n\nAndy is responding with standard complaint handling. Check if refund or product pull is needed.`;
+    const prefix = urgent
+      ? `🚨 *URGENT — Immediate Attention Required*`
+      : `⚠️ *Customer Issue*`;
+    const suffix = urgent
+      ? `\n\n*This is high-priority — legal threat, cancellation, or health concern. Respond personally ASAP.*`
+      : `\n\nAndy is responding with standard complaint handling. Check if refund or product pull is needed.`;
+    const alert = `${prefix}\n\nFrom: ${msg.sender} (${msg.channel})\nIssue: ${matches.join(', ')}\n\n"${msg.content.slice(0, 300)}"${suffix}`;
     escalationAlertFn(mainJid, alert).catch((err) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Escalation alert failed');
     });

@@ -66,21 +66,39 @@ export const IGNORE_SENDER_PATTERNS = [
 // ── Business-relevant keywords (emails without these are skipped) ──
 // Uses regex with word boundaries to prevent substring false positives.
 export const BUSINESS_KEYWORDS: RegExp[] = [
-  // Snak Group / Vending (specific phrases)
-  /\bvending\b/i, /\bsnack\s*(machine|service)\b/i, /\bcoffee\s*(machine|service)\b/i,
+  // Snak Group / Vending
+  /\bvending\b/i, /\bsnack\s*(machine|service)?\b/i, /\bcoffee\s*(machine|service)?\b/i,
   /\bice\s*machine\b/i, /\bbreakroom\b/i, /\bbreak\s*room\b/i,
-  /\bsnak\s*group\b/i, /\bsnakgroup\b/i,
-  // Sheridan Rentals (word-boundary)
-  /\bsheridan\b/i, /\btrailer\s*(rental|rent)\b/i, /\brv\s*(rental|rent)\b/i,
+  /\bsnak\s*group\b/i, /\bsnakgroup\b/i, /\bsnak\b/i,
+  /\bsmart\s*cooler\b/i, /\bcooler\b/i,
+  /\bIDDI\b/, /\bVitro\b/i,
+  // Sheridan Rentals
+  /\bsheridan\b/i, /\btrailer\s*(rental|rent)?\b/i, /\brv\s*(rental|rent)?\b/i,
   /\bcamper\b/i, /\btow(ing|ed|able)\b/i,
-  // Bookings / Service (specific phrases)
+  /\bcar\s*hauler\b/i, /\blandscaping\s*trailer\b/i,
+  // Bookings / Service
   /\bbooking\b/i, /\breservation\b/i, /\bavailability\b/i,
   /\bpickup\b/i, /\bdrop[\s-]?off\b/i,
-  /\bquote\b/i, /\bestimate\b/i, /\bpricing\b/i,
-  // Customer intent (specific to business inquiries)
+  /\bquote\b/i, /\bestimate\b/i, /\bpricing\b/i, /\bprice\b/i,
+  /\bhow\s*much\b/i, /\bcost\b/i, /\brates?\b/i,
+  // Customer intent (real people asking about the business)
   /\binquiry\b/i, /\brestock\b/i, /\bmaintenance\b/i,
   /\bvending\s*service\b/i, /\brental\b/i,
-  /\binstallation\b/i,
+  /\binstallation\b/i, /\binstall\b/i,
+  /\binterested\s*(in)?\b/i,
+  /\bset\s*up\b/i, /\bget\s*started\b/i,
+  /\blearn\s*more\b/i, /\bmore\s*info\b/i, /\binformation\b/i,
+  /\bschedule\b/i, /\bappointment\b/i, /\bcall\b/i, /\bmeet(ing)?\b/i,
+  /\bcontact\b/i, /\breach\s*out\b/i,
+  // Complaint language (must always get through)
+  /\brefund\b/i, /\bcharged\b/i, /\bovercharged\b/i,
+  /\bcomplaint\b/i, /\bissue\b/i, /\bproblem\b/i,
+  /\bnot\s*working\b/i, /\bbroke(n)?\b/i, /\bstuck\b/i,
+  /\bmachine\b/i,
+  // Reply indicators (customer replying to Andy's previous email)
+  /\bthanks?\b/i, /\bsounds?\s*good\b/i, /\byes\b/i, /\byeah\b/i,
+  /\bperfect\b/i, /\bgreat\b/i, /\bawesome\b/i,
+  /\bok(ay)?\b/i, /\bsure\b/i, /\blet'?s\s*do\b/i,
 ];
 
 // ── Error patterns that must NEVER be sent to customers ──
@@ -143,12 +161,31 @@ export const COMPLAINT_PATTERNS: RegExp[] = [
   /\b(refund|money back|get my money|want my money)\b/i,
   /\b(wrong (item|product|snack|drink)|got .{0,20} instead)\b/i,
   /\b(too expensive|overpriced|price is (too )?high|rip.?off)\b/i,
+  // Smart cooler issues
+  /\b(hold|pending.{0,10}charge|pre.?auth|authorization)\b.*\b(won.?t|didn.?t|not)\b/i,
+  /\b(door.{0,10}(won.?t|didn.?t|not).{0,10}(open|close|unlock))\b/i,
+  /\b(card.{0,10}(declined|rejected|not.{0,5}work))\b/i,
   // Equipment / rental issues
   /\b(damaged|not working|broke down|flat tire|won.?t start|malfunction)\b/i,
-  // General dissatisfaction (higher bar than before — avoids false positives)
+  /\b(leaking|dirty|filthy|unsanitary|bug|roach|pest)\b/i,
+  // General dissatisfaction
   /\b(furious|livid|unacceptable|worst experience|terrible service|horrible)\b/i,
+  /\b(disappointed|frustrated|upset|unhappy|dissatisfied)\b/i,
   /\b(lawyer|attorney|sue|legal action|bbb|better business bureau)\b/i,
   /\b(chargeback|dispute|overcharged|fraud|scam)\b/i,
+  /\b(cancel|cancellation|terminate|end.{0,5}(contract|service|agreement))\b/i,
+  /\b(remove|take.{0,5}(out|away|back)|pick.{0,5}up.{0,5}(machine|equipment))\b/i,
+];
+
+// ── High-urgency complaint patterns (owner notified IMMEDIATELY via WhatsApp) ──
+export const URGENT_COMPLAINT_PATTERNS: RegExp[] = [
+  /\b(lawyer|attorney|sue|legal action|bbb|better business bureau)\b/i,
+  /\b(chargeback|dispute|fraud|scam)\b/i,
+  /\b(health.{0,10}(department|inspector|violation|hazard))\b/i,
+  /\b(police|fire.{0,5}(department|marshal)|osha)\b/i,
+  /\b(furious|livid|unacceptable)\b/i,
+  /\b(cancel|terminate|remove.{0,10}machine)\b/i,
+  /\b(social media|yelp|google review|going public|news|reporter)\b/i,
 ];
 
 // ── Autoresponder subject prefixes ──
