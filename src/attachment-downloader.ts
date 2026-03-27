@@ -220,12 +220,9 @@ export function cleanupOldAttachments(
         }
       }
 
-      // Remove empty group directories
-      try {
-        fs.rmdirSync(groupPath);
-      } catch {
-        // not empty
-      }
+      // Note: do NOT remove empty group directories here.
+      // They are bind-mounted into running containers; removing and
+      // recreating them changes the inode, breaking the mount.
     }
   } catch (err) {
     logger.warn({ err }, 'Error during attachment cleanup');

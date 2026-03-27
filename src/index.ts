@@ -487,7 +487,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const groupAssistantName = resolveAssistantName(group.containerConfig);
   const triggerPattern = buildTriggerPattern(groupAssistantName);
 
-  const sinceTimestamp =
+  let sinceTimestamp =
     lastAgentTimestamp[chatJid] || lastAgentTimestamp[parentJid] || '';
   let missedMessages = getMessagesSince(
     chatJid,
@@ -718,6 +718,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const endIdx =
         nextTriggerIdx >= 0 ? nextTriggerIdx : missedMessages.length;
       if (startIdx > 0 || endIdx < missedMessages.length) {
+        // Advance sinceTimestamp so getBotResponsesSince (below) only
+        // returns bot messages from the current conversation window.
+        // Without this, stale bot responses from conversations that
+        // belonged to the trimmed pre-anchor messages leak into the prompt.
+        if (startIdx > 0) {
+          sinceTimestamp = missedMessages[startIdx - 1].timestamp;
+        }
         missedMessages = missedMessages.slice(startIdx, endIdx);
         // Re-anchor effectiveThreadId since the array was re-sliced
         effectiveThreadId = missedMessages[0].id;
@@ -908,6 +915,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
+
+  // When processing a thread reply whose root was a top-level message,
+  // also advance the parent JID cursor past that root message. This prevents
+  // stale top-level messages from accumulating and leaking into future
+  // parent-JID processings (cross-thread contamination).
+  if (threadId && chatJid !== parentJid) {
+    const parentCursor = lastAgentTimestamp[parentJid] || '';
+    const rootMsg = getMessageById(threadId, parentJid);
+    if (rootMsg && rootMsg.timestamp > parentCursor) {
+      lastAgentTimestamp[parentJid] = rootMsg.timestamp;
+    }
+  }
   logger.info(
     {
       group: group.name,
