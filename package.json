@@ -24,7 +24,6 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
-    "discord.js": "^14.25.1",
     "googleapis": "^144.0.0",
     "grammy": "^1.41.1",
     "openai": "^6.27.0",
