@@ -185,6 +185,26 @@ function buildVolumeMounts(
     });
   }
 
+  // Outlook credentials directory (for Outlook MCP inside the container)
+  const outlookDir = path.join(homeDir, '.outlook-mcp');
+  if (fs.existsSync(outlookDir)) {
+    mounts.push({
+      hostPath: outlookDir,
+      containerPath: '/home/node/.outlook-mcp',
+      readonly: true, // Credentials are read-only; tokens stored separately
+    });
+  }
+
+  // Outlook MCP token file (needs read-write for token refresh)
+  const outlookTokenFile = path.join(homeDir, '.outlook-mcp-tokens.json');
+  if (fs.existsSync(outlookTokenFile)) {
+    mounts.push({
+      hostPath: outlookTokenFile,
+      containerPath: '/home/node/.outlook-mcp-tokens.json',
+      readonly: false, // MCP needs to refresh OAuth tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -258,6 +278,18 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Outlook MCP credentials (client ID / secret for Microsoft Graph API)
+  const outlookEnvPath = path.join(os.homedir(), '.outlook-mcp', '.env');
+  if (fs.existsSync(outlookEnvPath)) {
+    const envContent = fs.readFileSync(outlookEnvPath, 'utf-8');
+    for (const line of envContent.split('\n')) {
+      const match = line.match(/^(MS_CLIENT_ID|MS_CLIENT_SECRET)=(.+)$/);
+      if (match) {
+        args.push('-e', `${match[1]}=${match[2].trim()}`);
+      }
+    }
   }
 
   // Runtime-specific args for host gateway resolution

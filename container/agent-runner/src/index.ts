@@ -410,6 +410,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
         'mcp__googlecalendar__*',
+        'mcp__outlook__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -434,6 +435,15 @@ async function runQuery(
           args: ['-y', '@cocal/google-calendar-mcp'],
           env: {
             GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+          },
+        },
+        outlook: {
+          command: 'npx',
+          args: ['-y', 'outlook-mcp'],
+          env: {
+            MS_CLIENT_ID: process.env.MS_CLIENT_ID || '',
+            MS_CLIENT_SECRET: process.env.MS_CLIENT_SECRET || '',
+            HOME: '/home/node',
           },
         },
       },
