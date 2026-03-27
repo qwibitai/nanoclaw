@@ -69,12 +69,30 @@ export class DiscordChannel implements Channel {
   private threadOriginMessage = new Map<string, string>();
   private webhookCache = new Map<string, Webhook>();
   private webhookCreating = new Map<string, Promise<Webhook | null>>();
-  private pendingThreadTitleValue: string | undefined;
+  // Keyed by conversation identifier (jid:triggerMessageId) to avoid
+  // cross-conversation state corruption when multiple groups run concurrently.
+  private pendingThreadTitle = new Map<string, string>();
+  private pendingHaikuTitle = new Map<string, Promise<string | undefined>>();
+  private pendingThreadRename = new Map<string, { threadId: string; appliedTitle: string }>();
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+  /** Called by index.ts before runAgent to pass the Haiku title promise. */
+  setHaikuTitlePromise(convKey: string, promise: Promise<string | undefined>): void {
+    this.pendingHaikuTitle.set(convKey, promise);
+  }
+
   /** Called by index.ts before sendMessage to pass an agent-generated thread title. */
-  setPendingThreadTitle(title: string): void {
-    this.pendingThreadTitleValue = title;
+  setPendingThreadTitle(convKey: string, title: string): void {
+    // If a thread was already created (IPC raced ahead of streaming output),
+    // retroactively rename it instead of storing the title for later.
+    const rename = this.pendingThreadRename.get(convKey);
+    if (rename && rename.appliedTitle !== title) {
+      this.pendingThreadRename.delete(convKey);
+      this.renameThread(rename.threadId, title);
+      return;
+    }
+    this.pendingThreadRename.delete(convKey);
+    this.pendingThreadTitle.set(convKey, title);
   }
 
   /** Resolve the parent channel ID from an interaction (thread → parent, else null). */
@@ -781,9 +799,21 @@ export class DiscordChannel implements Channel {
       const originalMessage =
         await textChannel.messages.fetch(originalMessageId);
 
-      // Use agent-generated title (set via setPendingThreadTitle) if available
-      const agentTitle = this.pendingThreadTitleValue;
-      this.pendingThreadTitleValue = undefined;
+      // Use agent-generated title (set via setPendingThreadTitle) if available.
+      // If no agent title, try the Haiku title promise (pre-generated in parallel).
+      const convKey = `dc:${parentChannelId}:${originalMessageId}`;
+      let agentTitle = this.pendingThreadTitle.get(convKey);
+      this.pendingThreadTitle.delete(convKey);
+
+      const haikuPromise = this.pendingHaikuTitle.get(convKey);
+      if (!agentTitle && haikuPromise) {
+        let timer: ReturnType<typeof setTimeout>;
+        agentTitle = await Promise.race([
+          haikuPromise.then((v) => { clearTimeout(timer); return v; }),
+          new Promise<string | undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 2000); }),
+        ]);
+        this.pendingHaikuTitle.delete(convKey);
+      }
 
       const fallbackName =
         threadName ||
@@ -798,6 +828,10 @@ export class DiscordChannel implements Channel {
         name,
         autoArchiveDuration: 1440, // 24h
       });
+
+      // Track this thread for potential retroactive rename if the agent's
+      // <thread-title> arrives later via streaming output.
+      this.pendingThreadRename.set(convKey, { threadId: thread.id, appliedTitle: name });
 
       text = await this.replaceMentions(text, textChannel);
       ({ text } = transformTablesInText('discord', text));
@@ -855,6 +889,26 @@ export class DiscordChannel implements Channel {
       await this.sendMessage(`dc:${parentChannelId}`, text, null);
       return null;
     }
+  }
+
+  /** Retroactively rename a Discord thread (fire-and-forget). */
+  private renameThread(threadId: string, name: string): void {
+    if (!this.client) return;
+    const trimmed = name.slice(0, 100);
+    this.client.channels
+      .fetch(threadId)
+      .then((ch) => {
+        if (ch?.isThread()) {
+          return (ch as ThreadChannel).edit({ name: trimmed });
+        }
+        return undefined;
+      })
+      .then(() => {
+        logger.info({ threadId, name: trimmed }, 'Discord thread renamed');
+      })
+      .catch((err) => {
+        logger.warn({ threadId, name: trimmed, err }, 'Failed to rename Discord thread');
+      });
   }
 
   private static MAX_MESSAGE_LENGTH = 2000;
@@ -953,12 +1007,24 @@ export class DiscordChannel implements Channel {
       // Per-conversation cleanup: clear the keyed redirect for this trigger message.
       const convKey = `${parentJid}:${threadId}`;
       this.createdThreadJid.delete(convKey);
+      this.pendingThreadTitle.delete(convKey);
+      this.pendingHaikuTitle.delete(convKey);
+      this.pendingThreadRename.delete(convKey);
     } else {
-      // Full cleanup: remove all redirects whose key starts with this parent JID.
+      // Full cleanup: remove all entries whose key starts with this parent JID.
+      const matchesJid = (key: string) =>
+        key === parentJid || key.startsWith(`${parentJid}:`);
       for (const key of this.createdThreadJid.keys()) {
-        if (key === parentJid || key.startsWith(`${parentJid}:`)) {
-          this.createdThreadJid.delete(key);
-        }
+        if (matchesJid(key)) this.createdThreadJid.delete(key);
+      }
+      for (const key of this.pendingThreadTitle.keys()) {
+        if (matchesJid(key)) this.pendingThreadTitle.delete(key);
+      }
+      for (const key of this.pendingHaikuTitle.keys()) {
+        if (matchesJid(key)) this.pendingHaikuTitle.delete(key);
+      }
+      for (const key of this.pendingThreadRename.keys()) {
+        if (matchesJid(key)) this.pendingThreadRename.delete(key);
       }
     }
   }

@@ -1040,6 +1040,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
+  // Pass the Haiku title promise to the Discord channel so IPC-created threads
+  // can use it instead of falling back to the truncated user message.
+  // The convKey matches the pattern used in createThreadAndSend: dc:{channelId}:{triggerMessageId}
+  const threadTitleConvKey = effectiveThreadId
+    ? `${chatJid}:${effectiveThreadId}`
+    : chatJid;
+  if (haikusTitlePromise && 'setHaikuTitlePromise' in channel) {
+    (
+      channel as { setHaikuTitlePromise(k: string, p: Promise<string | undefined>): void }
+    ).setHaikuTitlePromise(threadTitleConvKey, haikusTitlePromise);
+  }
+
   let output: string | undefined;
   try {
     output = await runAgent(
@@ -1077,8 +1089,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           }
           if (threadTitle && 'setPendingThreadTitle' in channel) {
             (
-              channel as { setPendingThreadTitle(t: string): void }
-            ).setPendingThreadTitle(threadTitle);
+              channel as { setPendingThreadTitle(k: string, t: string): void }
+            ).setPendingThreadTitle(threadTitleConvKey, threadTitle);
           }
           // Strip <internal> and <thread-title> blocks
           const text = stripInternalTags(raw);
