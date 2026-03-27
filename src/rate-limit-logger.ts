@@ -8,7 +8,9 @@ import { logger } from './logger.js';
 const API_URL = process.env.BOOKING_API_HOST_URL ?? 'http://localhost:4002';
 const API_KEY = process.env.BOOKING_API_KEY ?? '';
 
-async function resolveTenantId(groupFolder: string): Promise<string | undefined> {
+async function resolveTenantId(
+  groupFolder: string,
+): Promise<string | undefined> {
   try {
     const res = await fetch(
       `${API_URL}/admin/tenants/by-folder/${encodeURIComponent(groupFolder)}`,
@@ -23,7 +25,10 @@ async function resolveTenantId(groupFolder: string): Promise<string | undefined>
     const data = (await res.json()) as { id?: string };
     return data.id;
   } catch (err) {
-    logger.warn({ err, groupFolder }, 'Failed to resolve tenant for rate limit event');
+    logger.warn(
+      { err, groupFolder },
+      'Failed to resolve tenant for rate limit event',
+    );
     return undefined;
   }
 }

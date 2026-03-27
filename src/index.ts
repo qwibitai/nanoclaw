@@ -233,7 +233,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { chatJid, group: group.name, count: newUserMessages.length },
       'Rate limit exceeded — dropping batch',
     );
-    logRateLimitEvent({ phone: chatJid, groupFolder: group.folder, msgCount: newUserMessages.length });
+    logRateLimitEvent({
+      phone: chatJid,
+      groupFolder: group.folder,
+      msgCount: newUserMessages.length,
+    });
     // Advance cursor so we don't retry these messages endlessly
     lastAgentTimestamp[chatJid] =
       missedMessages[missedMessages.length - 1].timestamp;
