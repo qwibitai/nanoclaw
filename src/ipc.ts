@@ -458,7 +458,8 @@ export async function processTaskIpc(
       break;
 
     case 'create_dev_task':
-      if (!isMain) {
+      // Allow from main group and Boris's iOS devices (bearer-token authenticated)
+      if (!isMain && !sourceGroup.startsWith('ios_')) {
         logger.warn(
           { sourceGroup },
           'Unauthorized create_dev_task attempt blocked',

@@ -69,10 +69,12 @@ function buildPrompt(task: DevTask, worktreePath: string): string {
 
 // --- Environment ---
 
-function buildEnv(taskId: number): Record<string, string> {
+function buildEnv(_taskId: number): Record<string, string> {
+  // Use real HOME so Claude CLI finds its auth config at ~/.claude/.
+  // The sandbox filesystem rules are the actual security boundary.
   const env: Record<string, string> = {
     PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
-    HOME: `/tmp/claude-home-${taskId}`,
+    HOME: process.env.HOME || '/Users/fambot',
     LANG: 'en_US.UTF-8',
   };
 
@@ -123,26 +125,25 @@ export async function spawnClaudeSession(
     'Spawning Claude Code session',
   );
 
-  // Create temp home directory for the session
-  const { mkdirSync } = await import('fs');
-  mkdirSync(env.HOME, { recursive: true });
+  const homeDir = process.env.HOME || '/Users/fambot';
 
   const session = query({
     prompt,
     options: {
+      pathToClaudeCodeExecutable: process.env.CLAUDE_PATH || '/Users/fambot/.local/bin/claude',
       cwd: worktreePath,
       env,
       sandbox: {
         filesystem: {
-          denyRead: [process.env.HOME || '/Users/fambot'],
           allowRead: [
             worktreePath,
-            `/tmp/claude-home-${task.id}`,
+            `${homeDir}/.claude`,
+            `${homeDir}/.local/bin`,
             '/usr/local',
             '/usr/bin',
             '/bin',
           ],
-          allowWrite: [worktreePath, `/tmp/claude-home-${task.id}`],
+          allowWrite: [worktreePath],
         },
       },
       maxTurns,
