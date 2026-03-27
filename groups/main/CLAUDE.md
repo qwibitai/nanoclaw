@@ -250,59 +250,6 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ---
 
-## Creating Project Channels
-
-Users can ask you to create a Discord channel linked to a project in `~/projects/`.
-
-### Flow
-
-1. **List projects**: Read the contents of `/home/square/projects/` and check `available_groups.json` for existing project links. Present the list showing which projects already have channels.
-
-2. **Confirm**: State the channel name (`#project-<folder-name>`) and project path, then ask for confirmation.
-
-3. **Create via IPC**: Write the action file:
-
-```bash
-cat > /workspace/ipc/tasks/create_project_channel_$(date +%s).json << 'IPCEOF'
-{
-  "type": "create_project_channel",
-  "projectName": "<folder-name>",
-  "projectPath": "/home/square/projects/<folder-name>",
-  "channelName": "project-<folder-name>",
-  "requestedBy": "<chat-jid-of-requesting-channel>"
-}
-IPCEOF
-```
-
-4. **Read result**: Wait a few seconds, then check `/workspace/ipc/input/` for a file matching `create_project_channel_result_*.json`. Report the result.
-
-### Example
-
-```
-User: @Andy create a channel for discontinuous-machines
-
-You: Here are your projects:
-  • **discontinuous-machines** — no channel
-  • **platform-abm** — no channel
-
-I'll create **#project-discontinuous-machines** linked to `~/projects/discontinuous-machines`. Go ahead?
-
-User: Yes
-
-You: [write IPC file, wait, read result]
-Done — **#project-discontinuous-machines** is live and linked to your project.
-```
-
-### Channel Naming
-
-All project channels use the `project-` prefix: `#project-<folder-name>`.
-
-### Checking Existing Links
-
-`available_groups.json` includes a `projectPath` field for groups that are linked to projects. Use this to show which projects already have channels.
-
----
-
 ## Global Memory
 
 You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
