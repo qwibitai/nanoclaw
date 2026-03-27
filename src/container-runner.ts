@@ -177,6 +177,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Google Workspace CLI credentials (read-only)
+  // gws uses ~/.config/gws/ for OAuth tokens and client config
+  const gwsConfigDir = path.join(process.env.HOME || '/root', '.config', 'gws');
+  if (fs.existsSync(gwsConfigDir)) {
+    mounts.push({
+      hostPath: gwsConfigDir,
+      containerPath: '/home/node/.config/gws',
+      readonly: true,
+    });
+  }
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
