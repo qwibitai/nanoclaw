@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@onecli-sh/sdk": "^0.2.0",
+    "@whiskeysockets/baileys": "^6.7.18",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
     "pino": "^9.6.0",
