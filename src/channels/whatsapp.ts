@@ -704,7 +704,10 @@ export class WhatsAppChannel implements Channel {
     }
     try {
       await this.sock.sendMessage(jid, {
-        react: { text: emoji, key: { remoteJid: jid, id: messageId, participant } },
+        react: {
+          text: emoji,
+          key: { remoteJid: jid, id: messageId, participant },
+        },
       });
       logger.info({ jid, messageId, emoji }, 'Reaction sent');
     } catch (err) {
