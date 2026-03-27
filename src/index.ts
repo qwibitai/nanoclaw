@@ -645,6 +645,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Wire up sibling channels for cross-channel forwarding (e.g., webhook → telegram)
+  for (const ch of channels) {
+    if ('setSiblingChannels' in ch && typeof ch.setSiblingChannels === 'function') {
+      (ch as any).setSiblingChannels(channels);
+    }
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
