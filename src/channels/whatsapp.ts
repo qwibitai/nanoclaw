@@ -24,7 +24,12 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, NewMessage, OnChatMetadata, OnInboundMessage } from '../types.js';
+import {
+  Channel,
+  NewMessage,
+  OnChatMetadata,
+  OnInboundMessage,
+} from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const AUTH_DIR = path.join(STORE_DIR, 'auth');
@@ -64,7 +69,11 @@ class WhatsAppChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     // WhatsApp owns all standard JIDs — group (@g.us) and individual (@s.whatsapp.net)
-    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+    return (
+      jid.endsWith('@g.us') ||
+      jid.endsWith('@s.whatsapp.net') ||
+      jid.endsWith('@lid')
+    );
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -121,7 +130,13 @@ class WhatsAppChannel implements Channel {
         if (metadata.subject) {
           updateChatName(jid, metadata.subject);
           // Also fire onChatMetadata so the system knows about the group
-          this.onChatMetadata(jid, new Date().toISOString(), metadata.subject, 'whatsapp', true);
+          this.onChatMetadata(
+            jid,
+            new Date().toISOString(),
+            metadata.subject,
+            'whatsapp',
+            true,
+          );
           count++;
         }
       }
@@ -178,7 +193,10 @@ class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         await this.sendMessage(item.jid, item.text);
@@ -199,13 +217,6 @@ class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    if (!state.creds.registered) {
-      logger.warn(
-        'WhatsApp credentials not registered — channel skipped. Run whatsapp-auth setup.',
-      );
-      return;
-    }
-
     const sock = makeWASocket({
       auth: {
         creds: state.creds,
@@ -221,17 +232,28 @@ class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        logger.error('WhatsApp QR code required — re-run whatsapp-auth setup to re-authenticate.');
+        logger.error(
+          'WhatsApp QR code required — re-run whatsapp-auth setup to re-authenticate.',
+        );
         return;
       }
 
       if (connection === 'close') {
         this.connected = false;
-        const reason =
-          (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output
-            ?.statusCode;
+        const reason = (
+          lastDisconnect?.error as
+            | { output?: { statusCode?: number } }
+            | undefined
+        )?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'WA connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'WA connection closed',
+        );
 
         if (shouldReconnect && !this.shuttingDown) {
           logger.info('Reconnecting to WhatsApp...');
@@ -241,7 +263,9 @@ class WhatsAppChannel implements Channel {
             );
           }, 5 * ONE_SECOND);
         } else if (!this.shuttingDown) {
-          logger.error('WhatsApp session logged out — run whatsapp-auth setup to re-authenticate.');
+          logger.error(
+            'WhatsApp session logged out — run whatsapp-auth setup to re-authenticate.',
+          );
         }
       } else if (connection === 'open') {
         this.connected = true;
@@ -263,7 +287,9 @@ class WhatsAppChannel implements Channel {
         );
 
         // Sync group metadata on startup (respects 24h cache)
-        this.syncGroups().catch((err) => logger.error({ err }, 'Initial group sync failed'));
+        this.syncGroups().catch((err) =>
+          logger.error({ err }, 'Initial group sync failed'),
+        );
 
         // Set up daily sync timer (only once)
         if (!this.groupSyncTimerStarted) {
@@ -279,7 +305,13 @@ class WhatsAppChannel implements Channel {
         const storedChats = getAllChats();
         for (const chat of storedChats) {
           if (chat.jid.endsWith('@g.us')) {
-            this.onChatMetadata(chat.jid, chat.last_message_time ?? new Date().toISOString(), chat.name ?? undefined, 'whatsapp', true);
+            this.onChatMetadata(
+              chat.jid,
+              chat.last_message_time ?? new Date().toISOString(),
+              chat.name ?? undefined,
+              'whatsapp',
+              true,
+            );
           }
         }
       }
@@ -294,18 +326,34 @@ class WhatsAppChannel implements Channel {
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
         const chatJid = this.translateJid(rawJid);
-        const timestamp = new Date(Number(msg.messageTimestamp) * ONE_SECOND).toISOString();
+        const timestamp = new Date(
+          Number(msg.messageTimestamp) * ONE_SECOND,
+        ).toISOString();
 
         // Always fire metadata so new groups show up in discovery
-        storeChatMetadata(chatJid, timestamp, undefined, 'whatsapp', chatJid.endsWith('@g.us'));
-        this.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', chatJid.endsWith('@g.us'));
+        storeChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'whatsapp',
+          chatJid.endsWith('@g.us'),
+        );
+        this.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'whatsapp',
+          chatJid.endsWith('@g.us'),
+        );
 
         // Deliver message to core orchestrator
         const content = this.extractMessageContent(msg);
         if (content === null) continue;
 
         const senderJid =
-          (chatJid.endsWith('@g.us') ? msg.key.participant : msg.key.remoteJid) ?? '';
+          (chatJid.endsWith('@g.us')
+            ? msg.key.participant
+            : msg.key.remoteJid) ?? '';
         const translatedSender = this.translateJid(senderJid);
 
         const newMsg: NewMessage = {
@@ -328,6 +376,11 @@ class WhatsAppChannel implements Channel {
 // when credentials are absent (handled inside WhatsAppChannel.connect()).
 registerChannel('whatsapp', (opts: ChannelOpts) => {
   if (!fs.existsSync(AUTH_DIR)) {
+    return null;
+  }
+  // Check that there are actual credential files (not just an empty dir)
+  const files = fs.readdirSync(AUTH_DIR);
+  if (files.length === 0) {
     return null;
   }
   return new WhatsAppChannel(opts);
