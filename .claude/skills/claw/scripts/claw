@@ -156,6 +156,9 @@ def run_container(runtime: str, image: str, payload: dict,
                   folder: str | None = None, is_main: bool = False,
                   timeout: int = 300) -> None:
     cmd = [runtime, "run", "-i", "--rm"]
+    # Pass secrets as env vars so the container can reach the API without a credential proxy
+    for key, val in payload.get("secrets", {}).items():
+        cmd += ["-e", f"{key}={val}"]
     if folder:
         for host, container, readonly in build_mounts(folder, is_main):
             if readonly:
