@@ -3,13 +3,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteSession,
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getAllSessions,
   getMessagesSince,
   getNewMessages,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -480,5 +484,104 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- Session CRUD ---
+
+describe('session management', () => {
+  it('stores and retrieves a session', () => {
+    setSession('whatsapp_main', 'session-abc');
+    expect(getSession('whatsapp_main')).toBe('session-abc');
+  });
+
+  it('returns undefined for unknown group', () => {
+    expect(getSession('nonexistent')).toBeUndefined();
+  });
+
+  it('overwrites session on update', () => {
+    setSession('whatsapp_main', 'session-old');
+    setSession('whatsapp_main', 'session-new');
+    expect(getSession('whatsapp_main')).toBe('session-new');
+  });
+
+  it('deletes a session', () => {
+    setSession('whatsapp_main', 'session-abc');
+    deleteSession('whatsapp_main');
+    expect(getSession('whatsapp_main')).toBeUndefined();
+  });
+
+  it('deleteSession is a no-op for unknown group', () => {
+    expect(() => deleteSession('nonexistent')).not.toThrow();
+  });
+
+  it('getAllSessions returns all stored sessions', () => {
+    setSession('group_a', 'sess-1');
+    setSession('group_b', 'sess-2');
+    const all = getAllSessions();
+    expect(all).toEqual({ group_a: 'sess-1', group_b: 'sess-2' });
+  });
+
+  it('getAllSessions excludes deleted sessions', () => {
+    setSession('group_a', 'sess-1');
+    setSession('group_b', 'sess-2');
+    deleteSession('group_a');
+    const all = getAllSessions();
+    expect(all).toEqual({ group_b: 'sess-2' });
+  });
+
+  it('stale session recovery: delete clears session so next lookup returns undefined', () => {
+    // Simulate: session stored from a previous run
+    setSession('whatsapp_main', 'stale-session-xyz');
+    expect(getSession('whatsapp_main')).toBe('stale-session-xyz');
+
+    // Simulate: host detects resume error and clears the session
+    deleteSession('whatsapp_main');
+
+    // Next agent invocation should get no session (starts fresh)
+    expect(getSession('whatsapp_main')).toBeUndefined();
+
+    // getAllSessions also reflects the deletion
+    expect(getAllSessions()).toEqual({});
+  });
+});
+
+// --- Session error detection pattern ---
+
+describe('session error detection pattern', () => {
+  // This is the regex used in src/index.ts and container/agent-runner to
+  // detect stale-session errors and trigger recovery.
+  const SESSION_ERROR_PATTERN = /session|conversation not found|resume/i;
+
+  it('matches "No conversation found with session ID"', () => {
+    expect(
+      SESSION_ERROR_PATTERN.test(
+        'No conversation found with session ID abc-123',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches "session expired"', () => {
+    expect(SESSION_ERROR_PATTERN.test('session expired')).toBe(true);
+  });
+
+  it('matches "invalid session"', () => {
+    expect(SESSION_ERROR_PATTERN.test('invalid session')).toBe(true);
+  });
+
+  it('matches "failed to resume"', () => {
+    expect(SESSION_ERROR_PATTERN.test('failed to resume conversation')).toBe(
+      true,
+    );
+  });
+
+  it('matches case-insensitively', () => {
+    expect(SESSION_ERROR_PATTERN.test('SESSION NOT FOUND')).toBe(true);
+  });
+
+  it('does not match unrelated errors', () => {
+    expect(SESSION_ERROR_PATTERN.test('rate limit exceeded')).toBe(false);
+    expect(SESSION_ERROR_PATTERN.test('network timeout')).toBe(false);
+    expect(SESSION_ERROR_PATTERN.test('out of memory')).toBe(false);
   });
 });
