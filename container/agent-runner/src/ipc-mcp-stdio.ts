@@ -333,6 +333,47 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'update_dev_task',
+  'Update an existing dev task. Only provided fields are changed; omitted fields stay the same.',
+  {
+    task_id: z.number().describe('The dev task ID to update'),
+    title: z.string().optional().describe('New title for the task'),
+    description: z.string().optional().describe('New description for the task'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can update dev tasks.' }],
+        isError: true,
+      };
+    }
+
+    if (!args.title && !args.description) {
+      return {
+        content: [{ type: 'text' as const, text: 'Nothing to update — provide at least title or description.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | number | undefined> = {
+      type: 'update_dev_task',
+      devTaskId: args.task_id,
+      targetJid: chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    if (args.title !== undefined) data.title = args.title;
+    if (args.description !== undefined) data.description = args.description;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Dev task #${args.task_id} update requested.` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

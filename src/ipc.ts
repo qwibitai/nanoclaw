@@ -9,6 +9,7 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import {
   createTask as createDevTask,
   dispatchAndRun,
+  updateTask as updateDevTask,
 } from './dev-tasks.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
@@ -175,10 +176,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-    // For create_dev_task
+    // For create_dev_task / update_dev_task
     title?: string;
     description?: string;
     dispatch?: boolean;
+    devTaskId?: number;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -506,6 +508,47 @@ export async function processTaskIpc(
         }
       } else {
         logger.warn({ data }, 'create_dev_task missing title');
+      }
+      break;
+
+    case 'update_dev_task':
+      // Allow from main group and Boris's iOS devices (bearer-token authenticated)
+      if (!isMain && !sourceGroup.startsWith('ios_')) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized update_dev_task attempt blocked',
+        );
+        break;
+      }
+      if (data.devTaskId) {
+        try {
+          const updates: { title?: string; description?: string } = {};
+          if (data.title !== undefined) updates.title = data.title;
+          if (data.description !== undefined)
+            updates.description = data.description;
+
+          const updatedDevTask = updateDevTask(data.devTaskId, updates);
+          logger.info(
+            {
+              taskId: updatedDevTask.id,
+              title: updatedDevTask.title,
+              sourceGroup,
+            },
+            'DevTask updated via IPC',
+          );
+
+          // Send confirmation back to the chat
+          if (data.targetJid) {
+            await deps.sendMessage(
+              data.targetJid,
+              `Updated task #${updatedDevTask.id}: ${updatedDevTask.title}`,
+            );
+          }
+        } catch (err) {
+          logger.error({ err, devTaskId: data.devTaskId }, 'Failed to update DevTask via IPC');
+        }
+      } else {
+        logger.warn({ data }, 'update_dev_task missing devTaskId');
       }
       break;
 
