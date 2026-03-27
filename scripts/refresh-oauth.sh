@@ -1,6 +1,6 @@
 #!/bin/bash
 # Refresh OAuth token for credential proxy
-# Run via cron every 12 hours
+# Run via cron every 4 hours
 #
 # The credential proxy re-reads .env on each request, so updating
 # the file is sufficient — no service restart needed.
