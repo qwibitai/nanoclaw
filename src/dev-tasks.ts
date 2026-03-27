@@ -38,6 +38,7 @@ export const DEV_TASK_STATUSES = [
   'pr_ready',
   'done',
   'needs_session',
+  'has_followups',
 ] as const;
 
 export type DevTaskStatus = (typeof DEV_TASK_STATUSES)[number];
@@ -49,7 +50,7 @@ const DevTaskSchema = z.object({
   status: z.enum(DEV_TASK_STATUSES),
   created_at: z.string(),
   updated_at: z.string(),
-  source: z.enum(['fambot', 'chat', 'claude-code']),
+  source: z.enum(['fambot', 'chat', 'claude-code', 'claude']),
   pr_url: z.string().optional(),
   branch: z.string().optional(),
   session_notes: z.string().optional(),
@@ -64,7 +65,8 @@ const VALID_TRANSITIONS: Record<DevTaskStatus, DevTaskStatus[]> = {
   working: ['pr_ready', 'needs_session', 'open'],
   pr_ready: ['done', 'open'],
   needs_session: ['working', 'open', 'done'],
-  done: ['open'],
+  done: ['open', 'has_followups'],
+  has_followups: ['done', 'open'],
 };
 
 /**

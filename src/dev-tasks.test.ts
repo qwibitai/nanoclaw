@@ -118,6 +118,31 @@ describe('dev-tasks', () => {
         'Invalid status transition',
       );
     });
+
+    // has_followups transitions
+    it('allows done → has_followups', () => {
+      expect(() => transitionStatus('done', 'has_followups')).not.toThrow();
+    });
+
+    it('allows has_followups → done', () => {
+      expect(() => transitionStatus('has_followups', 'done')).not.toThrow();
+    });
+
+    it('allows has_followups → open', () => {
+      expect(() => transitionStatus('has_followups', 'open')).not.toThrow();
+    });
+
+    it('rejects has_followups → working', () => {
+      expect(() => transitionStatus('has_followups', 'working')).toThrow(
+        'Invalid status transition',
+      );
+    });
+
+    it('rejects open → has_followups', () => {
+      expect(() => transitionStatus('open', 'has_followups')).toThrow(
+        'Invalid status transition',
+      );
+    });
   });
 
   // --- Frontmatter parsing ---
@@ -195,6 +220,40 @@ describe('dev-tasks', () => {
     it('throws on invalid frontmatter data', () => {
       const bad = '---\ntitle: Test\n---\n';
       expect(() => parseTaskFile(bad)).toThrow(); // missing required fields
+    });
+
+    it('parses has_followups status', () => {
+      const task = {
+        id: 12,
+        title: 'FamBot macOS app',
+        description: 'Port FamBot to macOS',
+        status: 'has_followups' as const,
+        created_at: '2026-03-27T10:00:00.000Z',
+        updated_at: '2026-03-27T10:00:00.000Z',
+        source: 'claude-code' as const,
+        pr_url: 'https://github.com/user/repo/pull/7',
+        branch: 'feat/task-12-fambot-macos-app',
+      };
+
+      const md = serializeTask(task);
+      const parsed = parseTaskFile(md);
+      expect(parsed.status).toBe('has_followups');
+    });
+
+    it('parses claude source', () => {
+      const task = {
+        id: 13,
+        title: 'Add has_followups status',
+        description: '',
+        status: 'open' as const,
+        created_at: '2026-03-27T10:00:00.000Z',
+        updated_at: '2026-03-27T10:00:00.000Z',
+        source: 'claude' as const,
+      };
+
+      const md = serializeTask(task);
+      const parsed = parseTaskFile(md);
+      expect(parsed.source).toBe('claude');
     });
   });
 
