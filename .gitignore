@@ -36,3 +36,9 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# universityClaw
+vault/*
+!vault/profile/
+upload/
+.superpowers/

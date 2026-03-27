@@ -75,6 +75,27 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+## universityClaw Extensions
+
+This is a fork of NanoClaw customized as a personal university teaching assistant.
+
+### Additional Subsystems
+- **Vault Utility** (`src/vault/`) — Direct Obsidian vault file I/O (gray-matter + regex)
+- **Ingestion Pipeline** (`src/ingestion/`) — File watcher → Docling → Claude note gen → review queue
+- **RAG Layer** (`src/rag/`) — LightRAG hybrid retrieval over the vault
+- **Student Profile** (`src/profile/`) — Learning progress tracking
+- **Web Dashboard** (`dashboard/`) — Next.js app for upload, review, vault browsing
+
+### Key Paths
+- `vault/` — Obsidian vault (primary knowledge store)
+- `upload/` — Watched folder for new documents
+- `dashboard/` — Next.js web dashboard
+- `scripts/docling-extract.py` — Python document extraction script
+
+### Testing
+- `npm test` — Run all tests (vitest)
+- `cd dashboard && npm test` — Dashboard tests
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
