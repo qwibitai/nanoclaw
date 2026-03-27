@@ -76,7 +76,7 @@ export const TIMEZONE =
 // Messages longer than this are truncated (with a note) to prevent prompt-stuffing
 // and runaway token costs from unusually large pastes.
 export const MAX_MESSAGE_CHARS = parseInt(
-  process.env.MAX_MESSAGE_CHARS || '2000',
+  process.env.MAX_MESSAGE_CHARS || '500',
   10,
 );
 

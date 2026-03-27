@@ -66,6 +66,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startReminderLoop } from './reminder-loop.js';
 import { isRateLimited } from './rate-limiter.js';
+import { logRateLimitEvent } from './rate-limit-logger.js';
 import {
   canFaqShortCircuit,
   fetchPredefinedFaq,
@@ -232,6 +233,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { chatJid, group: group.name, count: newUserMessages.length },
       'Rate limit exceeded — dropping batch',
     );
+    logRateLimitEvent({ phone: chatJid, groupFolder: group.folder, msgCount: newUserMessages.length });
     // Advance cursor so we don't retry these messages endlessly
     lastAgentTimestamp[chatJid] =
       missedMessages[missedMessages.length - 1].timestamp;

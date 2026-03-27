@@ -321,10 +321,6 @@ export async function runContainerAgent(
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const tenantFolder = group.containerConfig?.tenantFolder ?? group.folder;
   const tenantId = await fetchTenantId(tenantFolder);
-  logger.info(
-    { tenantFolder, tenantId: tenantId ?? 'NOT FOUND' },
-    'Resolved tenant for container',
-  );
   const containerArgs = buildContainerArgs(mounts, containerName, tenantId);
 
   logger.debug(
