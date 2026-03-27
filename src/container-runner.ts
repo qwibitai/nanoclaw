@@ -10,6 +10,7 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -25,10 +26,15 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
+import { detectAuthMode, readVertexConfig } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
+
+// Cache auth mode at startup — it can't change without a restart.
+const AUTH_MODE = detectAuthMode();
+const VERTEX_CONFIG = AUTH_MODE === 'vertex' ? readVertexConfig() : null;
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -233,19 +239,36 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  // Vertex AI uses the credential proxy (OneCLI doesn't support Vertex yet).
+  // API key / OAuth modes use the OneCLI gateway for credential injection.
+  if (AUTH_MODE === 'vertex') {
+    if (!VERTEX_CONFIG) {
+      throw new Error(
+        'Vertex AI mode requires CLOUD_ML_REGION and ANTHROPIC_VERTEX_PROJECT_ID in .env',
+      );
+    }
+    const proxyUrl = `http://host.docker.internal:${CREDENTIAL_PROXY_PORT}`;
+    args.push('-e', 'CLAUDE_CODE_USE_VERTEX=1');
+    args.push('-e', `CLOUD_ML_REGION=${VERTEX_CONFIG.region}`);
+    args.push('-e', `ANTHROPIC_VERTEX_PROJECT_ID=${VERTEX_CONFIG.projectId}`);
+    // Point the SDK's Vertex client at our proxy instead of the real endpoint
+    args.push('-e', `ANTHROPIC_VERTEX_BASE_URL=${proxyUrl}`);
+    // Skip Google auth inside the container — the proxy handles it
+    args.push('-e', 'CLAUDE_CODE_SKIP_VERTEX_AUTH=1');
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    // OneCLI gateway handles credential injection — containers never see real secrets.
+    const onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable — container will have no credentials',
+      );
+    }
   }
 
   // Runtime-specific args for host gateway resolution
