@@ -412,6 +412,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
         'mcp__icloud__*',
+        'mcp__calendar__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -444,6 +445,10 @@ async function runQuery(
             EMAIL_USER: process.env.ICLOUD_EMAIL || '',
             EMAIL_PASS: process.env.ICLOUD_APP_PASSWORD || '',
           },
+        },
+        calendar: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-calendar-autoauth-mcp'],
         },
       },
       hooks: {
