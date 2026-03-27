@@ -43,6 +43,8 @@ async function sendTelegramMessage(
   }
 }
 
+const pendingRejections = new Map<string, { decisionId: string; expiresAt: number }>();
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -107,6 +109,34 @@ export class TelegramChannel implements Channel {
     this.bot!.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
+
+      // Check for pending rejection reason flow
+      const chatIdKey = String(ctx.chat?.id);
+      const pending = pendingRejections.get(chatIdKey);
+      if (pending) {
+        pendingRejections.delete(chatIdKey);
+        if (pending.expiresAt > Date.now()) {
+          const text = ctx.message.text.trim();
+          const rationale = text.toLowerCase() === 'skip' ? '' : text;
+          try {
+            const agencyHqUrl = process.env.AGENCY_HQ_URL || 'http://localhost:3040';
+            const resp = await fetch(`${agencyHqUrl}/api/v1/decisions/${pending.decisionId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'rejected', rationale }),
+            });
+            if (!resp.ok) throw new Error(`Agency HQ returned ${resp.status}`);
+            const summary = rationale ? ` Reason: ${rationale}` : '';
+            await ctx.reply(`✅ Decision rejected.${summary}`);
+            logger.info({ decisionId: pending.decisionId }, 'Decision rejected with reason');
+          } catch (err) {
+            logger.error({ err, decisionId: pending.decisionId }, 'Failed to submit rejection');
+            await ctx.reply('❌ Failed to submit rejection — please try again.');
+          }
+          return;
+        }
+        // Expired — fall through to normal handling
+      }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
@@ -244,14 +274,29 @@ export class TelegramChannel implements Channel {
       }
 
       const [, action, decisionId] = match;
+
+      // Rejection flow: ask for reason before submitting
+      if (action === 'reject') {
+        await ctx.answerCallbackQuery();
+        const chatIdKey = String(ctx.chat?.id);
+        pendingRejections.set(chatIdKey, {
+          decisionId,
+          expiresAt: Date.now() + 10 * 60 * 1000,
+        });
+        await ctx.editMessageReplyMarkup();
+        await ctx.reply(
+          "Please reply with the reason for rejecting this decision (or type 'skip' to reject without a reason).",
+        );
+        logger.info({ decisionId }, 'Rejection reason requested');
+        return;
+      }
+
       const statusMap: Record<string, string> = {
         approve: 'approved',
-        reject: 'rejected',
         defer: 'proposed',
       };
       const labels: Record<string, string> = {
         approve: '✅ Approved',
-        reject: '❌ Rejected',
         defer: '⏸ Deferred',
       };
       const status = statusMap[action];

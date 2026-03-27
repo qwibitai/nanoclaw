@@ -142,6 +142,155 @@ describe('TelegramChannel', () => {
     });
   });
 
+  describe('decision reject reason flow', () => {
+    function getHandler(bot: any, event: string) {
+      const call = bot.on.mock.calls.find((c: any) => c[0] === event);
+      return call?.[1];
+    }
+
+    it('reject callback asks for reason instead of calling agency-hq', async () => {
+      const opts = makeOpts();
+      const ch = new TelegramChannel('token123', opts);
+      await ch.connect();
+
+      const handler = getHandler(lastBotInstance, 'callback_query:data');
+      const ctx = {
+        callbackQuery: { data: 'decision:reject:dec-123' },
+        chat: { id: 99 },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+        editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('reason for rejecting'),
+      );
+    });
+
+    it('reply with reason submits rejection to agency-hq', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+      } as Response);
+
+      const opts = makeOpts();
+      const ch = new TelegramChannel('token123', opts);
+      await ch.connect();
+
+      // First trigger reject callback to set up pending rejection
+      const cbHandler = getHandler(lastBotInstance, 'callback_query:data');
+      await cbHandler({
+        callbackQuery: { data: 'decision:reject:dec-456' },
+        chat: { id: 42 },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+        editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      // Now send reason via message handler
+      const msgHandler = getHandler(lastBotInstance, 'message:text');
+      const msgCtx = {
+        message: { text: 'Too expensive', date: Date.now() / 1000, message_id: 1 },
+        chat: { id: 42, type: 'private' },
+        from: { id: 1, first_name: 'Test' },
+        reply: vi.fn().mockResolvedValue(undefined),
+        me: { username: 'test_bot' },
+      };
+
+      await msgHandler(msgCtx);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/decisions/dec-456'),
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ status: 'rejected', rationale: 'Too expensive' }),
+        }),
+      );
+      expect(msgCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Decision rejected'),
+      );
+      // Should NOT pass to onMessage
+      expect(opts.onMessage).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
+    });
+
+    it('typing skip rejects without rationale', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+      } as Response);
+
+      const opts = makeOpts();
+      const ch = new TelegramChannel('token123', opts);
+      await ch.connect();
+
+      // Set up pending rejection
+      const cbHandler = getHandler(lastBotInstance, 'callback_query:data');
+      await cbHandler({
+        callbackQuery: { data: 'decision:reject:dec-789' },
+        chat: { id: 55 },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+        editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      // Send 'skip'
+      const msgHandler = getHandler(lastBotInstance, 'message:text');
+      const msgCtx = {
+        message: { text: 'skip', date: Date.now() / 1000, message_id: 2 },
+        chat: { id: 55, type: 'private' },
+        from: { id: 1, first_name: 'Test' },
+        reply: vi.fn().mockResolvedValue(undefined),
+        me: { username: 'test_bot' },
+      };
+
+      await msgHandler(msgCtx);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/decisions/dec-789'),
+        expect.objectContaining({
+          body: JSON.stringify({ status: 'rejected', rationale: '' }),
+        }),
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('approve callback still works immediately', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+      } as Response);
+
+      const opts = makeOpts();
+      const ch = new TelegramChannel('token123', opts);
+      await ch.connect();
+
+      const handler = getHandler(lastBotInstance, 'callback_query:data');
+      const ctx = {
+        callbackQuery: { data: 'decision:approve:dec-100' },
+        chat: { id: 77 },
+        answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+        editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/decisions/dec-100'),
+        expect.objectContaining({
+          body: JSON.stringify({ status: 'approved' }),
+        }),
+      );
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Approved'));
+
+      fetchSpy.mockRestore();
+    });
+  });
+
   describe('sendMessage', () => {
     it('sends message via bot API', async () => {
       const ch = new TelegramChannel('token123', makeOpts());
