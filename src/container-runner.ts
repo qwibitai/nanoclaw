@@ -17,10 +17,6 @@ import {
   TIMEZONE,
 } from './config.js';
 
-// Host gateway hostname — how containers reach the host.
-// On Linux, Docker requires --add-host=host.docker.internal:host-gateway (see hostGatewayArgs).
-// On macOS/Windows, host.docker.internal resolves automatically.
-const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -329,7 +325,7 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   input?: ContainerInput,
-): Promise<string[]> {
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
