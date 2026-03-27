@@ -14,7 +14,9 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 /** Hostname/IP containers use to reach the host machine. */
 // Apple Container doesn't resolve host.docker.internal — use the gateway IP directly.
 export const CONTAINER_HOST_GATEWAY =
-  CONTAINER_RUNTIME_BIN === 'container' ? '192.168.64.1' : 'host.docker.internal';
+  CONTAINER_RUNTIME_BIN === 'container'
+    ? '192.168.64.1'
+    : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.

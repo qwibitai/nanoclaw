@@ -183,7 +183,10 @@ export class ICloudChannel implements Channel {
         try {
           await this.client.messageFlagsAdd(String(seq), ['\\Seen']);
         } catch (err) {
-          logger.warn({ uid: msg.uid, err }, 'Failed to mark iCloud email as read');
+          logger.warn(
+            { uid: msg.uid, err },
+            'Failed to mark iCloud email as read',
+          );
         }
       }
 
@@ -201,7 +204,11 @@ export class ICloudChannel implements Channel {
         30 * 60 * 1000,
       );
       logger.error(
-        { err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs },
+        {
+          err,
+          consecutiveErrors: this.consecutiveErrors,
+          nextPollMs: backoffMs,
+        },
         'iCloud poll failed',
       );
     } finally {
@@ -236,7 +243,10 @@ export class ICloudChannel implements Channel {
     // Extract plain text body from source
     const body = msg.source ? this.extractTextBody(msg.source) : '';
     if (!body) {
-      logger.debug({ uid: msg.uid, subject }, 'Skipping iCloud email with no text body');
+      logger.debug(
+        { uid: msg.uid, subject },
+        'Skipping iCloud email with no text body',
+      );
       return;
     }
 
@@ -249,7 +259,10 @@ export class ICloudChannel implements Channel {
     const groups = this.opts.registeredGroups();
     const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
     if (!mainEntry) {
-      logger.debug({ chatJid, subject }, 'No main group registered, skipping iCloud email');
+      logger.debug(
+        { chatJid, subject },
+        'No main group registered, skipping iCloud email',
+      );
       return;
     }
 
@@ -297,8 +310,12 @@ export class ICloudChannel implements Channel {
           // Handle base64 encoding
           if (partHeaders.includes('base64')) {
             try {
-              text = Buffer.from(text.replace(/\s/g, ''), 'base64').toString('utf-8');
-            } catch { /* use raw */ }
+              text = Buffer.from(text.replace(/\s/g, ''), 'base64').toString(
+                'utf-8',
+              );
+            } catch {
+              /* use raw */
+            }
           }
           // Handle quoted-printable
           if (partHeaders.includes('quoted-printable')) {
@@ -318,7 +335,9 @@ export class ICloudChannel implements Channel {
     if (headers.includes('base64')) {
       try {
         text = Buffer.from(text.replace(/\s/g, ''), 'base64').toString('utf-8');
-      } catch { /* use raw */ }
+      } catch {
+        /* use raw */
+      }
     }
     if (headers.includes('quoted-printable')) {
       text = text
