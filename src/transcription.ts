@@ -94,5 +94,6 @@ export async function transcribeAudioMessage(
 }
 
 export function isVoiceMessage(msg: WAMessage): boolean {
-  return msg.message?.audioMessage?.ptt === true;
+  // ptt=true for voice notes; also catch audio messages without ptt (e.g. self-chat)
+  return !!msg.message?.audioMessage;
 }

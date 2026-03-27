@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gabrielratner.weekly-restart</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/sbin/shutdown</string>
+    <string>-r</string>
+    <string>now</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/var/log/weekly-restart.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/weekly-restart.log</string>
+</dict>
+</plist>

@@ -6,6 +6,9 @@
 // gmail
 import './gmail.js';
 
+// outlook
+import './outlook.js';
+
 // slack
 
 // telegram
