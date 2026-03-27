@@ -180,6 +180,16 @@ This allows you to use:
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
 - Custom model deployments with Anthropic-compatible APIs
 
+You can also set Claude's default model choices in `.env`:
+
+```bash
+ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-3-5-haiku-latest
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-5
+ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-1
+```
+
+NanoClaw syncs these values into each group's generated Claude settings on startup, so existing groups pick up `.env` changes after a restart.
+
 Note: The model must support the Anthropic API format for best compatibility.
 
 **How do I debug issues?**

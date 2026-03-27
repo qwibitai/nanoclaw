@@ -90,6 +90,11 @@ vi.mock('child_process', async () => {
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
+const settingsFile =
+  '/tmp/nanoclaw-test-data/sessions/test-group/.claude/settings.json';
+const runtimeEnvFile =
+  '/tmp/nanoclaw-test-data/sessions/test-group/.claude/runtime-env.sh';
+
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
   folder: 'test-group',
@@ -110,6 +115,12 @@ function emitOutputMarker(
 ) {
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
+}
+
+function getWriteFileCall(pathname: string) {
+  return vi
+    .mocked(fs.writeFileSync)
+    .mock.calls.find(([filePath]) => filePath === pathname);
 }
 
 describe('container-runner timeout behavior', () => {
@@ -211,7 +222,9 @@ describe('container-runner timeout behavior', () => {
   });
 
   it('writes the allowlisted runtime env script for container skills', async () => {
-    vi.mocked(fs.readFileSync).mockReturnValue('TAVILY_API_KEY=tvly-test-key\n');
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'TAVILY_API_KEY=tvly-test-key\n',
+    );
 
     const resultPromise = runContainerAgent(
       testGroup,
@@ -230,9 +243,107 @@ describe('container-runner timeout behavior', () => {
     await resultPromise;
 
     expect(fs.writeFileSync).toHaveBeenCalledWith(
-      '/tmp/nanoclaw-test-data/sessions/test-group/.claude/runtime-env.sh',
+      runtimeEnvFile,
       "export TAVILY_API_KEY='tvly-test-key'\n",
-      { mode: 0o600 },
+      {
+        mode: 0o600,
+      },
     );
+  });
+
+  it('writes model env values into generated Claude settings', async () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      [
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-3-5-haiku-latest',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-5',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-1',
+      ].join('\n'),
+    );
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const settingsWrite = getWriteFileCall(settingsFile);
+    expect(settingsWrite).toBeTruthy();
+    expect(JSON.parse(String(settingsWrite?.[1]))).toEqual({
+      env: {
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-3-5-haiku-latest',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-5',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-1',
+      },
+    });
+  });
+
+  it('resyncs managed model env keys without clobbering unrelated settings', async () => {
+    vi.mocked(fs.existsSync).mockImplementation(
+      (filePath) => filePath === settingsFile,
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (filePath === settingsFile) {
+        return JSON.stringify({
+          permissions: {
+            allow: ['Bash'],
+          },
+          env: {
+            KEEP_ME: 'yes',
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'stale-haiku',
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'stale-opus',
+          },
+        });
+      }
+
+      return [
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL=fresh-haiku',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL=fresh-sonnet',
+      ].join('\n');
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const settingsWrite = getWriteFileCall(settingsFile);
+    expect(settingsWrite).toBeTruthy();
+    expect(JSON.parse(String(settingsWrite?.[1]))).toEqual({
+      permissions: {
+        allow: ['Bash'],
+      },
+      env: {
+        KEEP_ME: 'yes',
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'fresh-haiku',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'fresh-sonnet',
+      },
+    });
   });
 });

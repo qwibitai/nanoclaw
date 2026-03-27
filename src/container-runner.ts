@@ -59,6 +59,28 @@ interface VolumeMount {
 }
 
 const RUNTIME_ENV_KEYS = ['TAVILY_API_KEY'] as const;
+const MODEL_ENV_KEYS = [
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+] as const;
+const MANAGED_CLAUDE_SETTINGS_ENV = {
+  // Enable agent swarms (subagent orchestration)
+  // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+  // Load CLAUDE.md from additional mounted directories
+  // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+  CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+  // Enable Claude's memory feature (persists user preferences between sessions)
+  // https://code.claude.com/docs/en/memory#manage-auto-memory
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+} as const;
+const MANAGED_CLAUDE_SETTINGS_ENV_KEYS = new Set<string>([
+  ...Object.keys(MANAGED_CLAUDE_SETTINGS_ENV),
+  ...MODEL_ENV_KEYS,
+]);
 
 function escapeShellSingleQuoted(value: string): string {
   return value.replace(/'/g, `'\\''`);
@@ -70,13 +92,61 @@ function writeRuntimeEnvScript(scriptPath: string): void {
   const runtimeEnv = readEnvFile([...RUNTIME_ENV_KEYS]);
   const lines = Object.entries(runtimeEnv)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(
-      ([key, value]) =>
-        `export ${key}='${escapeShellSingleQuoted(value)}'`,
-    );
-  fs.writeFileSync(scriptPath, lines.length > 0 ? `${lines.join('\n')}\n` : '', {
-    mode: 0o600,
-  });
+    .map(([key, value]) => `export ${key}='${escapeShellSingleQuoted(value)}'`);
+  fs.writeFileSync(
+    scriptPath,
+    lines.length > 0 ? `${lines.join('\n')}\n` : '',
+    {
+      mode: 0o600,
+    },
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function writeClaudeSettingsFile(settingsFile: string): void {
+  const modelEnv = readEnvFile([...MODEL_ENV_KEYS]);
+
+  let existingSettings: Record<string, unknown> = {};
+  if (fs.existsSync(settingsFile)) {
+    const parsed = JSON.parse(
+      fs.readFileSync(settingsFile, 'utf-8'),
+    ) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error(`${settingsFile} must contain a JSON object`);
+    }
+    existingSettings = parsed;
+  }
+
+  const existingEnvValue = existingSettings.env;
+  if (existingEnvValue != null && !isRecord(existingEnvValue)) {
+    throw new Error(`${settingsFile} env must contain a JSON object`);
+  }
+
+  // Only overwrite NanoClaw-owned env keys so unrelated settings survive restarts.
+  const preservedEnv = Object.fromEntries(
+    Object.entries(existingEnvValue ?? {}).filter(
+      ([key]) => !MANAGED_CLAUDE_SETTINGS_ENV_KEYS.has(key),
+    ),
+  );
+
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(
+      {
+        ...existingSettings,
+        env: {
+          ...preservedEnv,
+          ...MANAGED_CLAUDE_SETTINGS_ENV,
+          ...modelEnv,
+        },
+      },
+      null,
+      2,
+    ) + '\n',
+  );
 }
 
 function buildVolumeMounts(
@@ -146,40 +216,7 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-
-  // Read model configuration from .env to pass to containers
-  const modelEnv = readEnvFile([
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_DEFAULT_OPUS_MODEL',
-    'ANTHROPIC_DEFAULT_SONNET_MODEL',
-    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-    'ANTHROPIC_SMALL_FAST_MODEL',
-  ]);
-
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-            // Pass model configuration to containers
-            ...modelEnv,
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
+  writeClaudeSettingsFile(settingsFile);
   writeRuntimeEnvScript(path.join(groupSessionsDir, 'runtime-env.sh'));
 
   // Sync skills from container/skills/ into each group's .claude/skills/
