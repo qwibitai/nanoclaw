@@ -46,6 +46,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { registerPaperclipRoute } from './plugins/paperclip.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -647,10 +648,16 @@ async function main(): Promise<void> {
 
   // Wire up sibling channels for cross-channel forwarding (e.g., webhook → telegram)
   for (const ch of channels) {
-    if ('setSiblingChannels' in ch && typeof ch.setSiblingChannels === 'function') {
+    if (
+      'setSiblingChannels' in ch &&
+      typeof ch.setSiblingChannels === 'function'
+    ) {
       (ch as any).setSiblingChannels(channels);
     }
   }
+
+  // Register webhook plugins (must be after channels connect)
+  registerPaperclipRoute();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
