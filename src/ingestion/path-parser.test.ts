@@ -119,10 +119,7 @@ describe('parseUploadPath', () => {
     it('uses provided TypeMappings instance', async () => {
       const tm = new TypeMappings('');
       await tm.learn('anteckningar', 'lecture');
-      const result = parseUploadPath(
-        'Course/Anteckningar/note.pdf',
-        tm,
-      );
+      const result = parseUploadPath('Course/Anteckningar/note.pdf', tm);
       expect(result.type).toBe('lecture');
     });
   });

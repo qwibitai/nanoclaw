@@ -9,25 +9,41 @@ describe('extractWikilinks', () => {
   it('extracts a simple wikilink', () => {
     const result = extractWikilinks('See [[Target]] for details.');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'Target', heading: undefined, alias: undefined });
+    expect(result[0]).toEqual({
+      target: 'Target',
+      heading: undefined,
+      alias: undefined,
+    });
   });
 
   it('extracts a wikilink with a heading', () => {
     const result = extractWikilinks('See [[Target#Introduction]] for more.');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'Target', heading: 'Introduction', alias: undefined });
+    expect(result[0]).toEqual({
+      target: 'Target',
+      heading: 'Introduction',
+      alias: undefined,
+    });
   });
 
   it('extracts a wikilink with an alias', () => {
     const result = extractWikilinks('See [[Target|My Alias]] here.');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'Target', heading: undefined, alias: 'My Alias' });
+    expect(result[0]).toEqual({
+      target: 'Target',
+      heading: undefined,
+      alias: 'My Alias',
+    });
   });
 
   it('extracts a wikilink with both heading and alias', () => {
     const result = extractWikilinks('Read [[Target#Section|Click here]].');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'Target', heading: 'Section', alias: 'Click here' });
+    expect(result[0]).toEqual({
+      target: 'Target',
+      heading: 'Section',
+      alias: 'Click here',
+    });
   });
 
   it('returns empty array when there are no wikilinks', () => {
@@ -36,28 +52,54 @@ describe('extractWikilinks', () => {
   });
 
   it('ignores image embeds ![[figure.png]]', () => {
-    const result = extractWikilinks('Here is an image ![[figure.png]] embedded.');
+    const result = extractWikilinks(
+      'Here is an image ![[figure.png]] embedded.',
+    );
     expect(result).toEqual([]);
   });
 
   it('ignores image embeds but still extracts adjacent wikilinks', () => {
-    const result = extractWikilinks('![[image.png]] and [[RealLink]] together.');
+    const result = extractWikilinks(
+      '![[image.png]] and [[RealLink]] together.',
+    );
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'RealLink', heading: undefined, alias: undefined });
+    expect(result[0]).toEqual({
+      target: 'RealLink',
+      heading: undefined,
+      alias: undefined,
+    });
   });
 
   it('extracts multiple wikilinks from the same text', () => {
-    const result = extractWikilinks('[[Alpha]] references [[Beta#Section]] and [[Gamma|G]].');
+    const result = extractWikilinks(
+      '[[Alpha]] references [[Beta#Section]] and [[Gamma|G]].',
+    );
     expect(result).toHaveLength(3);
-    expect(result[0]).toEqual({ target: 'Alpha', heading: undefined, alias: undefined });
-    expect(result[1]).toEqual({ target: 'Beta', heading: 'Section', alias: undefined });
-    expect(result[2]).toEqual({ target: 'Gamma', heading: undefined, alias: 'G' });
+    expect(result[0]).toEqual({
+      target: 'Alpha',
+      heading: undefined,
+      alias: undefined,
+    });
+    expect(result[1]).toEqual({
+      target: 'Beta',
+      heading: 'Section',
+      alias: undefined,
+    });
+    expect(result[2]).toEqual({
+      target: 'Gamma',
+      heading: undefined,
+      alias: 'G',
+    });
   });
 
   it('trims whitespace from target, heading, and alias', () => {
     const result = extractWikilinks('[[ Target # Heading | Alias ]]');
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ target: 'Target', heading: 'Heading', alias: 'Alias' });
+    expect(result[0]).toEqual({
+      target: 'Target',
+      heading: 'Heading',
+      alias: 'Alias',
+    });
   });
 });
 
@@ -67,17 +109,21 @@ describe('createWikilink', () => {
   });
 
   it('creates a wikilink with a heading', () => {
-    expect(createWikilink('Target', { heading: 'Introduction' })).toBe('[[Target#Introduction]]');
+    expect(createWikilink('Target', { heading: 'Introduction' })).toBe(
+      '[[Target#Introduction]]',
+    );
   });
 
   it('creates a wikilink with an alias', () => {
-    expect(createWikilink('Target', { alias: 'My Alias' })).toBe('[[Target|My Alias]]');
+    expect(createWikilink('Target', { alias: 'My Alias' })).toBe(
+      '[[Target|My Alias]]',
+    );
   });
 
   it('creates a wikilink with both heading and alias', () => {
-    expect(createWikilink('Target', { heading: 'Section', alias: 'Click here' })).toBe(
-      '[[Target#Section|Click here]]',
-    );
+    expect(
+      createWikilink('Target', { heading: 'Section', alias: 'Click here' }),
+    ).toBe('[[Target#Section|Click here]]');
   });
 
   it('creates a wikilink with no opts provided', () => {
@@ -87,7 +133,11 @@ describe('createWikilink', () => {
 
 describe('replaceWikilinks', () => {
   it('renames a simple target', () => {
-    const result = replaceWikilinks('See [[OldTarget]] here.', 'OldTarget', 'NewTarget');
+    const result = replaceWikilinks(
+      'See [[OldTarget]] here.',
+      'OldTarget',
+      'NewTarget',
+    );
     expect(result).toBe('See [[NewTarget]] here.');
   });
 
@@ -128,7 +178,11 @@ describe('replaceWikilinks', () => {
   });
 
   it('does not replace image embeds', () => {
-    const result = replaceWikilinks('![[OldTarget]] and [[OldTarget]]', 'OldTarget', 'NewTarget');
+    const result = replaceWikilinks(
+      '![[OldTarget]] and [[OldTarget]]',
+      'OldTarget',
+      'NewTarget',
+    );
     expect(result).toBe('![[OldTarget]] and [[NewTarget]]');
   });
 

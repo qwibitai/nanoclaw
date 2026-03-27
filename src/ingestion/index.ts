@@ -7,7 +7,11 @@ import { parseUploadPath } from './path-parser.js';
 import { TypeMappings } from './type-mappings.js';
 import { ReviewQueue, DraftInput } from './review-queue.js';
 import { VaultUtility } from '../vault/vault-utility.js';
-import { createIngestionJob, updateIngestionJobStatus, createReviewItem } from '../db.js';
+import {
+  createIngestionJob,
+  updateIngestionJobStatus,
+  createReviewItem,
+} from '../db.js';
 import { logger } from '../logger.js';
 
 export interface IngestionPipelineOpts {
@@ -59,9 +63,14 @@ export class IngestionPipeline {
     const context = parseUploadPath(relativePath, this.typeMappings);
 
     createIngestionJob(
-      jobId, filePath, fileName,
-      context.courseCode, context.courseName,
-      context.semester, context.year, context.type,
+      jobId,
+      filePath,
+      fileName,
+      context.courseCode,
+      context.courseName,
+      context.semester,
+      context.year,
+      context.type,
     );
 
     try {
@@ -87,10 +96,17 @@ export class IngestionPipeline {
 
         // Copy figures to vault attachments
         if (figures.length > 0) {
-          const figDir = join(attachmentDir, 'figures', fileName.replace(/\.[^.]+$/, ''));
+          const figDir = join(
+            attachmentDir,
+            'figures',
+            fileName.replace(/\.[^.]+$/, ''),
+          );
           await mkdir(join(this.vaultDir, figDir), { recursive: true });
           for (let i = 0; i < figures.length; i++) {
-            await copyFile(figurePaths[i], join(this.vaultDir, figDir, figures[i]));
+            await copyFile(
+              figurePaths[i],
+              join(this.vaultDir, figDir, figures[i]),
+            );
           }
         }
       } else {
@@ -105,8 +121,11 @@ export class IngestionPipeline {
       const courseFolder = context.courseCode || '_unsorted';
       const targetPath = `courses/${courseFolder}/${targetFolder}/${fileName.replace(/\.[^.]+$/, '.md')}`;
 
-      const figureEmbeds = figures.map((f) => `![[${f}]]\n\n**Figure:** _Description pending._`).join('\n\n');
-      const fullContent = markdown + (figureEmbeds ? `\n\n## Figures\n\n${figureEmbeds}` : '');
+      const figureEmbeds = figures
+        .map((f) => `![[${f}]]\n\n**Figure:** _Description pending._`)
+        .join('\n\n');
+      const fullContent =
+        markdown + (figureEmbeds ? `\n\n## Figures\n\n${figureEmbeds}` : '');
 
       const draft: DraftInput = {
         id: draftId,
@@ -129,7 +148,15 @@ export class IngestionPipeline {
 
       await this.reviewQueue.addDraft(draft);
 
-      createReviewItem(draftId, jobId, `drafts/${draftId}.md`, fileName, context.type, context.courseCode, figures);
+      createReviewItem(
+        draftId,
+        jobId,
+        `drafts/${draftId}.md`,
+        fileName,
+        context.type,
+        context.courseCode,
+        figures,
+      );
 
       // Move original out of upload folder
       const processedDir = join(this.uploadDir, '.processed');

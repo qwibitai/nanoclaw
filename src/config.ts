@@ -42,8 +42,12 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 export const VAULT_DIR = process.env.VAULT_DIR || join(process.cwd(), 'vault');
-export const UPLOAD_DIR = process.env.UPLOAD_DIR || join(process.cwd(), 'upload');
-export const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || '3100', 10);
+export const UPLOAD_DIR =
+  process.env.UPLOAD_DIR || join(process.cwd(), 'upload');
+export const DASHBOARD_PORT = parseInt(
+  process.env.DASHBOARD_PORT || '3100',
+  10,
+);
 export const TYPE_MAPPINGS_PATH = join(STORE_DIR, 'type-mappings.json');
 
 export const CONTAINER_IMAGE =

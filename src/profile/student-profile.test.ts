@@ -94,7 +94,7 @@ describe('StudentProfile', () => {
       expect(content).toContain('confidence: 0.8');
     });
 
-    it('includes today\'s date in the new entry', async () => {
+    it("includes today's date in the new entry", async () => {
       await profile.updateKnowledgeMap('Recursion', 'CS101', 0.6);
 
       const today = new Date().toISOString().slice(0, 10);

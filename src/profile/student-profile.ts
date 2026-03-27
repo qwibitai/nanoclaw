@@ -50,10 +50,7 @@ export class StudentProfile {
     const existing = note ? note.content : '# Knowledge Map\n';
 
     const escapedTopic = topic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const topicRegex = new RegExp(
-      `^- \\*\\*${escapedTopic}\\*\\*.*$`,
-      'm',
-    );
+    const topicRegex = new RegExp(`^- \\*\\*${escapedTopic}\\*\\*.*$`, 'm');
 
     let updated: string;
     if (topicRegex.test(existing)) {
@@ -87,9 +84,14 @@ export class StudentProfile {
     let updated: string;
     if (existing.includes(heading)) {
       const insertPos = existing.indexOf(heading) + heading.length;
-      updated = existing.slice(0, insertPos) + '\n' + courseEntry + existing.slice(insertPos);
+      updated =
+        existing.slice(0, insertPos) +
+        '\n' +
+        courseEntry +
+        existing.slice(insertPos);
     } else {
-      updated = existing.trimEnd() + '\n\n' + heading + '\n' + courseEntry + '\n';
+      updated =
+        existing.trimEnd() + '\n\n' + heading + '\n' + courseEntry + '\n';
     }
 
     const fullPath = join(

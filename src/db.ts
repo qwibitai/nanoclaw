@@ -706,7 +706,16 @@ export function createIngestionJob(
   db.prepare(
     `INSERT INTO ingestion_jobs (id, source_path, source_filename, course_code, course_name, semester, year, type)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, sourcePath, sourceFilename, courseCode, courseName, semester, year, type);
+  ).run(
+    id,
+    sourcePath,
+    sourceFilename,
+    courseCode,
+    courseName,
+    semester,
+    year,
+    type,
+  );
 }
 
 export function updateIngestionJobStatus(
@@ -723,7 +732,9 @@ export function updateIngestionJobStatus(
 export function getIngestionJobs(status?: string): unknown[] {
   if (status !== undefined) {
     return db
-      .prepare('SELECT * FROM ingestion_jobs WHERE status = ? ORDER BY created_at DESC')
+      .prepare(
+        'SELECT * FROM ingestion_jobs WHERE status = ? ORDER BY created_at DESC',
+      )
       .all(status);
   }
   return db
@@ -745,7 +756,15 @@ export function createReviewItem(
   db.prepare(
     `INSERT INTO review_items (id, job_id, draft_path, original_source, suggested_type, suggested_course, figures)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, jobId, draftPath, originalSource, suggestedType, suggestedCourse, JSON.stringify(figures));
+  ).run(
+    id,
+    jobId,
+    draftPath,
+    originalSource,
+    suggestedType,
+    suggestedCourse,
+    JSON.stringify(figures),
+  );
 }
 
 export function updateReviewItemStatus(id: string, status: string): void {
@@ -757,7 +776,9 @@ export function updateReviewItemStatus(id: string, status: string): void {
 
 export function getPendingReviewItems(): unknown[] {
   return db
-    .prepare(`SELECT * FROM review_items WHERE status = 'pending' ORDER BY created_at ASC`)
+    .prepare(
+      `SELECT * FROM review_items WHERE status = 'pending' ORDER BY created_at ASC`,
+    )
     .all();
 }
 
@@ -775,7 +796,9 @@ export function setFolderTypeOverride(
 
 export function getFolderTypeOverride(
   folderName: string,
-): { folder_name: string; note_type: string; course_code: string | null } | undefined {
+):
+  | { folder_name: string; note_type: string; course_code: string | null }
+  | undefined {
   return db
     .prepare('SELECT * FROM folder_type_overrides WHERE folder_name = ?')
     .get(folderName) as

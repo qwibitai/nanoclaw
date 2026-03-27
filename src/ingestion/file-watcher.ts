@@ -2,9 +2,20 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { extname } from 'node:path';
 
 const SUPPORTED_EXTENSIONS = new Set([
-  '.pdf', '.pptx', '.docx', '.doc', '.ppt',
-  '.png', '.jpg', '.jpeg', '.tiff', '.bmp',
-  '.md', '.txt', '.html', '.htm',
+  '.pdf',
+  '.pptx',
+  '.docx',
+  '.doc',
+  '.ppt',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.tiff',
+  '.bmp',
+  '.md',
+  '.txt',
+  '.html',
+  '.htm',
 ]);
 
 const IGNORED_FILES = new Set(['.ds_store', 'thumbs.db', '.gitkeep']);

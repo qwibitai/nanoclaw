@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { join } from 'node:path';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
@@ -11,11 +12,14 @@ import {
   IDLE_TIMEOUT,
   ONECLI_URL,
   POLL_INTERVAL,
+  STORE_DIR,
   TIMEZONE,
   VAULT_DIR,
   UPLOAD_DIR,
   TYPE_MAPPINGS_PATH,
 } from './config.js';
+import { RagClient } from './rag/rag-client.js';
+import { RagIndexer } from './rag/indexer.js';
 import { IngestionPipeline } from './ingestion/index.js';
 import './channels/index.js';
 import {
@@ -543,9 +547,17 @@ async function main(): Promise<void> {
   });
   await pipeline.start();
 
+  const ragClient = new RagClient({
+    workingDir: join(STORE_DIR, 'rag'),
+    vaultDir: VAULT_DIR,
+  });
+  const ragIndexer = new RagIndexer(VAULT_DIR, ragClient);
+  await ragIndexer.start();
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await ragIndexer.stop();
     await pipeline.stop();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();

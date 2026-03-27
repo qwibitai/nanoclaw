@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { parseFrontmatter, serializeFrontmatter, updateFrontmatter } from './frontmatter.js';
+import {
+  parseFrontmatter,
+  serializeFrontmatter,
+  updateFrontmatter,
+} from './frontmatter.js';
 
 describe('parseFrontmatter', () => {
   it('parses YAML frontmatter and body from a markdown string', () => {
@@ -125,7 +129,10 @@ title: Original
 
 Content.`;
 
-    const result = updateFrontmatter(markdown, { tags: ['new'], reviewed: true });
+    const result = updateFrontmatter(markdown, {
+      tags: ['new'],
+      reviewed: true,
+    });
     const parsed = parseFrontmatter(result);
 
     expect(parsed.data.title).toBe('Original');
@@ -142,7 +149,10 @@ count: 1
 
 Body.`;
 
-    const result = updateFrontmatter(markdown, { title: 'New Title', count: 99 });
+    const result = updateFrontmatter(markdown, {
+      title: 'New Title',
+      count: 99,
+    });
     const parsed = parseFrontmatter(result);
 
     expect(parsed.data.title).toBe('New Title');
@@ -162,7 +172,9 @@ Paragraph with **bold** and _italic_.`;
     const result = updateFrontmatter(markdown, { status: 'done' });
     const parsed = parseFrontmatter(result);
 
-    expect(parsed.content).toBe('# Heading\n\nParagraph with **bold** and _italic_.');
+    expect(parsed.content).toBe(
+      '# Heading\n\nParagraph with **bold** and _italic_.',
+    );
   });
 
   it('adds frontmatter to markdown that has none', () => {

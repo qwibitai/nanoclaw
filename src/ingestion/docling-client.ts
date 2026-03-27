@@ -62,7 +62,10 @@ export class DoclingClient {
       { timeout: 5 * 60 * 1000 },
     );
 
-    const status = JSON.parse(stdout.trim()) as { status: string; outputDir?: string };
+    const status = JSON.parse(stdout.trim()) as {
+      status: string;
+      outputDir?: string;
+    };
     if (status.status !== 'ok') {
       throw new Error(`Docling extraction failed: ${JSON.stringify(status)}`);
     }

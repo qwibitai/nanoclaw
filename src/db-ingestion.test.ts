@@ -47,7 +47,16 @@ describe('createIngestionJob', () => {
   });
 
   it('creates a job with null optional fields', () => {
-    createIngestionJob('job-2', '/path/doc.pdf', 'doc.pdf', null, null, null, null, null);
+    createIngestionJob(
+      'job-2',
+      '/path/doc.pdf',
+      'doc.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
 
     const jobs = getIngestionJobs() as Array<Record<string, unknown>>;
     expect(jobs).toHaveLength(1);
@@ -61,7 +70,16 @@ describe('createIngestionJob', () => {
 
 describe('updateIngestionJobStatus', () => {
   beforeEach(() => {
-    createIngestionJob('job-3', '/path/f.pdf', 'f.pdf', null, null, null, null, null);
+    createIngestionJob(
+      'job-3',
+      '/path/f.pdf',
+      'f.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
   });
 
   it('updates job status to completed and sets completed_at', () => {
@@ -94,8 +112,26 @@ describe('updateIngestionJobStatus', () => {
 
 describe('getIngestionJobs', () => {
   beforeEach(() => {
-    createIngestionJob('job-a', '/a.pdf', 'a.pdf', null, null, null, null, null);
-    createIngestionJob('job-b', '/b.pdf', 'b.pdf', null, null, null, null, null);
+    createIngestionJob(
+      'job-a',
+      '/a.pdf',
+      'a.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    createIngestionJob(
+      'job-b',
+      '/b.pdf',
+      'b.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
     updateIngestionJobStatus('job-b', 'completed');
   });
 
@@ -105,11 +141,15 @@ describe('getIngestionJobs', () => {
   });
 
   it('filters jobs by status', () => {
-    const pending = getIngestionJobs('pending') as Array<Record<string, unknown>>;
+    const pending = getIngestionJobs('pending') as Array<
+      Record<string, unknown>
+    >;
     expect(pending).toHaveLength(1);
     expect(pending[0].id).toBe('job-a');
 
-    const completed = getIngestionJobs('completed') as Array<Record<string, unknown>>;
+    const completed = getIngestionJobs('completed') as Array<
+      Record<string, unknown>
+    >;
     expect(completed).toHaveLength(1);
     expect(completed[0].id).toBe('job-b');
   });
@@ -124,7 +164,16 @@ describe('getIngestionJobs', () => {
 
 describe('createReviewItem', () => {
   beforeEach(() => {
-    createIngestionJob('job-r', '/source.pdf', 'source.pdf', 'MAT201', null, null, null, null);
+    createIngestionJob(
+      'job-r',
+      '/source.pdf',
+      'source.pdf',
+      'MAT201',
+      null,
+      null,
+      null,
+      null,
+    );
   });
 
   it('creates a review item linked to a job with default pending status', () => {
@@ -152,7 +201,15 @@ describe('createReviewItem', () => {
   });
 
   it('stores an empty figures array as JSON', () => {
-    createReviewItem('review-2', 'job-r', '/drafts/note2.md', null, null, null, []);
+    createReviewItem(
+      'review-2',
+      'job-r',
+      '/drafts/note2.md',
+      null,
+      null,
+      null,
+      [],
+    );
 
     const items = getPendingReviewItems() as Array<Record<string, unknown>>;
     expect(items[0].figures).toBe('[]');
@@ -161,7 +218,16 @@ describe('createReviewItem', () => {
 
 describe('updateReviewItemStatus', () => {
   beforeEach(() => {
-    createIngestionJob('job-s', '/s.pdf', 's.pdf', null, null, null, null, null);
+    createIngestionJob(
+      'job-s',
+      '/s.pdf',
+      's.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
     createReviewItem('review-3', 'job-s', '/drafts/n.md', null, null, null, []);
   });
 
@@ -183,7 +249,16 @@ describe('updateReviewItemStatus', () => {
 
 describe('getPendingReviewItems', () => {
   beforeEach(() => {
-    createIngestionJob('job-p', '/p.pdf', 'p.pdf', null, null, null, null, null);
+    createIngestionJob(
+      'job-p',
+      '/p.pdf',
+      'p.pdf',
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
     createReviewItem('rev-p1', 'job-p', '/drafts/p1.md', null, null, null, []);
     createReviewItem('rev-p2', 'job-p', '/drafts/p2.md', null, null, null, []);
     createReviewItem('rev-p3', 'job-p', '/drafts/p3.md', null, null, null, []);

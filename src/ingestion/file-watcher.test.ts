@@ -72,9 +72,20 @@ describe('FileWatcher', () => {
 
   it('detects all supported document types', async () => {
     const files = [
-      'file.pdf', 'file.pptx', 'file.docx', 'file.doc', 'file.ppt',
-      'file.png', 'file.jpg', 'file.jpeg', 'file.tiff', 'file.bmp',
-      'file.md', 'file.txt', 'file.html', 'file.htm',
+      'file.pdf',
+      'file.pptx',
+      'file.docx',
+      'file.doc',
+      'file.ppt',
+      'file.png',
+      'file.jpg',
+      'file.jpeg',
+      'file.tiff',
+      'file.bmp',
+      'file.md',
+      'file.txt',
+      'file.html',
+      'file.htm',
     ];
     for (const name of files) {
       await writeFile(join(tmpDir, name), 'content');

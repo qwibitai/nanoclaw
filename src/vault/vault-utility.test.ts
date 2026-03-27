@@ -77,7 +77,10 @@ describe('VaultUtility', () => {
 
   describe('moveNote', () => {
     it('moves a file to a new path and creates target directories', async () => {
-      await vault.createNote('source.md', { data: { v: 1 }, content: 'move me' });
+      await vault.createNote('source.md', {
+        data: { v: 1 },
+        content: 'move me',
+      });
       await vault.moveNote('source.md', 'subdir/dest.md');
 
       const original = await vault.readNote('source.md');
@@ -185,7 +188,10 @@ describe('VaultUtility', () => {
     });
 
     it('returns empty array when no notes link to the title', async () => {
-      await vault.createNote('solo.md', { data: {}, content: 'No links here.' });
+      await vault.createNote('solo.md', {
+        data: {},
+        content: 'No links here.',
+      });
       const backlinks = await vault.getBacklinks('Ghost');
       expect(backlinks).toEqual([]);
     });
