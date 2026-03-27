@@ -3,10 +3,10 @@
 
 // discord
 
+// gmail
+
 // mattermost
 import './mattermost.js';
-
-// gmail
 
 // slack
 

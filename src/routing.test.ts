@@ -22,6 +22,11 @@ describe('JID ownership patterns', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
   });
+
+  it('Mattermost channel JID: starts with mm:', () => {
+    const jid = 'mm:abc123def456';
+    expect(jid.startsWith('mm:')).toBe(true);
+  });
 });
 
 // --- getAvailableGroups ---
