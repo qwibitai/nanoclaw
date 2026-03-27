@@ -5,7 +5,15 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask, addBrainEntry, queryBrainEntries, updateBrainEntry } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  updateTask,
+  addBrainEntry,
+  queryBrainEntries,
+  updateBrainEntry,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -512,7 +520,11 @@ export async function processTaskIpc(
         }
         const entryId = addBrainEntry({
           source_group: data.source_group || sourceGroup,
-          entry_type: data.entry_type as 'decision' | 'action_item' | 'insight' | 'follow_up',
+          entry_type: data.entry_type as
+            | 'decision'
+            | 'action_item'
+            | 'insight'
+            | 'follow_up',
           content: data.content,
           status: (data.status as 'open' | 'done' | 'cancelled') || 'open',
           created_at: new Date().toISOString(),
@@ -539,9 +551,17 @@ export async function processTaskIpc(
         since: data.since,
         limit: data.limit,
       });
-      const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'brain-responses');
+      const responseDir = path.join(
+        DATA_DIR,
+        'ipc',
+        sourceGroup,
+        'brain-responses',
+      );
       fs.mkdirSync(responseDir, { recursive: true });
-      const responseFile = path.join(responseDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+      const responseFile = path.join(
+        responseDir,
+        `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
+      );
       fs.writeFileSync(responseFile, JSON.stringify(entries, null, 2));
       logger.info(
         { count: entries.length, sourceGroup },

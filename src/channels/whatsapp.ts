@@ -59,6 +59,10 @@ class WhatsAppChannel implements Channel {
     this.onChatMetadata = opts.onChatMetadata;
   }
 
+  private reconnectDelay = 5 * ONE_SECOND;
+  private readonly MAX_RECONNECT_DELAY = 5 * 60 * ONE_SECOND; // cap at 5 min
+  private connGen = 0; // monotonically increasing generation to drop stale events
+
   async connect(): Promise<void> {
     await this.connectInternal();
   }
@@ -215,6 +219,7 @@ class WhatsAppChannel implements Channel {
       return;
     }
 
+    const myGen = ++this.connGen; // capture generation at connection start
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
     const sock = makeWASocket({
@@ -229,6 +234,7 @@ class WhatsAppChannel implements Channel {
     this.sock = sock;
 
     sock.ev.on('connection.update', (update) => {
+      if (myGen !== this.connGen) return; // stale socket — ignore
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -256,12 +262,18 @@ class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect && !this.shuttingDown) {
-          logger.info('Reconnecting to WhatsApp...');
+          logger.info({ reconnectIn: this.reconnectDelay }, 'Reconnecting to WhatsApp...');
           setTimeout(() => {
+            if (this.sock) {
+              try { this.sock.end(undefined); } catch { /* best-effort */ }
+              this.sock = null;
+            }
             this.connectInternal().catch((err) =>
               logger.error({ err }, 'Failed to reconnect to WhatsApp'),
             );
-          }, 5 * ONE_SECOND);
+          }, this.reconnectDelay);
+          // Exponential backoff, capped at MAX_RECONNECT_DELAY
+          this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.MAX_RECONNECT_DELAY);
         } else if (!this.shuttingDown) {
           logger.error(
             'WhatsApp session logged out — run whatsapp-auth setup to re-authenticate.',
@@ -269,6 +281,7 @@ class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectDelay = 5 * ONE_SECOND; // reset backoff on success
         logger.info('Connected to WhatsApp');
 
         // Build LID → phone mapping from auth state for self-chat translation
@@ -320,6 +333,7 @@ class WhatsAppChannel implements Channel {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('messages.upsert', ({ messages }) => {
+      if (myGen !== this.connGen) return; // stale socket — ignore
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;

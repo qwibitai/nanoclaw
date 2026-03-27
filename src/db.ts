@@ -748,12 +748,15 @@ export function queryBrainEntries(filters: {
     params.push(filters.since);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = filters.limit || 100;
   params.push(limit);
 
   return db
-    .prepare(`SELECT * FROM brain_entries ${where} ORDER BY created_at DESC LIMIT ?`)
+    .prepare(
+      `SELECT * FROM brain_entries ${where} ORDER BY created_at DESC LIMIT ?`,
+    )
     .all(...params) as BrainEntry[];
 }
 
