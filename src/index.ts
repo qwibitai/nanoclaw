@@ -33,6 +33,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  clearSession,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -70,6 +71,15 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+function shouldResetSessionOnError(error?: string): boolean {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes('exited with code 137') ||
+    normalized.includes('timed out')
+  );
+}
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -316,6 +326,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  allowSessionReset: boolean = true,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -379,6 +390,27 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      if (
+        allowSessionReset &&
+        sessionId &&
+        shouldResetSessionOnError(output.error)
+      ) {
+        logger.warn(
+          {
+            group: group.name,
+            groupFolder: group.folder,
+            sessionId,
+            error: output.error,
+          },
+          'Detected stale session failure, clearing persisted session and retrying once with a fresh session',
+        );
+
+        delete sessions[group.folder];
+        clearSession(group.folder);
+
+        return runAgent(group, prompt, chatJid, onOutput, false);
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
