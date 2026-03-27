@@ -47,12 +47,42 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+/** Snapshot of context usage from the last result message. */
+interface UsageSnapshot {
+  inputTokens: number;
+  contextWindow: number;
+}
+
+/**
+ * Determine if auto-compact should trigger based on usage and config.
+ * Exported for testing.
+ */
+export function shouldTriggerAutoCompact(
+  usage: UsageSnapshot | null,
+  config: { enabled: boolean; threshold: number },
+  alreadyCompactedThisSession: boolean,
+): boolean {
+  if (!config.enabled) return false;
+  if (alreadyCompactedThisSession) return false;
+  if (!usage) return false;
+  if (usage.contextWindow <= 0) return false;
+  const ratio = usage.inputTokens / usage.contextWindow;
+  return ratio >= config.threshold;
+}
+
 interface SDKUserMessage {
   type: 'user';
   message: { role: 'user'; content: string };
   parent_tool_use_id: null;
   session_id: string;
 }
+
+// Auto-compact configuration (injected from host via session env)
+const AUTO_COMPACT_ENABLED = process.env.AUTO_COMPACT_ENABLED === 'true';
+const AUTO_COMPACT_THRESHOLD = Math.min(
+  1,
+  Math.max(0, parseFloat(process.env.AUTO_COMPACT_THRESHOLD || '0.8')),
+);
 
 const IPC_INPUT_DIR = process.env.NANOCLAW_IPC_INPUT_DIR || '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
@@ -368,7 +398,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; lastUsage: UsageSnapshot | null }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -397,6 +427,7 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let lastUsage: UsageSnapshot | null = null;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalDir = process.env.NANOCLAW_GLOBAL_DIR || '/workspace/global';
@@ -492,12 +523,64 @@ async function runQuery(
         result: textResult || null,
         newSessionId
       });
+
+      // Capture usage snapshot for auto-compact decision after query completes
+      const resultMsg = message as {
+        usage?: { input_tokens?: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null };
+        modelUsage?: Record<string, { contextWindow?: number }>;
+      };
+      if (resultMsg.usage) {
+        const inputTokens = (resultMsg.usage.input_tokens || 0)
+          + (resultMsg.usage.cache_creation_input_tokens || 0)
+          + (resultMsg.usage.cache_read_input_tokens || 0);
+        // Find context window from first model in modelUsage
+        let contextWindow = 0;
+        if (resultMsg.modelUsage) {
+          for (const model of Object.values(resultMsg.modelUsage)) {
+            if (model.contextWindow && model.contextWindow > 0) {
+              contextWindow = model.contextWindow;
+              break;
+            }
+          }
+        }
+        if (contextWindow > 0) {
+          lastUsage = { inputTokens, contextWindow };
+          log(`Usage: ${inputTokens}/${contextWindow} (${(inputTokens / contextWindow * 100).toFixed(1)}%)`);
+        }
+      }
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, lastUsage };
+}
+
+/**
+ * Run /compact as a new query to trigger SDK-native compaction.
+ * Returns the new session ID if compaction succeeded, or null on failure.
+ * Non-fatal: logs warnings but never throws.
+ */
+async function runCompactCommand(
+  sessionId: string,
+  mcpServerPath: string,
+  containerInput: ContainerInput,
+  sdkEnv: Record<string, string | undefined>,
+  resumeAt?: string,
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string } | null> {
+  log('Auto-compact: triggering /compact due to high context usage');
+  try {
+    const result = await runQuery('/compact', sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+    if (result.newSessionId) {
+      log(`Auto-compact: compaction complete, new session: ${result.newSessionId}`);
+      return { newSessionId: result.newSessionId, lastAssistantUuid: result.lastAssistantUuid };
+    }
+    log('Auto-compact: compaction completed but no new session ID returned');
+    return { lastAssistantUuid: result.lastAssistantUuid };
+  } catch (err) {
+    log(`Auto-compact: failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
 }
 
 async function main(): Promise<void> {
@@ -643,6 +726,7 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let autoCompactedThisSession = false;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
@@ -661,6 +745,29 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      // Auto-compact: check if context usage exceeds threshold
+      if (shouldTriggerAutoCompact(
+        queryResult.lastUsage,
+        { enabled: AUTO_COMPACT_ENABLED, threshold: AUTO_COMPACT_THRESHOLD },
+        autoCompactedThisSession,
+      )) {
+        const usagePct = queryResult.lastUsage
+          ? (queryResult.lastUsage.inputTokens / queryResult.lastUsage.contextWindow * 100).toFixed(1)
+          : '?';
+        log(`Auto-compact: usage at ${usagePct}%, threshold ${AUTO_COMPACT_THRESHOLD * 100}%`);
+        writeOutput({ status: 'success', result: `[Auto-compacting context (${usagePct}% used)]`, newSessionId: sessionId });
+
+        const compactResult = await runCompactCommand(sessionId!, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        autoCompactedThisSession = true;
+        if (compactResult?.newSessionId) {
+          sessionId = compactResult.newSessionId;
+          writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+        }
+        if (compactResult?.lastAssistantUuid) {
+          resumeAt = compactResult.lastAssistantUuid;
+        }
       }
 
       // Emit session update so host can track it

@@ -110,6 +110,15 @@ export const DISPATCH_DRAIN_TIMEOUT_MS = parseInt(
   10,
 );
 
+// Auto-compact: automatically trigger /compact when context usage exceeds threshold.
+// Opt-in — disabled by default to preserve existing behavior.
+export const AUTO_COMPACT_ENABLED =
+  (process.env.AUTO_COMPACT_ENABLED || 'false') === 'true';
+export const AUTO_COMPACT_THRESHOLD = Math.min(
+  1,
+  Math.max(0, parseFloat(process.env.AUTO_COMPACT_THRESHOLD || '0.8')),
+);
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

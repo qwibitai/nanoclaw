@@ -6,7 +6,13 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { CREDENTIAL_PROXY_PORT, DATA_DIR, TIMEZONE } from './config.js';
+import {
+  AUTO_COMPACT_ENABLED,
+  AUTO_COMPACT_THRESHOLD,
+  CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
+  TIMEZONE,
+} from './config.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
 import type { VolumeMount } from './container-runner.js';
@@ -91,6 +97,12 @@ export function buildSessionEnv(mounts: VolumeMount[]): Record<string, string> {
     } else if (mount.containerPath === '/workspace/extra') {
       env.NANOCLAW_EXTRA_DIR = mount.hostPath;
     }
+  }
+
+  // Auto-compact configuration
+  if (AUTO_COMPACT_ENABLED) {
+    env.AUTO_COMPACT_ENABLED = 'true';
+    env.AUTO_COMPACT_THRESHOLD = String(AUTO_COMPACT_THRESHOLD);
   }
 
   return env;
