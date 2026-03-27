@@ -126,6 +126,34 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add listen_only column if it doesn't exist (migration for existing DBs)
+  // listen_only groups store messages passively but never spawn agent containers
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN listen_only INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Create central brain table (intelligence across all groups)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS brain_entries (
+      id TEXT PRIMARY KEY,
+      source_group TEXT NOT NULL,
+      entry_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      metadata TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_brain_type ON brain_entries(entry_type);
+    CREATE INDEX IF NOT EXISTS idx_brain_source ON brain_entries(source_group);
+    CREATE INDEX IF NOT EXISTS idx_brain_status ON brain_entries(status);
+    CREATE INDEX IF NOT EXISTS idx_brain_created ON brain_entries(created_at);
+  `);
+
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
@@ -576,6 +604,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        listen_only: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -598,6 +627,7 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    listenOnly: row.listen_only === 1 ? true : undefined,
   };
 }
 
@@ -606,8 +636,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, listen_only)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -617,6 +647,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.listenOnly ? 1 : 0,
   );
 }
 
@@ -630,6 +661,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    listen_only: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -651,9 +683,109 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      listenOnly: row.listen_only === 1 ? true : undefined,
     };
   }
   return result;
+}
+
+// --- Central Brain CRUD ---
+
+export interface BrainEntry {
+  id: string;
+  source_group: string;
+  entry_type: 'decision' | 'action_item' | 'insight' | 'follow_up';
+  content: string;
+  status: 'open' | 'done' | 'cancelled';
+  created_at: string;
+  updated_at: string | null;
+  metadata: string | null;
+}
+
+export function addBrainEntry(
+  entry: Omit<BrainEntry, 'id' | 'updated_at'>,
+): string {
+  const id = `brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    `INSERT INTO brain_entries (id, source_group, entry_type, content, status, created_at, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    entry.source_group,
+    entry.entry_type,
+    entry.content,
+    entry.status || 'open',
+    entry.created_at,
+    entry.metadata || null,
+  );
+  return id;
+}
+
+export function queryBrainEntries(filters: {
+  entry_type?: string;
+  source_group?: string;
+  status?: string;
+  since?: string;
+  limit?: number;
+}): BrainEntry[] {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.entry_type) {
+    conditions.push('entry_type = ?');
+    params.push(filters.entry_type);
+  }
+  if (filters.source_group) {
+    conditions.push('source_group = ?');
+    params.push(filters.source_group);
+  }
+  if (filters.status) {
+    conditions.push('status = ?');
+    params.push(filters.status);
+  }
+  if (filters.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = filters.limit || 100;
+  params.push(limit);
+
+  return db
+    .prepare(`SELECT * FROM brain_entries ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params) as BrainEntry[];
+}
+
+export function updateBrainEntry(
+  id: string,
+  updates: { status?: string; content?: string; metadata?: string },
+): void {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+
+  if (updates.status !== undefined) {
+    fields.push('status = ?');
+    params.push(updates.status);
+  }
+  if (updates.content !== undefined) {
+    fields.push('content = ?');
+    params.push(updates.content);
+  }
+  if (updates.metadata !== undefined) {
+    fields.push('metadata = ?');
+    params.push(updates.metadata);
+  }
+
+  if (fields.length === 0) return;
+
+  fields.push('updated_at = ?');
+  params.push(new Date().toISOString());
+  params.push(id);
+
+  db.prepare(`UPDATE brain_entries SET ${fields.join(', ')} WHERE id = ?`).run(
+    ...params,
+  );
 }
 
 // --- JSON migration ---

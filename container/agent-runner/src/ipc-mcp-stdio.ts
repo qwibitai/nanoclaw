@@ -14,6 +14,8 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const BRAIN_DIR = path.join(IPC_DIR, 'brain');
+const BRAIN_RESPONSES_DIR = path.join(IPC_DIR, 'brain-responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -305,12 +307,16 @@ server.tool(
   'register_group',
   `Register a new chat/group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.
+
+Set listen_only=true for groups that Alfred should monitor passively — messages are stored in the database for intelligence gathering but no agent is ever spawned in response to messages.`,
   {
     jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
     name: z.string().describe('Display name for the group'),
     folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    requires_trigger: z.boolean().optional().describe('Whether trigger prefix is needed (default: true). Set false for always-active groups.'),
+    listen_only: z.boolean().optional().describe('If true, messages are stored for intelligence gathering but no agent is spawned. Use for external groups you want to monitor.'),
   },
   async (args) => {
     if (!isMain) {
@@ -326,13 +332,196 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
+      requiresTrigger: args.requires_trigger,
+      listenOnly: args.listen_only,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(TASKS_DIR, data);
 
+    const mode = args.listen_only
+      ? 'listen-only (passive monitoring, no agent responses)'
+      : args.requires_trigger === false
+        ? 'always-active (responds to all messages)'
+        : 'trigger-based (responds to @trigger messages)';
+
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [{ type: 'text' as const, text: `Group "${args.name}" registered in ${mode} mode. Folder: ${args.folder}` }],
+    };
+  },
+);
+
+// --- Central Brain tools ---
+
+server.tool(
+  'brain_add',
+  `Add an entry to the central intelligence brain — a shared knowledge store accessible across all groups.
+
+Use this when you identify:
+- *decision*: A key decision made (by the user or team)
+- *action_item*: A task or follow-up that needs to happen
+- *insight*: A useful piece of information or pattern discovered
+- *follow_up*: Something that needs to be checked on or revisited later
+
+Entries are stored in SQLite and synced to markdown files readable by all group agents.`,
+  {
+    entry_type: z
+      .enum(['decision', 'action_item', 'insight', 'follow_up'])
+      .describe('Type of intelligence entry'),
+    content: z.string().describe('The entry content — be specific and actionable'),
+    status: z
+      .enum(['open', 'done', 'cancelled'])
+      .default('open')
+      .describe('Status of the entry (default: open)'),
+    metadata: z
+      .string()
+      .optional()
+      .describe('Optional JSON metadata (e.g., due date, owner, priority)'),
+  },
+  async (args) => {
+    fs.mkdirSync(BRAIN_DIR, { recursive: true });
+
+    const data = {
+      type: 'brain_add',
+      entry_type: args.entry_type,
+      content: args.content,
+      status: args.status || 'open',
+      source_group: groupFolder,
+      metadata: args.metadata || undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(BRAIN_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Brain entry added: [${args.entry_type}] ${args.content.slice(0, 80)}${args.content.length > 80 ? '...' : ''}` }],
+    };
+  },
+);
+
+server.tool(
+  'brain_query',
+  `Query the central intelligence brain for entries across all groups.
+
+Returns entries matching the filters, ordered by most recent first. Use this to:
+- Retrieve open action items before starting work
+- Find past decisions relevant to the current discussion
+- Get a cross-group intelligence summary
+- Check follow-ups from other groups`,
+  {
+    entry_type: z
+      .enum(['decision', 'action_item', 'insight', 'follow_up'])
+      .optional()
+      .describe('Filter by entry type'),
+    source_group: z
+      .string()
+      .optional()
+      .describe('Filter by source group folder (e.g., "whatsapp_cos")'),
+    status: z
+      .enum(['open', 'done', 'cancelled'])
+      .optional()
+      .describe('Filter by status (default: all)'),
+    since: z
+      .string()
+      .optional()
+      .describe('Only return entries created after this ISO timestamp'),
+    limit: z
+      .number()
+      .default(50)
+      .describe('Maximum number of entries to return (default: 50)'),
+  },
+  async (args) => {
+    // Write a brain_query IPC file and wait briefly for the response
+    fs.mkdirSync(BRAIN_DIR, { recursive: true });
+    fs.mkdirSync(BRAIN_RESPONSES_DIR, { recursive: true });
+
+    const queryId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = {
+      type: 'brain_query',
+      queryId,
+      entry_type: args.entry_type,
+      source_group: args.source_group,
+      status: args.status,
+      since: args.since,
+      limit: args.limit || 50,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(BRAIN_DIR, data);
+
+    // Poll for response file (host writes to brain-responses/ dir)
+    const responsePattern = path.join(BRAIN_RESPONSES_DIR);
+    let entries: unknown[] = [];
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        const files = fs.readdirSync(responsePattern).filter((f) => f.endsWith('.json'));
+        if (files.length > 0) {
+          // Take the newest file
+          const sorted = files.sort();
+          const responseFile = path.join(responsePattern, sorted[sorted.length - 1]);
+          entries = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+          // Clean up all response files
+          for (const f of files) {
+            try { fs.unlinkSync(path.join(responsePattern, f)); } catch { /* ignore */ }
+          }
+          break;
+        }
+      } catch { /* dir not ready yet */ }
+    }
+
+    if (entries.length === 0) {
+      return {
+        content: [{ type: 'text' as const, text: 'No brain entries found matching the filters.' }],
+      };
+    }
+
+    const formatted = (entries as Array<{
+      id: string;
+      source_group: string;
+      entry_type: string;
+      content: string;
+      status: string;
+      created_at: string;
+    }>)
+      .map((e) => `[${e.id}] *${e.entry_type}* (${e.source_group}) [${e.status}]\n${e.content}\n→ ${e.created_at.slice(0, 10)}`)
+      .join('\n\n');
+
+    return {
+      content: [{ type: 'text' as const, text: `Brain entries (${entries.length}):\n\n${formatted}` }],
+    };
+  },
+);
+
+server.tool(
+  'brain_update',
+  'Update an existing brain entry — change its status, correct its content, or add metadata.',
+  {
+    entry_id: z.string().describe('The brain entry ID (from brain_query results)'),
+    status: z
+      .enum(['open', 'done', 'cancelled'])
+      .optional()
+      .describe('New status'),
+    content: z.string().optional().describe('Updated content'),
+    metadata: z.string().optional().describe('Updated JSON metadata'),
+  },
+  async (args) => {
+    fs.mkdirSync(BRAIN_DIR, { recursive: true });
+
+    const data = {
+      type: 'brain_update',
+      entryId: args.entry_id,
+      status: args.status,
+      content: args.content,
+      metadata: args.metadata,
+      sourceGroup: groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(BRAIN_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Brain entry ${args.entry_id} update requested.` }],
     };
   },
 );

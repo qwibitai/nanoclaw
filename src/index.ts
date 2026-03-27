@@ -197,6 +197,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
+  // Listen-only groups: messages are stored passively but no agent is spawned
+  if (group.listenOnly) return true;
+
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
@@ -433,6 +436,9 @@ async function startMessageLoop(): Promise<void> {
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
+          // Listen-only groups: messages are stored passively, never spawn agents
+          if (group.listenOnly) continue;
+
           const channel = findChannel(channels, chatJid);
           if (!channel) {
             logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
@@ -501,6 +507,9 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    // Listen-only groups never process messages, skip recovery
+    if (group.listenOnly) continue;
+
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {

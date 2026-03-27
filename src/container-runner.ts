@@ -61,6 +61,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  isScheduledTask?: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -95,6 +96,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Main gets the brain directory with write access so digest tasks can
+    // update the markdown intelligence files
+    const brainDirMain = path.join(GROUPS_DIR, 'global', 'brain');
+    fs.mkdirSync(brainDirMain, { recursive: true });
+    mounts.push({
+      hostPath: brainDirMain,
+      containerPath: '/workspace/brain',
+      readonly: false,
+    });
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -110,6 +121,17 @@ function buildVolumeMounts(
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
+        readonly: true,
+      });
+    }
+
+    // Central brain directory (read-only for non-main)
+    // Contains cross-group intelligence: decisions, action items, insights
+    const brainDir = path.join(GROUPS_DIR, 'global', 'brain');
+    if (fs.existsSync(brainDir)) {
+      mounts.push({
+        hostPath: brainDir,
+        containerPath: '/workspace/brain',
         readonly: true,
       });
     }
@@ -215,7 +237,7 @@ function buildVolumeMounts(
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
       group.name,
-      isMain,
+      isMain || !!isScheduledTask,
     );
     mounts.push(...validatedMounts);
   }
@@ -285,7 +307,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.isScheduledTask);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
