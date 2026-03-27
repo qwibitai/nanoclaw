@@ -82,6 +82,41 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS ingestion_jobs (
+      id TEXT PRIMARY KEY,
+      source_path TEXT NOT NULL,
+      source_filename TEXT NOT NULL,
+      course_code TEXT,
+      course_name TEXT,
+      semester INTEGER,
+      year INTEGER,
+      type TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS review_items (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES ingestion_jobs(id),
+      draft_path TEXT NOT NULL,
+      original_source TEXT,
+      suggested_type TEXT,
+      suggested_course TEXT,
+      figures TEXT DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS folder_type_overrides (
+      folder_name TEXT PRIMARY KEY,
+      note_type TEXT NOT NULL,
+      course_code TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -654,6 +689,98 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Ingestion job accessors ---
+
+export function createIngestionJob(
+  id: string,
+  sourcePath: string,
+  sourceFilename: string,
+  courseCode: string | null,
+  courseName: string | null,
+  semester: number | null,
+  year: number | null,
+  type: string | null,
+): void {
+  db.prepare(
+    `INSERT INTO ingestion_jobs (id, source_path, source_filename, course_code, course_name, semester, year, type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, sourcePath, sourceFilename, courseCode, courseName, semester, year, type);
+}
+
+export function updateIngestionJobStatus(
+  id: string,
+  status: string,
+  error?: string,
+): void {
+  const completedAt = status === 'completed' ? new Date().toISOString() : null;
+  db.prepare(
+    `UPDATE ingestion_jobs SET status = ?, error = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?`,
+  ).run(status, error ?? null, completedAt, id);
+}
+
+export function getIngestionJobs(status?: string): unknown[] {
+  if (status !== undefined) {
+    return db
+      .prepare('SELECT * FROM ingestion_jobs WHERE status = ? ORDER BY created_at DESC')
+      .all(status);
+  }
+  return db
+    .prepare('SELECT * FROM ingestion_jobs ORDER BY created_at DESC')
+    .all();
+}
+
+// --- Review item accessors ---
+
+export function createReviewItem(
+  id: string,
+  jobId: string,
+  draftPath: string,
+  originalSource: string | null,
+  suggestedType: string | null,
+  suggestedCourse: string | null,
+  figures: string[],
+): void {
+  db.prepare(
+    `INSERT INTO review_items (id, job_id, draft_path, original_source, suggested_type, suggested_course, figures)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, jobId, draftPath, originalSource, suggestedType, suggestedCourse, JSON.stringify(figures));
+}
+
+export function updateReviewItemStatus(id: string, status: string): void {
+  const reviewedAt = new Date().toISOString();
+  db.prepare(
+    `UPDATE review_items SET status = ?, reviewed_at = ? WHERE id = ?`,
+  ).run(status, reviewedAt, id);
+}
+
+export function getPendingReviewItems(): unknown[] {
+  return db
+    .prepare(`SELECT * FROM review_items WHERE status = 'pending' ORDER BY created_at ASC`)
+    .all();
+}
+
+// --- Folder type override accessors ---
+
+export function setFolderTypeOverride(
+  folderName: string,
+  noteType: string,
+  courseCode?: string,
+): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO folder_type_overrides (folder_name, note_type, course_code) VALUES (?, ?, ?)`,
+  ).run(folderName, noteType, courseCode ?? null);
+}
+
+export function getFolderTypeOverride(
+  folderName: string,
+): { folder_name: string; note_type: string; course_code: string | null } | undefined {
+  return db
+    .prepare('SELECT * FROM folder_type_overrides WHERE folder_name = ?')
+    .get(folderName) as
+    | { folder_name: string; note_type: string; course_code: string | null }
+    | undefined;
 }
 
 // --- JSON migration ---
