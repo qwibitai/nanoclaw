@@ -137,9 +137,7 @@ function createSchema(database: Database.Database): void {
 
   // Add project_path column for project-linked groups
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN project_path TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN project_path TEXT`);
   } catch {
     /* column already exists */
   }
