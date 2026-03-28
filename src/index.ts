@@ -49,6 +49,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { sendAndStore } from './send.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -292,7 +293,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await sendAndStore(channel, chatJid, text, ASSISTANT_NAME);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -595,19 +596,20 @@ async function main(): Promise<void> {
         process.cwd(),
       );
       if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
+        await sendAndStore(channel, chatJid, result.url, ASSISTANT_NAME);
       } else {
-        await channel.sendMessage(
-          chatJid,
+        await sendAndStore(
+          channel, chatJid,
           `Remote Control failed: ${result.error}`,
+          ASSISTANT_NAME,
         );
       }
     } else {
       const result = stopRemoteControl();
       if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
+        await sendAndStore(channel, chatJid, 'Remote Control session ended.', ASSISTANT_NAME);
       } else {
-        await channel.sendMessage(chatJid, result.error);
+        await sendAndStore(channel, chatJid, result.error, ASSISTANT_NAME);
       }
     }
   }
@@ -687,14 +689,14 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await sendAndStore(channel, jid, text, ASSISTANT_NAME);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return sendAndStore(channel, jid, text, ASSISTANT_NAME);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

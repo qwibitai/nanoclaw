@@ -91,6 +91,10 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Returns true if the channel echoes sent messages back via onMessage.
+  // When true, sendAndStore() skips explicit DB storage (avoiding duplicate rows).
+  // Channels that don't implement this default to explicit storage.
+  storesSentMessages?(): boolean;
 }
 
 // Callback type that channels use to deliver inbound messages
