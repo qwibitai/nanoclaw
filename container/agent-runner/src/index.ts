@@ -521,10 +521,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
-
   // Expose selected secrets to Bash subprocesses (e.g. Python scripts needing API keys)
   for (const key of containerInput.envKeys || []) {
     const value = containerInput.secrets?.[key];
@@ -532,6 +528,10 @@ async function main(): Promise<void> {
       process.env[key] = value;
     }
   }
+
+  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
+  // No real secrets exist in the container environment.
+  const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
