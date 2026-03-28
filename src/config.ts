@@ -1,3 +1,4 @@
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -12,8 +13,12 @@ const envConfig = readEnvFile([
   'TZ',
 ]);
 
+export const DEFAULT_ASSISTANT_NAME = 'LearnClaw';
+
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+  process.env.ASSISTANT_NAME ||
+  envConfig.ASSISTANT_NAME ||
+  DEFAULT_ASSISTANT_NAME;
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -24,17 +29,21 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
+function resolveConfigDir(): string {
+  const preferredDir = path.join(HOME_DIR, '.config', 'learnclaw');
+  const legacyDir = path.join(HOME_DIR, '.config', 'nanoclaw');
+  if (fs.existsSync(preferredDir) || !fs.existsSync(legacyDir)) {
+    return preferredDir;
+  }
+  return legacyDir;
+}
+
+const CONFIG_DIR = resolveConfigDir();
+
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'nanoclaw',
-  'mount-allowlist.json',
-);
+export const MOUNT_ALLOWLIST_PATH = path.join(CONFIG_DIR, 'mount-allowlist.json');
 export const SENDER_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'nanoclaw',
+  CONFIG_DIR,
   'sender-allowlist.json',
 );
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');

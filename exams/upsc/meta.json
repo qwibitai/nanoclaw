@@ -1,0 +1,29 @@
+{
+  "exam": "UPSC CSE",
+  "slug": "upsc",
+  "conductingBody": "Union Public Service Commission",
+  "goalType": "high-stakes exam",
+  "description": "Indian Civil Services examination package scaffold for LearnClaw.",
+  "phases": [
+    "foundation",
+    "coverage",
+    "revision",
+    "mock-tests"
+  ],
+  "defaultCadence": {
+    "lesson": "07:00",
+    "currentAffairs": "08:00",
+    "quiz": "21:00",
+    "weeklyReport": "Sunday 08:00"
+  },
+  "requiredFiles": [
+    "syllabus.json",
+    "resources.json",
+    "plans/6-month-prelims.json"
+  ],
+  "notes": [
+    "Use pre-written lessons where possible.",
+    "Prefer deterministic MCQ delivery over generated quizzes when content exists.",
+    "Track weak topics for spaced-repetition scheduling."
+  ]
+}

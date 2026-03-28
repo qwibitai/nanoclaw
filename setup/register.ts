@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { STORE_DIR } from '../src/config.ts';
+import { DEFAULT_ASSISTANT_NAME, STORE_DIR } from '../src/config.ts';
 import { initDatabase, setRegisteredGroup } from '../src/db.ts';
 import { isValidGroupFolder } from '../src/group-folder.ts';
 import { logger } from '../src/logger.ts';
@@ -33,7 +33,7 @@ function parseArgs(args: string[]): RegisterArgs {
     channel: 'whatsapp', // backward-compat: pre-refactor installs omit --channel
     requiresTrigger: true,
     isMain: false,
-    assistantName: 'Andy',
+    assistantName: DEFAULT_ASSISTANT_NAME,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -60,7 +60,7 @@ function parseArgs(args: string[]): RegisterArgs {
         result.isMain = true;
         break;
       case '--assistant-name':
-        result.assistantName = args[++i] || 'Andy';
+        result.assistantName = args[++i] || DEFAULT_ASSISTANT_NAME;
         break;
     }
   }
@@ -142,9 +142,9 @@ export async function run(args: string[]): Promise<void> {
 
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
-  if (parsed.assistantName !== 'Andy') {
+  if (parsed.assistantName !== DEFAULT_ASSISTANT_NAME) {
     logger.info(
-      { from: 'Andy', to: parsed.assistantName },
+      { from: DEFAULT_ASSISTANT_NAME, to: parsed.assistantName },
       'Updating assistant name',
     );
 
@@ -157,9 +157,12 @@ export async function run(args: string[]): Promise<void> {
     for (const mdFile of mdFiles) {
       if (fs.existsSync(mdFile)) {
         let content = fs.readFileSync(mdFile, 'utf-8');
-        content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
         content = content.replace(
-          /You are Andy/g,
+          /^# (Andy|LearnClaw)$/m,
+          `# ${parsed.assistantName}`,
+        );
+        content = content.replace(
+          /You are (Andy|LearnClaw)/g,
           `You are ${parsed.assistantName}`,
         );
         fs.writeFileSync(mdFile, content);

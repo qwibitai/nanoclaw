@@ -3,12 +3,11 @@
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  LearnClaw is a learning-first fork of NanoClaw: an autonomous study partner that runs securely in self-hosted containers and pushes lessons, revision, and accountability through messaging.
 </p>
 
 <p align="center">
-  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
-  <a href="https://docs.nanoclaw.dev">docs</a>&nbsp; • &nbsp;
+  <a href="https://nanoclaw.dev">upstream: nanoclaw.dev</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
@@ -17,43 +16,43 @@
 
 ---
 
-## Why I Built NanoClaw
+## Why LearnClaw Exists
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
+LearnClaw starts from NanoClaw's core strength: a small, understandable, self-hosted agent architecture with real container isolation. This fork takes that base and points it at a different outcome: helping a learner move from goal to daily execution without having to decide what to study every day.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+The product direction is a personal learning OS. You define an exam or learning goal, current level, and constraints. LearnClaw then structures the journey backward, keeps persistent learner memory, and uses scheduled delivery for lessons, quizzes, revision, and accountability.
 
 ## Quick Start
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
+git clone https://github.com/iabheejit/learnclaw.git
+cd learnclaw
 claude
 ```
 
 <details>
 <summary>Without GitHub CLI</summary>
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
-2. `git clone https://github.com/<your-username>/nanoclaw.git`
-3. `cd nanoclaw`
+1. Fork [iabheejit/learnclaw](https://github.com/iabheejit/learnclaw) on GitHub
+2. `git clone https://github.com/<your-username>/learnclaw.git`
+3. `cd learnclaw`
 4. `claude`
 
 </details>
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
+Then run `/setup`. Claude Code handles dependencies, authentication, container setup, and service configuration for the self-hosted LearnClaw runtime.
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
 
 ## Philosophy
 
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
+**Small enough to understand.** LearnClaw keeps NanoClaw's one-process architecture so the product remains hackable by a single builder.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
+**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted.
 
-**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
+**Goal-aware by default.** The fork is optimized around learners, exams, study plans, revision loops, and messaging-based accountability.
 
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
+**Customization = code changes.** LearnClaw remains a fork-first product. If a workflow needs to change, edit the code rather than layering configuration sprawl on top.
 
 **AI-native.**
 - No installation wizard; Claude Code guides setup.
@@ -62,45 +61,45 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
+**Best harness, best model.** LearnClaw still uses the Claude Agent SDK foundation from NanoClaw, but the product logic on top is oriented toward learning journeys.
 
 ## What It Supports
 
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
+- **Self-hosted learning companion** - Use a messaging-first study partner that can plan, teach, remind, and review.
+- **Multi-channel messaging** - Talk to LearnClaw from WhatsApp, Telegram, Discord, Slack, or Gmail as those skills are added to your fork.
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Learning memory files** - Maintain learner profile, study plan, resources, and heartbeat files directly in the workspace.
+- **Scheduled tasks** - Recurring jobs that can deliver lessons, revision prompts, quizzes, and weekly summaries.
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
 - **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+- **Exam package scaffolding** - Start structuring subject-specific content under `exams/` for lessons, quizzes, plans, and resources.
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Andy`):
+Talk to your assistant with the trigger word (default: `@LearnClaw`):
 
 ```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@LearnClaw I am preparing for UPSC 2027, starting from scratch, with 2 hours every evening
+@LearnClaw build my first 6-week study plan and create the files you need to track it
+@LearnClaw every day at 7am send today's lesson and every night at 9pm quiz me on what I studied
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+From the main channel, you can manage study workflows and tasks:
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@LearnClaw list all scheduled study tasks
+@LearnClaw pause tonight's quiz reminder
+@LearnClaw show me which files define my study plan and weak areas
 ```
 
 ## Customizing
 
-NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
+LearnClaw doesn't rely on heavy configuration files. To make changes, tell Claude Code what you want:
 
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
+- "Change the trigger word to @Coach"
+- "Keep a WHO_I_AM.md file updated after every weekly report"
+- "Create exam packages for CAT and GMAT next"
+- "Use scheduled tasks to send spaced-repetition reviews instead of generic reminders"
 
 Or run `/customize` for guided changes.
 

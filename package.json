@@ -1,7 +1,7 @@
 {
-  "name": "nanoclaw",
+  "name": "learnclaw",
   "version": "1.2.42",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "description": "Autonomous personal learning OS built on NanoClaw's secure self-hosted architecture.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
