@@ -59,6 +59,21 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+## Recovering from dispatch_blocked_until
+
+When a task fails to dispatch 3 consecutive times, the dispatch loop sets `dispatch_blocked_until` to 24 hours in the future via a PUT to Agency HQ (`/api/v1/tasks/:id` with `status: 'blocked'` and `dispatch_blocked_until: <ISO timestamp>`). The task will not be retried until that timestamp passes.
+
+To unblock a task manually:
+
+```sql
+-- In Agency HQ's PostgreSQL database:
+UPDATE tasks SET dispatch_blocked_until = NULL, status = 'ready' WHERE id = '<task-id>';
+```
+
+There is no dedicated API endpoint for clearing the block — manual SQL against Agency HQ's `tasks` table is required. After clearing, the task will be picked up on the next dispatch loop tick.
+
+The in-memory retry counter (`dispatchRetryCount` in `src/dispatch-loop.ts`) resets on process restart, so restarting NanoClaw also clears the local retry state (but does not clear `dispatch_blocked_until` in Agency HQ — you must clear that separately).
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
