@@ -225,6 +225,7 @@ export function buildVolumeMounts(
       JSON.stringify(
         {
           model: 'opusplan',
+          autoDreamEnabled: true,
           env: {
             // Enable agent swarms (subagent orchestration)
             // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
