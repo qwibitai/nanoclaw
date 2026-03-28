@@ -22,6 +22,8 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+// When set, all output (messages, audio, images, etc.) goes to this JID instead of chatJid
+const outputJid = process.env.NANOCLAW_REPORT_TO_JID || chatJid;
 
 const GROUP_DIR = '/workspace/group';
 
@@ -71,7 +73,7 @@ server.tool(
       const subdir = path.basename(path.dirname(args.sticker_path));
       const data = {
         type: 'sticker',
-        chatJid,
+        chatJid: outputJid,
         filename,
         subdir: subdir !== 'group' ? subdir : undefined,
         groupFolder,
@@ -86,7 +88,7 @@ server.tool(
       const filename = path.basename(safePath);
       const data = {
         type: 'video',
-        chatJid,
+        chatJid: outputJid,
         filename,
         caption: args.text || '',
         groupFolder,
@@ -101,7 +103,7 @@ server.tool(
       const filename = path.basename(safePath);
       const data = {
         type: 'document',
-        chatJid,
+        chatJid: outputJid,
         filename,
         originalName: filename,
         caption: args.text || '',
@@ -117,7 +119,7 @@ server.tool(
       const filename = path.basename(safePath);
       const data = {
         type: 'audio',
-        chatJid,
+        chatJid: outputJid,
         filename,
         groupFolder,
         timestamp: new Date().toISOString(),
@@ -131,7 +133,7 @@ server.tool(
       const filename = path.basename(safePath);
       const data = {
         type: 'image',
-        chatJid,
+        chatJid: outputJid,
         filename,
         caption: args.text,
         groupFolder,
@@ -143,7 +145,7 @@ server.tool(
 
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: outputJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,

@@ -28,6 +28,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   mcpServers?: string[];
+  reportToJid?: string;
   imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
@@ -354,6 +355,7 @@ function getAllMcpServers(containerInput: ContainerInput, mcpServerPath: string)
       args: [mcpServerPath],
       env: {
         NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_REPORT_TO_JID: containerInput.reportToJid || '',
         NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
         NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
         SES_REGION: process.env.SES_REGION || '',

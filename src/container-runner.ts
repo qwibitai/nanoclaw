@@ -43,6 +43,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   mcpServers?: string[];
+  reportToJid?: string;
   imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 

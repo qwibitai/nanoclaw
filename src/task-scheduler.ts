@@ -154,6 +154,9 @@ async function runTask(
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
+  // Cross-group tasks: redirect output to the requester instead of the target group
+  const reportToJid = task.report_to_jid || null;
+
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
@@ -180,14 +183,15 @@ async function runTask(
         isScheduledTask: true,
         assistantName: group.trigger.replace(/^@/, '') || ASSISTANT_NAME,
         mcpServers: group.containerConfig?.mcpServers,
+        reportToJid: reportToJid || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result: to requester if cross-group, otherwise to target group
+          await deps.sendMessage(reportToJid || task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
