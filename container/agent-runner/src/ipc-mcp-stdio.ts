@@ -20,6 +20,48 @@ const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
+// Room API proxy URL (optional — set by container-runner when SELF_HOSTED_API_SECRET configured)
+const roomApiUrl = process.env.ROOM_API_URL || '';
+
+// ─── Room API HTTP helper ───────────────────────────────────────────────────
+
+async function roomApiFetch(
+  path: string,
+  options: { method?: string; body?: string } = {},
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  if (!roomApiUrl) {
+    return { ok: false, status: 503, data: { error: 'Room API not configured. Set SELF_HOSTED_API_SECRET in .env on the host.' } };
+  }
+
+  const url = `${roomApiUrl}${path}`;
+  const method = options.method || 'GET';
+
+  try {
+    const resp = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: options.body,
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    let data: unknown;
+    const contentType = resp.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await resp.json();
+    } else if (contentType.includes('audio') || contentType.includes('octet-stream')) {
+      // Binary response — return size info, actual download handled by music_download
+      data = { type: 'binary', contentType, size: resp.headers.get('content-length') };
+    } else {
+      data = { raw: await resp.text() };
+    }
+
+    return { ok: resp.ok, status: resp.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, status: 0, data: { error: `Request failed: ${message}` } };
+  }
+}
+
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
@@ -329,6 +371,211 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+    };
+  },
+);
+
+// ─── Room Music Gen Tools ───────────────────────────────────────────────────
+
+server.tool(
+  'music_generate',
+  `Generate an AI music track using Room's Music Gen service (ACE-Step).
+Submit a job and get back a job_id to poll for completion.
+Returns the job_id immediately — generation takes 30s-5min depending on duration.
+
+Common genres: pop, rock, electronic, hip-hop, jazz, classical, lo-fi, ambient, synthwave, cinematic, chiptune
+Moods: happy, sad, energetic, calm, dark, uplifting, melancholic, epic, dreamy, mysterious
+Vocal types: "male vocal", "female vocal", "duet", "no vocal", "a cappella"
+Tempos: very-slow, slow, moderate, fast, very-fast
+
+For lyrics, use structure tags: [Verse 1], [Chorus], [Bridge], [Instrumental], [Intro], [Outro].
+Use "[inst]" for purely instrumental tracks. Keep 6-10 syllables per line.`,
+  {
+    title: z.string().optional().describe('Track title'),
+    genre: z.string().describe('Music genre (e.g. "lo-fi", "cinematic", "pop")'),
+    mood: z.string().optional().describe('Emotional mood (e.g. "calm", "epic", "melancholic")'),
+    vocal_type: z.string().optional().describe('Vocal style: "male vocal", "female vocal", "no vocal", etc.'),
+    tempo: z.string().optional().describe('Speed: very-slow, slow, moderate, fast, very-fast'),
+    bpm: z.number().optional().describe('Exact BPM (60-220)'),
+    key: z.string().optional().describe('Musical key (e.g. "C major", "A minor")'),
+    duration: z.number().default(60).describe('Length in seconds (30, 60, 90, 120, 180)'),
+    instruments: z.array(z.string()).optional().describe('Instruments to use (e.g. ["piano", "guitar", "strings"])'),
+    texture: z.array(z.string()).optional().describe('Production feel: warm, crisp, bright, dark, airy, punchy, lush, vintage'),
+    lyrics: z.string().optional().describe('Song lyrics with structure tags [Verse], [Chorus], etc. Use "[inst]" for instrumental.'),
+    prompt: z.string().optional().describe('Free-text description of desired music'),
+  },
+  async (args) => {
+    const result = await roomApiFetch('/music-gen/jobs', {
+      method: 'POST',
+      body: JSON.stringify(args),
+    });
+
+    if (!result.ok) {
+      return {
+        content: [{ type: 'text' as const, text: `Music generation failed (${result.status}): ${JSON.stringify(result.data)}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data as { job_id?: string };
+    return {
+      content: [{ type: 'text' as const, text: `Music generation job submitted!\nJob ID: ${data.job_id}\n\nUse music_status to check progress, then music_download when completed.` }],
+    };
+  },
+);
+
+server.tool(
+  'music_status',
+  'Check the status of a music generation job. Returns: queued, processing, completed, or failed.',
+  {
+    job_id: z.string().describe('The job ID returned by music_generate'),
+  },
+  async (args) => {
+    const result = await roomApiFetch(`/music-gen/jobs/${args.job_id}`);
+
+    if (!result.ok) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to get status (${result.status}): ${JSON.stringify(result.data)}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data as { status?: string; queue_position?: number; progress?: number };
+    const parts = [`Status: ${data.status}`];
+    if (data.queue_position !== undefined) parts.push(`Queue position: ${data.queue_position}`);
+    if (data.progress !== undefined) parts.push(`Progress: ${data.progress}%`);
+
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+  },
+);
+
+server.tool(
+  'music_download',
+  'Download the generated audio file (MP3) for a completed music job. Saves to the group workspace.',
+  {
+    job_id: z.string().describe('The job ID of a completed music generation job'),
+    filename: z.string().optional().describe('Output filename (default: {job_id}.mp3). Saved to /workspace/group/'),
+  },
+  async (args) => {
+    if (!roomApiUrl) {
+      return {
+        content: [{ type: 'text' as const, text: 'Room API not configured.' }],
+        isError: true,
+      };
+    }
+
+    const url = `${roomApiUrl}/music-gen/jobs/${args.job_id}/audio?format=mp3`;
+
+    try {
+      const resp = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+        signal: AbortSignal.timeout(120_000),
+      });
+
+      if (!resp.ok) {
+        return {
+          content: [{ type: 'text' as const, text: `Download failed (${resp.status}). Job may still be processing — check music_status first.` }],
+          isError: true,
+        };
+      }
+
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      const outName = args.filename || `${args.job_id}.mp3`;
+      const outPath = path.join('/workspace/group', outName);
+      fs.writeFileSync(outPath, buffer);
+
+      const sizeMb = (buffer.length / (1024 * 1024)).toFixed(2);
+      return {
+        content: [{ type: 'text' as const, text: `Audio saved: ${outPath} (${sizeMb} MB)\nYou can share this file with the user via send_message.` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Download error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ─── Room Facebook Page Manager Tools ───────────────────────────────────────
+
+server.tool(
+  'facebook_list_pages',
+  'List all Facebook pages managed by the Room Facebook Page Manager service.',
+  {},
+  async () => {
+    const result = await roomApiFetch('/facebook/pages');
+
+    if (!result.ok) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to list pages (${result.status}): ${JSON.stringify(result.data)}` }],
+        isError: true,
+      };
+    }
+
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+  },
+);
+
+server.tool(
+  'facebook_approval_queue',
+  'View the Facebook content approval queue. Shows posts/comments/messages waiting for human review before publishing.',
+  {
+    status: z.enum(['pending', 'approved', 'rejected']).default('pending').describe('Filter by approval status'),
+  },
+  async (args) => {
+    const result = await roomApiFetch(`/facebook/approval?status=${args.status}`);
+
+    if (!result.ok) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to get approval queue (${result.status}): ${JSON.stringify(result.data)}` }],
+        isError: true,
+      };
+    }
+
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+  },
+);
+
+server.tool(
+  'facebook_approval_action',
+  'Approve, reject, or regenerate a Facebook content item in the approval queue.',
+  {
+    item_id: z.string().describe('The approval item ID'),
+    action: z.enum(['approve', 'reject', 'regenerate']).describe('Action to take'),
+    reason: z.string().optional().describe('Reason for rejection, or instructions for regeneration'),
+  },
+  async (args) => {
+    const body = args.reason ? JSON.stringify({ reason: args.reason, instructions: args.reason }) : '{}';
+
+    const result = await roomApiFetch(`/facebook/approval/${args.item_id}/${args.action}`, {
+      method: 'POST',
+      body,
+    });
+
+    if (!result.ok) {
+      return {
+        content: [{ type: 'text' as const, text: `Action failed (${result.status}): ${JSON.stringify(result.data)}` }],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: `${args.action} action completed for item ${args.item_id}.\n${JSON.stringify(result.data, null, 2)}` }],
+    };
+  },
+);
+
+server.tool(
+  'facebook_health',
+  'Check the health and status of the Facebook Page Manager service.',
+  {},
+  async () => {
+    const result = await roomApiFetch('/facebook/health');
+    return {
+      content: [{ type: 'text' as const, text: result.ok
+        ? `Facebook service healthy: ${JSON.stringify(result.data, null, 2)}`
+        : `Facebook service unreachable (${result.status}): ${JSON.stringify(result.data)}` }],
     };
   },
 );

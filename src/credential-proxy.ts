@@ -43,10 +43,7 @@ function signFacebookRequest(
   body: string,
 ): string {
   const payload = `${method}\n${path}\n${timestamp}\n${body}`;
-  return crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('base64');
+  return crypto.createHmac('sha256', secret).update(payload).digest('base64');
 }
 
 /** Route a Room API request to the correct upstream service with auth. */
@@ -211,14 +208,12 @@ export function startCredentialProxy(
         }
 
         // ── Anthropic API proxy (default) ────────────────────────────
-        const headers: Record<
-          string,
-          string | number | string[] | undefined
-        > = {
-          ...(req.headers as Record<string, string>),
-          host: upstreamUrl.host,
-          'content-length': body.length,
-        };
+        const headers: Record<string, string | number | string[] | undefined> =
+          {
+            ...(req.headers as Record<string, string>),
+            host: upstreamUrl.host,
+            'content-length': body.length,
+          };
 
         // Strip hop-by-hop headers that must not be forwarded by proxies
         delete headers['connection'];
