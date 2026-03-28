@@ -1295,6 +1295,7 @@ export interface SessionV2Full extends SessionV2Row {
   effort: string | null;
   processing: number; // 0 or 1
   chat_jid: string | null;
+  first_message?: string | null;
 }
 
 export function buildSessionKey(
@@ -1431,7 +1432,22 @@ export function getSessionsV2Full(
   ).c;
   const data = db
     .prepare(
-      'SELECT * FROM sessions_v2 WHERE group_folder = ? ORDER BY last_activity DESC LIMIT ? OFFSET ?',
+      `SELECT s.*,
+              COALESCE(
+                (SELECT m.content FROM messages m
+                 WHERE s.thread_id IS NOT NULL AND m.id = s.thread_id AND m.chat_jid = s.chat_jid
+                 LIMIT 1),
+                (SELECT m.content FROM messages m
+                 WHERE m.chat_jid = s.chat_jid
+                   AND m.sender != 'bot' AND m.is_from_me = 0
+                 ORDER BY m.timestamp ASC LIMIT 1),
+                (SELECT m.content FROM messages m
+                 WHERE m.chat_jid = s.chat_jid
+                 ORDER BY m.timestamp ASC LIMIT 1)
+              ) AS first_message
+       FROM sessions_v2 s
+       WHERE s.group_folder = ?
+       ORDER BY s.last_activity DESC LIMIT ? OFFSET ?`,
     )
     .all(groupFolder, limit, offset) as SessionV2Full[];
   return { data, total };
@@ -1446,7 +1462,21 @@ export function getAllSessionsV2Full(
   ).c;
   const data = db
     .prepare(
-      'SELECT * FROM sessions_v2 ORDER BY last_activity DESC LIMIT ? OFFSET ?',
+      `SELECT s.*,
+              COALESCE(
+                (SELECT m.content FROM messages m
+                 WHERE s.thread_id IS NOT NULL AND m.id = s.thread_id AND m.chat_jid = s.chat_jid
+                 LIMIT 1),
+                (SELECT m.content FROM messages m
+                 WHERE m.chat_jid = s.chat_jid
+                   AND m.sender != 'bot' AND m.is_from_me = 0
+                 ORDER BY m.timestamp ASC LIMIT 1),
+                (SELECT m.content FROM messages m
+                 WHERE m.chat_jid = s.chat_jid
+                 ORDER BY m.timestamp ASC LIMIT 1)
+              ) AS first_message
+       FROM sessions_v2 s
+       ORDER BY s.last_activity DESC LIMIT ? OFFSET ?`,
     )
     .all(limit, offset) as SessionV2Full[];
   return { data, total };
@@ -1555,6 +1585,71 @@ export function getRecentMessages(
        ORDER BY timestamp DESC LIMIT ?`,
     )
     .all(chatJid, limit) as Array<{
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    text: string;
+    timestamp: string;
+    is_from_me: number;
+  }>;
+}
+
+/**
+ * Get messages belonging to a specific thread within a parent chat_jid.
+ * Uses the trigger message (id = threadId) timestamp as the anchor and
+ * returns messages from that timestamp onward until the next thread starts.
+ */
+export function getThreadMessagesByTrigger(
+  chatJid: string,
+  threadId: string,
+  limit: number,
+): Array<{
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  text: string;
+  timestamp: string;
+  is_from_me: number;
+}> {
+  // Get the trigger message timestamp
+  const trigger = db
+    .prepare(
+      `SELECT timestamp FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(threadId, chatJid) as { timestamp: string } | undefined;
+  if (!trigger) return [];
+
+  // Get the next thread's start timestamp (next non-bot message after this thread's messages)
+  // We approximate by getting the trigger message + all bot responses until the next user message
+  // that isn't from this thread
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender AS sender_jid, sender_name,
+              content AS text, timestamp, is_from_me
+       FROM messages
+       WHERE chat_jid = ? AND content != '' AND content IS NOT NULL
+         AND timestamp >= ?
+         AND timestamp <= (
+           SELECT COALESCE(
+             (SELECT m2.timestamp FROM messages m2
+              WHERE m2.chat_jid = ? AND m2.timestamp > ?
+                AND m2.is_from_me = 0 AND m2.sender != 'bot' AND m2.id != ?
+              ORDER BY m2.timestamp ASC LIMIT 1),
+             '9999-12-31T23:59:59.999Z'
+           )
+         )
+       ORDER BY timestamp ASC LIMIT ?`,
+    )
+    .all(
+      chatJid,
+      trigger.timestamp,
+      chatJid,
+      trigger.timestamp,
+      threadId,
+      limit,
+    ) as Array<{
     id: string;
     chat_jid: string;
     sender: string;

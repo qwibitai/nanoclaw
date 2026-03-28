@@ -24,6 +24,7 @@ import {
   getGateById,
   getPendingGate,
   getRecentMessages,
+  getThreadMessagesByTrigger,
   getSessionsV2Full,
   getSessionV2ByKey,
   getShipLogPaginated,
@@ -260,6 +261,25 @@ export async function handleRoute(
     // Fall back to DB lookup by session_key
     const dbSession = getSessionV2ByKey(sessionKey);
     if (dbSession?.chat_jid) {
+      if (dbSession.thread_id) {
+        // Try thread-specific JID first (e.g., dc:guild:thread:id or slack:team:thread:ts)
+        const threadJid = `${dbSession.chat_jid}:thread:${dbSession.thread_id}`;
+        const threadMessages = getRecentMessages(threadJid, limit);
+        if (threadMessages.length > 0) {
+          json(res, 200, { data: threadMessages, sessionKey });
+          return true;
+        }
+        // Fall back to extracting thread messages from parent chat_jid
+        const extracted = getThreadMessagesByTrigger(
+          dbSession.chat_jid,
+          dbSession.thread_id,
+          limit,
+        );
+        if (extracted.length > 0) {
+          json(res, 200, { data: extracted, sessionKey });
+          return true;
+        }
+      }
       const messages = getRecentMessages(dbSession.chat_jid, limit);
       json(res, 200, { data: messages, sessionKey });
       return true;
