@@ -37,7 +37,7 @@ git fetch nanoclaw-whatsapp
 git checkout -B whatsapp-merge nanoclaw-whatsapp/main
 git merge main
 # Resolve conflicts (see below)
-# Remove upstream-only workflows if they were re-added by the merge:
+# Remove upstream-only workflows (re-added by every merge since main has them):
 git rm .github/workflows/bump-version.yml .github/workflows/update-tokens.yml 2>/dev/null
 git push nanoclaw-whatsapp HEAD:main
 git checkout main && git branch -D whatsapp-merge
