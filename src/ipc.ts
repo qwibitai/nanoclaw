@@ -27,6 +27,36 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+/** Delete error files older than 7 days from the ipc/errors/ directory. */
+function cleanupStaleErrorFiles(ipcBaseDir: string): void {
+  const errorDir = path.join(ipcBaseDir, 'errors');
+  if (!fs.existsSync(errorDir)) return;
+
+  const maxAgeMs = 7 * 24 * 60 * 60_000;
+  const cutoff = Date.now() - maxAgeMs;
+  let cleaned = 0;
+
+  try {
+    for (const file of fs.readdirSync(errorDir)) {
+      const filePath = path.join(errorDir, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch {
+        // Skip files that can't be stat'd or removed
+      }
+    }
+    if (cleaned > 0) {
+      logger.info({ cleaned }, 'Cleaned up stale IPC error files (>7 days)');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to clean up IPC error directory');
+  }
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -36,6 +66,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+
+  // Clean up stale error files on startup
+  cleanupStaleErrorFiles(ipcBaseDir);
 
   // Per-group processing lock: allows different groups to process concurrently
   // while preventing the same group from being processed twice simultaneously.
