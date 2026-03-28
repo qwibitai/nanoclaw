@@ -75,12 +75,13 @@ function getChannelStatus(): Array<{
   connected: boolean;
   lastEvent: string | null;
   lastEventTime: string | null;
+  account: string | null;
 }> {
   const LOG_PATH = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
   const channels = ['whatsapp', 'telegram', 'outlook', 'gmail', 'discord', 'slack'];
-  const status: Record<string, { connected: boolean; lastEvent: string | null; lastEventTime: string | null }> = {};
+  const status: Record<string, { connected: boolean; lastEvent: string | null; lastEventTime: string | null; account: string | null }> = {};
   for (const ch of channels) {
-    status[ch] = { connected: false, lastEvent: null, lastEventTime: null };
+    status[ch] = { connected: false, lastEvent: null, lastEventTime: null, account: null };
   }
 
   if (!fs.existsSync(LOG_PATH)) return channels.map(name => ({ name, ...status[name] }));
@@ -136,6 +137,51 @@ function getChannelStatus(): Array<{
     /* log read failed */
   }
 
+  // Extract account identities from logs
+  try {
+    const logPath = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
+    if (fs.existsSync(logPath)) {
+      const logTail = execSync(`tail -2000 ${JSON.stringify(logPath)} 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      // Telegram: @BotUsername
+      const tgMatch = logTail.match(/Telegram bot: @(\S+)/);
+      if (tgMatch) status['telegram'].account = `@${tgMatch[1]}`;
+
+      // Outlook: email from connection log
+      const olMatch = logTail.match(/Outlook channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
+      if (olMatch) status['outlook'].account = olMatch[1];
+
+      // Gmail: email from connection log
+      const gmMatch = logTail.match(/Gmail channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
+      if (gmMatch) status['gmail'].account = gmMatch[1];
+
+      // WhatsApp: phone number from connection
+      const waMatch = logTail.match(/"username":\s*"(\d{10,})"/);
+      if (waMatch) status['whatsapp'].account = `+${waMatch[1]}`;
+    }
+  } catch {
+    /* log parsing failed */
+  }
+
+  // Fall back to .env / credential files for account info
+  try {
+    const envPath2 = path.resolve(PROJECT_ROOT, '.env');
+    const env2 = fs.existsSync(envPath2) ? fs.readFileSync(envPath2, 'utf-8') : '';
+    const msEmail = env2.match(/MS_USER_EMAIL=(.+)/)?.[1]?.trim();
+    if (msEmail && !status['outlook'].account) status['outlook'].account = msEmail;
+  } catch { /* */ }
+
+  try {
+    const gmailCreds = path.join(os.homedir(), '.gmail-mcp', 'credentials.json');
+    if (fs.existsSync(gmailCreds) && !status['gmail'].account) {
+      const creds = JSON.parse(fs.readFileSync(gmailCreds, 'utf-8'));
+      if (creds.email) status['gmail'].account = creds.email;
+    }
+  } catch { /* */ }
+
   // Also check for .env credentials to determine which channels are configured
   const envPath = path.resolve(PROJECT_ROOT, '.env');
   let envContent = '';
@@ -155,7 +201,7 @@ function getChannelStatus(): Array<{
 
 const EMPTY_DATA = {
   service: { running: false, pid: null, uptime: null },
-  channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null }>,
+  channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null; account: string | null }>,
   groups: [],
   groupFolders: [],
   tasks: [],
@@ -525,8 +571,8 @@ function renderTopStats() {
     d.channels.forEach(ch => {
       const icon = channelIcon(ch.name);
       const connBadge = ch.connected ? badge('connected', 'green') : badge('disconnected', 'red');
-      const lastInfo = ch.lastEventTime ? ' <span class="time-ago">' + esc(ch.lastEventTime) + '</span>' : '';
-      html += '<div class="stat-row"><span>' + icon + ' ' + esc(ch.name) + '</span><span>' + connBadge + lastInfo + '</span></div>';
+      const acct = ch.account ? '<br><span class="time-ago" style="font-size:11px">' + esc(ch.account) + '</span>' : '';
+      html += '<div class="stat-row" style="align-items:flex-start"><span>' + icon + ' ' + esc(ch.name) + acct + '</span><span>' + connBadge + '</span></div>';
     });
   }
   html += '</div>';
