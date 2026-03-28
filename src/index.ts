@@ -615,12 +615,29 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Enqueue for processing. processGroupMessages will pull all
-          // messages since the last agent cursor, advance the cursor after
-          // reading, and spawn a container. We don't advance lastAgentTimestamp
-          // here — doing so would race with processGroupMessages and cause
-          // it to find zero messages.
-          queue.enqueueMessageCheck(chatJid);
+          // Try to pipe into an idle (warm) container first. If one exists,
+          // format the new messages and send via IPC — the container picks
+          // them up immediately without spawning a new process.
+          const allPending = getMessagesSince(
+            chatJid,
+            getOrRecoverCursor(chatJid),
+            ASSISTANT_NAME,
+            MAX_MESSAGES_PER_PROMPT,
+          );
+          const messagesToSend =
+            allPending.length > 0 ? allPending : groupMessages;
+          const formatted = formatMessages(messagesToSend, TIMEZONE);
+
+          if (queue.sendMessage(chatJid, formatted)) {
+            // Piped to idle container — advance cursor so we don't re-send
+            lastAgentTimestamp[chatJid] =
+              messagesToSend[messagesToSend.length - 1].timestamp;
+            saveState();
+          } else {
+            // No idle container — enqueue for a fresh container spawn.
+            // processGroupMessages will pull messages and advance the cursor.
+            queue.enqueueMessageCheck(chatJid);
+          }
         }
       }
     } catch (err) {
