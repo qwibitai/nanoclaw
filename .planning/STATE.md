@@ -8,21 +8,21 @@
 
 ## Current Position
 
-- **Phase:** 04-whatsapp-voice-notes (Plan 1 of 2 complete)
-- **Plan:** 04-01 complete, 04-02 next
-- **Status:** In Progress
-- **Progress:** █████████░ 90%
+- **Phase:** 04-whatsapp-voice-notes (Plan 2 of 2 complete)
+- **Plan:** 04-02 complete — phase done
+- **Status:** Complete
+- **Progress:** [██████████] 100%
 
 ## Performance Metrics
 
 | Metric          | Value |
 | --------------- | ----- |
 | Phases total    | 4     |
-| Phases complete | 3     |
+| Phases complete | 4     |
 | Plans total     | 9     |
-| Plans complete  | 8     |
-| Tasks total     | 20    |
-| Tasks complete  | 20    |
+| Plans complete  | 9     |
+| Tasks total     | 22    |
+| Tasks complete  | 22    |
 
 | Phase | Plan | Duration | Tasks | Files |
 | ----- | ---- | -------- | ----- | ----- |
@@ -32,6 +32,7 @@
 | 02    | 01   | 188s     | 2     | 4     |
 | 02    | 02   | 170s     | 1     | 4     |
 | 04    | 01   | 151s     | 2     | 7     |
+| 04    | 02   | 110s     | 2     | 3     |
 
 ## Accumulated Context
 
@@ -56,6 +57,8 @@
 - No retry/queuing for audio — large and ephemeral, caller can retry (unlike text messages)
 - Same authorisation rules for send_audio as send_message — isMain or same group folder
 - Audio files cleaned up immediately after sending to avoid disk accumulation
+- Container send_audio MCP tool copies audio (not moves) so original remains for retry
+- No WAV→OGG conversion in MCP tool — container agent responsible (ffmpeg available)
 
 ### Technical Notes
 
@@ -95,23 +98,22 @@
 
 ### Last Session
 
-- 2026-03-12T15:30:00Z
+- 2026-03-28T14:40:00Z
 
 ### Stopped At
 
-- Completed 04-01-PLAN.md (WhatsApp voice note sending infrastructure)
+- Completed 04-02-PLAN.md (Container send_audio MCP tool and tests) — Phase 04 complete
 
 ### Handover Notes
 
 - Phase 01 complete: All 3 plans done (01-01, 01-02, 01-03)
 - Phase 02 complete: All 2 plans done (02-01, 02-02)
 - Phase 03 complete: All 2 plans done (03-01, 03-02) — OAuth auto-refresh
-- **Phase 04 Plan 01 complete (2026-03-28):** Host-side voice note sending infrastructure
-  - Channel interface extended with optional sendAudio method
-  - WhatsApp implementation uses Baileys ptt:true for inline voice notes
-  - IPC handler for send_audio with same auth as text messages
-  - Audio files staged in data/ipc/{group}/media/ and cleaned after send
-  - 352 tests passing, clean build
+- **Phase 04 COMPLETE (2026-03-28):** WhatsApp voice note sending
+  - Plan 01: Host-side infrastructure — Channel interface, WhatsApp ptt:true, IPC handler, media staging
+  - Plan 02: Container-side — send_audio MCP tool, 6 new tests (sendAudio + IPC auth)
+  - End-to-end pipeline: container agent → MCP tool → IPC media + JSON → host handler → Baileys ptt
+  - 358 tests passing, clean build
 - **Google Chat context loss bug FIXED** — Holly now remembers conversation history
   - Root cause: every Google Chat message spawned a fresh container with zero history
   - Fix: store inbound/outbound messages in DB, prepend last 20 as <conversation-history> XML
