@@ -9,4 +9,7 @@
 
 // telegram
 
+// local-chat
+import './local-chat.js';
+
 // whatsapp

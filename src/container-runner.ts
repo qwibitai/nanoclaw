@@ -33,6 +33,8 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const STATUS_START_MARKER = '---NANOCLAW_STATUS_START---';
+const STATUS_END_MARKER = '---NANOCLAW_STATUS_END---';
 
 export interface ContainerInput {
   prompt: string;
@@ -193,16 +195,7 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -274,11 +267,17 @@ async function buildContainerArgs(
   return args;
 }
 
+export interface AgentStatus {
+  event: string;
+  detail?: string;
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onStatus?: (status: AgentStatus) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -344,6 +343,9 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
+    let timedOut = false;
+    let hadStreamingOutput = false;
+
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
@@ -393,6 +395,28 @@ export async function runContainerAgent(
             );
           }
         }
+
+        // Parse status markers
+        if (onStatus) {
+          let statusIdx: number;
+          while (
+            (statusIdx = parseBuffer.indexOf(STATUS_START_MARKER)) !== -1
+          ) {
+            const statusEnd = parseBuffer.indexOf(STATUS_END_MARKER, statusIdx);
+            if (statusEnd === -1) break;
+            const statusJson = parseBuffer
+              .slice(statusIdx + STATUS_START_MARKER.length, statusEnd)
+              .trim();
+            parseBuffer = parseBuffer.slice(
+              statusEnd + STATUS_END_MARKER.length,
+            );
+            try {
+              onStatus(JSON.parse(statusJson));
+            } catch {
+              // ignore malformed status
+            }
+          }
+        }
       }
     });
 
@@ -418,8 +442,6 @@ export async function runContainerAgent(
       }
     });
 
-    let timedOut = false;
-    let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.

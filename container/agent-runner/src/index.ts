@@ -108,11 +108,19 @@ async function readStdin(): Promise<string> {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const STATUS_START_MARKER = '---NANOCLAW_STATUS_START---';
+const STATUS_END_MARKER = '---NANOCLAW_STATUS_END---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+function writeStatus(status: { event: string; detail?: string }): void {
+  console.log(STATUS_START_MARKER);
+  console.log(JSON.stringify(status));
+  console.log(STATUS_END_MARKER);
 }
 
 function log(message: string): void {
@@ -435,8 +443,28 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (message.type === 'assistant') {
+      if ('uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
+      // Emit status for tool use blocks so the host can show what the agent is doing
+      const typedMsg = message as { message?: { content?: Array<{ type: string; name?: string }> } };
+      const content = typedMsg.message?.content;
+      if (Array.isArray(content)) {
+        let hasToolUse = false;
+        for (const block of content) {
+          if (block.type === 'tool_use' && block.name) {
+            writeStatus({ event: 'tool_use', detail: block.name });
+            hasToolUse = true;
+          }
+        }
+        if (!hasToolUse) {
+          writeStatus({ event: 'thinking' });
+        }
+      } else {
+        // No content blocks — agent is thinking
+        writeStatus({ event: 'thinking' });
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

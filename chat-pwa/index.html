@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>NanoClaw Chat</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Login screen (shown when auth required) -->
+  <div id="login-screen" class="login-screen" hidden>
+    <div class="login-card">
+      <img class="logo logo-dark" src="/logo-dark.svg" alt="NanoClaw" style="height:32px;margin-bottom:16px">
+      <img class="logo logo-light" src="/logo-light.svg" alt="NanoClaw" style="height:32px;margin-bottom:16px">
+      <p class="login-subtitle">Enter your access token to continue</p>
+      <form id="login-form" class="login-form">
+        <input id="login-token" type="password" placeholder="Access token" autocomplete="off" required>
+        <button type="submit" class="btn-save">Connect</button>
+      </form>
+      <p id="login-error" class="login-error" hidden></p>
+    </div>
+  </div>
+
+  <div id="app">
+    <nav id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-header-row">
+          <img class="logo logo-dark" src="/logo-dark.svg" alt="NanoClaw">
+          <img class="logo logo-light" src="/logo-light.svg" alt="NanoClaw">
+          <button id="dash-toggle" class="settings-btn" aria-label="Dashboard" title="Dashboard">▦</button>
+          <button id="settings-btn" class="settings-btn" aria-label="Settings">⚙</button>
+        </div>
+        <span id="identity" class="identity"></span>
+      </div>
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-tab="rooms">Rooms</button>
+        <button class="sidebar-tab" data-tab="bots">Bots</button>
+      </div>
+      <div id="tab-rooms" class="tab-content active">
+        <ul id="room-list"></ul>
+      </div>
+      <div id="tab-bots" class="tab-content">
+        <ul id="bot-list"></ul>
+        <button id="create-bot-btn" class="create-bot-btn">+ New Bot</button>
+      </div>
+    </nav>
+    <main id="chat">
+      <div id="chat-header">
+        <button id="mobile-back" class="mobile-back" aria-label="Back to rooms">‹</button>
+        <span id="room-name">Select a room</span>
+        <button id="members-toggle" class="members-toggle" hidden aria-label="Show room members">0</button>
+      </div>
+      <div id="connection-banner" class="connection-banner">Connection lost. Reconnecting...</div>
+      <div id="chat-body">
+        <div id="chat-content">
+          <div id="messages-wrap" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
+          <div id="messages">
+            <div id="empty-state" class="empty-state">Select a room from the sidebar to start chatting</div>
+          </div>
+          <button id="scroll-bottom" class="scroll-bottom" hidden aria-label="Jump to bottom">↓</button>
+          </div>
+          <div id="typing-indicator" class="typing-indicator" hidden></div>
+          <div id="file-preview" class="file-preview" hidden></div>
+          <form id="message-form">
+            <button type="button" id="file-picker" class="file-picker-btn" title="Upload file">📎</button>
+            <textarea id="message-input" rows="1" placeholder="Message..." autocomplete="off" disabled></textarea>
+            <button type="submit" disabled aria-label="Send message">Send</button>
+          </form>
+        </div>
+        <aside id="members-panel" class="members-panel" hidden>
+          <div class="members-header">
+            <span>Members</span>
+            <button id="members-close" class="members-close">&times;</button>
+          </div>
+          <ul id="members-list"></ul>
+        </aside>
+        <aside id="bot-detail" class="bot-detail" hidden>
+          <!-- Edit mode -->
+          <div id="bot-edit-view">
+            <div class="bot-detail-header">
+              <span id="bot-detail-title">Bot Details</span>
+              <button id="bot-detail-close" class="members-close">&times;</button>
+            </div>
+            <form id="bot-detail-form" class="bot-detail-form">
+              <label>
+                <span class="form-label">Name</span>
+                <input id="bot-name" type="text" required>
+              </label>
+              <label>
+                <span class="form-label">Trigger</span>
+                <input id="bot-trigger" type="text" required>
+              </label>
+              <label class="checkbox-label">
+                <input id="bot-requires-trigger" type="checkbox">
+                <span>Requires trigger word</span>
+              </label>
+              <label>
+                <div class="form-label-row">
+                  <span class="form-label">Instructions</span>
+                  <select id="bot-template" class="template-select" aria-label="Choose instruction template">
+                    <option value="">Template...</option>
+                    <option value="general">General Assistant</option>
+                    <option value="coder">Code Reviewer</option>
+                    <option value="researcher">Researcher</option>
+                    <option value="writer">Writer</option>
+                  </select>
+                </div>
+                <textarea id="bot-instructions" rows="12" placeholder="CLAUDE.md instructions..."></textarea>
+              </label>
+              <div class="bot-detail-actions">
+                <button type="submit" class="btn-save">Save</button>
+                <button type="button" id="bot-delete" class="btn-delete">Delete</button>
+              </div>
+            </form>
+          </div>
+          <!-- Create mode (chat) -->
+          <div id="bot-create-view" hidden>
+            <div class="bot-detail-header">
+              <span>Create Bot</span>
+              <button id="bot-create-close" class="members-close">&times;</button>
+            </div>
+            <div id="bot-create-messages" class="bot-create-messages"></div>
+            <form id="bot-create-form" class="bot-create-input">
+              <input id="bot-create-input" type="text" placeholder="Describe the bot you want..." autocomplete="off">
+              <button type="submit" class="btn-save">Send</button>
+            </form>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <section id="dashboard" hidden>
+      <div class="dash-header">
+        <button id="dash-back" class="mobile-back" aria-label="Back">‹</button>
+        <span>Dashboard</span>
+        <button id="dash-refresh" class="dash-refresh-btn">↻ Refresh</button>
+      </div>
+      <div class="dash-body">
+        <div id="dash-health" class="dash-health"></div>
+        <div class="dash-section">
+          <div class="dash-section-title">Rooms &amp; Bots</div>
+          <div id="dash-graph" class="dash-graph"></div>
+        </div>
+        <div class="dash-section">
+          <div class="dash-section-title">Recent Activity</div>
+          <div id="dash-activity" class="dash-activity"></div>
+        </div>
+      </div>
+    </section>
+    <div id="members-overlay" class="members-overlay" hidden></div>
+
+    <!-- Settings modal -->
+    <div id="settings-overlay" class="modal-overlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <span>Settings</span>
+          <button id="settings-close" class="members-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="setting-group">
+            <span class="setting-label">Theme</span>
+            <div class="setting-options" id="theme-options">
+              <button class="setting-option" data-value="dark">Dark</button>
+              <button class="setting-option" data-value="light">Light</button>
+              <button class="setting-option" data-value="system">System</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <span class="setting-label">Font size</span>
+            <div class="setting-options" id="font-options">
+              <button class="setting-option" data-value="small">Small</button>
+              <button class="setting-option" data-value="medium">Medium</button>
+              <button class="setting-option" data-value="large">Large</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <span class="setting-label">Send message</span>
+            <div class="setting-options" id="send-options">
+              <button class="setting-option" data-value="enter">Enter</button>
+              <button class="setting-option" data-value="shift-enter">Shift+Enter</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label class="setting-toggle">
+              <span>Desktop notifications</span>
+              <input id="notif-toggle" type="checkbox">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -4,6 +4,8 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { createChatRoom } from './chat-db.js';
+import { isChatServerRunning } from './chat-server.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -441,9 +443,9 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC.                                                                                                                                    
-        // Preserve isMain from the existing registration so IPC config                                                                                                                          
-        // updates (e.g. adding additionalMounts) don't strip the flag.                                                                                                                          
+        // Defense in depth: agent cannot set isMain via IPC.
+        // Preserve isMain from the existing registration so IPC config
+        // updates (e.g. adding additionalMounts) don't strip the flag.
         const existingGroup = registeredGroups[data.jid];
         deps.registerGroup(data.jid, {
           name: data.name,
@@ -454,6 +456,15 @@ export async function processTaskIpc(
           requiresTrigger: data.requiresTrigger,
           isMain: existingGroup?.isMain,
         });
+        // Auto-create chat room for local-chat groups
+        if (data.jid.startsWith('chat:') && isChatServerRunning()) {
+          const roomId = data.jid.replace(/^chat:/, '');
+          createChatRoom(roomId, data.name);
+          logger.info(
+            { roomId, name: data.name },
+            'Auto-created chat room for registered group',
+          );
+        }
       } else {
         logger.warn(
           { data },
