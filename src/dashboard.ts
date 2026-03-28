@@ -5,7 +5,14 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 
-const PROJECT_ROOT = process.cwd();
+// Resolve to the real repo root (not a worktree) so we find logs/, store/, groups/
+const PROJECT_ROOT = process.env.NANOCLAW_ROOT || (() => {
+  try {
+    return execSync('git rev-parse --path-format=absolute --git-common-dir', { encoding: 'utf-8' }).trim().replace(/\/.git$/, '');
+  } catch {
+    return process.cwd();
+  }
+})();
 const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 const DB_PATH = path.join(STORE_DIR, 'messages.db');
