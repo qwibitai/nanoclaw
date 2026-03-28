@@ -68,6 +68,8 @@ vi.mock('@slack/bolt', () => ({
       this.eventHandlers.set(name, handler);
     }
 
+    error(_handler: Handler) {}
+
     async start() {}
     async stop() {}
   },
