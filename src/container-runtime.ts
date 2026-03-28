@@ -3,26 +3,45 @@
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
 import { execSync } from 'child_process';
+import os from 'os';
 
 import { logger } from './logger.js';
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
+/** CLI args needed for the container to resolve the host gateway. */
+export function hostGatewayArgs(): string[] {
+  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  if (os.platform() === 'linux') {
+    return ['--add-host=host.docker.internal:host-gateway'];
+  }
+  return [];
+}
+
 /** Returns CLI args for a readonly bind mount. */
-export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
+export function readonlyMountArgs(
+  hostPath: string,
+  containerPath: string,
+): string[] {
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
-/** Returns the shell command to stop a container by name. */
-export function stopContainer(name: string): string {
-  return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
+/** Stop a container by name. Uses execFileSync to avoid shell injection. */
+export function stopContainer(name: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+    throw new Error(`Invalid container name: ${name}`);
+  }
+  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
   try {
-    execSync(`${CONTAINER_RUNTIME_BIN} info`, { stdio: 'pipe', timeout: 10000 });
+    execSync(`${CONTAINER_RUNTIME_BIN} info`, {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
     logger.debug('Container runtime already running');
   } catch (err) {
     logger.error({ err }, 'Failed to reach container runtime');
@@ -50,7 +69,9 @@ export function ensureContainerRuntimeRunning(): void {
     console.error(
       '╚════════════════════════════════════════════════════════════════╝\n',
     );
-    throw new Error('Container runtime is required but failed to start');
+    throw new Error('Container runtime is required but failed to start', {
+      cause: err,
+    });
   }
 }
 
@@ -64,11 +85,16 @@ export function cleanupOrphans(): void {
     const orphans = output.trim().split('\n').filter(Boolean);
     for (const name of orphans) {
       try {
-        execSync(stopContainer(name), { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+        stopContainer(name);
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');

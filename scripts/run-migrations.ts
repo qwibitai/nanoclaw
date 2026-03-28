@@ -3,7 +3,15 @@ import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { compareSemver } from '../skills-engine/state.js';
+function compareSemver(a: string, b: string): number {
+  const partsA = a.split('.').map(Number);
+  const partsB = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const diff = (partsA[i] || 0) - (partsB[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 // Resolve tsx binary once to avoid npx race conditions across migrations
 function resolveTsx(): string {
@@ -43,9 +51,7 @@ const results: MigrationResult[] = [];
 const migrationsDir = path.join(newCorePath, 'migrations');
 
 if (!fs.existsSync(migrationsDir)) {
-  console.log(
-    JSON.stringify({ migrationsRun: 0, results: [] }, null, 2),
-  );
+  console.log(JSON.stringify({ migrationsRun: 0, results: [] }, null, 2));
   process.exit(0);
 }
 
@@ -84,18 +90,13 @@ for (const version of migrationVersions) {
     });
     results.push({ version, success: true });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : String(err);
     results.push({ version, success: false, error: message });
   }
 }
 
 console.log(
-  JSON.stringify(
-    { migrationsRun: results.length, results },
-    null,
-    2,
-  ),
+  JSON.stringify({ migrationsRun: results.length, results }, null, 2),
 );
 
 // Exit with error if any migration failed

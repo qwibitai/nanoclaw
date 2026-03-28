@@ -3,12 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import {
-  DATA_DIR,
-  IPC_POLL_INTERVAL,
-  MAIN_GROUP_FOLDER,
-  TIMEZONE,
-} from './config.js';
+import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -19,7 +14,7 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
-  syncGroupMetadata: (force: boolean) => Promise<void>;
+  syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
@@ -27,6 +22,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  onTasksChanged: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -57,8 +53,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
+    // Build folder→isMain lookup from registered groups
+    const folderIsMain = new Map<string, boolean>();
+    for (const group of Object.values(registeredGroups)) {
+      if (group.isMain) folderIsMain.set(group.folder, true);
+    }
+
     for (const sourceGroup of groupFolders) {
-      const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+      const isMain = folderIsMain.get(sourceGroup) === true;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
@@ -160,6 +162,7 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    script?: string;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -235,18 +238,20 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
+          const date = new Date(data.schedule_value);
+          if (isNaN(date.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = scheduled.toISOString();
+          nextRun = date.toISOString();
         }
 
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskId =
+          data.taskId ||
+          `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const contextMode =
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
@@ -256,6 +261,7 @@ export async function processTaskIpc(
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt: data.prompt,
+          script: data.script || null,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
@@ -267,6 +273,7 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
+        deps.onTasksChanged();
       }
       break;
 
@@ -279,6 +286,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -297,6 +305,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -315,12 +324,79 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task cancel attempt',
           );
         }
+      }
+      break;
+
+    case 'update_task':
+      if (data.taskId) {
+        const task = getTaskById(data.taskId);
+        if (!task) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Task not found for update',
+          );
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Unauthorized task update attempt',
+          );
+          break;
+        }
+
+        const updates: Parameters<typeof updateTask>[1] = {};
+        if (data.prompt !== undefined) updates.prompt = data.prompt;
+        if (data.script !== undefined) updates.script = data.script || null;
+        if (data.schedule_type !== undefined)
+          updates.schedule_type = data.schedule_type as
+            | 'cron'
+            | 'interval'
+            | 'once';
+        if (data.schedule_value !== undefined)
+          updates.schedule_value = data.schedule_value;
+
+        // Recompute next_run if schedule changed
+        if (data.schedule_type || data.schedule_value) {
+          const updatedTask = {
+            ...task,
+            ...updates,
+          };
+          if (updatedTask.schedule_type === 'cron') {
+            try {
+              const interval = CronExpressionParser.parse(
+                updatedTask.schedule_value,
+                { tz: TIMEZONE },
+              );
+              updates.next_run = interval.next().toISOString();
+            } catch {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid cron in task update',
+              );
+              break;
+            }
+          } else if (updatedTask.schedule_type === 'interval') {
+            const ms = parseInt(updatedTask.schedule_value, 10);
+            if (!isNaN(ms) && ms > 0) {
+              updates.next_run = new Date(Date.now() + ms).toISOString();
+            }
+          }
+        }
+
+        updateTask(data.taskId, updates);
+        logger.info(
+          { taskId: data.taskId, sourceGroup, updates },
+          'Task updated via IPC',
+        );
+        deps.onTasksChanged();
       }
       break;
 
@@ -331,7 +407,7 @@ export async function processTaskIpc(
           { sourceGroup },
           'Group metadata refresh requested via IPC',
         );
-        await deps.syncGroupMetadata(true);
+        await deps.syncGroups(true);
         // Write updated snapshot immediately
         const availableGroups = deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
@@ -365,6 +441,10 @@ export async function processTaskIpc(
           );
           break;
         }
+        // Defense in depth: agent cannot set isMain via IPC.                                                                                                                                    
+        // Preserve isMain from the existing registration so IPC config                                                                                                                          
+        // updates (e.g. adding additionalMounts) don't strip the flag.                                                                                                                          
+        const existingGroup = registeredGroups[data.jid];
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
@@ -372,6 +452,7 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          isMain: existingGroup?.isMain,
         });
       } else {
         logger.warn(

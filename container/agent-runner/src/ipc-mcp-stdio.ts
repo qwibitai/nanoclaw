@@ -41,7 +41,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -64,7 +64,7 @@ server.tool(
 
 server.tool(
   'schedule_task',
-  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
+  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
 CONTEXT MODE - Choose based on task type:
 \u2022 "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
@@ -91,6 +91,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    script: z.string().optional().describe('Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.'),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -130,9 +131,13 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     // Non-main groups can only schedule for themselves
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     const data = {
       type: 'schedule_task',
+      taskId,
       prompt: args.prompt,
+      script: args.script || undefined,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
@@ -141,10 +146,10 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       timestamp: new Date().toISOString(),
     };
 
-    const filename = writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
     };
   },
 );
@@ -245,14 +250,66 @@ server.tool(
 );
 
 server.tool(
-  'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
-
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+  'update_task',
+  'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    task_id: z.string().describe('The task ID to update'),
+    prompt: z.string().optional().describe('New prompt for the task'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
+    schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    script: z.string().optional().describe('New script for the task. Set to empty string to remove the script.'),
+  },
+  async (args) => {
+    // Validate schedule_value if provided
+    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+      if (args.schedule_value) {
+        try {
+          CronExpressionParser.parse(args.schedule_value);
+        } catch {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            isError: true,
+          };
+        }
+      }
+    }
+    if (args.schedule_type === 'interval' && args.schedule_value) {
+      const ms = parseInt(args.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          isError: true,
+        };
+      }
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'update_task',
+      taskId: args.task_id,
+      groupFolder,
+      isMain: String(isMain),
+      timestamp: new Date().toISOString(),
+    };
+    if (args.prompt !== undefined) data.prompt = args.prompt;
+    if (args.script !== undefined) data.script = args.script;
+    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
+  },
+);
+
+server.tool(
+  'register_group',
+  `Register a new chat/group so the agent can respond to messages there. Main group only.
+
+Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+  {
+    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
