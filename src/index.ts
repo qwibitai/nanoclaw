@@ -86,7 +86,6 @@ import {
   pruneThreadOrigins,
   setRegisteredGroup,
   setRouterState,
-  setSession,
   setSessionEffort,
   setSessionModel,
   setSessionProcessing,
@@ -1343,11 +1342,10 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Persist session ID to both in-memory cache and SQLite (V1 + V2)
+  // Persist session ID to both in-memory cache and SQLite
   const persistSession = (newSessionId: string) => {
     sessions.set(sessionKey, newSessionId);
     setSessionV2(sessionKey, group.folder, newSessionId, threadId);
-    if (!threadId) setSession(group.folder, newSessionId);
   };
 
   // Wrap onOutput to track session ID from streamed results
