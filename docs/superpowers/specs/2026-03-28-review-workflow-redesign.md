@@ -12,26 +12,28 @@ This is unusable for bulk imports of historic course material.
 
 ### Pipeline Change: Agent-First Draft Generation
 
-The ingestion pipeline currently goes: upload → docling extraction → raw draft in review queue. The redesign inserts an agent processing step between extraction and draft creation.
+The ingestion pipeline currently goes: upload → docling extraction → raw draft in review queue. The redesign replaces docling as a mandatory step and puts the agent in charge of document processing.
 
 **New flow:**
 
 1. File lands in `upload/` (via dashboard or filesystem), with or without folder structure.
-2. Docling extracts raw markdown and figures from the file.
-3. The path parser infers whatever metadata it can from the folder hierarchy (course code, semester, type).
+2. The path parser infers whatever metadata it can from the folder hierarchy (course code, semester, type).
+3. The original source file is copied to `vault/attachments/{course}/` (or `_unsorted/`).
 4. A fresh NanoClaw agent container is spawned for this single document. It receives:
-   - The original source file for multimodal reading (sees actual slides, diagrams, tables)
-   - The docling extraction (structured text where extraction succeeded)
+   - The original source file path (mounted into the container) for multimodal reading
    - Path-parser metadata (course, semester, type — may be partial or null)
    - The vault's existing course structure (list of known courses and categories)
    - The note schema specification (expected frontmatter fields, format)
-5. The agent generates proper study notes: structured markdown with summaries, key concepts, descriptive figure captions, and fully populated metadata.
+   - Access to a docling extraction tool — the agent can call it if needed (e.g., to extract embedded figures as separate image files), but it is not mandatory
+5. The agent reads the document directly (multimodal), generates proper study notes with structured markdown, summaries, key concepts, and fully populated metadata. If the document contains important diagrams or figures, the agent can invoke docling to extract them as standalone image files for the vault.
 6. The agent's output lands in `vault/drafts/{id}.md` as a well-formed draft.
 7. The draft appears in the review queue, already classified and readable.
 
+**Docling as a tool, not a pipeline step:** Docling is no longer in the critical path. The agent reads the original file multimodally, which produces better results than docling for most content (especially diagrams, tables, and slides). Docling is available as an agent tool for figure extraction — when the agent encounters important embedded images, it can call docling to extract them as separate files for the vault's attachments folder. This preserves token usage by only invoking extraction when the agent determines it's worthwhile.
+
 Each document gets its own agent invocation — no shared context between documents. This prevents context rot when processing large batches. Documents queue and process sequentially; parallelism is not needed.
 
-The original source file is copied to `vault/attachments/{course}/` and linked in the draft via wikilink (`source: "[[filename.pdf]]"`).
+The original source file is linked in the draft via wikilink (`source: "[[filename.pdf]]"`).
 
 ### Web Channel
 
@@ -100,7 +102,7 @@ The review agent group has a CLAUDE.md with specific instructions for review int
 
 The agent-generated draft is already in the review queue. The chat is for refinements, not initial processing. When the user sends a message:
 
-- The agent reads the current draft state and the original source file (multimodal + docling extraction).
+- The agent reads the current draft state and can access the original source file (multimodal) if needed.
 - It makes the requested changes — structural edits, additional detail, metadata corrections.
 - It writes the updated draft in-place.
 - The center panel refreshes to show changes.
@@ -117,9 +119,9 @@ If the user mentions context ("this is relevant for the exam", "this connects to
 Complete flow from upload to vault:
 
 1. **Upload** — file lands in `upload/`, with or without folder structure.
-2. **Extraction** — docling extracts markdown + figures.
-3. **Agent processing** — fresh container reads original (multimodal) + extraction + path metadata, generates structured study notes with filled metadata.
-4. **Draft created** — agent output in `vault/drafts/{id}.md`, original in `vault/attachments/`.
+2. **Path parsing** — metadata inferred from folder hierarchy. Original copied to `vault/attachments/`.
+3. **Agent processing** — fresh container reads original file (multimodal) + path metadata, generates structured study notes with filled metadata. Calls docling tool for figure extraction if needed.
+4. **Draft created** — agent output in `vault/drafts/{id}.md`, original already in `vault/attachments/`.
 5. **Review queue** — appears in overview, grouped by course.
 6. **User opens draft** — three-panel view: original source, processed draft, chat.
 7. **User iterates** — fixes metadata manually, asks agent for changes via chat, removes bad figures.
@@ -156,7 +158,7 @@ figures: [figure-01-tcp-header.png]
 ## What This Changes
 
 ### Modified files
-- `src/ingestion/index.ts` — insert agent processing step between docling extraction and draft creation
+- `src/ingestion/index.ts` — replace docling-first pipeline with agent-first processing; docling becomes an optional tool
 - `src/ingestion/file-watcher.ts` — already fixed: ignore `.processed/` subfolder
 - `src/index.ts` — register web channel, start review agent group
 - `src/config.ts` — web channel config (port, etc.)
@@ -168,6 +170,9 @@ figures: [figure-01-tcp-header.png]
 - `dashboard/src/app/api/chat/route.ts` — chat endpoint (forwards to NanoClaw web channel)
 - `dashboard/src/app/api/chat/[draftId]/stream/route.ts` — SSE endpoint for streaming agent responses
 - `groups/review_agent/CLAUDE.md` — review agent instructions
+
+### Repurposed files
+- `src/ingestion/docling-client.ts` — remains as-is but is no longer called by the pipeline directly; exposed as a tool the agent can invoke for figure extraction
 
 ### Not in scope
 - Rich text editing of draft content (markdown source editing is sufficient for now)
