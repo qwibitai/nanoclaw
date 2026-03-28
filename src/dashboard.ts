@@ -496,6 +496,13 @@ const HTML = `<!DOCTYPE html>
     color: var(--accent2);
     font-weight: 600;
   }
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
   .empty { color: var(--text2); font-style: italic; font-size: 13px; padding: 12px 0; }
   .time-ago { color: var(--text2); }
   @media (max-width: 768px) {
@@ -646,14 +653,19 @@ function renderMain() {
   html += '</div>';
 
   // Scheduled Tasks
-  html += '<div class="card"><h2>Scheduled Tasks (' + d.tasks.length + ')</h2>';
+  html += '<div class="card wide"><h2>Scheduled Tasks (' + d.tasks.length + ')</h2>';
   if (d.tasks.length === 0) {
     html += '<div class="empty">No scheduled tasks</div>';
   } else {
-    html += '<table><tr><th>Prompt</th><th>Schedule</th><th>Status</th><th>Next Run</th><th>Last Run</th></tr>';
+    html += '<table><tr><th style="width:40%">Task</th><th>Schedule</th><th>Group</th><th>Status</th><th>Next Run</th><th>Last Run</th></tr>';
     d.tasks.forEach(t => {
-      html += '<tr><td class="truncate" title="' + esc(t.prompt) + '">' + esc(t.prompt) + '</td>';
-      html += '<td>' + esc(t.schedule_type) + ': ' + esc(t.schedule_value) + '</td>';
+      // Extract a short label from the prompt (first sentence or first 80 chars)
+      const raw = String(t.prompt || '');
+      const label = raw.split(/[.!\\n]/)[0].substring(0, 80) + (raw.length > 80 ? '...' : '');
+      const sched = esc(t.schedule_value);
+      html += '<tr><td title="' + esc(raw) + '">' + esc(label) + '</td>';
+      html += '<td><code>' + sched + '</code></td>';
+      html += '<td>' + esc(t.group_folder) + '</td>';
       html += '<td>' + statusBadge(t.status) + '</td>';
       html += '<td class="time-ago">' + (t.next_run ? timeAgo(t.next_run) : '—') + '</td>';
       html += '<td class="time-ago">' + (t.last_run ? timeAgo(t.last_run) : 'never') + '</td></tr>';
