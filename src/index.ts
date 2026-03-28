@@ -615,25 +615,11 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            getOrRecoverCursor(chatJid),
-            ASSISTANT_NAME,
-            MAX_MESSAGES_PER_PROMPT,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
-
-          // Always spawn a new container for each batch of new messages.
-          // Don't pipe into an existing container — that serialises work.
-          // The idle container reuse in enqueueMessageCheck handles the
-          // optimisation case where no container is actively processing.
-          lastAgentTimestamp[chatJid] =
-            messagesToSend[messagesToSend.length - 1].timestamp;
-          saveState();
+          // Enqueue for processing. processGroupMessages will pull all
+          // messages since the last agent cursor, advance the cursor after
+          // reading, and spawn a container. We don't advance lastAgentTimestamp
+          // here — doing so would race with processGroupMessages and cause
+          // it to find zero messages.
           queue.enqueueMessageCheck(chatJid);
         }
       }
