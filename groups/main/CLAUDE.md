@@ -293,6 +293,21 @@ bash -c 'node --input-type=module -e "
 
 If a task requires your judgment every time (daily briefings, reminders, reports), skip the script — just use a regular prompt.
 
+---
+
+## LazyLibrarian
+
+Use the `lazylibrarian` skill to search for and add books.
+
+```
+LAZYLIBRARIAN_URL: http://CHANGE_ME:5299
+LAZYLIBRARIAN_API_KEY: CHANGE_ME
+```
+
+Run `/lazylibrarian` (or just ask about a book) to use it.
+
+---
+
 ### Frequent task guidance
 
 If a user wants tasks running more than ~2x daily and a script can't reduce agent wake-ups:
