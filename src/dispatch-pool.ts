@@ -62,11 +62,10 @@ export function workerSlotJid(i: number): string {
 /**
  * Returns true when the PostgreSQL-backed slot management is enabled.
  *
- * Set DISPATCH_SLOTS_PG=true after applying migration
+ * Activation: set DISPATCH_SLOTS_PG=true after applying migration
  * 1710600026000_add-dispatch-slots-table.ts to Agency HQ's PostgreSQL.
  *
- * Defaults to false (SQLite backend) until the migration is reviewed and
- * applied to production.
+ * Defaults to false (local SQLite backend).
  */
 export function isDispatchSlotsPgEnabled(): boolean {
   return process.env.DISPATCH_SLOTS_PG === 'true';
