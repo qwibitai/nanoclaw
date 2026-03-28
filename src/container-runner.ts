@@ -172,12 +172,18 @@ function buildVolumeMounts(
           .filter((v) => fs.statSync(path.join(pluginDir, v)).isDirectory())
           .sort();
         if (versions.length === 0) continue;
-        const latestSkillsDir = path.join(pluginDir, versions.at(-1)!, 'skills');
+        const latestSkillsDir = path.join(
+          pluginDir,
+          versions.at(-1)!,
+          'skills',
+        );
         if (!fs.existsSync(latestSkillsDir)) continue;
         for (const skillDir of fs.readdirSync(latestSkillsDir)) {
           const srcDir = path.join(latestSkillsDir, skillDir);
           if (!fs.statSync(srcDir).isDirectory()) continue;
-          fs.cpSync(srcDir, path.join(skillsDst, skillDir), { recursive: true });
+          fs.cpSync(srcDir, path.join(skillsDst, skillDir), {
+            recursive: true,
+          });
         }
       }
     }
