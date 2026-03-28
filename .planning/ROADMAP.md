@@ -17,11 +17,13 @@ NanoClaw is the container runtime for GorillaHubOS agents. Phases 1–2 delivere
 **Plans:** 3 plans
 
 Plans:
+
 - [x] 01-01-PLAN.md — Refactor GroupQueue data model from single-container to multi-container
 - [x] 01-02-PLAN.md — Update index.ts and task-scheduler.ts for multi-container API
 - [x] 01-03-PLAN.md — Rewrite and extend GroupQueue test suite
 
 **Success Criteria:**
+
 1. A second message to the same group spawns a new container while the first container is still running
 2. Each concurrent container gets a fresh Claude session (no shared sessionId)
 3. An idle-waiting container receives piped messages instead of spawning a new container
@@ -39,10 +41,12 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
+
 - [x] 02-01-PLAN.md — Host-side session awareness file writer + lifecycle hooks + tests
 - [x] 02-02-PLAN.md — Container-side awareness read + prompt injection
 
 **Success Criteria:**
+
 1. `data/ipc/{group}/active_sessions.json` accurately lists all running containers for a group (name, start time, type, repos)
 2. The file updates within 1 second of container start/exit
 3. Each new container reads the session awareness file on startup and has the information available for prompt context
@@ -59,10 +63,12 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
+
 - [x] 03-01-PLAN.md — OAuth module + container-runner integration + tests
 - [x] 03-02-PLAN.md — VPS deployment, seed credentials, verify refresh cycle
 
 **Success Criteria:**
+
 1. NanoClaw reads OAuth credentials from `oauth-credentials.json` (not `.env`)
 2. When access token is within 5 minutes of expiry, NanoClaw automatically refreshes it before spawning a container
 3. Refreshed credentials (including potentially rotated refresh token) are persisted atomically
@@ -70,15 +76,40 @@ Plans:
 5. Holly stays alive for 48+ hours without manual token intervention
 6. If refresh fails, a CRITICAL log entry is written and the stale token is used as fallback
 
+### Phase 4: WhatsApp Voice Notes
+
+**Goal:** Container agents can send OGG/Opus audio files as inline-playable WhatsApp voice notes via a new `send_audio` MCP tool and IPC message type.
+
+**Dependencies:** None (independent of Phases 1–3)
+
+**Requirements:** None (feature request from conversation)
+
+**Plans:** 2 plans
+
+Plans:
+
+- [ ] 04-01-PLAN.md — Host-side infrastructure: Channel sendAudio interface, WhatsApp implementation, IPC handler
+- [ ] 04-02-PLAN.md — Container MCP send_audio tool + tests
+
+**Success Criteria:**
+
+1. Container agent calls `send_audio` MCP tool with a file path to an OGG/Opus file
+2. Audio file is copied to IPC media directory with a JSON instruction
+3. Host reads the audio file, sends via WhatsApp Baileys `{ audio, ptt: true }` — appears as inline voice note
+4. Authorization matches existing send_message rules (main can send anywhere, others only to own chat)
+5. Audio file cleaned up from IPC after sending
+6. All existing tests pass, new tests cover sendAudio + IPC handler
+
 ---
 
 ## Progress
 
-| Phase | Status | Plans | Completed |
-|-------|--------|-------|-----------|
-| 1 — Multi-Container GroupQueue | Complete | 3 | 3 |
-| 2 — Session Awareness + Deployment | Complete | 2 | 2 |
-| 3 — OAuth Auto-Refresh | Complete | 2 | 2 |
+| Phase                              | Status   | Plans | Completed |
+| ---------------------------------- | -------- | ----- | --------- |
+| 1 — Multi-Container GroupQueue     | Complete | 3     | 3         |
+| 2 — Session Awareness + Deployment | Complete | 2     | 2         |
+| 3 — OAuth Auto-Refresh             | Complete | 2     | 2         |
+| 4 — WhatsApp Voice Notes           | Planned  | 2     | 0         |
 
 ## Deployment
 
