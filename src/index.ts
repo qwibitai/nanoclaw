@@ -31,6 +31,7 @@ import {
 import {
   getAllChats,
   getAllRegisteredGroups,
+  deleteSession,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
@@ -372,7 +373,21 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    // Detect stale sessions: if the error indicates the session no longer
+    // exists (e.g. after a crash), discard the session ID so the next retry
+    // creates a fresh session instead of looping on the same dead ID.
+    const isStaleSession =
+      output.status === 'error' &&
+      output.error?.includes('No conversation found with session ID');
+
+    if (isStaleSession) {
+      logger.warn(
+        { group: group.name, sessionId: output.newSessionId },
+        'Stale session detected, discarding so next retry creates a new one',
+      );
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+    } else if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
