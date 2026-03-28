@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,25 +11,26 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
-  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { OneCLI } from '@onecli-sh/sdk';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
 const TOOL_SECRET_KEYS = [
@@ -59,6 +60,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  script?: string;
 }
 
 export interface ContainerOutput {
@@ -95,7 +97,7 @@ function buildVolumeMounts(
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
+    // Credentials are injected by the OneCLI gateway, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -208,8 +210,17 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
+    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    const needsCopy =
+      !fs.existsSync(groupAgentRunnerDir) ||
+      !fs.existsSync(cachedIndex) ||
+      (fs.existsSync(srcIndex) &&
+        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+    if (needsCopy) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -236,30 +247,29 @@ interface ContainerArgsResult {
   envFilePath?: string;
 }
 
-function buildContainerArgs(
+async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): ContainerArgsResult {
+  agentIdentifier?: string,
+): Promise<ContainerArgsResult> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  // OneCLI gateway handles credential injection — containers never see real secrets.
+  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
+  const onecliApplied = await onecli.applyContainerConfig(args, {
+    addHostMapping: false, // Nanoclaw already handles host gateway
+    agent: agentIdentifier,
+  });
+  if (onecliApplied) {
+    logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    logger.warn(
+      { containerName },
+      'OneCLI gateway not reachable — container will have no credentials',
+    );
   }
 
   // Tool API keys (non-Claude credentials for MCP tools like semantic memory)
@@ -317,7 +327,15 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const { args: containerArgs, envFilePath } = buildContainerArgs(mounts, containerName);
+  // Main group uses the default OneCLI agent; others use their own agent.
+  const agentIdentifier = input.isMain
+    ? undefined
+    : group.folder.toLowerCase().replace(/_/g, '-');
+  const { args: containerArgs, envFilePath } = await buildContainerArgs(
+    mounts,
+    containerName,
+    agentIdentifier,
+  );
 
   logger.debug(
     {
@@ -452,15 +470,15 @@ export async function runContainerAgent(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
-          container.kill('SIGKILL');
-        }
-      });
+      try {
+        stopContainer(containerName);
+      } catch (err) {
+        logger.warn(
+          { group: group.name, containerName, err },
+          'Graceful stop failed, force killing',
+        );
+        container.kill('SIGKILL');
+      }
     };
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
@@ -550,11 +568,7 @@ export async function runContainerAgent(
         // Full input is only included at verbose level to avoid
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
-          logLines.push(
-            `=== Input ===`,
-            JSON.stringify(input, null, 2),
-            ``,
-          );
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
           logLines.push(
             `=== Input Summary ===`,
@@ -709,6 +723,7 @@ export function writeTasksSnapshot(
     id: string;
     groupFolder: string;
     prompt: string;
+    script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;
@@ -744,7 +759,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
+  _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
