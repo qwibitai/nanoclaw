@@ -257,6 +257,32 @@ def execute_walkthrough(actions: list, frames_dir: Path, client: Anthropic,
                 frame_num = settle(page, frames_dir, frame_num, cursor, [],
                                    step_idx, label, act, metadata, delay_ms)
 
+            elif act == "click_xy":
+                target = [action["x"], action["y"]]
+                frame_num, cursor = animate_cursor(
+                    page, frames_dir, frame_num, cursor, target,
+                    step_idx, label, metadata,
+                )
+                for i in range(SPOTLIGHT_FRAMES):
+                    frame_num = take_screenshot(
+                        page, frames_dir, frame_num, cursor, [],
+                        step_idx, label, "spotlight", metadata,
+                        spotlight_pos=cursor[:], spotlight_progress=(i + 1) / SPOTLIGHT_FRAMES,
+                    )
+                page.mouse.click(target[0], target[1])
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+                for i in range(RIPPLE_FRAMES):
+                    frame_num = take_screenshot(
+                        page, frames_dir, frame_num, cursor, [],
+                        step_idx, label, "ripple", metadata,
+                        ripple_center=cursor[:], ripple_progress=(i + 1) / RIPPLE_FRAMES,
+                    )
+                frame_num = settle(page, frames_dir, frame_num, cursor, [],
+                                   step_idx, label, act, metadata, delay_ms)
+
             elif act == "scene":
                 # Full-frame scene transition card
                 for i in range(SCENE_FRAMES):
