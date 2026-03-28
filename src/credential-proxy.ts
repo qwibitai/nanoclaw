@@ -94,8 +94,7 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
-            const oauthToken =
-              readClaudeCredentials() || fallbackOauthToken;
+            const oauthToken = readClaudeCredentials() || fallbackOauthToken;
             if (oauthToken) {
               headers['authorization'] = `Bearer ${oauthToken}`;
             }

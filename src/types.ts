@@ -66,7 +66,7 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
-  fail_count: number;        // consecutive failure count, reset on success
+  fail_count: number; // consecutive failure count, reset on success
   last_error: string | null; // last error message, null when healthy
 }
 

@@ -382,7 +382,10 @@ export function getMessagesSince(
 }
 
 export function createTask(
-  task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'fail_count' | 'last_error'>,
+  task: Omit<
+    ScheduledTask,
+    'last_run' | 'last_result' | 'fail_count' | 'last_error'
+  >,
 ): void {
   db.prepare(
     `
