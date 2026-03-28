@@ -96,7 +96,7 @@ export function escapeRegex(str: string): string {
 
 // Default model for the agent container. Per-group overrides live in
 // ContainerConfig.model; per-message overrides via "-m opus" (sticky) or "-m1 opus" (one-shot).
-export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-opus-4-6[1m]';
+export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
 
 // Map short aliases to full model IDs
 export const MODEL_ALIASES: Record<string, string> = {
