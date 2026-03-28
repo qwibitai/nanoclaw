@@ -188,6 +188,11 @@ function createSchema(database: Database.Database): void {
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
+    CREATE TABLE IF NOT EXISTS outbound_dedup (
+      hash_key TEXT PRIMARY KEY,
+      sent_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
     CREATE TABLE IF NOT EXISTS conversions (
       id TEXT PRIMARY KEY,
       chat_jid TEXT NOT NULL,
@@ -1530,6 +1535,22 @@ export function recordMessageId(msgId: string): void {
 export function pruneOldMessageIds(olderThanMs = 86_400_000): number {
   const cutoffEpoch = Math.floor((Date.now() - olderThanMs) / 1000);
   return db.prepare('DELETE FROM inbound_message_ids WHERE created_at < ?').run(cutoffEpoch).changes;
+}
+
+// --- Outbound message dedup (persistent across restarts) ---
+
+export function hasOutboundDedup(hashKey: string): boolean {
+  const row = db.prepare('SELECT 1 FROM outbound_dedup WHERE hash_key = ?').get(hashKey);
+  return row !== undefined;
+}
+
+export function recordOutboundDedup(hashKey: string): void {
+  db.prepare('INSERT OR IGNORE INTO outbound_dedup (hash_key) VALUES (?)').run(hashKey);
+}
+
+export function pruneOldOutboundDedup(olderThanMs = 300_000): number {
+  const cutoffEpoch = Math.floor((Date.now() - olderThanMs) / 1000);
+  return db.prepare('DELETE FROM outbound_dedup WHERE sent_at < ?').run(cutoffEpoch).changes;
 }
 
 export function pruneOldLogs(): { taskRuns: number; usage: number; messages: number } {

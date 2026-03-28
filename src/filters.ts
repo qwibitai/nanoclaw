@@ -146,8 +146,8 @@ export const RATE_LIMITS = {
   whatsapp:  { perHour: 20, perDay: 80 },
   /** Inbound webhook IP rate limit. */
   webhookPerIp: { perMinute: 30 },
-  /** Outbound dedup window. */
-  dedup: { windowMs: 30_000, maxCache: 5000 },
+  /** Outbound dedup window (5 min — survives restarts via SQLite). */
+  dedup: { windowMs: 300_000, maxCache: 5000 },
   /** Reply-loop detection thresholds. */
   replyLoop: { maxRoundTrips: 3, windowMs: 10 * 60_000 },
 } as const;

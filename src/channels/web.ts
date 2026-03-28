@@ -128,6 +128,13 @@ export class WebChannel implements Channel {
         return;
       }
 
+      // ── GET /health — health check endpoint ──
+      if (req.method === 'GET' && url.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+        return;
+      }
+
       // ── POST /api/square-webhook — Square payment.completed callback ──
       if (req.method === 'POST' && url.pathname === '/api/square-webhook') {
         let body = '';

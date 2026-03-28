@@ -24,6 +24,7 @@ import {
   logLearningEvent,
   pruneOldLogs,
   pruneOldMessageIds,
+  pruneOldOutboundDedup,
   setHealthState,
   updateTask,
 } from './db.js';
@@ -400,6 +401,13 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
       }
     } catch (err) {
       logger.error({ err }, 'Failed to prune message IDs');
+    }
+
+    // Prune old outbound dedup entries
+    try {
+      pruneOldOutboundDedup();
+    } catch (err) {
+      logger.error({ err }, 'Failed to prune outbound dedup');
     }
 
     // Expire stale pending bookings (>30 min old)
