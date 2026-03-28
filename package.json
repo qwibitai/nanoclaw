@@ -15,6 +15,7 @@
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
+    "dashboard": "tsx src/dashboard.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
