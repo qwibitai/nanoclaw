@@ -1,40 +1,41 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, rename } from 'node:fs/promises';
+import { copyFile, mkdir, rename, access } from 'node:fs/promises';
 import { join, relative, basename } from 'node:path';
 import { FileWatcher } from './file-watcher.js';
-import { DoclingClient } from './docling-client.js';
 import { parseUploadPath } from './path-parser.js';
 import { TypeMappings } from './type-mappings.js';
-import { ReviewQueue, DraftInput } from './review-queue.js';
-import { VaultUtility } from '../vault/vault-utility.js';
+import { AgentProcessor } from './agent-processor.js';
 import {
   createIngestionJob,
   updateIngestionJobStatus,
   createReviewItem,
 } from '../db.js';
+import { RegisteredGroup } from '../types.js';
 import { logger } from '../logger.js';
 
 export interface IngestionPipelineOpts {
   uploadDir: string;
   vaultDir: string;
   typeMappingsPath: string;
+  getReviewAgentGroup: () => RegisteredGroup | undefined;
 }
 
 export class IngestionPipeline {
   private watcher: FileWatcher;
-  private docling: DoclingClient;
+  private agentProcessor: AgentProcessor;
   private typeMappings: TypeMappings;
-  private vault: VaultUtility;
-  private reviewQueue: ReviewQueue;
   private uploadDir: string;
   private vaultDir: string;
+  private getReviewAgentGroup: () => RegisteredGroup | undefined;
 
   constructor(opts: IngestionPipelineOpts) {
     this.uploadDir = opts.uploadDir;
     this.vaultDir = opts.vaultDir;
-    this.vault = new VaultUtility(opts.vaultDir);
-    this.reviewQueue = new ReviewQueue(this.vault);
-    this.docling = new DoclingClient();
+    this.getReviewAgentGroup = opts.getReviewAgentGroup;
+    this.agentProcessor = new AgentProcessor({
+      vaultDir: opts.vaultDir,
+      uploadDir: opts.uploadDir,
+    });
     this.typeMappings = new TypeMappings(opts.typeMappingsPath);
     this.watcher = new FileWatcher(opts.uploadDir, (filePath) => {
       this.processFile(filePath).catch((err) => {
@@ -55,6 +56,7 @@ export class IngestionPipeline {
 
   async processFile(filePath: string): Promise<void> {
     const jobId = randomUUID();
+    const draftId = randomUUID();
     const relativePath = relative(this.uploadDir, filePath);
     const fileName = basename(filePath);
 
@@ -74,80 +76,44 @@ export class IngestionPipeline {
     );
 
     try {
-      updateIngestionJobStatus(jobId, 'extracting');
-
-      // Copy original to attachments
+      // Copy original to vault attachments
       const courseDir = context.courseCode || '_unsorted';
       const attachmentDir = join('attachments', courseDir);
       await mkdir(join(this.vaultDir, attachmentDir), { recursive: true });
       await copyFile(filePath, join(this.vaultDir, attachmentDir, fileName));
 
-      // Extract text and figures via Docling
-      let markdown: string;
-      let figures: string[] = [];
-      let figurePaths: string[] = [];
+      // Ensure drafts directory exists
+      await mkdir(join(this.vaultDir, 'drafts'), { recursive: true });
 
-      if (this.docling.isSupported(fileName)) {
-        updateIngestionJobStatus(jobId, 'extracting');
-        const result = await this.docling.extract(filePath);
-        markdown = result.markdown;
-        figures = result.figures;
-        figurePaths = result.figurePaths;
-
-        // Copy figures to vault attachments
-        if (figures.length > 0) {
-          const figDir = join(
-            attachmentDir,
-            'figures',
-            fileName.replace(/\.[^.]+$/, ''),
-          );
-          await mkdir(join(this.vaultDir, figDir), { recursive: true });
-          for (let i = 0; i < figures.length; i++) {
-            await copyFile(
-              figurePaths[i],
-              join(this.vaultDir, figDir, figures[i]),
-            );
-          }
-        }
-      } else {
-        markdown = `<!-- Unsupported format: ${fileName} -->\n\nOriginal file: [[${fileName}]]`;
+      // Get the review agent group
+      const reviewAgentGroup = this.getReviewAgentGroup();
+      if (!reviewAgentGroup) {
+        throw new Error('Review agent group not registered');
       }
 
+      // Process with agent
       updateIngestionJobStatus(jobId, 'generating');
+      const result = await this.agentProcessor.process(
+        filePath,
+        fileName,
+        context,
+        draftId,
+        reviewAgentGroup,
+      );
 
-      // Create draft note
-      const draftId = randomUUID();
-      const targetFolder = context.type || 'unsorted';
-      const courseFolder = context.courseCode || '_unsorted';
-      const targetPath = `courses/${courseFolder}/${targetFolder}/${fileName.replace(/\.[^.]+$/, '.md')}`;
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Agent processing failed');
+      }
 
-      const figureEmbeds = figures
-        .map((f) => `![[${f}]]\n\n**Figure:** _Description pending._`)
-        .join('\n\n');
-      const fullContent =
-        markdown + (figureEmbeds ? `\n\n## Figures\n\n${figureEmbeds}` : '');
+      // Verify the agent actually wrote the draft file
+      const draftPath = join(this.vaultDir, 'drafts', `${draftId}.md`);
+      try {
+        await access(draftPath);
+      } catch {
+        throw new Error(`Agent completed but draft file not found at ${draftPath}`);
+      }
 
-      const draft: DraftInput = {
-        id: draftId,
-        data: {
-          title: fileName.replace(/\.[^.]+$/, ''),
-          type: context.type,
-          course: context.courseCode,
-          course_name: context.courseName,
-          semester: context.semester,
-          year: context.year,
-          source: fileName,
-          language: 'auto',
-          status: 'draft',
-          figures,
-          created: new Date().toISOString().split('T')[0],
-        },
-        content: fullContent,
-        targetPath,
-      };
-
-      await this.reviewQueue.addDraft(draft);
-
+      // Create review item in DB
       createReviewItem(
         draftId,
         jobId,
@@ -155,7 +121,7 @@ export class IngestionPipeline {
         fileName,
         context.type,
         context.courseCode,
-        figures,
+        [],
       );
 
       // Move original out of upload folder

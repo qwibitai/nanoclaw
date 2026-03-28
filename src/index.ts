@@ -13,11 +13,13 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   STORE_DIR,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
   VAULT_DIR,
   UPLOAD_DIR,
   TYPE_MAPPINGS_PATH,
 } from './config.js';
+import { initBotPool } from './channels/telegram.js';
 import { RagClient } from './rag/rag-client.js';
 import { RagIndexer } from './rag/indexer.js';
 import { IngestionPipeline } from './ingestion/index.js';
@@ -73,6 +75,9 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+const REVIEW_AGENT_JID = 'web:review:__agent__';
+const WEB_REVIEW_PREFIX = 'web:review:';
+
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -81,6 +86,10 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+// Track active web review JIDs so the message loop can query for them.
+// Populated when onMessage is called with a web:review:* JID.
+const activeWebReviewJids = new Set<string>();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -197,12 +206,23 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+function findGroupForJid(chatJid: string): RegisteredGroup | undefined {
+  if (registeredGroups[chatJid]) return registeredGroups[chatJid];
+  if (
+    chatJid.startsWith(WEB_REVIEW_PREFIX) &&
+    registeredGroups[REVIEW_AGENT_JID]
+  ) {
+    return registeredGroups[REVIEW_AGENT_JID];
+  }
+  return undefined;
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  const group = findGroupForJid(chatJid);
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
@@ -413,6 +433,10 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
+      // Include active web review JIDs so per-draft messages are fetched
+      for (const webJid of activeWebReviewJids) {
+        if (!jids.includes(webJid)) jids.push(webJid);
+      }
       const { messages, newTimestamp } = getNewMessages(
         jids,
         lastTimestamp,
@@ -438,7 +462,7 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
+          const group = findGroupForJid(chatJid);
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
@@ -532,6 +556,32 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Ensure review agent group exists
+  if (!registeredGroups[REVIEW_AGENT_JID]) {
+    registerGroup(REVIEW_AGENT_JID, {
+      name: 'Review Agent',
+      folder: 'review_agent',
+      trigger: '',
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+      isMain: false,
+      containerConfig: {
+        additionalMounts: [
+          {
+            hostPath: join(process.cwd(), 'vault'),
+            containerPath: '/workspace/extra/vault',
+            readonly: false,
+          },
+          {
+            hostPath: join(process.cwd(), 'upload'),
+            containerPath: '/workspace/extra/upload',
+            readonly: true,
+          },
+        ],
+      },
+    });
+  }
+
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
   for (const [jid, group] of Object.entries(registeredGroups)) {
@@ -544,6 +594,7 @@ async function main(): Promise<void> {
     uploadDir: UPLOAD_DIR,
     vaultDir: VAULT_DIR,
     typeMappingsPath: TYPE_MAPPINGS_PATH,
+    getReviewAgentGroup: () => registeredGroups[REVIEW_AGENT_JID],
   });
   await pipeline.start();
 
@@ -637,6 +688,11 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Track web review JIDs so the message loop polls for them
+      if (chatJid.startsWith(WEB_REVIEW_PREFIX)) {
+        activeWebReviewJids.add(chatJid);
+      }
     },
     onChatMetadata: (
       chatJid: string,
@@ -667,6 +723,11 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  // Initialize Telegram bot pool for agent teams (if configured)
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
   }
 
   // Start subsystems (independently of connection handler)

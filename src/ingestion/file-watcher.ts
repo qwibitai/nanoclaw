@@ -33,6 +33,7 @@ export class FileWatcher {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 100 },
       depth: 10,
+      ignored: /[\\/]\.processed[\\/]/,
     });
     this.watcher.on('add', (filePath: string) => {
       const fileName = filePath.split('/').pop() || '';
