@@ -41,7 +41,10 @@ function resolveConfigDir(): string {
 const CONFIG_DIR = resolveConfigDir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(CONFIG_DIR, 'mount-allowlist.json');
+export const MOUNT_ALLOWLIST_PATH = path.join(
+  CONFIG_DIR,
+  'mount-allowlist.json',
+);
 export const SENDER_ALLOWLIST_PATH = path.join(
   CONFIG_DIR,
   'sender-allowlist.json',
