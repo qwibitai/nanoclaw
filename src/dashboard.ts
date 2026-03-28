@@ -137,7 +137,7 @@ function getChannelStatus(): Array<{
     /* log read failed */
   }
 
-  // Extract account identities from logs
+  // Extract account identities from logs (use last match = most recent)
   try {
     const logPath = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
     if (fs.existsSync(logPath)) {
@@ -146,20 +146,26 @@ function getChannelStatus(): Array<{
         timeout: 5000,
       });
 
+      // Helper: find last match in string
+      const lastMatch = (text: string, re: RegExp): RegExpMatchArray | null => {
+        const matches = [...text.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))];
+        return matches.length > 0 ? matches[matches.length - 1] : null;
+      };
+
       // Telegram: @BotUsername
-      const tgMatch = logTail.match(/Telegram bot: @(\S+)/);
+      const tgMatch = lastMatch(logTail, /Telegram bot: @(\S+)/);
       if (tgMatch) status['telegram'].account = `@${tgMatch[1]}`;
 
       // Outlook: email from connection log
-      const olMatch = logTail.match(/Outlook channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
+      const olMatch = lastMatch(logTail, /Outlook channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
       if (olMatch) status['outlook'].account = olMatch[1];
 
       // Gmail: email from connection log
-      const gmMatch = logTail.match(/Gmail channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
+      const gmMatch = lastMatch(logTail, /Gmail channel connected[\s\S]*?email.*?:\s*"([^"]+)"/);
       if (gmMatch) status['gmail'].account = gmMatch[1];
 
       // WhatsApp: phone number from connection
-      const waMatch = logTail.match(/"username":\s*"(\d{10,})"/);
+      const waMatch = lastMatch(logTail, /"username":\s*"(\d{10,})"/);
       if (waMatch) status['whatsapp'].account = `+${waMatch[1]}`;
     }
   } catch {
