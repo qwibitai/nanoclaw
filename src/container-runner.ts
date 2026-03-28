@@ -25,7 +25,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { detectAuthMode, isRoomApiConfigured } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -236,6 +236,15 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Room API proxy: containers call /room-api/* on the same credential proxy
+  // to access music-gen and facebook-page-manager services securely.
+  if (isRoomApiConfigured()) {
+    args.push(
+      '-e',
+      `ROOM_API_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/room-api`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution

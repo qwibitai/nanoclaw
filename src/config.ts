@@ -71,3 +71,7 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Room API proxy port (shares the credential proxy port — path-based routing)
+// Containers access Room APIs via: http://host.docker.internal:{CREDENTIAL_PROXY_PORT}/room-api/
+export const ROOM_API_PROXY_PORT = CREDENTIAL_PROXY_PORT;
