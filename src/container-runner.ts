@@ -1931,8 +1931,10 @@ function buildVolumeMounts(
   // Each file has all Google scopes (Gmail, Calendar, Drive, Docs, Sheets, Slides).
   // Mounted when any Google service is enabled.
   if (
-    isToolEnabled(tools, 'gmail') || isToolEnabled(tools, 'gmail-readonly') ||
-    isToolEnabled(tools, 'calendar') || isToolEnabled(tools, 'google-workspace')
+    isToolEnabled(tools, 'gmail') ||
+    isToolEnabled(tools, 'gmail-readonly') ||
+    isToolEnabled(tools, 'calendar') ||
+    isToolEnabled(tools, 'google-workspace')
   ) {
     const gwsDir = path.join(homeDir, '.config', 'gws', 'accounts');
     if (fs.existsSync(gwsDir)) {
