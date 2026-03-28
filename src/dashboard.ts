@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { createServer } from 'http';
 import { execSync } from 'child_process';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 
@@ -69,8 +70,92 @@ function getServiceStatus(): {
   }
 }
 
+function getChannelStatus(): Array<{
+  name: string;
+  connected: boolean;
+  lastEvent: string | null;
+  lastEventTime: string | null;
+}> {
+  const LOG_PATH = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
+  const channels = ['whatsapp', 'telegram', 'outlook', 'gmail', 'discord', 'slack'];
+  const status: Record<string, { connected: boolean; lastEvent: string | null; lastEventTime: string | null }> = {};
+  for (const ch of channels) {
+    status[ch] = { connected: false, lastEvent: null, lastEventTime: null };
+  }
+
+  if (!fs.existsSync(LOG_PATH)) return channels.map(name => ({ name, ...status[name] }));
+
+  try {
+    // Read last 500 lines of log for channel events
+    const log = execSync(`tail -500 ${JSON.stringify(LOG_PATH)} 2>/dev/null`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    const lines = log.split('\n');
+    for (const line of lines) {
+      const timeMatch = line.match(/\[(\d{2}:\d{2}:\d{2}\.\d{3})\]/);
+      const time = timeMatch ? timeMatch[1] : null;
+
+      const lineLower = line.toLowerCase();
+
+      // Channel-specific connect patterns
+      const connectPatterns: Record<string, string[]> = {
+        whatsapp: ['connected to whatsapp', 'whatsapp channel connected'],
+        telegram: ['telegram bot connected', 'telegram channel connected'],
+        outlook: ['outlook channel connected'],
+        gmail: ['gmail channel connected'],
+        discord: ['discord channel connected', 'discord bot connected'],
+        slack: ['slack channel connected'],
+      };
+      const stopPatterns: Record<string, string[]> = {
+        whatsapp: ['whatsapp channel stopped', 'whatsapp disconnected', 'connection closed'],
+        telegram: ['telegram channel stopped', 'telegram bot stopped'],
+        outlook: ['outlook channel stopped'],
+        gmail: ['gmail channel stopped'],
+        discord: ['discord channel stopped'],
+        slack: ['slack channel stopped'],
+      };
+
+      for (const ch of channels) {
+        if (connectPatterns[ch]?.some(p => lineLower.includes(p))) {
+          status[ch] = { connected: true, lastEvent: 'connected', lastEventTime: time };
+        } else if (stopPatterns[ch]?.some(p => lineLower.includes(p))) {
+          status[ch] = { connected: false, lastEvent: 'stopped', lastEventTime: time };
+        } else if (lineLower.includes(ch.toLowerCase()) && lineLower.includes('delivered')) {
+          if (!status[ch].connected) {
+            status[ch] = { connected: true, lastEvent: 'active', lastEventTime: time };
+          } else {
+            status[ch].lastEvent = 'active';
+            status[ch].lastEventTime = time;
+          }
+        }
+      }
+    }
+  } catch {
+    /* log read failed */
+  }
+
+  // Also check for .env credentials to determine which channels are configured
+  const envPath = path.resolve(PROJECT_ROOT, '.env');
+  let envContent = '';
+  try { envContent = fs.readFileSync(envPath, 'utf-8'); } catch { /* no .env */ }
+
+  const configured = new Set<string>();
+  if (envContent.includes('MS_TENANT_ID')) configured.add('outlook');
+  if (envContent.includes('TELEGRAM_BOT_TOKEN') || fs.existsSync(path.resolve(PROJECT_ROOT, '.claude/channels/telegram/.env'))) configured.add('telegram');
+  if (fs.existsSync(path.join(os.homedir(), '.gmail-mcp'))) configured.add('gmail');
+  // WhatsApp auth store
+  if (fs.existsSync(path.resolve(PROJECT_ROOT, 'store', 'auth')) || fs.existsSync(path.resolve(PROJECT_ROOT, 'auth_info_baileys'))) configured.add('whatsapp');
+
+  return channels
+    .filter(name => configured.has(name) || status[name].connected || status[name].lastEvent)
+    .map(name => ({ name, ...status[name] }));
+}
+
 const EMPTY_DATA = {
   service: { running: false, pid: null, uptime: null },
+  channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null }>,
   groups: [],
   groupFolders: [],
   tasks: [],
@@ -85,7 +170,7 @@ const EMPTY_DATA = {
 
 function apiData() {
   const db = getDb();
-  if (!db) return { ...EMPTY_DATA, containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
+  if (!db) return { ...EMPTY_DATA, channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
 
   const groups = db
     .prepare(
@@ -169,11 +254,13 @@ function apiData() {
 
   const containers = getContainers();
   const service = getServiceStatus();
+  const channels = getChannelStatus();
 
   db.close();
 
   return {
     service,
+    channels,
     groups,
     groupFolders,
     tasks,
@@ -428,6 +515,20 @@ function renderTopStats() {
   if (svc.pid) html += '<div class="stat-row"><span>PID</span><span class="stat-value">' + svc.pid + '</span></div>';
   if (svc.uptime) html += '<div class="stat-row"><span>Uptime</span><span class="stat-value">' + svc.uptime + '</span></div>';
   html += '<div class="stat-row"><span>Containers</span><span class="stat-value">' + d.containers.length + ' / 5</span></div>';
+  html += '</div>';
+
+  // Channels
+  html += '<div class="card"><h2>Channels</h2>';
+  if (d.channels.length === 0) {
+    html += '<div class="empty">No channels configured</div>';
+  } else {
+    d.channels.forEach(ch => {
+      const icon = channelIcon(ch.name);
+      const connBadge = ch.connected ? badge('connected', 'green') : badge('disconnected', 'red');
+      const lastInfo = ch.lastEventTime ? ' <span class="time-ago">' + esc(ch.lastEventTime) + '</span>' : '';
+      html += '<div class="stat-row"><span>' + icon + ' ' + esc(ch.name) + '</span><span>' + connBadge + lastInfo + '</span></div>';
+    });
+  }
   html += '</div>';
 
   // Message stats
