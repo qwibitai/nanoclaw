@@ -675,7 +675,7 @@ function renderMain() {
   html += '</div>';
 
   // Containers
-  html += '<div class="card"><h2>Active Containers (' + d.containers.length + ')</h2>';
+  html += '<div class="card wide"><h2>Active Containers (' + d.containers.length + ')</h2>';
   if (d.containers.length === 0) {
     html += '<div class="empty">No running containers</div>';
   } else {
