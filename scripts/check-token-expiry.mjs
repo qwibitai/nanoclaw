@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import https from 'https';
 
-const WARN_THRESHOLD_MS = 90 * 60 * 1000; // warn when < 90 min remaining
+const WARN_THRESHOLD_MS = 0; // warn only when already expired
 const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const ENV_FILE = path.join(import.meta.dirname, '..', '.env');
 
