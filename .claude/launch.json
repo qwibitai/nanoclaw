@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nanoclaw-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": null
+    },
+    {
+      "name": "whatsapp-auth",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "auth"],
+      "port": null
+    }
+  ]
+}
