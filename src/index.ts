@@ -41,6 +41,7 @@ import {
   initChannels,
   startServices,
 } from './bootstrap.js';
+import { recordInteractiveCliFailure, resetInteractiveCliFailures } from './health.js';
 import {
   getRegisteredGroups,
   getSessions,
@@ -258,6 +259,7 @@ async function runAgent(
 
       if (cliOutput.status === 'error') {
         logger.warn({ group: group.name, error: cliOutput.error }, 'Interactive CLI failed');
+        recordInteractiveCliFailure();
 
         if (CLI_FALLBACK_ENABLED) {
           logger.warn({ group: group.name, event: 'cli_interactive_fallback' }, 'Falling back to container (API credits)');
@@ -268,7 +270,9 @@ async function runAgent(
           return 'error';
         }
       } else {
-        // CLI succeeded — forward result if not already sent via send_message MCP tool
+        // CLI succeeded — clear failure counter
+        resetInteractiveCliFailures();
+        // Forward result if not already sent via send_message MCP tool
         if (cliOutput.result && onOutput) {
           await onOutput({
             status: 'success',
@@ -280,6 +284,7 @@ async function runAgent(
       }
     } catch (err) {
       logger.warn({ group: group.name, err }, 'Interactive CLI threw, trying container fallback');
+      recordInteractiveCliFailure();
       if (!CLI_FALLBACK_ENABLED) {
         logger.error({ group: group.name }, 'CLI failed and CLI_FALLBACK_ENABLED=false');
         return 'error';

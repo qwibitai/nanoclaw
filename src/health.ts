@@ -1,10 +1,11 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  CLI_ENABLED,
   DATA_DIR,
   GROUPS_DIR,
   HEALTH_CHECK_INTERVAL,
@@ -73,6 +74,34 @@ interface HealthSnapshot {
 
 const startTime = Date.now();
 let alertedCriticalAt: number | null = null;
+let cliProbeFailures = 0;
+let interactiveCliFailures = 0;
+let lastAutoRestartAt = 0;
+
+/** Called by index.ts when interactive CLI fails for a customer message. */
+export function recordInteractiveCliFailure(): void {
+  interactiveCliFailures++;
+}
+
+/** Reset interactive failure counter (e.g., after a successful CLI call). */
+export function resetInteractiveCliFailures(): void {
+  interactiveCliFailures = 0;
+}
+
+/** Probe CLI health by running `claude --version` with a 15s timeout. */
+function probeCli(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const env = { ...process.env };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const proc = spawn('claude', ['--version'], { env, timeout: 15000 });
+    let stdout = '';
+    proc.stdout?.on('data', (d: Buffer) => { stdout += d; });
+    proc.on('close', (code) => resolve(code === 0 && stdout.trim().length > 0));
+    proc.on('error', () => resolve(false));
+  });
+}
 
 function getWhatsAppChannel(channels: Channel[]): WhatsAppChannel | null {
   return (
@@ -275,6 +304,43 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
       });
     }
   } catch { /* non-critical */ }
+
+  // Check 10: CLI health probe (can Claude CLI execute at all?)
+  if (CLI_ENABLED) {
+    try {
+      const cliOk = await probeCli();
+      if (cliOk) {
+        cliProbeFailures = 0;
+      } else {
+        cliProbeFailures++;
+        logger.warn({ consecutiveFailures: cliProbeFailures }, 'CLI health probe failed');
+      }
+
+      // Also factor in interactive failures (real customer messages that failed)
+      const totalCliIssues = cliProbeFailures + interactiveCliFailures;
+
+      if (totalCliIssues >= 3) {
+        status = 'critical';
+        issues.push(`CLI broken: ${cliProbeFailures} probe failures, ${interactiveCliFailures} interactive failures — customers are getting error messages`);
+
+        // Auto-restart once per 30 minutes if CLI is persistently broken
+        const now = Date.now();
+        if (now - lastAutoRestartAt > 30 * 60 * 1000) {
+          lastAutoRestartAt = now;
+          issues.push('Auto-restart triggered — restarting service to recover CLI');
+          logger.warn('CLI persistently broken — triggering auto-restart');
+
+          // Schedule restart after health check completes (give time for alert to send)
+          setTimeout(() => {
+            spawn('sudo', ['systemctl', 'restart', 'nanoclaw'], { detached: true, stdio: 'ignore' }).unref();
+          }, 5000);
+        }
+      } else if (totalCliIssues >= 1) {
+        if (status === 'ok') status = 'warning';
+        issues.push(`CLI probe: ${cliProbeFailures} failures, ${interactiveCliFailures} interactive failures`);
+      }
+    } catch { /* non-critical */ }
+  }
 
   // Persist status
   setHealthState('status', status);
