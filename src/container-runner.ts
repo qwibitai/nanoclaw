@@ -157,6 +157,35 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+
+  // Sync skills from Claude plugin caches (host user-level and project-level)
+  const syncPluginSkills = (pluginsCacheDir: string) => {
+    if (!fs.existsSync(pluginsCacheDir)) return;
+    for (const publisher of fs.readdirSync(pluginsCacheDir)) {
+      const publisherDir = path.join(pluginsCacheDir, publisher);
+      if (!fs.statSync(publisherDir).isDirectory()) continue;
+      for (const pluginName of fs.readdirSync(publisherDir)) {
+        const pluginDir = path.join(publisherDir, pluginName);
+        if (!fs.statSync(pluginDir).isDirectory()) continue;
+        const versions = fs
+          .readdirSync(pluginDir)
+          .filter((v) => fs.statSync(path.join(pluginDir, v)).isDirectory())
+          .sort();
+        if (versions.length === 0) continue;
+        const latestSkillsDir = path.join(pluginDir, versions.at(-1)!, 'skills');
+        if (!fs.existsSync(latestSkillsDir)) continue;
+        for (const skillDir of fs.readdirSync(latestSkillsDir)) {
+          const srcDir = path.join(latestSkillsDir, skillDir);
+          if (!fs.statSync(srcDir).isDirectory()) continue;
+          fs.cpSync(srcDir, path.join(skillsDst, skillDir), { recursive: true });
+        }
+      }
+    }
+  };
+
+  const pluginsHomeDir = process.env.HOME || '/home/node';
+  syncPluginSkills(path.join(pluginsHomeDir, '.claude', 'plugins', 'cache'));
+  syncPluginSkills(path.join(process.cwd(), '.claude', 'plugins', 'cache'));
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',

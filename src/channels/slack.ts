@@ -20,6 +20,13 @@ import {
 // Messages exceeding this are split into sequential chunks.
 const MAX_MESSAGE_LENGTH = 4000;
 
+// How often to verify the Slack socket is alive (ms).
+const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Reconnection backoff: start at 5s, double each retry, cap at 5 minutes.
+const RECONNECT_BASE_MS = 5_000;
+const RECONNECT_MAX_MS = 5 * 60 * 1000;
+
 // The message subtypes we process. Bolt delivers all subtypes via app.event('message');
 // we filter to regular messages (GenericMessageEvent, subtype undefined) and bot messages
 // (BotMessageEvent, subtype 'bot_message') so we can track our own output.
@@ -43,6 +50,9 @@ export class SlackChannel implements Channel {
 
   private opts: SlackChannelOpts;
   private botToken: string;
+  private healthCheckTimer: ReturnType<typeof setInterval> | undefined;
+  private reconnecting = false;
+  private reconnectAttempts = 0;
 
   constructor(opts: SlackChannelOpts) {
     this.opts = opts;
@@ -68,6 +78,12 @@ export class SlackChannel implements Channel {
     });
 
     this.setupEventHandlers();
+
+    // Catch unhandled Slack errors (socket drops, auth failures, etc.)
+    this.app.error(async (error) => {
+      logger.error({ err: error }, 'Slack app error');
+      this.scheduleReconnect();
+    });
   }
 
   private setupEventHandlers(): void {
@@ -219,6 +235,10 @@ export class SlackChannel implements Channel {
     }
 
     this.connected = true;
+    this.reconnectAttempts = 0;
+
+    // Start periodic health checks
+    this.startHealthCheck();
 
     // Flush any messages queued before connection
     await this.flushOutgoingQueue();
@@ -271,7 +291,113 @@ export class SlackChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = undefined;
+    }
     await this.app.stop();
+  }
+
+  /**
+   * Periodically call auth.test() to verify the socket is alive.
+   * If the call fails, trigger a reconnect.
+   */
+  private startHealthCheck(): void {
+    if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
+
+    this.healthCheckTimer = setInterval(async () => {
+      if (this.reconnecting) return;
+      try {
+        await this.app.client.auth.test();
+        logger.debug('Slack health check OK');
+      } catch (err) {
+        logger.warn({ err }, 'Slack health check failed');
+        this.scheduleReconnect();
+      }
+    }, HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  /**
+   * Schedule a reconnection attempt with exponential backoff.
+   * Safe to call multiple times — only one reconnect loop runs at a time.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    this.connected = false;
+
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = undefined;
+    }
+
+    const delay = Math.min(
+      RECONNECT_BASE_MS * 2 ** this.reconnectAttempts,
+      RECONNECT_MAX_MS,
+    );
+    this.reconnectAttempts++;
+
+    logger.info(
+      { attempt: this.reconnectAttempts, delayMs: delay },
+      'Scheduling Slack reconnect',
+    );
+
+    setTimeout(() => this.attemptReconnect(), delay);
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    try {
+      logger.info(
+        { attempt: this.reconnectAttempts },
+        'Attempting Slack reconnect',
+      );
+
+      // Stop the old socket (ignore errors — it may already be dead)
+      try {
+        await this.app.stop();
+      } catch {
+        // expected if socket is already closed
+      }
+
+      // Re-create the Bolt app with fresh socket
+      const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN']);
+      this.app = new App({
+        token: env.SLACK_BOT_TOKEN,
+        appToken: env.SLACK_APP_TOKEN,
+        socketMode: true,
+        logLevel: LogLevel.ERROR,
+      });
+
+      this.setupEventHandlers();
+      this.app.error(async (error) => {
+        logger.error({ err: error }, 'Slack app error');
+        this.scheduleReconnect();
+      });
+
+      await this.app.start();
+
+      const auth = await this.app.client.auth.test();
+      this.botUserId = auth.user_id as string;
+
+      this.connected = true;
+      this.reconnecting = false;
+      this.reconnectAttempts = 0;
+
+      this.startHealthCheck();
+      await this.flushOutgoingQueue();
+
+      logger.info(
+        { botUserId: this.botUserId },
+        'Slack reconnected successfully',
+      );
+    } catch (err) {
+      logger.error(
+        { err, attempt: this.reconnectAttempts },
+        'Slack reconnect failed',
+      );
+      this.reconnecting = false;
+      this.scheduleReconnect();
+    }
   }
 
   // Slack does not expose a typing indicator API for bots.
