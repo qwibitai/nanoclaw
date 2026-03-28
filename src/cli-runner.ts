@@ -348,6 +348,13 @@ export async function runCliAgent(
     env[key] = value;
   }
 
+  // Remove API auth keys so the CLI uses its own OAuth credentials
+  // from ~/.claude/.credentials.json (Max subscription, free) instead of
+  // the API key (credits) or a stale OAuth token from .env.
+  // This matches the interactive runner's behavior (line 673-674).
+  delete env.ANTHROPIC_API_KEY;
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+
   // Ensure logs directory exists
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
