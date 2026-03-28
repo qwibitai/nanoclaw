@@ -40,4 +40,27 @@ if [ -n "$GH_TOKEN" ]; then
     echo "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
   fi
 fi
+# gws (Google Workspace CLI) needs a writable config dir for API discovery cache.
+# /home/node/.config/ may be owned by root from calendar MCP setup in Dockerfile.
+export GOOGLE_WORKSPACE_CLI_CONFIG_DIR=/tmp/.gws
+mkdir -p /tmp/.gws
+
+# Convert Gmail OAuth credentials to gws authorized_user format.
+# gws needs {type,client_id,client_secret,refresh_token};
+# existing creds split these across gcp-oauth.keys.json and credentials.json.
+for dir in /home/node/.gmail-mcp /home/node/.gmail-mcp-*; do
+  [ -f "$dir/credentials.json" ] && [ -f "$dir/gcp-oauth.keys.json" ] || continue
+  node -e '
+    const fs=require("fs"),p=require("path");
+    const oauth=JSON.parse(fs.readFileSync(p.join("'"$dir"'","gcp-oauth.keys.json"),"utf8"));
+    const creds=JSON.parse(fs.readFileSync(p.join("'"$dir"'","credentials.json"),"utf8"));
+    const c=oauth.installed||oauth.web;
+    if(!c||!creds.refresh_token)process.exit(0);
+    fs.writeFileSync(p.join("'"$dir"'","gws-credentials.json"),JSON.stringify({
+      type:"authorized_user",client_id:c.client_id,
+      client_secret:c.client_secret,refresh_token:creds.refresh_token
+    },null,2)+"\n");
+  ' 2>/dev/null || true
+done
+
 node /tmp/dist/index.js < /tmp/input.json

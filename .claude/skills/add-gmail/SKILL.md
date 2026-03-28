@@ -52,8 +52,9 @@ This merges in:
 - `src/channels/gmail.test.ts` (unit tests)
 - `import './gmail.js'` appended to the channel barrel file `src/channels/index.ts`
 - Gmail credentials mount (`~/.gmail-mcp`) in `src/container-runner.ts`
-- Gmail MCP server (`@gongrzhe/server-gmail-autoauth-mcp`) and `mcp__gmail__*` allowed tool in `container/agent-runner/src/index.ts`
 - `googleapis` npm dependency in `package.json`
+
+The agent uses Gmail via `gws` CLI (Google Workspace CLI) through container skills (`gws-gmail-*`), not MCP tools. No agent-runner changes needed.
 
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
@@ -117,13 +118,13 @@ Tell the user:
 
 > I'm going to run Gmail authorization. A browser window will open — sign in and grant access. If you see an "app isn't verified" warning, click "Advanced" then "Go to [app name] (unsafe)" — this is normal for personal OAuth apps.
 
-Run the authorization:
+Run the authorization using the reauth script:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+node scripts/reauth-google.mjs gmail primary
 ```
 
-If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
+Verify with `ls ~/.gmail-mcp/credentials.json`.
 
 ### Build and restart
 
@@ -173,10 +174,10 @@ tail -f logs/nanoclaw.log
 
 ### Gmail connection not responding
 
-Test directly:
+Test credentials directly inside a container:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/home/node/.gmail-mcp/gws-credentials.json gws gmail +triage --max 1
 ```
 
 ### OAuth token expired
@@ -184,8 +185,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 Re-authorize:
 
 ```bash
-rm ~/.gmail-mcp/credentials.json
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+node scripts/reauth-google.mjs gmail primary
 ```
 
 ### Container can't access Gmail
@@ -203,18 +203,14 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 ### Tool-only mode
 
 1. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
-2. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
+2. Remove gws container skills from `container/skills/gws-gmail-*`
 3. Rebuild and restart
-4. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
 
 ### Channel mode
 
 1. Delete `src/channels/gmail.ts` and `src/channels/gmail.test.ts`
 2. Remove `import './gmail.js'` from `src/channels/index.ts`
 3. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
-4. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
+4. Remove gws container skills from `container/skills/gws-gmail-*`
 5. Uninstall: `npm uninstall googleapis`
 6. Rebuild and restart
-7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

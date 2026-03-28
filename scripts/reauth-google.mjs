@@ -142,7 +142,16 @@ async function reauthGmail(account, oauthKeys) {
     expiry_date: Date.now() + (tokens.expires_in || 3600) * 1000,
   };
   fs.writeFileSync(credPath, JSON.stringify(creds, null, 2) + '\n');
-  console.log(`✓ Gmail ${account.label} re-authed successfully`);
+  // Also generate gws CLI credential file (authorized_user format)
+  const gwsCredPath = path.join(account.dir, 'gws-credentials.json');
+  const gwsCreds = {
+    type: 'authorized_user',
+    client_id: oauthKeys.clientId,
+    client_secret: oauthKeys.clientSecret,
+    refresh_token: tokens.refresh_token,
+  };
+  fs.writeFileSync(gwsCredPath, JSON.stringify(gwsCreds, null, 2) + '\n');
+  console.log(`✓ Gmail ${account.label} re-authed successfully (+ gws credentials)`);
 }
 
 // --- Calendar ---

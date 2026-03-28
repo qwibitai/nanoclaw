@@ -46,10 +46,8 @@ RUN python3 -m venv /opt/dbt-venv \
     && ln -s /opt/dbt-venv/bin/dbt /usr/local/bin/dbt \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Workspace MCP server (Drive, Sheets, Slides, Docs)
-RUN python3 -m venv /opt/gwmcp-venv \
-    && /opt/gwmcp-venv/bin/pip install workspace-mcp \
-    && ln -s /opt/gwmcp-venv/bin/workspace-mcp /usr/local/bin/workspace-mcp
+# Google Workspace (Drive, Sheets, Slides, Docs, Gmail, Calendar) is handled
+# by gws CLI (@googleworkspace/cli), installed via npm below.
 
 # Install Python visualization libraries (matplotlib, seaborn, plotly + kaleido for PNG export)
 # Installed to system python — agents use `python3` directly
@@ -64,16 +62,15 @@ RUN apt-get update && apt-get install -y unzip \
     && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Install agent-browser, claude-code, MCP servers, and Mermaid CLI globally.
-# Pre-installing MCP servers avoids npx downloading them at runtime,
-# which is slow and intermittently fails (causing "no Gmail MCP tools" errors).
+# Install agent-browser, claude-code, gws (Google Workspace CLI), and Mermaid CLI globally.
+# gws replaces the old Gmail, Calendar, and Workspace MCP servers — the agent
+# uses gws via Bash + container skills (gws-gmail-*, gws-calendar-*, gws-drive, etc.).
 # Mermaid CLI uses system Chromium (PUPPETEER_SKIP_DOWNLOAD avoids 300MB download).
 # Pinned versions — build.sh checks for updates automatically.
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g \
     agent-browser@0.22.1 \
     @anthropic-ai/claude-code \
-    @gongrzhe/server-gmail-autoauth-mcp@1.1.11 \
-    @cocal/google-calendar-mcp@2.6.1 \
+    @googleworkspace/cli@0.22.3 \
     @mermaid-js/mermaid-cli
 
 # Install PostgreSQL client, Redis CLI, and Google Cloud CLI

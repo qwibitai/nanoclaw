@@ -162,26 +162,21 @@ Available profiles are listed in `~/.dbt/profiles.yml`. Common ones:
 
 Always specify `--profile <name>` to pick the right database. If unsure, check `cat ~/.dbt/profiles.yml`.
 
-## Google Workspace (Drive / Sheets / Slides / Docs)
+## Google Workspace (Drive / Sheets / Slides / Docs / Gmail / Calendar)
 
-You have access to Google Drive, Sheets, Slides, and Docs via MCP tools prefixed with `mcp__google-workspace__`.
+You have access to all Google Workspace services via the `gws` CLI (Google Workspace CLI). Use the container skills (`gws-drive`, `gws-sheets`, `gws-docs`, `gws-slides`, `gws-gmail-*`, `gws-calendar-*`) for usage details, or run `gws <service> --help`.
 
-All tools that accept `user_google_email` must use one of these exact addresses:
-- `david.kim6@gmail.com` (primary personal)
-- `dave.kim917@gmail.com` (personal 2)
-- `david.kim@getsunday.com` (Sunday)
-- `dave@illysium.ai` (Illysium)
-- `dave@numberdrinks.com` (Number Drinks)
+Authentication is via `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` env var pointing to the account's credential file. See the `gws-shared` skill for details.
 
-Pick the account that matches your group. If unsure, check which credential files exist at `~/.google_workspace_mcp/credentials/`.
+Common operations (helpers + raw API):
+- *Gmail*: `+send`, `+forward`, `+reply`, `+reply-all`, `+read`, `+triage`, `+watch`
+- *Calendar*: `+agenda`, `+insert`, plus full events/calendars API
+- *Drive*: `+upload`, plus files list/get/create/delete/copy, permissions
+- *Sheets*: `+read`, `+append`, plus spreadsheets get/batchUpdate, values get/update/clear
+- *Docs*: `+write`, plus documents get/batchUpdate
+- *Slides*: presentations get/batchUpdate, pages get
 
-Common operations:
-- *Drive*: Search files, list contents, download, upload, share
-- *Sheets*: Read/write cell ranges, create spreadsheets, append rows
-- *Docs*: Read/create/edit documents, get as markdown
-- *Slides*: Read/create/modify presentations
-
-Use these tools directly — no CLI needed.
+Run `gws <service> --help` for the full command list. See the `gws-*` container skills for detailed usage.
 
 ## GitHub Workflow
 

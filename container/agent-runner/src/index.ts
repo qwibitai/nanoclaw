@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, EffortLevel } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, EffortLevel, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerAttachment {
@@ -65,20 +65,14 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-// Content block types for Claude vision (defined inline since SDK types aren't directly importable)
+// Content block types for Claude vision (matches SDK ContentBlockParam types)
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 type TextBlock = { type: 'text'; text: string };
 type ImageBlock = {
   type: 'image';
-  source: { type: 'base64'; media_type: string; data: string };
+  source: { type: 'base64'; media_type: ImageMediaType; data: string };
 };
 type ContentBlock = TextBlock | ImageBlock;
-
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string | ContentBlock[] };
-  parent_tool_use_id: null;
-  session_id: string;
-}
 
 const IPC_INPUT_SUBDIR = process.env.IPC_INPUT_SUBDIR;
 if (!IPC_INPUT_SUBDIR) {
@@ -536,85 +530,10 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
   return tools.some(t => t === name || t.startsWith(name + ':'));
 }
 
-/** True when tools has scoped entries (e.g. 'gmail:illysium') but no bare entry ('gmail'). */
-function isToolScoped(tools: string[] | undefined, name: string): boolean {
-  if (!tools) return false;
-  return tools.some(t => t.startsWith(name + ':')) && !tools.includes(name);
-}
+// Gmail, Calendar, and Workspace tools are now provided by gws CLI (Google Workspace CLI)
+// via Bash + container skills (gws-gmail-*, gws-calendar-*).
+// No MCP tool arrays needed — access is controlled by credential mounting.
 
-// Read-only Gmail tools — gmail-readonly:<account> groups get these
-const GMAIL_READ_TOOLS = [
-  'mcp__gmail__search_emails',
-  'mcp__gmail__read_email',
-  'mcp__gmail__list_email_labels',
-  'mcp__gmail__list_filters',
-  'mcp__gmail__get_filter',
-  'mcp__gmail__download_attachment',
-] as const;
-
-// Gmail tools for scoped groups (e.g. gmail:illysium) — everything except permanent delete.
-// Excluded: delete_email, batch_delete_emails (permanent delete requires mail.google.com scope anyway)
-const GMAIL_SCOPED_TOOLS = [
-  ...GMAIL_READ_TOOLS,
-  'mcp__gmail__modify_email',
-  'mcp__gmail__batch_modify_emails',
-  'mcp__gmail__send_email',
-  'mcp__gmail__draft_email',
-  'mcp__gmail__create_label',
-  'mcp__gmail__update_label',
-  'mcp__gmail__delete_label',
-  'mcp__gmail__get_or_create_label',
-  'mcp__gmail__create_filter',
-  'mcp__gmail__create_filter_from_template',
-  'mcp__gmail__delete_filter',
-] as const;
-
-// Read-only Calendar tools — scoped groups get these instead of mcp__google-calendar__*
-// Excluded write tools: create-event, create-events, delete-event, update-event, respond-to-event
-const CALENDAR_READ_TOOLS = [
-  'mcp__google-calendar__list-events',
-  'mcp__google-calendar__get-event',
-  'mcp__google-calendar__search-events',
-  'mcp__google-calendar__list-calendars',
-  'mcp__google-calendar__list-colors',
-  'mcp__google-calendar__get-current-time',
-  'mcp__google-calendar__get-freebusy',
-] as const;
-
-// Read-only Google Workspace tools — scoped groups get these instead of mcp__google-workspace__*
-// Excluded write tools: batch_update_doc, batch_update_presentation, copy_drive_file,
-// create_*, delete_*, export_doc_to_pdf, find_and_replace_doc, format_sheet_range,
-// import_to_google_doc, insert_*, manage_*, modify_*, set_drive_file_permissions,
-// update_*, manage_drive_access, manage_*_comment, create_table_with_data
-const GOOGLE_WORKSPACE_READ_TOOLS = [
-  // Drive
-  'mcp__google-workspace__search_drive_files',
-  'mcp__google-workspace__list_drive_items',
-  'mcp__google-workspace__get_drive_file_content',
-  'mcp__google-workspace__get_drive_file_download_url',
-  'mcp__google-workspace__get_drive_file_permissions',
-  'mcp__google-workspace__get_drive_shareable_link',
-  'mcp__google-workspace__check_drive_file_public_access',
-  // Sheets
-  'mcp__google-workspace__get_spreadsheet_info',
-  'mcp__google-workspace__read_sheet_values',
-  'mcp__google-workspace__list_spreadsheets',
-  'mcp__google-workspace__list_spreadsheet_comments',
-  // Docs
-  'mcp__google-workspace__get_doc_content',
-  'mcp__google-workspace__get_doc_as_markdown',
-  'mcp__google-workspace__inspect_doc_structure',
-  'mcp__google-workspace__list_docs_in_folder',
-  'mcp__google-workspace__list_document_comments',
-  'mcp__google-workspace__search_docs',
-  // Slides
-  'mcp__google-workspace__get_presentation',
-  'mcp__google-workspace__get_page',
-  'mcp__google-workspace__get_page_thumbnail',
-  'mcp__google-workspace__list_presentation_comments',
-  // Auth (always needed)
-  'mcp__google-workspace__start_google_auth',
-] as const;
 
 function buildAllowedTools(tools: string[] | undefined): string[] {
   const allowed = [
@@ -627,20 +546,7 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
     'NotebookEdit',
     'mcp__nanoclaw__*',
   ];
-  if (isToolEnabled(tools, 'gmail-readonly')) {
-    // Read-only access (shared groups like Illysium Slack)
-    allowed.push(...GMAIL_READ_TOOLS);
-  }
-  if (isToolEnabled(tools, 'gmail')) {
-    if (isToolScoped(tools, 'gmail')) {
-      // Scoped = everything except permanent delete
-      allowed.push(...GMAIL_SCOPED_TOOLS);
-    } else {
-      allowed.push('mcp__gmail__*');
-      // Also allow additional Gmail account MCP servers (gmail-sunday, gmail-illysium, etc.)
-      allowed.push('mcp__gmail-*__*');
-    }
-  }
+  // Gmail and Calendar: handled by gws CLI via Bash (no MCP tools to allow)
   if (isToolEnabled(tools, 'exa')) {
     allowed.push('mcp__exa__*');
     allowed.push('mcp__exa-websets__*');
@@ -648,59 +554,15 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
   if (isToolEnabled(tools, 'granola')) allowed.push('mcp__granola__*');
   if (isToolEnabled(tools, 'braintrust')) allowed.push('mcp__braintrust__*');
   if (isToolEnabled(tools, 'omni')) allowed.push('mcp__omni__*');
-  if (isToolEnabled(tools, 'google-workspace')) {
-    if (isToolScoped(tools, 'google-workspace')) {
-      allowed.push(...GOOGLE_WORKSPACE_READ_TOOLS);
-    } else {
-      allowed.push('mcp__google-workspace__*');
-    }
-  }
-  if (isToolEnabled(tools, 'calendar')) {
-    if (isToolScoped(tools, 'calendar')) {
-      allowed.push(...CALENDAR_READ_TOOLS);
-    } else {
-      allowed.push('mcp__google-calendar__*');
-    }
-  }
+  // Google Workspace (Drive, Sheets, Docs, Slides): handled by gws CLI via Bash
   allowed.push('mcp__ollama__*');
   return allowed;
 }
 
-// Gmail write tools to deny for gmail-readonly groups.
-// disallowedTools overrides both allowedTools and bypassPermissions.
-const GMAIL_WRITE_TOOLS = [
-  'mcp__gmail__send_email',
-  'mcp__gmail__draft_email',
-  'mcp__gmail__modify_email',
-  'mcp__gmail__batch_modify_emails',
-  'mcp__gmail__delete_email',
-  'mcp__gmail__batch_delete_emails',
-  'mcp__gmail__create_label',
-  'mcp__gmail__update_label',
-  'mcp__gmail__delete_label',
-  'mcp__gmail__get_or_create_label',
-  'mcp__gmail__create_filter',
-  'mcp__gmail__create_filter_from_template',
-  'mcp__gmail__delete_filter',
-] as const;
-
-// Permanent-delete tools to deny for scoped gmail groups.
-const GMAIL_DELETE_TOOLS = [
-  'mcp__gmail__delete_email',
-  'mcp__gmail__batch_delete_emails',
-] as const;
-
-function buildDisallowedTools(tools: string[] | undefined): string[] {
-  const denied: string[] = [];
-  if (isToolEnabled(tools, 'gmail-readonly') && !tools?.includes('gmail')) {
-    // Hard-deny all write tools for gmail-readonly groups
-    denied.push(...GMAIL_WRITE_TOOLS);
-  }
-  if (isToolScoped(tools, 'gmail')) {
-    // Hard-deny permanent delete for scoped gmail groups
-    denied.push(...GMAIL_DELETE_TOOLS);
-  }
-  return denied;
+// Gmail/Calendar disallowed tools no longer needed — gws CLI access is
+// controlled by credential mounting (no credentials = no access).
+function buildDisallowedTools(_tools: string[] | undefined): string[] {
+  return [];
 }
 
 const EXA_TOOLS = [
@@ -732,47 +594,9 @@ function buildMcpServers(
       },
     },
   };
-  if (isToolEnabled(tools, 'gmail') || isToolEnabled(tools, 'gmail-readonly')) {
-    // Primary account
-    const primaryDir = '/home/node/.gmail-mcp';
-    servers.gmail = {
-      command: 'gmail-mcp',
-      args: [],
-      env: {
-        GMAIL_OAUTH_PATH: `${primaryDir}/gcp-oauth.keys.json`,
-        GMAIL_CREDENTIALS_PATH: `${primaryDir}/credentials.json`,
-      },
-    };
-    // Additional accounts: mount dirs like /home/node/.gmail-mcp-sunday
-    try {
-      const entries = fs.readdirSync('/home/node');
-      for (const entry of entries) {
-        if (!entry.startsWith('.gmail-mcp-')) continue;
-        const accountName = entry.replace('.gmail-mcp-', '');
-        const dir = `/home/node/${entry}`;
-        servers[`gmail-${accountName}`] = {
-          command: 'gmail-mcp',
-          args: [],
-          env: {
-            GMAIL_OAUTH_PATH: `${dir}/gcp-oauth.keys.json`,
-            GMAIL_CREDENTIALS_PATH: `${dir}/credentials.json`,
-          },
-        };
-      }
-    } catch {
-      // ignore readdir errors
-    }
-  }
-  if (isToolEnabled(tools, 'calendar')) {
-    servers['google-calendar'] = {
-      command: 'google-calendar-mcp',
-      args: [],
-      env: {
-        GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-        GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
-      },
-    };
-  }
+  // Gmail and Calendar: no MCP servers — agent uses gws CLI via Bash.
+  // Credentials are mounted at /home/node/.gmail-mcp*/ and converted
+  // to gws authorized_user format by entrypoint.sh at container startup.
   if (isToolEnabled(tools, 'exa')) {
     // Exa uses query-param auth (?exaApiKey=), not HTTP headers,
     // so the OneCLI proxy can't inject it. Key comes via secrets.
@@ -813,20 +637,7 @@ function buildMcpServers(
       url: 'https://sunday.omniapp.co/mcp/https',
     };
   }
-  if (isToolEnabled(tools, 'google-workspace')) {
-    servers['google-workspace'] = {
-      command: 'workspace-mcp',
-      args: ['--tools', 'drive', 'sheets', 'slides', 'docs'],
-      env: {
-        GOOGLE_OAUTH_CLIENT_ID:
-          containerInput.secrets?.GOOGLE_OAUTH_CLIENT_ID || '',
-        GOOGLE_OAUTH_CLIENT_SECRET:
-          containerInput.secrets?.GOOGLE_OAUTH_CLIENT_SECRET || '',
-        WORKSPACE_MCP_CREDENTIALS_DIR:
-          '/home/node/.google_workspace_mcp/credentials',
-      },
-    };
-  }
+  // Google Workspace: no MCP server — agent uses gws CLI via Bash.
   servers.ollama = {
     command: 'node',
     args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
@@ -843,8 +654,8 @@ const IMAGE_MIME_TYPES = new Set([
  * Detect actual image MIME type from file magic bytes.
  * Falls back to the provided mimeType if detection fails.
  */
-function detectImageMimeType(data: Buffer, declaredMime: string): string {
-  if (data.length < 8) return declaredMime;
+function detectImageMimeType(data: Buffer, declaredMime: string): ImageMediaType {
+  if (data.length < 8) return declaredMime as ImageMediaType;
   // PNG: 89 50 4E 47
   if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47) return 'image/png';
   // JPEG: FF D8 FF
@@ -854,7 +665,7 @@ function detectImageMimeType(data: Buffer, declaredMime: string): string {
   // WebP: RIFF....WEBP
   if (data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
       data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) return 'image/webp';
-  return declaredMime;
+  return declaredMime as ImageMediaType;
 }
 
 /**
