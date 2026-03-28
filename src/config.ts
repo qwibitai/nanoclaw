@@ -9,6 +9,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
+  'TELEGRAM_BOT_POOL',
   'TZ',
 ]);
 
@@ -83,6 +84,15 @@ export function getTriggerPattern(trigger?: string): RegExp {
   const normalizedTrigger = trigger?.trim();
   return buildTriggerPattern(normalizedTrigger || DEFAULT_TRIGGER);
 }
+
+export const TELEGRAM_BOT_POOL = (
+  process.env.TELEGRAM_BOT_POOL ||
+  envConfig.TELEGRAM_BOT_POOL ||
+  ''
+)
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
 
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
 

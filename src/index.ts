@@ -13,11 +13,13 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   STORE_DIR,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
   VAULT_DIR,
   UPLOAD_DIR,
   TYPE_MAPPINGS_PATH,
 } from './config.js';
+import { initBotPool } from './channels/telegram.js';
 import { RagClient } from './rag/rag-client.js';
 import { RagIndexer } from './rag/indexer.js';
 import { IngestionPipeline } from './ingestion/index.js';
@@ -667,6 +669,11 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  // Initialize Telegram bot pool for agent teams (if configured)
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
   }
 
   // Start subsystems (independently of connection handler)

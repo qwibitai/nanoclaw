@@ -35,8 +35,9 @@ export class DoclingClient {
   private pythonBin: string;
   private scriptPath: string;
 
-  constructor(pythonBin = 'python3') {
-    this.pythonBin = pythonBin;
+  constructor(pythonBin?: string) {
+    this.pythonBin =
+      pythonBin ?? join(import.meta.dirname, '..', '..', '.venv', 'bin', 'python3');
     this.scriptPath = join(
       import.meta.dirname,
       '..',
