@@ -13,12 +13,20 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 
 /**
  * Detect if we are running under Apple Container (macOS-native runtime).
- * Identified by the presence of the bridge100 interface it creates.
+ * Checks for the `container` binary — stable at startup unlike the bridge
+ * interface (bridge100), which only exists while a container is running.
  */
 function isAppleContainer(): boolean {
   if (os.platform() !== 'darwin') return false;
-  const ifaces = os.networkInterfaces();
-  return Object.keys(ifaces).some((name) => name.startsWith('bridge'));
+  const paths = (process.env.PATH || '').split(':');
+  return paths.some((dir) => {
+    try {
+      fs.accessSync(`${dir}/container`, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -32,7 +40,9 @@ export const CONTAINER_HOST_GATEWAY =
 
 function detectHostGateway(): string {
   if (isAppleContainer()) {
-    // Find the host's IP on the Apple Container bridge network (bridge100)
+    // Apple Container always uses 192.168.64.0/24; host is the .1 address.
+    // Prefer reading the live bridge IP, but fall back to the well-known
+    // default so the proxy binds correctly even before any container runs.
     const ifaces = os.networkInterfaces();
     for (const [name, addrs] of Object.entries(ifaces)) {
       if (name.startsWith('bridge') && addrs) {
@@ -40,6 +50,7 @@ function detectHostGateway(): string {
         if (ipv4) return ipv4.address;
       }
     }
+    return '192.168.64.1'; // well-known Apple Container host gateway
   }
   return 'host.docker.internal';
 }
@@ -56,7 +67,10 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (isAppleContainer()) return detectHostGateway();
+  // Apple Container: bind to all interfaces so the proxy is reachable once
+  // bridge100 comes up (192.168.64.1). We can't bind to that IP at startup
+  // because the bridge only exists while a container is running.
+  if (isAppleContainer()) return '0.0.0.0';
   if (os.platform() === 'darwin') return '127.0.0.1';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
