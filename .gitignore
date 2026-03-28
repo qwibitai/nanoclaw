@@ -39,3 +39,9 @@ groups/milo/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Database
+nanoclaw.db
+
+# Claude Code worktrees
+.claude/worktrees/
