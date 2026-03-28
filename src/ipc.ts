@@ -515,6 +515,12 @@ async function processQueueFile(
 }
 
 let ipcWatcherRunning = false;
+let ipcWatcherStopped = false;
+
+/** Signal the IPC watcher loop to stop after its current iteration. */
+export function stopIpcWatcher(): void {
+  ipcWatcherStopped = true;
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -522,6 +528,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
     return;
   }
   ipcWatcherRunning = true;
+  ipcWatcherStopped = false;
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
@@ -544,7 +551,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       });
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+      if (!ipcWatcherStopped) setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
       return;
     }
 
@@ -739,7 +746,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
-    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+    if (!ipcWatcherStopped) setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
   processIpcFiles();
