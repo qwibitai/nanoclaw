@@ -517,6 +517,9 @@ async function processQueueFile(
 let ipcWatcherRunning = false;
 let ipcWatcherStopped = false;
 
+/** @internal Exposed for integration testing only. */
+export const _processQueueFile = processQueueFile;
+
 /** Signal the IPC watcher loop to stop after its current iteration. */
 export function stopIpcWatcher(): void {
   ipcWatcherStopped = true;
