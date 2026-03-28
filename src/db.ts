@@ -14,6 +14,11 @@ import {
 
 let db: Database.Database;
 
+/** @internal - exposes the raw database handle for feature modules. */
+export function getDb(): Database.Database {
+  return db;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -138,6 +143,225 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // --- Intelligence feature migrations ---
+
+  // schema_migrations table (tracks which DDL migrations have been applied)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+
+  runMigrations(database, [
+    {
+      id: '001_consolidation_runs',
+      sql: `
+        CREATE TABLE IF NOT EXISTS consolidation_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_at TEXT NOT NULL,
+          job_type TEXT NOT NULL,
+          group_folder TEXT,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          result_summary TEXT,
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_consolidation_runs_job ON consolidation_runs(job_type, run_at);
+      `,
+    },
+    {
+      id: '002_temporal_debt',
+      sql: `
+        CREATE TABLE IF NOT EXISTS temporal_debt (
+          id TEXT PRIMARY KEY,
+          group_folder TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          description TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          resolved_at TEXT,
+          score REAL NOT NULL DEFAULT 1.0,
+          last_escalated_at TEXT,
+          escalation_count INTEGER NOT NULL DEFAULT 0,
+          source_message_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_temporal_debt_group ON temporal_debt(group_folder, resolved_at);
+        CREATE INDEX IF NOT EXISTS idx_temporal_debt_score ON temporal_debt(score DESC);
+      `,
+    },
+    {
+      id: '003_adversarial_transcripts',
+      sql: `
+        CREATE TABLE IF NOT EXISTS adversarial_transcripts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_folder TEXT NOT NULL,
+          original_prompt TEXT NOT NULL,
+          main_response TEXT NOT NULL,
+          rebuttal TEXT,
+          final_response TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_adversarial_transcripts_group ON adversarial_transcripts(group_folder, created_at);
+      `,
+    },
+    {
+      id: '004_narrative_events',
+      sql: `
+        CREATE TABLE IF NOT EXISTS narrative_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_folder TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          description TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          included_in_narrative INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_narrative_events_group ON narrative_events(group_folder, created_at);
+      `,
+    },
+    {
+      id: '005_emergence_reports',
+      sql: `
+        CREATE TABLE IF NOT EXISTS emergence_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          generated_at TEXT NOT NULL,
+          pattern_summary TEXT NOT NULL,
+          groups_analyzed TEXT NOT NULL,
+          delivered INTEGER DEFAULT 0
+        );
+      `,
+    },
+    {
+      id: '006_task_lifecycle',
+      sql: `
+        CREATE TABLE IF NOT EXISTS task_fossils (
+          id TEXT PRIMARY KEY,
+          group_folder TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          original_status TEXT NOT NULL,
+          lifecycle_state TEXT NOT NULL,
+          context_snapshot TEXT,
+          fossilized_at TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_fossils_group ON task_fossils(group_folder, fossilized_at);
+      `,
+    },
+    {
+      id: '007_shadow_mode',
+      sql: `
+        CREATE TABLE IF NOT EXISTS shadow_responses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_folder TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          response TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          would_have_sent_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_shadow_responses_group ON shadow_responses(group_folder, created_at);
+      `,
+    },
+    {
+      id: '008_whispers',
+      sql: `
+        CREATE TABLE IF NOT EXISTS whispers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_group_folder TEXT NOT NULL,
+          signal TEXT NOT NULL,
+          strength REAL NOT NULL DEFAULT 1.0,
+          emitted_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          decay_rate REAL NOT NULL DEFAULT 0.1
+        );
+        CREATE INDEX IF NOT EXISTS idx_whispers_expires ON whispers(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_whispers_strength ON whispers(strength DESC);
+      `,
+    },
+    {
+      id: '009_uncertainty_logs',
+      sql: `
+        CREATE TABLE IF NOT EXISTS uncertainty_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_folder TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          response_summary TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          uncertainty_source TEXT NOT NULL,
+          uncertainty_detail TEXT,
+          logged_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_uncertainty_logs_group ON uncertainty_logs(group_folder, logged_at);
+        CREATE INDEX IF NOT EXISTS idx_uncertainty_logs_confidence ON uncertainty_logs(confidence);
+      `,
+    },
+    {
+      id: '010_archaeology_reports',
+      sql: `
+        CREATE TABLE IF NOT EXISTS archaeology_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_folder TEXT NOT NULL,
+          generated_at TEXT NOT NULL,
+          slow_task_count INTEGER NOT NULL,
+          silent_failure_count INTEGER NOT NULL,
+          tool_usage_summary TEXT NOT NULL,
+          p50_duration_ms INTEGER,
+          p95_duration_ms INTEGER,
+          anomalies TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_archaeology_reports_group ON archaeology_reports(group_folder, generated_at);
+      `,
+    },
+    {
+      id: '011_task_lifecycle_column',
+      sql: `ALTER TABLE scheduled_tasks ADD COLUMN lifecycle_state TEXT DEFAULT 'born';`,
+    },
+    {
+      id: '012_shadow_mode_columns',
+      sql: `
+        ALTER TABLE registered_groups ADD COLUMN shadow_mode INTEGER DEFAULT 0;
+        ALTER TABLE registered_groups ADD COLUMN shadow_activation_threshold INTEGER DEFAULT 10;
+        ALTER TABLE registered_groups ADD COLUMN shadow_message_count INTEGER DEFAULT 0;
+      `,
+    },
+  ]);
+}
+
+function runMigrations(
+  database: Database.Database,
+  migrations: { id: string; sql: string }[],
+): void {
+  const applied = new Set(
+    (
+      database
+        .prepare('SELECT id FROM schema_migrations')
+        .all() as { id: string }[]
+    ).map((r) => r.id),
+  );
+  const insert = database.prepare(
+    'INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)',
+  );
+  for (const migration of migrations) {
+    if (applied.has(migration.id)) continue;
+    try {
+      database.exec(migration.sql);
+      insert.run(migration.id, new Date().toISOString());
+    } catch (err) {
+      // For ALTER TABLE, column-already-exists is not a fatal error
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        msg.includes('duplicate column name') ||
+        msg.includes('already exists')
+      ) {
+        insert.run(migration.id, new Date().toISOString());
+      } else {
+        logger.error({ migrationId: migration.id, err }, 'Migration failed');
+        throw err;
+      }
+    }
   }
 }
 
@@ -558,6 +782,8 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        shadow_mode: number | null;
+        shadow_activation_threshold: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -580,6 +806,8 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    shadowMode: row.shadow_mode === 1 ? true : undefined,
+    shadowActivationThreshold: row.shadow_activation_threshold ?? undefined,
   };
 }
 
@@ -588,8 +816,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, shadow_mode, shadow_activation_threshold)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -599,6 +827,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.shadowMode ? 1 : 0,
+    group.shadowActivationThreshold ?? 10,
   );
 }
 
@@ -612,6 +842,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    shadow_mode: number | null;
+    shadow_activation_threshold: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -633,6 +865,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      shadowMode: row.shadow_mode === 1 ? true : undefined,
+      shadowActivationThreshold:
+        row.shadow_activation_threshold ?? undefined,
     };
   }
   return result;

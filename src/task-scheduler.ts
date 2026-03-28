@@ -18,6 +18,8 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { buildConsolidationGroup, isConsolidationFolder } from './consolidation-runner.js';
+import { advanceTaskLifecycle } from './task-lifecycle.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -109,24 +111,29 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
-
-  if (!group) {
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
-      'Group not found for task',
+  let group: RegisteredGroup;
+  if (isConsolidationFolder(task.group_folder)) {
+    group = buildConsolidationGroup();
+  } else {
+    const found = Object.values(groups).find(
+      (g) => g.folder === task.group_folder,
     );
-    logTaskRun({
-      task_id: task.id,
-      run_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
-      status: 'error',
-      result: null,
-      error: `Group not found: ${task.group_folder}`,
-    });
-    return;
+    if (!found) {
+      logger.error(
+        { taskId: task.id, groupFolder: task.group_folder },
+        'Group not found for task',
+      );
+      logTaskRun({
+        task_id: task.id,
+        run_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+        status: 'error',
+        result: null,
+        error: `Group not found: ${task.group_folder}`,
+      });
+      return;
+    }
+    group = found;
   }
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -236,6 +243,15 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Advance lifecycle state on successful task runs
+  if (!error && !isConsolidationFolder(task.group_folder)) {
+    try {
+      advanceTaskLifecycle(task.id);
+    } catch {
+      /* lifecycle state is non-critical */
+    }
+  }
 }
 
 let schedulerRunning = false;

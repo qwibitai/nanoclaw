@@ -40,6 +40,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  shadowMode?: boolean; // If true, responses are stored but not sent
+  shadowActivationThreshold?: number; // Number of messages before auto-activating (default: 10)
 }
 
 export interface NewMessage {

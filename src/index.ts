@@ -62,6 +62,15 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startDebtMonitorLoop } from './temporal-debt.js';
+import { startLifecycleMonitorLoop } from './task-lifecycle.js';
+import { startWhisperDecayLoop, injectWhisperContext } from './whispers.js';
+import { scheduleCircadianTask } from './circadian.js';
+import { scheduleEmergenceTask } from './emergence.js';
+import { scheduleUncertaintyReport } from './uncertainty.js';
+import { scheduleArchaeologyTask } from './archaeology.js';
+import { ensureNarrativeFile } from './narrative.js';
+import { isGroupInShadowMode, storeShadowResponse, incrementShadowMessageCount } from './shadow-mode.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -120,6 +129,13 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+
+  // Ensure narrative file exists for new groups
+  try {
+    ensureNarrativeFile(group.folder);
+  } catch {
+    /* non-critical */
+  }
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
@@ -188,7 +204,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const rawPrompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = injectWhisperContext(group.folder, rawPrompt);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -283,8 +300,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           `Agent output: ${raw.slice(0, 200)}`,
         );
         if (text) {
-          await channel.sendMessage(chatJid, text);
-          outputSentToUser = true;
+          // Shadow mode: store response instead of sending it
+          if (isGroupInShadowMode(chatJid)) {
+            storeShadowResponse(group.folder, chatJid, prompt, text);
+            incrementShadowMessageCount(chatJid);
+            outputSentToUser = true; // Treat as sent to avoid cursor rollback
+          } else {
+            await channel.sendMessage(chatJid, text);
+            outputSentToUser = true;
+          }
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
         resetIdleTimer();
@@ -791,6 +815,37 @@ async function main(): Promise<void> {
       );
     queue.enqueueMessageCheck(chatJid);
   };
+
+  // Start intelligence feature background loops
+  startDebtMonitorLoop(async (jid, text) => {
+    const channel = findChannel(channels, jid);
+    if (channel) await channel.sendMessage(jid, text);
+  });
+  startLifecycleMonitorLoop();
+  startWhisperDecayLoop();
+
+  // Schedule intelligence feature recurring tasks
+  const mainGroup = Object.entries(registeredGroups).find(([, g]) => g.isMain);
+  const mainGroupJid = mainGroup?.[0] ?? '';
+  const sendMessageFn = async (jid: string, rawText: string) => {
+    const channel = findChannel(channels, jid);
+    if (!channel) return;
+    const text = formatOutbound(rawText);
+    if (text) await channel.sendMessage(jid, text);
+  };
+
+  scheduleCircadianTask(
+    { cronExpr: '0 3 * * *', timezone: TIMEZONE, digestTargetJid: mainGroupJid || undefined },
+    queue,
+    sendMessageFn,
+  );
+
+  if (mainGroupJid) {
+    scheduleEmergenceTask(mainGroupJid, queue, sendMessageFn);
+    scheduleUncertaintyReport(mainGroupJid, sendMessageFn);
+  }
+
+  scheduleArchaeologyTask(queue, () => registeredGroups);
 
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
