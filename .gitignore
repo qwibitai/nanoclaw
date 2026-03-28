@@ -16,6 +16,9 @@ groups/*
 *.keys.json
 .env
 
+# Database files
+*.db
+
 # Temp files
 .tmp-*
 
