@@ -1,11 +1,12 @@
 ---
 name: add-discord
-description: Add Discord bot channel integration to NanoClaw.
+description: Add Discord bot channel integration to NanoClaw, including image attachment support — images sent in Discord are downloaded, resized, and passed to the agent as multimodal content.
 ---
 
 # Add Discord Channel
 
 This skill adds Discord support to NanoClaw, then walks through interactive setup.
+Images sent as Discord attachments are automatically downloaded and passed to the agent — no extra configuration needed.
 
 ## Phase 1: Pre-flight
 
@@ -23,23 +24,23 @@ If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-### Ensure channel remote
+### Ensure upstream remote
 
 ```bash
 git remote -v
 ```
 
-If `discord` is missing, add it:
+If `upstream` is missing, add it:
 
 ```bash
-git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
 ### Merge the skill branch
 
 ```bash
-git fetch discord main
-git merge discord/main || {
+git fetch upstream skill/discord
+git merge upstream/skill/discord || {
   git checkout --theirs package-lock.json
   git add package-lock.json
   git merge --continue
@@ -47,10 +48,11 @@ git merge discord/main || {
 ```
 
 This merges in:
-- `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
-- `src/channels/discord.test.ts` (unit tests with discord.js mock)
+- `src/channels/discord.ts` (DiscordChannel with image attachment downloading)
+- `src/image.ts` (generic image resize/save pipeline shared with other channels)
 - `import './discord.js'` appended to the channel barrel file `src/channels/index.ts`
-- `discord.js` npm dependency in `package.json`
+- `imageAttachments` plumbing in `src/index.ts`, `src/container-runner.ts`, and `container/agent-runner/src/index.ts`
+- `discord.js` and `sharp` npm dependencies in `package.json`
 - `DISCORD_BOT_TOKEN` in `.env.example`
 
 If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
@@ -196,7 +198,8 @@ If you can't copy the channel ID:
 
 The Discord bot supports:
 - Text messages in registered channels
-- Attachment descriptions (images, videos, files shown as placeholders)
+- **Image attachments** — downloaded, resized to 1024×1024 max, and passed to the agent as multimodal content
+- Non-image files (video, audio, documents) shown as placeholders
 - Reply context (shows who the user is replying to)
 - @mention translation (Discord `<@botId>` → NanoClaw trigger format)
 - Message splitting for responses over 2000 characters
