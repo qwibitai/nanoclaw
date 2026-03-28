@@ -1484,7 +1484,7 @@ const TONE_PROFILES_DIR = '/workspace/tone-profiles';
 
 server.tool(
   'get_tone_profile',
-  'Load a tone profile by name. Returns the full profile content for email drafting, tone overrides, or any response where tone fidelity matters. If no saved profile exists for the name, returns an ad-hoc hint so you can interpret the tone naturally.',
+  'Load a tone profile and writing quality rules. ALWAYS call this before drafting any email, message, or written content that will be sent to someone. Returns the full profile plus universal writing rules (banned AI vocabulary, structural patterns to avoid). Also use for tone overrides ("use X tone").',
   {
     name: z.string().describe('Tone profile name (e.g. "professional", "engineering", "medieval", "pirate")'),
   },
@@ -1492,7 +1492,12 @@ server.tool(
     const profilePath = path.join(TONE_PROFILES_DIR, `${args.name}.md`);
     if (fs.existsSync(profilePath)) {
       const content = fs.readFileSync(profilePath, 'utf-8');
-      return { content: [{ type: 'text' as const, text: content }] };
+      // Append universal writing rules so every profile load includes them
+      const writingRulesPath = path.join(TONE_PROFILES_DIR, 'writing-rules.md');
+      const writingRules = fs.existsSync(writingRulesPath)
+        ? '\n\n---\n\n' + fs.readFileSync(writingRulesPath, 'utf-8')
+        : '';
+      return { content: [{ type: 'text' as const, text: content + writingRules }] };
     }
     // No saved profile — signal ad-hoc interpretation
     return {
@@ -1514,7 +1519,7 @@ server.tool(
     if (!fs.existsSync(TONE_PROFILES_DIR)) {
       return { content: [{ type: 'text' as const, text: 'No tone profiles directory found.' }] };
     }
-    const files = fs.readdirSync(TONE_PROFILES_DIR).filter((f) => f.endsWith('.md') && f !== 'selection-guide.md');
+    const files = fs.readdirSync(TONE_PROFILES_DIR).filter((f) => f.endsWith('.md') && f !== 'selection-guide.md' && f !== 'writing-rules.md');
     const profiles = files.map((f) => f.replace('.md', ''));
     return {
       content: [{ type: 'text' as const, text: profiles.length > 0 ? profiles.join(', ') : 'No tone profiles found.' }],
