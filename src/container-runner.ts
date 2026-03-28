@@ -246,6 +246,8 @@ async function readSecrets(): Promise<Record<string, string>> {
     'X_API_KEY_SECRET',
     'X_ACCESS_TOKEN',
     'X_ACCESS_TOKEN_SECRET',
+    // Voice generation
+    'POCKET_TTS_URL',
   ]);
 
   // OAuth token from credentials file (auto-refreshing) or .env fallback
