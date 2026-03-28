@@ -162,6 +162,18 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+
+  // Sync group-local skills (allows groups to ship domain-specific skills)
+  const groupSkillsSrc = path.join(groupDir, '.claude', 'skills');
+  if (fs.existsSync(groupSkillsSrc)) {
+    for (const skillDir of fs.readdirSync(groupSkillsSrc)) {
+      const srcDir = path.join(groupSkillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(skillsDst, skillDir);
+      fs.cpSync(srcDir, dstDir, { recursive: true });
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
