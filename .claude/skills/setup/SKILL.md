@@ -200,7 +200,28 @@ Ask them to let you know when done.
 
 ### 4b. Apple Container → Native Credential Proxy
 
-Apple Container is not compatible with OneCLI. Invoke `/use-native-credential-proxy` to set up the built-in credential proxy instead. That skill handles credential collection, `.env` configuration, and verification.
+Apple Container is not compatible with OneCLI. The credential proxy code is already included in the apple-container branch — do NOT invoke `/use-native-credential-proxy` (it would conflict with already-applied code).
+
+Instead, just configure the credentials in `.env`:
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. Run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+For subscription: tell the user to run `claude setup-token` in another terminal. Stop and wait for the user to confirm they have completed this step successfully before proceeding.
+
+Once confirmed, add the token to `.env`:
+```bash
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+For API key: add to `.env`:
+```bash
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
+
+Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
 
 ## 5. Set Up Channels
 
