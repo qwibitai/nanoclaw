@@ -63,6 +63,9 @@ export class DiscordChannel implements Channel {
   private botToken: string;
   // Pending triggers: contextId → { message } for creating Discord thread on first response
   private pendingTrigger = new Map<number, { message: Message }>();
+  // In-flight thread creation: contextId → promise resolving to thread ID (or null on failure)
+  // Prevents concurrent sendMessage/sendFile calls from racing on the same new thread.
+  private pendingThreadCreation = new Map<number, Promise<string | null>>();
   // Current send target: `{jid}:{threadId}` → ThreadContext (set by index.ts before streaming)
   private currentSendTarget = new Map<string, ThreadContext>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -504,26 +507,60 @@ export class DiscordChannel implements Channel {
     target: any;
     kind: 'new-thread' | 'existing-thread' | 'channel';
   }> {
-    // Step 1: If there's a pending trigger → create a new thread
+    // Step 1: If there's a pending trigger → create a new thread.
+    // Use pendingThreadCreation to serialise concurrent callers: whichever
+    // call wins the race stores a Promise so that any concurrent sendFile (or
+    // a second sendMessage chunk) waits for the same thread instead of falling
+    // back to the channel.
     if (threadContextId !== undefined) {
-      const triggerInfo = this.pendingTrigger.get(threadContextId);
-      if (triggerInfo) {
-        this.pendingTrigger.delete(threadContextId);
-        try {
-          const thread = await triggerInfo.message.startThread({
-            name:
-              threadNameHint.slice(0, 100).replace(/\n/g, ' ') || 'Response',
-          });
-          updateThreadContext(threadContextId, { threadId: thread.id });
+      const inFlight = this.pendingThreadCreation.get(threadContextId);
+      if (inFlight) {
+        const createdThreadId = await inFlight;
+        if (createdThreadId) {
+          const thread =
+            textChannel.threads.cache.get(createdThreadId) ??
+            (await textChannel.threads
+              .fetch(createdThreadId)
+              .catch(() => null));
+          if (thread) return { target: thread, kind: 'existing-thread' };
+        }
+      } else {
+        const triggerInfo = this.pendingTrigger.get(threadContextId);
+        if (triggerInfo) {
+          this.pendingTrigger.delete(threadContextId);
           const sendKey = `${jid}:ctx-${threadContextId}`;
-          const ctx = this.currentSendTarget.get(sendKey);
-          if (ctx) ctx.thread_id = thread.id;
-          return { target: thread, kind: 'new-thread' };
-        } catch (err) {
-          logger.warn(
-            { jid, err },
-            'Failed to create thread, falling back to channel',
-          );
+          const createPromise: Promise<string | null> = (async () => {
+            try {
+              const thread = await triggerInfo.message.startThread({
+                name:
+                  threadNameHint.slice(0, 100).replace(/\n/g, ' ') ||
+                  'Response',
+              });
+              updateThreadContext(threadContextId, { threadId: thread.id });
+              const ctx = this.currentSendTarget.get(sendKey);
+              if (ctx) ctx.thread_id = thread.id;
+              return thread.id;
+            } catch (err) {
+              logger.warn(
+                { jid, err },
+                'Failed to create thread, falling back to channel',
+              );
+              return null;
+            } finally {
+              this.pendingThreadCreation.delete(threadContextId);
+            }
+          })();
+          this.pendingThreadCreation.set(threadContextId, createPromise);
+          const createdThreadId = await createPromise;
+          if (createdThreadId) {
+            const thread =
+              textChannel.threads.cache.get(createdThreadId) ??
+              (await textChannel.threads
+                .fetch(createdThreadId)
+                .catch(() => null));
+            if (thread) return { target: thread, kind: 'new-thread' };
+          }
+          return { target: textChannel, kind: 'channel' };
         }
       }
     }
