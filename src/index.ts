@@ -87,6 +87,10 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+// Track active web review JIDs so the message loop can query for them.
+// Populated when onMessage is called with a web:review:* JID.
+const activeWebReviewJids = new Set<string>();
+
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
@@ -429,6 +433,10 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
+      // Include active web review JIDs so per-draft messages are fetched
+      for (const webJid of activeWebReviewJids) {
+        if (!jids.includes(webJid)) jids.push(webJid);
+      }
       const { messages, newTimestamp } = getNewMessages(
         jids,
         lastTimestamp,
@@ -680,6 +688,11 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Track web review JIDs so the message loop polls for them
+      if (chatJid.startsWith(WEB_REVIEW_PREFIX)) {
+        activeWebReviewJids.add(chatJid);
+      }
     },
     onChatMetadata: (
       chatJid: string,

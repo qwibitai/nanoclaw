@@ -23,10 +23,25 @@ export function createWebChannel(opts: ChannelOpts): Channel {
   let server: http.Server | null = null;
   const openSockets = new Set<import('net').Socket>();
 
+  const MAX_BODY = 1024 * 1024; // 1 MB
+
   function handleMessage(req: http.IncomingMessage, res: http.ServerResponse) {
     let body = '';
-    req.on('data', (chunk) => (body += chunk));
+    let size = 0;
+    let aborted = false;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY && !aborted) {
+        aborted = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Request body too large' }));
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
+      if (aborted) return;
       try {
         const parsed = JSON.parse(body) as { draftId?: string; text?: string };
         if (!parsed.draftId || !parsed.text) {
@@ -47,7 +62,13 @@ export function createWebChannel(opts: ChannelOpts): Channel {
         };
 
         opts.onMessage(chatJid, msg);
-        opts.onChatMetadata(chatJid, msg.timestamp, `Review: ${parsed.draftId}`, 'web', false);
+        opts.onChatMetadata(
+          chatJid,
+          msg.timestamp,
+          `Review: ${parsed.draftId}`,
+          'web',
+          false,
+        );
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, messageId: msg.id }));
@@ -58,7 +79,11 @@ export function createWebChannel(opts: ChannelOpts): Channel {
     });
   }
 
-  function handleSSE(req: http.IncomingMessage, res: http.ServerResponse, draftId: string) {
+  function handleSSE(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    draftId: string,
+  ) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -102,8 +127,8 @@ export function createWebChannel(opts: ChannelOpts): Channel {
       return;
     }
 
-    // GET /stream/:draftId
-    const streamMatch = url.pathname.match(/^\/stream\/(.+)$/);
+    // GET /stream/:draftId (UUID format only)
+    const streamMatch = url.pathname.match(/^\/stream\/([a-f0-9-]{36})$/);
     if (req.method === 'GET' && streamMatch) {
       handleSSE(req, res, streamMatch[1]);
       return;
@@ -142,9 +167,11 @@ export function createWebChannel(opts: ChannelOpts): Channel {
         }
       }
 
-      // Also buffer for clients that connect later
+      // Also buffer for clients that connect later (capped to prevent memory growth)
       if (!responseBuffers.has(draftId)) responseBuffers.set(draftId, []);
-      responseBuffers.get(draftId)!.push(text);
+      const buf = responseBuffers.get(draftId)!;
+      buf.push(text);
+      if (buf.length > 50) buf.splice(0, buf.length - 50);
     },
 
     isConnected() {
