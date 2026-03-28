@@ -10,6 +10,10 @@
 
 **Important:** The dashboard uses Next.js 16.2.1 which has breaking changes from older versions. Before writing any dashboard code, read the relevant guide in `dashboard/node_modules/next/dist/docs/` to verify APIs and conventions.
 
+**Architectural note — JID-to-group mapping:** The review agent group is registered under a single JID (`web:review:__agent__`), but individual draft conversations use JIDs like `web:review:{draftId}`. The message loop in `src/index.ts` looks up groups by exact JID match (`registeredGroups[chatJid]`). To support per-draft JIDs mapping to the single review agent group, add prefix-based group lookup in `src/index.ts`: if exact match fails and the JID starts with `web:review:`, use the review agent group. This is implemented in Task 2.
+
+**Architectural note — SSE streaming:** The dashboard connects directly to the NanoClaw web channel's SSE endpoint (port 3200) rather than proxying through Next.js API routes. This avoids connection lifetime issues with Next.js route handlers and keeps the SSE connection long-lived. The `/api/chat` POST endpoint still proxies through Next.js for message sending.
+
 ---
 
 ## File Structure
@@ -26,7 +30,7 @@
 | `dashboard/src/app/review/page.tsx` | Redesigned overview: drafts grouped by course, batch actions, checkboxes. Replaces current. |
 | `dashboard/src/app/review/[id]/page.tsx` | Three-panel detail view: source viewer, draft editor, chat panel. Replaces current. |
 | `dashboard/src/app/api/chat/route.ts` | POST endpoint: sends user message to NanoClaw web channel for a specific draft. |
-| `dashboard/src/app/api/chat/[draftId]/stream/route.ts` | GET endpoint: SSE stream of agent responses for a specific draft. |
+| ~~`dashboard/src/app/api/chat/[draftId]/stream/route.ts`~~ | Removed — dashboard connects directly to web channel SSE at `http://localhost:3200/stream/{draftId}` to avoid Next.js proxy connection lifetime issues. |
 | `dashboard/src/app/api/review/[id]/route.ts` | GET endpoint: fetch single draft with full content (not just excerpt). |
 | `dashboard/src/app/api/attachments/[...path]/route.ts` | GET endpoint: serve attachment files (PDFs, figures) from vault for the source viewer. |
 
@@ -211,7 +215,7 @@ export function createWebChannel(opts: ChannelOpts): Channel {
           sender_name: 'Web User',
           content: parsed.text,
           timestamp: new Date().toISOString(),
-          is_from_me: true,
+          is_from_me: false,
         };
 
         opts.onMessage(chatJid, msg);
@@ -436,7 +440,7 @@ Notes are organized as:
 - `drafts/` — pending review items (your workspace)
 ```
 
-- [ ] **Step 2: Register review agent group on startup**
+- [ ] **Step 2: Register review agent group on startup and add prefix-based lookup**
 
 Add to `src/index.ts`, inside `main()` after `loadState()`:
 
@@ -460,6 +464,24 @@ if (!registeredGroups[REVIEW_AGENT_JID]) {
   });
 }
 ```
+
+Also add a helper function (before `processGroupMessages`) for prefix-based group lookup so per-draft JIDs like `web:review:abc-123` resolve to the review agent group:
+
+```typescript
+const WEB_REVIEW_PREFIX = 'web:review:';
+
+function findGroupForJid(chatJid: string): RegisteredGroup | undefined {
+  // Exact match first
+  if (registeredGroups[chatJid]) return registeredGroups[chatJid];
+  // Prefix match for web review channel (all draft JIDs share one group)
+  if (chatJid.startsWith(WEB_REVIEW_PREFIX) && registeredGroups[REVIEW_AGENT_JID]) {
+    return registeredGroups[REVIEW_AGENT_JID];
+  }
+  return undefined;
+}
+```
+
+Then update `processGroupMessages` and the message loop to use `findGroupForJid(chatJid)` instead of `registeredGroups[chatJid]` for group lookup. Also update the registered JIDs check in `getNewMessages` to include all `web:review:*` JIDs by adding them when messages arrive.
 
 - [ ] **Step 3: Run build to verify no errors**
 
@@ -790,6 +812,14 @@ export class IngestionPipeline {
         throw new Error(result.error || 'Agent processing failed');
       }
 
+      // Verify the agent actually wrote the draft file
+      const draftPath = join(this.vaultDir, 'drafts', `${draftId}.md`);
+      try {
+        await import('node:fs/promises').then((fs) => fs.access(draftPath));
+      } catch {
+        throw new Error(`Agent completed but draft file not found at ${draftPath}`);
+      }
+
       // Create review item in DB
       createReviewItem(
         draftId,
@@ -895,7 +925,6 @@ export async function GET() {
           id: filename.replace(/\.md$/, ''),
           filename,
           frontmatter: data,
-          content,
           excerpt: content.slice(0, 200),
         };
       })
@@ -1121,59 +1150,9 @@ export async function POST(req: NextRequest) {
 }
 ```
 
-- [ ] **Step 2: Create SSE stream endpoint**
+- [ ] **Step 2: No SSE proxy needed**
 
-Create `dashboard/src/app/api/chat/[draftId]/stream/route.ts`:
-
-```typescript
-import { NextRequest } from 'next/server';
-
-const WEB_CHANNEL_URL = process.env.WEB_CHANNEL_URL || 'http://127.0.0.1:3200';
-
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ draftId: string }> },
-) {
-  const { draftId } = await params;
-
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const res = await fetch(`${WEB_CHANNEL_URL}/stream/${draftId}`);
-
-        if (!res.ok || !res.body) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', text: 'Failed to connect to web channel' })}\n\n`));
-          controller.close();
-          return;
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          controller.enqueue(encoder.encode(decoder.decode(value)));
-        }
-      } catch (err) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', text: String(err) })}\n\n`));
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
-}
-```
+The dashboard connects directly to the web channel's SSE endpoint at `http://localhost:3200/stream/{draftId}`. This avoids Next.js request timeout issues with long-lived connections. The detail page (Task 9) uses `new EventSource('http://localhost:3200/stream/${id}')` directly.
 
 - [ ] **Step 3: Run dashboard build**
 
@@ -1428,7 +1407,13 @@ export default function ReviewPage() {
 
 - [ ] **Step 2: Add PATCH endpoint for batch metadata updates**
 
-Add PATCH handler to `dashboard/src/app/api/review/[id]/route.ts`:
+Add PATCH handler to `dashboard/src/app/api/review/[id]/route.ts`. Update the imports at the top of the file to include `writeFile`:
+
+```typescript
+import { readFile, writeFile } from 'fs/promises';
+```
+
+Then add the PATCH handler:
 
 ```typescript
 export async function PATCH(
@@ -1556,7 +1541,8 @@ export default function ReviewDetailPage() {
 
   // SSE connection for agent responses
   useEffect(() => {
-    const es = new EventSource(`/api/chat/${id}/stream`);
+    const WEB_CHANNEL_URL = process.env.NEXT_PUBLIC_WEB_CHANNEL_URL || 'http://localhost:3200';
+    const es = new EventSource(`${WEB_CHANNEL_URL}/stream/${id}`);
     eventSourceRef.current = es;
 
     es.onmessage = (event) => {
