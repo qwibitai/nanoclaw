@@ -631,11 +631,11 @@ function renderMain() {
   let html = '';
 
   // Groups
-  html += '<div class="card"><h2>Groups (' + d.groups.length + ')</h2>';
+  html += '<div class="card wide"><h2>Groups (' + d.groups.length + ')</h2>';
   if (d.groups.length === 0) {
     html += '<div class="empty">No registered groups</div>';
   } else {
-    html += '<table><tr><th>Name</th><th>Folder</th><th>Channel</th><th>Trigger</th><th>Registered</th></tr>';
+    html += '<table><tr><th>Name</th><th>Folder</th><th>Channel</th><th>Trigger Required</th><th>Registered</th></tr>';
     d.groups.forEach(g => {
       const ch = g.jid.includes('@g.us') || g.jid.includes('@s.whatsapp') ? 'whatsapp'
         : g.jid.startsWith('tg:') ? 'telegram'
@@ -646,7 +646,7 @@ function renderMain() {
         : '—';
       const isMain = g.is_main ? ' ' + badge('main', 'purple') : '';
       const trigger = g.requires_trigger ? badge('yes', 'blue') : badge('no', 'green');
-      html += '<tr><td>' + esc(g.name) + isMain + '</td><td>' + esc(g.folder) + '</td><td>' + channelIcon(ch) + ' ' + ch + '</td><td>' + trigger + '</td><td class="time-ago">' + timeAgo(g.added_at) + '</td></tr>';
+      html += '<tr><td>' + esc(g.name) + isMain + '</td><td><code>' + esc(g.folder) + '</code></td><td>' + channelIcon(ch) + ' ' + ch + '</td><td>' + trigger + '</td><td class="time-ago">' + timeAgo(g.added_at) + '</td></tr>';
     });
     html += '</table>';
   }
