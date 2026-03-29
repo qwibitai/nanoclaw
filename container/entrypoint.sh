@@ -71,4 +71,21 @@ else
   done
 fi
 
+# Prevent gws from falling back to service account credentials via ADC.
+# When GOOGLE_APPLICATION_CREDENTIALS is set (for gcloud/gsutil), gws picks
+# up the service account instead of the user's OAuth token — causing
+# FAILED_PRECONDITION on Gmail/Calendar. This wrapper strips it so gws
+# only uses GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE or per-command overrides.
+GWS_BIN=$(command -v gws 2>/dev/null || true)
+if [ -n "$GWS_BIN" ]; then
+  mkdir -p /tmp/bin
+  cat > /tmp/bin/gws <<WRAPPER
+#!/bin/bash
+unset GOOGLE_APPLICATION_CREDENTIALS
+exec "$GWS_BIN" "\$@"
+WRAPPER
+  chmod +x /tmp/bin/gws
+  export PATH="/tmp/bin:$PATH"
+fi
+
 node /tmp/dist/index.js < /tmp/input.json

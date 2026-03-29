@@ -2571,6 +2571,50 @@ function readSecrets(
     }
   }
 
+  // Google Workspace CLI — set GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE so gws
+  // uses the correct OAuth user credential instead of falling back to ADC
+  // (which may resolve to a service account via GOOGLE_APPLICATION_CREDENTIALS).
+  // Only set for scoped tools (e.g. 'gmail:sunday') where a single account is
+  // intended. Unscoped groups (multi-account) rely on per-command env overrides;
+  // the entrypoint's gws wrapper prevents ADC service-account fallback for those.
+  if (
+    isToolEnabled(tools, 'gmail') ||
+    isToolEnabled(tools, 'gmail-readonly') ||
+    isToolEnabled(tools, 'calendar') ||
+    isToolEnabled(tools, 'google-workspace')
+  ) {
+    const { scopes: gmailScopes, isScoped: gmailScoped } = extractToolScopes(tools, 'gmail');
+    const { scopes: roScopes, isScoped: roScoped } = extractToolScopes(tools, 'gmail-readonly');
+    const { scopes: calScopes, isScoped: calScoped } = extractToolScopes(tools, 'calendar');
+    const { scopes: gwScopes, isScoped: gwScoped } = extractToolScopes(tools, 'google-workspace');
+
+    const gwsAccount =
+      (gmailScoped && gmailScopes[0]) ||
+      (roScoped && roScopes[0]) ||
+      (calScoped && calScopes[0]) ||
+      (gwScoped && gwScopes[0]) ||
+      undefined;
+
+    if (gwsAccount) {
+      const gwsCredPath = path.join(
+        os.homedir(),
+        '.config',
+        'gws',
+        'accounts',
+        `${gwsAccount}.json`,
+      );
+      if (fs.existsSync(gwsCredPath)) {
+        secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE =
+          `/home/node/.config/gws/accounts/${gwsAccount}.json`;
+      } else {
+        logger.warn(
+          { gwsAccount, gwsCredPath },
+          'gws credential file not found — GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE not set',
+        );
+      }
+    }
+  }
+
   // Google Cloud credentials — set GOOGLE_APPLICATION_CREDENTIALS for gcloud/gsutil.
   // Key files are mounted by prepareMounts(); here we just set the env var.
   if (isToolEnabled(tools, 'gcloud')) {

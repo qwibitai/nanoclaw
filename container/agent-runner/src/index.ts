@@ -1065,10 +1065,10 @@ async function main(): Promise<void> {
 
   // CLI tools that previously needed secrets exported to process.env now get
   // credentials injected by the OneCLI HTTPS proxy at request time. Only
-  // non-HTTP secrets (dbt login, gcloud paths) remain in containerInput.secrets.
-  // Export any remaining secrets that CLI tools might need as env vars.
+  // non-HTTP secrets (dbt login, gcloud/gws credential paths) remain in
+  // containerInput.secrets. Export these so CLI tools can read them as env vars.
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    if (key.startsWith('DBT_CLOUD_') || key.startsWith('OMNI_') || key === 'GOOGLE_APPLICATION_CREDENTIALS') {
+    if (key.startsWith('DBT_CLOUD_') || key.startsWith('OMNI_') || key === 'GOOGLE_APPLICATION_CREDENTIALS' || key === 'GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE') {
       process.env[key] = value;
     }
   }
