@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "timestamp": "2026-03-29T16:23:58.057Z",
+  "sessionId": "",
+  "wipTasks": [],
+  "recentEdits": [
+    ".claude/skills/add-google-drive/SKILL.md",
+    ".claude/skills/add-google-drive/manifest.yaml",
+    ".claude/skills/add-google-drive/modify/container/agent-runner/src/index.ts",
+    ".claude/skills/add-google-drive/modify/container/agent-runner/src/index.ts.intent.md",
+    ".claude/skills/add-google-drive/modify/src/container-runner.ts",
+    ".claude/skills/add-google-drive/modify/src/container-runner.ts.intent.md",
+    ".claude/skills/add-google-drive/tests/gdrive.test.ts",
+    ".claude/skills/add-s3-storage/SKILL.md",
+    ".claude/skills/add-s3-storage/manifest.yaml",
+    ".claude/skills/setup-secrets/SKILL.md",
+    ".claude/skills/setup-secrets/env_to_yaml.py",
+    ".claude/skills/setup-secrets/sops-run.sh",
+    ".gitignore",
+    ".playwright-mcp/console-2026-03-08T20-26-40-393Z.log",
+    ".playwright-mcp/console-2026-03-10T19-18-02-166Z.log",
+    ".playwright-mcp/console-2026-03-10T19-18-30-487Z.log",
+    ".playwright-mcp/console-2026-03-10T19-28-23-808Z.log",
+    ".playwright-mcp/console-2026-03-10T19-29-18-850Z.log",
+    ".playwright-mcp/console-2026-03-10T20-13-28-473Z.log",
+    ".playwright-mcp/console-2026-03-10T20-13-53-860Z.log"
+  ],
+  "metrics": null
+}

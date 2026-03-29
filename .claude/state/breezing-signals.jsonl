@@ -1,0 +1,1 @@
+{"signal":"ci_failure_detected","timestamp":"2026-03-24T21:26:19Z","conclusion":"failure","trigger_command":"cd /tmp/harness-pr && git remote set-url origin git@github.com:bandepanu/claude-code-harness.git && git push origin fix/use-english-descriptions 2>&1"}

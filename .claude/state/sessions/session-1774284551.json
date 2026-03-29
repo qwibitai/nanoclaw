@@ -1,0 +1,45 @@
+{
+  "session_id": "session-1774284551",
+  "parent_session_id": null,
+  "state": "stopped",
+  "started_at": "2026-03-23T16:49:11Z",
+  "updated_at": "2026-03-23T16:50:00Z",
+  "resumed_at": "2026-03-23T16:49:11Z",
+  "event_seq": 4,
+  "last_event_id": "event-000004",
+  "state_version": 1,
+  "cwd": "/home/psg/nanoclaw",
+  "project_name": "nanoclaw",
+  "git": {
+    "branch": "feat/add-s3-storage-skill",
+    "uncommitted_changes": 41,
+    "last_commit": "b2c4f8f"
+  },
+  "plans": {
+    "exists": false,
+    "last_modified": 0,
+    "wip_tasks": 0,
+    "todo_tasks": 0,
+    "pending_tasks": 0,
+    "completed_tasks": 0
+  },
+  "orchestration": {
+    "max_state_retries": 3,
+    "retry_backoff_seconds": 10
+  },
+  "prompt_seq": 1,
+  "intent": "literal",
+  "changes_this_session": [
+    {
+      "file": "/home/psg/.claude/projects/-home-psg-nanoclaw/memory/consulting_pipeline.md",
+      "action": "Write",
+      "timestamp": "2026-03-23T16:49:56Z",
+      "important": false
+    }
+  ],
+  "last_message_length": 313,
+  "last_message_hash": "1238af0f268c704a",
+  "ended_at": "2026-03-23T16:50:00Z",
+  "duration_minutes": 0,
+  "memory_logged": true
+}

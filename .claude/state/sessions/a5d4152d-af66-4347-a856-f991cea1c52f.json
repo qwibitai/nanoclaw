@@ -1,0 +1,39 @@
+{
+  "session_id": "a5d4152d-af66-4347-a856-f991cea1c52f",
+  "parent_session_id": null,
+  "state": "stopped",
+  "state_version": 1,
+  "started_at": "2026-03-23T16:50:20Z",
+  "updated_at": "2026-03-23T16:51:02Z",
+  "resume_token": "0aa91a51-448e-4f65-834b-832344990356",
+  "event_seq": 3,
+  "last_event_id": "event-000003",
+  "fork_count": 0,
+  "orchestration": {
+    "max_state_retries": 3,
+    "retry_backoff_seconds": 10
+  },
+  "cwd": "/home/psg/nanoclaw",
+  "project_name": "nanoclaw",
+  "prompt_seq": 1,
+  "git": {
+    "branch": "feat/add-s3-storage-skill",
+    "uncommitted_changes": 42,
+    "last_commit": "b2c4f8f"
+  },
+  "plans": {
+    "exists": false,
+    "last_modified": 0,
+    "wip_tasks": 0,
+    "todo_tasks": 0,
+    "pending_tasks": 0,
+    "completed_tasks": 0
+  },
+  "changes_this_session": [],
+  "intent": "literal",
+  "last_message_length": 76,
+  "last_message_hash": "f430651f1d86cbce",
+  "ended_at": "2026-03-23T16:51:02Z",
+  "duration_minutes": 0,
+  "memory_logged": true
+}

@@ -1,0 +1,38 @@
+{
+  "session_id": "74babf98-ae18-47a3-bad4-9650a9bd881e",
+  "parent_session_id": null,
+  "state": "initialized",
+  "state_version": 1,
+  "started_at": "2026-03-29T14:53:42Z",
+  "updated_at": "2026-03-29T14:53:42Z",
+  "resume_token": "11afc78b-2f09-4638-bd57-38f324d996c1",
+  "event_seq": 0,
+  "last_event_id": "",
+  "fork_count": 0,
+  "orchestration": {
+    "max_state_retries": 3,
+    "retry_backoff_seconds": 10
+  },
+  "cwd": "/home/psg/nanoclaw",
+  "project_name": "nanoclaw",
+  "prompt_seq": 0,
+  "git": {
+    "branch": "feat/add-s3-storage-skill",
+    "uncommitted_changes": 51,
+    "last_commit": "b2c4f8f"
+  },
+  "plans": {
+    "exists": true,
+    "last_modified":   File: "Plans.md"
+    ID: 203215e1c1b5430e Namelen: 255     Type: ext2/ext3
+Block size: 4096       Fundamental block size: 4096
+Blocks: Total: 19606306   Free: 6086984    Available: 5275799
+Inodes: Total: 4862256    Free: 4412652
+1774285002,
+    "wip_tasks": 0,
+    "todo_tasks": 0,
+    "pending_tasks": 0,
+    "completed_tasks": 0
+  },
+  "changes_this_session": []
+}

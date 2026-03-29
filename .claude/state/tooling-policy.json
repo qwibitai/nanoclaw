@@ -1,0 +1,32 @@
+{
+  "lsp": {
+    "available": false,
+    "plugins": "",
+    "available_by_ext": {},
+    "last_used_prompt_seq": 0,
+    "last_used_tool_name": "",
+    "used_since_last_prompt": false
+  },
+  "plugins": {
+    "installed": 0,
+    "enabled_estimate": null,
+    "source": ""
+  },
+  "mcp": {
+    "configured": null,
+    "disabled": null,
+    "enabled_estimate": null,
+    "sources": [
+      ".mcp.json"
+    ]
+  },
+  "context_budget": {
+    "enabled": true,
+    "max_enabled_mcps": 10,
+    "max_installed_plugins": 10
+  },
+  "skills": {
+    "index": [],
+    "decision_required": false
+  }
+}

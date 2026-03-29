@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "PreCompact": [],
+    "Stop": []
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "lastCheckedPluginVersion": "3.12.0",
+  "files": {
+    "CLAUDE.md": {
+      "templateVersion": "unknown",
+      "fileHash": "517078abbb70d7121dcf1d282212d7a67943241e8739d6a48574ba9536f5c555",
+      "recordedAt": "2026-03-25T14:05:45Z"
+    },
+    "Plans.md": {
+      "templateVersion": "unknown",
+      "fileHash": "c2b697e1b7326a81d9cfaf8154b615e4cf74c9a22f5372d03b018069c4dbb7d0",
+      "recordedAt": "2026-03-25T14:05:45Z"
+    },
+    ".claude/settings.local.json": {
+      "templateVersion": "unknown",
+      "fileHash": "771193b8b279c350b32280100c9f5e36a75e7a59f282441d5282facbfb263124",
+      "recordedAt": "2026-03-25T14:05:45Z"
+    }
+  }
+}
