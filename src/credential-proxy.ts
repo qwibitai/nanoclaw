@@ -20,7 +20,7 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
+const FALLBACK_MODEL = 'claude-sonnet-4-6-20250514';
 
 export interface NanoClawHandlers {
   getInviteLink?: (jid: string) => Promise<string | null>;
@@ -210,7 +210,7 @@ export function startCredentialProxy(
             upRes.on('end', () => {
               logger.warn(
                 { url: req.url, fallbackModel: FALLBACK_MODEL },
-                'Rate limited on OAuth, retrying with API key + Haiku',
+                'Rate limited on OAuth, retrying with API key + Sonnet',
               );
 
               const fallbackBody = swapModelInBody(body);
