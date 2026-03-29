@@ -11,7 +11,7 @@ interface QueuedTask {
   fn: () => Promise<void>;
 }
 
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 2;
 const BASE_RETRY_MS = 5000;
 
 interface GroupState {
@@ -33,6 +33,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
+  private onRetriesExhaustedFn: ((groupJid: string) => void) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -57,6 +58,10 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  setOnRetriesExhausted(fn: (groupJid: string) => void): void {
+    this.onRetriesExhaustedFn = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -268,6 +273,7 @@ export class GroupQueue {
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
       state.retryCount = 0;
+      this.onRetriesExhaustedFn?.(groupJid);
       return;
     }
 

@@ -193,19 +193,19 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Run through all 5 retries (MAX_RETRIES = 5)
+    // Run through all 2 retries (MAX_RETRIES = 2)
     // Initial call
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(1);
 
-    // Retry 1: 5000ms, Retry 2: 10000ms, Retry 3: 20000ms, Retry 4: 40000ms, Retry 5: 80000ms
-    const retryDelays = [5000, 10000, 20000, 40000, 80000];
+    // Retry 1: 5000ms, Retry 2: 10000ms
+    const retryDelays = [5000, 10000];
     for (let i = 0; i < retryDelays.length; i++) {
       await vi.advanceTimersByTimeAsync(retryDelays[i] + 10);
       expect(callCount).toBe(i + 2);
     }
 
-    // After 5 retries (6 total calls), should stop — no more retries
+    // After 2 retries (3 total calls), should stop — no more retries
     const countAfterMaxRetries = callCount;
     await vi.advanceTimersByTimeAsync(200000); // Wait a long time
     expect(callCount).toBe(countAfterMaxRetries);

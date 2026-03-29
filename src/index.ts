@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -37,6 +38,7 @@ import {
   initDatabase,
   setRegisteredGroup,
   setRouterState,
+  clearSession,
   setSession,
   storeChatMetadata,
   storeMessage,
@@ -326,6 +328,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Check transcript size and suggest /compact if it's getting large
+  const TRANSCRIPT_WARN_BYTES = 80 * 1024; // 80KB ≈ ~100K tokens after SDK overhead
+  const transcriptDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'history');
+  if (fs.existsSync(transcriptDir)) {
+    try {
+      let totalSize = 0;
+      for (const f of fs.readdirSync(transcriptDir)) {
+        totalSize += fs.statSync(path.join(transcriptDir, f)).size;
+      }
+      if (totalSize > TRANSCRIPT_WARN_BYTES) {
+        const sizeKB = Math.round(totalSize / 1024);
+        logger.info({ group: group.name, sizeKB }, 'Transcript size above threshold, suggesting /compact');
+        await channel.sendMessage(chatJid, `_La sesión lleva ${sizeKB}KB de historial. Considera mandar /compact para reducir consumo de tokens._`);
+      }
+    } catch { /* ignore stat errors */ }
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -468,6 +487,16 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Clear stale session on fatal session errors to prevent retry loops
+      const fatalPatterns = [
+        'No conversation found with session ID',
+        'Could not process image',
+      ];
+      if (output.error && fatalPatterns.some(p => output.error!.includes(p))) {
+        delete sessions[group.folder];
+        clearSession(group.folder);
+        logger.warn({ group: group.name }, 'Cleared stale session after fatal error');
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -912,6 +941,13 @@ async function main(): Promise<void> {
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.setOnRetriesExhausted((groupJid) => {
+    const group = registeredGroups[groupJid];
+    if (!group) return;
+    const channel = findChannel(channels, groupJid);
+    if (!channel) return;
+    channel.sendMessage(groupJid, '_No pude procesar los mensajes anteriores después de varios intentos. Por favor reenvíen._').catch(() => {});
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
