@@ -18,10 +18,15 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-// HOME_DIR: explicit home for the atlas user — env var takes precedence so
-// services running as a different OS user (e.g. nanoclaw-svc) still resolve
-// to the correct atlas home where .claude/ and .atlas/ live.
-export const HOME_DIR = process.env.HOME || os.homedir();
+// HOME_DIR: explicit home for the atlas user.
+// On Linux: env var takes precedence so services running as a different OS user
+// (e.g. nanoclaw-svc) still resolve to the correct atlas home where .claude/
+// and .atlas/ live. On Windows: always use os.homedir() because $HOME can be
+// an MSYS-style path (/c/Users/...) that breaks path.join.
+export const HOME_DIR =
+  process.platform !== 'win32' && process.env.HOME
+    ? process.env.HOME
+    : os.homedir();
 export const HOST_CLAUDE_DIR = path.join(HOME_DIR, '.claude');
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
