@@ -75,7 +75,7 @@ export async function processImage(
     .toBuffer();
 
   // Validate sharp output — corrupt input can produce tiny/invalid buffers
-  if (resized.length < 1024 || resized[0] !== 0xFF || resized[1] !== 0xD8) {
+  if (resized.length < 1024 || resized[0] !== 0xff || resized[1] !== 0xd8) {
     return null;
   }
 
