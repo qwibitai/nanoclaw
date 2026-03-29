@@ -17,7 +17,13 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, getLatestMessage, setLastGroupSync, storeReaction, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -441,7 +447,9 @@ export class WhatsAppChannel implements Channel {
 
     // Query Baileys' signal repository for the mapping
     try {
-      const pn = await (this.sock.signalRepository as any)?.lidMapping?.getPNForLID(jid);
+      const pn = await (
+        this.sock.signalRepository as any
+      )?.lidMapping?.getPNForLID(jid);
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;

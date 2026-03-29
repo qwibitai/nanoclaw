@@ -12,8 +12,6 @@ import {
   TaskRunLog,
 } from './types.js';
 
-let db: Database.Database;
-
 export interface Reaction {
   message_id: string;
   message_chat_jid: string;
@@ -22,6 +20,8 @@ export interface Reaction {
   emoji: string;
   timestamp: string;
 }
+
+let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -164,7 +164,7 @@ function createSchema(database: Database.Database): void {
       `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
     );
     database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
+      `UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`,
     );
   } catch {
     /* columns already exist */
@@ -186,6 +186,11 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+}
+
+/** @internal - for tests only. */
+export function _closeDatabase(): void {
+  db.close();
 }
 
 /**
@@ -393,127 +398,17 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
-export function getMessageFromMe(messageId: string, chatJid: string): boolean {
+export function getLastBotMessageTimestamp(
+  chatJid: string,
+  botPrefix: string,
+): string | undefined {
   const row = db
     .prepare(
-      `SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+      `SELECT MAX(timestamp) as ts FROM messages
+       WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)`,
     )
-    .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
-  return row?.is_from_me === 1;
-}
-
-export function getLatestMessage(
-  chatJid: string,
-): { id: string; fromMe: boolean; sender?: string } | undefined {
-  const row = db
-    .prepare(
-      `SELECT id, is_from_me, sender FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
-    )
-    .get(chatJid) as
-    | { id: string; is_from_me: number | null; sender?: string }
-    | undefined;
-  if (!row) return undefined;
-  return { id: row.id, fromMe: row.is_from_me === 1, sender: row.sender };
-}
-
-export function storeReaction(reaction: Reaction): void {
-  if (!reaction.emoji) {
-    db.prepare(
-      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
-    ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
-    return;
-  }
-  db.prepare(
-    `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    reaction.message_id,
-    reaction.message_chat_jid,
-    reaction.reactor_jid,
-    reaction.reactor_name || null,
-    reaction.emoji,
-    reaction.timestamp,
-  );
-}
-
-export function getReactionsForMessage(
-  messageId: string,
-  chatJid: string,
-): Reaction[] {
-  return db
-    .prepare(
-      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
-    )
-    .all(messageId, chatJid) as Reaction[];
-}
-
-export function getMessagesByReaction(
-  reactorJid: string,
-  emoji: string,
-  chatJid?: string,
-): Array<
-  Reaction & { content: string; sender_name: string; message_timestamp: string }
-> {
-  const sql = chatJid
-    ? `
-      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
-      FROM reactions r
-      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
-      WHERE r.reactor_jid = ? AND r.emoji = ? AND r.message_chat_jid = ?
-      ORDER BY r.timestamp DESC
-    `
-    : `
-      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
-      FROM reactions r
-      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
-      WHERE r.reactor_jid = ? AND r.emoji = ?
-      ORDER BY r.timestamp DESC
-    `;
-
-  type Result = Reaction & {
-    content: string;
-    sender_name: string;
-    message_timestamp: string;
-  };
-  return chatJid
-    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
-    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
-}
-
-export function getReactionsByUser(
-  reactorJid: string,
-  limit: number = 50,
-): Reaction[] {
-  return db
-    .prepare(
-      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`,
-    )
-    .all(reactorJid, limit) as Reaction[];
-}
-
-export function getReactionStats(chatJid?: string): Array<{
-  emoji: string;
-  count: number;
-}> {
-  const sql = chatJid
-    ? `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      WHERE message_chat_jid = ?
-      GROUP BY emoji
-      ORDER BY count DESC
-    `
-    : `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      GROUP BY emoji
-      ORDER BY count DESC
-    `;
-
-  type Result = { emoji: string; count: number };
-  return chatJid
-    ? (db.prepare(sql).all(chatJid) as Result[])
-    : (db.prepare(sql).all() as Result[]);
+    .get(chatJid, `${botPrefix}:%`) as { ts: string | null } | undefined;
+  return row?.ts ?? undefined;
 }
 
 export function createTask(
@@ -857,6 +752,131 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Reaction functions ---
+
+export function getMessageFromMe(messageId: string, chatJid: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
+  return row?.is_from_me === 1;
+}
+
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; fromMe: boolean; sender?: string } | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, is_from_me, sender FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as
+    | { id: string; is_from_me: number | null; sender?: string }
+    | undefined;
+  if (!row) return undefined;
+  return { id: row.id, fromMe: row.is_from_me === 1, sender: row.sender };
+}
+
+export function storeReaction(reaction: Reaction): void {
+  if (!reaction.emoji) {
+    db.prepare(
+      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
+    ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
+    return;
+  }
+  db.prepare(
+    `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    reaction.message_id,
+    reaction.message_chat_jid,
+    reaction.reactor_jid,
+    reaction.reactor_name || null,
+    reaction.emoji,
+    reaction.timestamp,
+  );
+}
+
+export function getReactionsForMessage(
+  messageId: string,
+  chatJid: string,
+): Reaction[] {
+  return db
+    .prepare(
+      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
+    )
+    .all(messageId, chatJid) as Reaction[];
+}
+
+export function getMessagesByReaction(
+  reactorJid: string,
+  emoji: string,
+  chatJid?: string,
+): Array<
+  Reaction & { content: string; sender_name: string; message_timestamp: string }
+> {
+  const sql = chatJid
+    ? `
+      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
+      FROM reactions r
+      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
+      WHERE r.reactor_jid = ? AND r.emoji = ? AND r.message_chat_jid = ?
+      ORDER BY r.timestamp DESC
+    `
+    : `
+      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
+      FROM reactions r
+      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
+      WHERE r.reactor_jid = ? AND r.emoji = ?
+      ORDER BY r.timestamp DESC
+    `;
+
+  type Result = Reaction & {
+    content: string;
+    sender_name: string;
+    message_timestamp: string;
+  };
+  return chatJid
+    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
+    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
+}
+
+export function getReactionsByUser(
+  reactorJid: string,
+  limit: number = 50,
+): Reaction[] {
+  return db
+    .prepare(
+      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(reactorJid, limit) as Reaction[];
+}
+
+export function getReactionStats(chatJid?: string): Array<{
+  emoji: string;
+  count: number;
+}> {
+  const sql = chatJid
+    ? `
+      SELECT emoji, COUNT(*) as count
+      FROM reactions
+      WHERE message_chat_jid = ?
+      GROUP BY emoji
+      ORDER BY count DESC
+    `
+    : `
+      SELECT emoji, COUNT(*) as count
+      FROM reactions
+      GROUP BY emoji
+      ORDER BY count DESC
+    `;
+
+  type Result = { emoji: string; count: number };
+  return chatJid
+    ? (db.prepare(sql).all(chatJid) as Result[])
+    : (db.prepare(sql).all() as Result[]);
 }
 
 // --- Message lookup helpers ---

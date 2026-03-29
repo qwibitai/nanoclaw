@@ -11,8 +11,8 @@ Telegram.
 
 | Channel | Transformation |
 |---------|---------------|
-| WhatsApp | `**bold**` → `*bold*`, `*italic*` → `_italic_`, headings → bold, links flattened |
-| Telegram | same as WhatsApp |
+| WhatsApp | `**bold**` → `*bold*`, `*italic*` → `_italic_`, headings → bold, links → `text (url)` |
+| Telegram | same as WhatsApp, but `[text](url)` links are preserved (Markdown v1 renders them natively) |
 | Slack | same as WhatsApp, but links become `<url\|text>` |
 | Discord | passthrough (Discord already renders Markdown) |
 | Signal | passthrough for `parseTextStyles`; `parseSignalStyles` in `src/text-styles.ts` produces plain text + native `textStyle` ranges for use by the Signal skill |

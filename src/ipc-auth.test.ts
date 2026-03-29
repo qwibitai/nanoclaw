@@ -437,7 +437,6 @@ describe('IPC message authorization', () => {
   });
 });
 
-
 // --- IPC reaction authorization ---
 // Same authorization pattern as message sending (ipc.ts lines 104-127).
 
@@ -454,8 +453,12 @@ describe('IPC reaction authorization', () => {
   }
 
   it('main group can react in any chat', () => {
-    expect(isReactionAuthorized('whatsapp_main', true, 'other@g.us', groups)).toBe(true);
-    expect(isReactionAuthorized('whatsapp_main', true, 'third@g.us', groups)).toBe(true);
+    expect(
+      isReactionAuthorized('whatsapp_main', true, 'other@g.us', groups),
+    ).toBe(true);
+    expect(
+      isReactionAuthorized('whatsapp_main', true, 'third@g.us', groups),
+    ).toBe(true);
   });
 
   it('non-main group can react in its own chat', () => {

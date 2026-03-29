@@ -5,12 +5,14 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_TRIGGER,
+  getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
-  TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -32,9 +34,10 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getLastBotMessageTimestamp,
+  getMessageById,
   getMessagesSince,
   getNewMessages,
-  getMessageById,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -72,9 +75,9 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+let statusTracker: StatusTracker | null = null;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-let statusTracker: StatusTracker | null = null;
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -112,6 +115,27 @@ function loadState(): void {
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
+}
+
+/**
+ * Return the message cursor for a group, recovering from the last bot reply
+ * if lastAgentTimestamp is missing (new group, corrupted state, restart).
+ */
+function getOrRecoverCursor(chatJid: string): string {
+  const existing = lastAgentTimestamp[chatJid];
+  if (existing) return existing;
+
+  const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
+  if (botTs) {
+    logger.info(
+      { chatJid, recoveredFrom: botTs },
+      'Recovered message cursor from last bot reply',
+    );
+    lastAgentTimestamp[chatJid] = botTs;
+    saveState();
+    return botTs;
+  }
+  return '';
 }
 
 function saveState(): void {
@@ -207,24 +231,55 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
     chatJid,
-    sinceTimestamp,
+    getOrRecoverCursor(chatJid),
     ASSISTANT_NAME,
+    MAX_MESSAGES_PER_PROMPT,
   );
 
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
+    const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
+        triggerPattern.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
+  }
+
+  // Track received messages for emoji status reactions
+  const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+  for (const msg of missedMessages) {
+    // For trigger-gated groups, only react to trigger messages and allowlisted senders
+    if (needsTrigger) {
+      const allowlistCfg = loadSenderAllowlist();
+      const isTrigger =
+        getTriggerPattern(group.trigger).test(msg.content.trim()) &&
+        (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+      const allowed = isSenderAllowed(chatJid, msg.sender, allowlistCfg);
+      if (!isTrigger && !allowed) continue;
+    }
+    const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+    statusTracker?.markReceived(
+      msg.id,
+      chatJid,
+      fromMe,
+      msg.sender,
+      msg.is_bot_message === true,
+    );
+  }
+
+  // Advance user messages to THINKING
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
+  );
+  for (const msg of userMessages) {
+    statusTracker?.markThinking(msg.id, chatJid);
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -240,29 +295,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     { group: group.name, messageCount: missedMessages.length },
     'Processing messages',
   );
-
-  // Track received messages for emoji status reactions
-  const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-  for (const msg of missedMessages) {
-    // For trigger-gated groups, only react to trigger messages and allowlisted senders
-    if (needsTrigger) {
-      const allowlistCfg = loadSenderAllowlist();
-      const isTrigger = TRIGGER_PATTERN.test(msg.content.trim()) &&
-        (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
-      const allowed = isSenderAllowed(chatJid, msg.sender, allowlistCfg);
-      if (!isTrigger && !allowed) continue;
-    }
-    const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-    statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
-  }
-
-  // Advance user messages to THINKING (👀 → 💭)
-  const userMessages = missedMessages.filter(
-    (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
-  );
-  for (const msg of userMessages) {
-    statusTracker?.markThinking(msg.id, chatJid);
-  }
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -286,7 +318,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
-      // Advance all tracked messages to WORKING on first output (💭 → 🔄)
+      // Advance all tracked messages to WORKING on first output
       // Uses markAllWorking so piped messages are included, not just the initial batch
       if (!firstOutputSeen) {
         firstOutputSeen = true;
@@ -308,11 +340,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
       statusTracker?.markAllDone(chatJid);
+      queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
+      statusTracker?.markAllDone(chatJid);
       hadError = true;
     }
   });
@@ -321,17 +354,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    statusTracker?.markAllFailed(chatJid, 'Agent error — retrying.');
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      statusTracker?.markAllDone(chatJid);
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
     }
-    statusTracker?.markAllFailed(chatJid, 'Agent error — retrying.');
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
@@ -364,6 +396,7 @@ async function runAgent(
       id: t.id,
       groupFolder: t.group_folder,
       prompt: t.prompt,
+      script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
@@ -434,7 +467,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 
   while (true) {
     try {
@@ -480,10 +513,11 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
+            const triggerPattern = getTriggerPattern(group.trigger);
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
+                triggerPattern.test(m.content.trim()) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
@@ -494,30 +528,45 @@ async function startMessageLoop(): Promise<void> {
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || '',
+            getOrRecoverCursor(chatJid),
             ASSISTANT_NAME,
+            MAX_MESSAGES_PER_PROMPT,
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
+          // Track received messages for emoji status before advancing to THINKING
+          for (const msg of groupMessages) {
+            if (needsTrigger) {
+              const allowlistCfg = loadSenderAllowlist();
+              const isTrigger =
+                getTriggerPattern(group.trigger).test(msg.content.trim()) &&
+                (msg.is_from_me ||
+                  isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+              const allowed = isSenderAllowed(
+                chatJid,
+                msg.sender,
+                allowlistCfg,
+              );
+              if (!isTrigger && !allowed) continue;
+            }
+            const fromMe =
+              msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+            statusTracker?.markReceived(
+              msg.id,
+              chatJid,
+              fromMe,
+              msg.sender,
+              msg.is_bot_message === true,
+            );
+          }
+          // Agent is about to see these — advance to THINKING
+          for (const msg of groupMessages) {
+            statusTracker?.markThinking(msg.id, chatJid);
+          }
+
           if (queue.sendMessage(chatJid, formatted)) {
-            // Track received messages for emoji status before advancing to THINKING
-            for (const msg of groupMessages) {
-              if (needsTrigger) {
-                const allowlistCfg = loadSenderAllowlist();
-                const isTrigger = TRIGGER_PATTERN.test(msg.content.trim()) &&
-                  (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
-                const allowed = isSenderAllowed(chatJid, msg.sender, allowlistCfg);
-                if (!isTrigger && !allowed) continue;
-              }
-              const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-              statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
-            }
-            // Agent is about to see these — advance to THINKING (👀 → 💭)
-            for (const msg of groupMessages) {
-              statusTracker?.markThinking(msg.id, chatJid);
-            }
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -554,13 +603,18 @@ function recoverPendingMessages(isStartup: boolean = false): void {
 
     // For non-main trigger-gated groups, only recover if there's a trigger message
     if (!isMainGroup && group.requiresTrigger !== false) {
-      const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-      const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+      const sinceTimestamp = getOrRecoverCursor(chatJid);
+      const pending = getMessagesSince(
+        chatJid,
+        sinceTimestamp,
+        ASSISTANT_NAME,
+        MAX_MESSAGES_PER_PROMPT,
+      );
       if (pending.length === 0) continue;
       const allowlistCfg = loadSenderAllowlist();
       const hasTrigger = pending.some(
         (m) =>
-          TRIGGER_PATTERN.test(m.content.trim()) &&
+          getTriggerPattern(group.trigger).test(m.content.trim()) &&
           (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
       );
       if (!hasTrigger) continue;
@@ -577,8 +631,13 @@ function recoverPendingMessages(isStartup: boolean = false): void {
       }
       queue.enqueueMessageCheck(chatJid);
     } else {
-      const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-      const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+      const sinceTimestamp = getOrRecoverCursor(chatJid);
+      const pending = getMessagesSince(
+        chatJid,
+        sinceTimestamp,
+        ASSISTANT_NAME,
+        MAX_MESSAGES_PER_PROMPT,
+      );
       if (pending.length > 0) {
         if (isStartup) {
           logger.info(
@@ -699,11 +758,18 @@ async function main(): Promise<void> {
       }
       storeMessage(msg);
 
-      // Fire 👀 immediately on real-time message event, not on next poll cycle
+      // Fire received status immediately on real-time message event, not on next poll cycle
       const group = registeredGroups[chatJid];
       if (group?.isMain || group?.requiresTrigger === false) {
-        const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-        statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
+        const fromMe =
+          msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+        statusTracker?.markReceived(
+          msg.id,
+          chatJid,
+          fromMe,
+          msg.sender,
+          msg.is_bot_message === true,
+        );
       }
     },
     onChatMetadata: (
@@ -716,7 +782,7 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Initialize status tracker BEFORE channels connect, so onMessage can fire 👀 immediately
+  // Initialize status tracker BEFORE channels connect, so onMessage can fire reactions immediately
   statusTracker = new StatusTracker({
     sendReaction: async (chatJid, messageKey, emoji) => {
       const channel = findChannel(channels, chatJid);
@@ -789,6 +855,7 @@ async function main(): Promise<void> {
           .map((ch) => ch.syncGroups!(force)),
       );
     },
+    getAvailableGroups,
     sendReaction: async (jid, emoji, messageId) => {
       const channel = findChannel(channels, jid);
       if (!channel) return;
@@ -797,7 +864,8 @@ async function main(): Promise<void> {
         const key = {
           id: messageId,
           remoteJid: jid,
-          fromMe: msg?.is_from_me === true || (msg?.is_from_me as unknown) === 1,
+          fromMe:
+            msg?.is_from_me === true || (msg?.is_from_me as unknown) === 1,
           participant: msg?.sender,
         };
         await channel.sendReaction(jid, key, emoji);
@@ -805,7 +873,6 @@ async function main(): Promise<void> {
         await channel.reactToLatestMessage(jid, emoji);
       }
     },
-    getAvailableGroups,
     statusHeartbeat: () => statusTracker?.heartbeatCheck(),
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
@@ -815,6 +882,7 @@ async function main(): Promise<void> {
         id: t.id,
         groupFolder: t.group_folder,
         prompt: t.prompt,
+        script: t.script || undefined,
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
         status: t.status,
