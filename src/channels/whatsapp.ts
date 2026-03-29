@@ -26,7 +26,12 @@ import {
   setLastGroupSync,
   updateChatName,
 } from '../db.js';
-import { isImageMessage, processImage } from '../image.js';
+import {
+  extractVideoFrame,
+  isImageMessage,
+  isVideoMessage,
+  processImage,
+} from '../image.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
@@ -282,6 +287,37 @@ export class WhatsAppChannel implements Channel {
                 }
               } catch (err) {
                 logger.warn({ err, jid: chatJid }, 'Image - download failed');
+              }
+            }
+
+            // Video/GIF handling — extract first frame for vision
+            if (isVideoMessage(msg)) {
+              try {
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                const groupDir = path.join(GROUPS_DIR, groups[chatJid].folder);
+                const caption = normalized?.videoMessage?.caption ?? '';
+                const framePath = await extractVideoFrame(
+                  buffer as Buffer,
+                  groupDir,
+                );
+                const frameBuffer = fs.readFileSync(framePath);
+                fs.unlinkSync(framePath);
+                const result = await processImage(
+                  frameBuffer,
+                  groupDir,
+                  caption,
+                );
+                if (result) {
+                  const isGif =
+                    normalized?.videoMessage?.gifPlayback === true;
+                  const label = isGif ? 'GIF' : 'Video';
+                  content = `[${label} frame: ${result.relativePath}] ${caption}`.trim();
+                }
+              } catch (err) {
+                logger.warn(
+                  { err, jid: chatJid },
+                  'Video/GIF - frame extraction failed',
+                );
               }
             }
 

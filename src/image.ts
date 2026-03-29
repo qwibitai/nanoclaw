@@ -1,10 +1,12 @@
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import type { WAMessage } from '@whiskeysockets/baileys';
 
 const MAX_DIMENSION = 1024;
-const IMAGE_REF_PATTERN = /\[Image: (attachments\/[^\]]+)\]/g;
+const IMAGE_REF_PATTERN =
+  /\[(?:Image|GIF frame|Video frame): (attachments\/[^\]]+)\]/g;
 
 export interface ProcessedImage {
   content: string;
@@ -18,6 +20,43 @@ export interface ImageAttachment {
 
 export function isImageMessage(msg: WAMessage): boolean {
   return !!msg.message?.imageMessage;
+}
+
+export function isVideoMessage(msg: WAMessage): boolean {
+  return !!msg.message?.videoMessage;
+}
+
+export async function extractVideoFrame(
+  videoBuffer: Buffer,
+  groupDir: string,
+): Promise<string> {
+  const attachDir = path.join(groupDir, 'attachments');
+  fs.mkdirSync(attachDir, { recursive: true });
+
+  const tmpVideo = path.join(attachDir, `tmp-video-${Date.now()}.mp4`);
+  const framePath = path.join(
+    attachDir,
+    `frame-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jpg`,
+  );
+  fs.writeFileSync(tmpVideo, videoBuffer);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        'ffmpeg',
+        ['-i', tmpVideo, '-vframes', '1', '-q:v', '2', framePath],
+        { timeout: 10000 },
+        (err) => (err ? reject(err) : resolve()),
+      );
+    });
+    return framePath;
+  } finally {
+    try {
+      fs.unlinkSync(tmpVideo);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
 }
 
 export async function processImage(
