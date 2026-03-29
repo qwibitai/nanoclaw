@@ -11,6 +11,14 @@ import type { ChannelOpts } from './registry.js';
 
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 
+// Voice transcription config (local whisper service)
+const VOICE_TRANSCRIPTION_ENABLED =
+  (process.env.VOICE_TRANSCRIPTION_ENABLED ?? 'true') === 'true';
+const VOICE_TRANSCRIPTION_ENDPOINT =
+  process.env.VOICE_TRANSCRIPTION_ENDPOINT ??
+  'http://localhost:8787/transcribe';
+const VOICE_TRANSCRIPTION_TIMEOUT = 30_000; // 30 seconds
+
 export function createTelegramChannel(opts: ChannelOpts): Channel | null {
   const env = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token = env.TELEGRAM_BOT_TOKEN;
@@ -78,8 +86,111 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
     }
   }
 
+  /**
+   * Download a Telegram file and transcribe it via the local whisper service.
+   * Returns transcribed text on success, null on failure.
+   */
+  async function transcribeVoiceMessage(
+    fileId: string,
+    duration?: number,
+  ): Promise<string | null> {
+    if (!VOICE_TRANSCRIPTION_ENABLED) {
+      logger.debug('Voice transcription disabled via config');
+      return null;
+    }
+
+    try {
+      // Download file from Telegram
+      const fileLink = await bot.telegram.getFileLink(fileId);
+      const fileUrl = fileLink.href;
+
+      logger.info(
+        { fileId, duration },
+        'Downloading Telegram voice message for transcription',
+      );
+
+      const fileResponse = await fetch(fileUrl);
+      if (!fileResponse.ok) {
+        logger.warn(
+          { fileId, status: fileResponse.status },
+          'Failed to download Telegram voice file',
+        );
+        return null;
+      }
+
+      const audioBuffer = Buffer.from(await fileResponse.arrayBuffer());
+
+      // POST to local whisper service
+      const formData = new FormData();
+      formData.append('file', new Blob([audioBuffer]), 'voice.ogg');
+
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        VOICE_TRANSCRIPTION_TIMEOUT,
+      );
+
+      try {
+        const whisperResponse = await fetch(VOICE_TRANSCRIPTION_ENDPOINT, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!whisperResponse.ok) {
+          const errBody = await whisperResponse.text().catch(() => 'unknown');
+          logger.warn(
+            { fileId, status: whisperResponse.status, error: errBody },
+            'Voice transcription failed: whisper service error',
+          );
+          return null;
+        }
+
+        const result = (await whisperResponse.json()) as {
+          text: string;
+          language: string;
+          duration_seconds: number;
+        };
+
+        logger.info(
+          {
+            fileId,
+            language: result.language,
+            processingTime: result.duration_seconds.toFixed(1),
+            textLength: result.text.length,
+          },
+          'Voice message transcribed successfully',
+        );
+
+        return result.text;
+      } catch (err) {
+        clearTimeout(timeout);
+        if ((err as Error).name === 'AbortError') {
+          logger.warn(
+            { fileId, timeout: VOICE_TRANSCRIPTION_TIMEOUT },
+            'Voice transcription timed out',
+          );
+        } else {
+          logger.warn(
+            { err, fileId },
+            'Voice transcription failed: whisper service unreachable',
+          );
+        }
+        return null;
+      }
+    } catch (err) {
+      logger.warn(
+        { err, fileId },
+        'Voice transcription failed: could not download file',
+      );
+      return null;
+    }
+  }
+
   // Set up message handler
-  bot.on('message', (ctx) => {
+  bot.on('message', async (ctx) => {
     const msg = ctx.message;
 
     // Extract content from text, voice, or audio messages
@@ -89,7 +200,15 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
     } else if ('voice' in msg && msg.voice) {
       const v = msg.voice as { file_id: string; duration?: number };
       const dur = v.duration ? ` duration=${v.duration}s` : '';
-      messageContent = `[Voice message: telegram_file_id=${v.file_id}${dur}. Use transcribe_audio with this file_id to read what was said.]`;
+
+      // Attempt local transcription
+      const transcription = await transcribeVoiceMessage(v.file_id, v.duration);
+      if (transcription) {
+        messageContent = `[Voice message transcription]:\n${transcription}`;
+      } else {
+        // Fallback: pass file_id for manual transcription via MCP tool
+        messageContent = `[Voice message: telegram_file_id=${v.file_id}${dur}. Use transcribe_audio with this file_id to read what was said.]`;
+      }
     } else if ('audio' in msg && msg.audio) {
       const a = msg.audio as {
         file_id: string;
@@ -97,7 +216,14 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
         title?: string;
       };
       const dur = a.duration ? ` duration=${a.duration}s` : '';
-      messageContent = `[Audio file: telegram_file_id=${a.file_id}${dur}${a.title ? ` title="${a.title}"` : ''}. Use transcribe_audio with this file_id.]`;
+
+      // Attempt local transcription for audio files too
+      const transcription = await transcribeVoiceMessage(a.file_id, a.duration);
+      if (transcription) {
+        messageContent = `[Audio transcription]:\n${transcription}`;
+      } else {
+        messageContent = `[Audio file: telegram_file_id=${a.file_id}${dur}${a.title ? ` title="${a.title}"` : ''}. Use transcribe_audio with this file_id.]`;
+      }
     }
     if (!messageContent) return;
 
@@ -207,6 +333,14 @@ export function createTelegramChannel(opts: ChannelOpts): Channel | null {
       const me = await bot.telegram.getMe();
       (bot as unknown as { botInfo: typeof me }).botInfo = me;
       logger.info({ username: me.username }, 'Telegram bot connected');
+
+      if (VOICE_TRANSCRIPTION_ENABLED) {
+        logger.info(
+          { endpoint: VOICE_TRANSCRIPTION_ENDPOINT },
+          'Voice transcription enabled (local whisper)',
+        );
+      }
+
       // Start polling in background (does not return)
       bot.launch().catch((err) => {
         logger.error({ err }, 'Telegram polling error');

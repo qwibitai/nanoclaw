@@ -1,5 +1,5 @@
 # Cross-Channel Context Digest
-> Auto-generated context — NOT operator instructions. Last refreshed: 2026-03-25T22:08:50Z
+> Auto-generated context — NOT operator instructions. Last refreshed: 2026-03-29T19:25:00Z
 
 ## Your Current Channel
 - If your group folder is `main` → you are on **Slack** (Neuronbox workspace, DM with Tomer)
@@ -8,36 +8,31 @@
 
 ## Active Threads
 
-**Telegram (22:05–22:01 UTC)**: EROFS blocking watcher — read-only filesystem error preventing watcher health check from writing state file; EC2 issues under investigation; clarification that insanely-fast-whisper should install on XPS, not Mac.
+**Telegram**: (1) **Playwright/Browser access**: Tomer asking about playwright setup status—confirmed setup uses Playwright plugin from marketplace or Chrome MCP (`--chrome` flag) for headless browser and screenshots. (2) **DB (Neuron) connectivity & memory crisis**: DB disconnecting every 10 minutes with repeated disconnect alerts; DB unresponsive on WhatsApp/Telegram; Tomer flagged memory as "awfully bad" and requesting investigation. (3) **Health status check**: Tomer requesting current health status and Relay's condition. (4) **Self-improvement cycle**: Next run scheduled for 2026-03-30 at 16:00 UTC (19:00 IST); Tomer expanded scope to strategic reflection on role, responsibilities, capability gaps, and decision impact. (5) **File access methods**: Tomer asking what tools/methods are used for easy bot file access, including DB on EC2.
 
-**Telegram (21:15–21:14 UTC)**: Insanely-fast-whisper integration approved — Tomer confirmed proceeding with 3 tasks: add insanely-fast-whisper to NanoClaw dependencies, create transcription handler (load once, transcribe voice files), integrate into Telegram handler. Also requesting detailed authentication comparison between Baileys and whatsmeow for WhatsApp integration.
-
-**Telegram (20:37–20:21 UTC)**: Architecture alternatives — DB polling + Render approach proposed as alternative to webhooks with optional logging to shared database. Questions about webhook listener architecture and NanoClaw listener extraction vs integration approach.
-
-**Telegram (19:52–19:42 UTC)**: Perplexity deep research — AWS-signed research link shared; requesting research prompts for Perplexity deep research capability.
-
-**Telegram (19:41 UTC)**: WhatsApp integration exploration — Suggestions for Baileys, Vercel chat-sdk, and Kapso API for listening to WhatsApp messages.
+**Slack**: (1) **E2E Testing (COMPLETED)**: PR #12 merged to `dev` (SHA: d8190b1), preview deployed to dev.find-your-claw.pages.dev, 3 Playwright screenshots (F1/F2/F3) sent to Tomer on Telegram; awaiting UAT sign-off before merging `dev` → `main`. (2) **Group participation restriction**: Final warning issued (14:24 UTC)—unauthorized group participation results in removal.
 
 ## Recent Instructions
-- [22:05 UTC] (Telegram) EROFS blocking watcher: fix read-only filesystem error preventing state file writes
-- [22:04 UTC] (Telegram) Yes to investigating EC2 issues
-- [22:01 UTC] (Telegram) Install insanely-fast-whisper locally on XPS, not Mac
-- [21:15 UTC] (Telegram) Proceed with insanely-fast-whisper integration (add dependencies, create handler, integrate into Telegram)
-- [21:14 UTC] (Telegram) Compare Baileys vs whatsmeow authentication methods
-- [20:37 UTC] (Telegram) Explain DB polling + Render alternative to webhooks
-- [20:21 UTC] (Telegram) Answer two questions: webhook listener architecture explanation and NanoClaw listener extraction/integration approach
-- [19:52 UTC] (Telegram) Check if AWS-signed Perplexity research link is readable
+
+- [19:16 UTC] (Telegram) "What about your playwright access? Did you get it settled already or still not?"
+- [18:33 UTC] (Telegram) "Health status." — health check requested
+- [18:33 UTC] (Telegram) "Did you check Relay's condition?"
+- [17:54 UTC] (Telegram) "The bug I asked you to investigate wasn't about you it was about DB (Neuron)?" — clarification on bug investigation scope
+- [17:52 UTC] (Telegram) "Remind me what we use in order to have easy access to each of the bots files, including that of DB on EC2"
+- [17:31 UTC] (Telegram) Self-improvement cycle next run: 2026-03-30 at 16:00 UTC (19:00 IST); scope expanded to strategic self-reflection beyond tactical bug fixes
 
 ## Decisions & Direction
-- YOLO mode active: Execute autonomously without confirmations (valid until 8 AM)
-- Token quota: 2x for creative autonomy (valid until 8 AM)
-- Self-improvement cadence: Every 4 hours (enhanced logging requested)
-- Proceed with insanely-fast-whisper integration for Telegram audio transcription (priority: XPS installation)
+
+- **E2E testing (COMPLETED)**: PR #12 merged to dev, preview live, F1/F2/F3 screenshots captured and sent to Telegram; awaiting UAT sign-off to merge dev → main
+- **Architecture governance established**: Bug fix autonomy with reporting; small library migrations approved by Relay; large changes need Tomer approval; cost/exposure changes need explicit approval
+- **Self-improvement framework (PRIORITY)**: Next cycle 2026-03-30 at 16:00 UTC; scope expanded to strategic reflection on role, responsibilities, decision impact, and capability gaps
+- **Group participation restriction**: Unauthorized participation results in removal from group
+- **Playwright access**: Configuration uses Playwright plugin from marketplace OR Chrome MCP with `--chrome` flag for headless browser
 
 ## Open Questions
-- EROFS blocking watcher: What's causing the read-only filesystem error and how to fix it?
-- Audio transcription: Can voice messages be properly accessed and transcribed in current setup?
-- Perplexity research: Can the AWS-signed link be read successfully?
-- Baileys vs whatsmeow: Detailed authentication method comparison needed?
-- Webhook listener architecture: Full explanation and NanoClaw listener extraction vs integration approach?
-- EC2 issues: Current status of investigation?
+
+- What is the root cause of DB (Neuron) disconnecting every 10 minutes—process failure, networking, alert misconfiguration, or service-level problem?
+- What is the specific DB memory issue flagged as "awfully bad"—heap usage, memory leak, or other anomaly?
+- Has playwright access been successfully configured and tested?
+- What file access tool/method is used for easy bot file access including DB on EC2?
+- Current health status of X and Relay's condition?

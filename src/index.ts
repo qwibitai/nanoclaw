@@ -379,10 +379,15 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
+      const allowBotsJids = Object.entries(registeredGroups)
+        .filter(([, g]) => g.allowBots)
+        .map(([jid]) => jid);
       const { messages, newTimestamp } = getNewMessages(
         jids,
         lastTimestamp,
         ASSISTANT_NAME,
+        200,
+        allowBotsJids,
       );
 
       if (messages.length > 0) {
@@ -456,6 +461,8 @@ async function startMessageLoop(): Promise<void> {
             chatJid,
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
+            200,
+            group.allowBots === true,
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;

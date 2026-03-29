@@ -89,7 +89,7 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
-} catch {
+  } catch {
     /* column already exists */
   }
 
@@ -102,7 +102,7 @@ function createSchema(database: Database.Database): void {
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
-} catch {
+  } catch {
     /* column already exists */
   }
 
@@ -115,7 +115,7 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
     );
-} catch {
+  } catch {
     /* column already exists */
   }
 
@@ -154,7 +154,7 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
     );
-} catch {
+  } catch {
     /* columns already exist */
   }
 }
@@ -325,28 +325,51 @@ export function getNewMessages(
   lastTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  allowBotsJids: string[] = [],
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Groups with allowBots=true also receive bot messages (but never our own).
   // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
+  let sql: string;
+  let params: unknown[];
 
-  const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+  if (allowBotsJids.length > 0) {
+    const abPlaceholders = allowBotsJids.map(() => '?').join(',');
+    sql = `
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+        FROM messages
+        WHERE timestamp > ? AND chat_jid IN (${placeholders})
+          AND (
+            (is_bot_message = 0 AND content NOT LIKE ?)
+            OR (is_from_me = 0 AND is_bot_message = 1 AND chat_jid IN (${abPlaceholders}))
+          )
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
+    `;
+    params = [lastTimestamp, ...jids, `${botPrefix}:%`, ...allowBotsJids, limit];
+  } else {
+    sql = `
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+        FROM messages
+        WHERE timestamp > ? AND chat_jid IN (${placeholders})
+          AND is_bot_message = 0 AND content NOT LIKE ?
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
+    `;
+    params = [lastTimestamp, ...jids, `${botPrefix}:%`, limit];
+  }
+
+  const rows = db.prepare(sql).all(...params) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -688,7 +711,7 @@ function migrateJsonState(): void {
       const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
       fs.renameSync(filePath, `${filePath}.migrated`);
       return data;
-  } catch {
+    } catch {
       return null;
     }
   };
