@@ -3,6 +3,11 @@
  * check-token-expiry.mjs
  * Checks Claude Code OAuth token expiry and sends a Telegram warning if it
  * expires within WARN_THRESHOLD_MS. Run on a schedule via launchd.
+ *
+ * Rate-limiting: once an alert is sent, a state file records the timestamp.
+ * Subsequent runs suppress the alert until RESEND_INTERVAL_MS has elapsed,
+ * preventing spam when nanoclaw is left unattended overnight.
+ * The state file is cleared automatically when the token is no longer expired.
  */
 import fs from 'fs';
 import os from 'os';
@@ -10,7 +15,9 @@ import path from 'path';
 import https from 'https';
 
 const WARN_THRESHOLD_MS = 0; // warn only when already expired
+const RESEND_INTERVAL_MS = 4 * 60 * 60 * 1000; // re-alert at most once per 4h
 const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
+const STATE_FILE = path.join(os.tmpdir(), 'nanoclaw-token-alert.json');
 const ENV_FILE = path.join(import.meta.dirname, '..', '.env');
 
 function readEnv(key) {
@@ -22,6 +29,26 @@ function readEnv(key) {
     }
   } catch { /* ignore */ }
   return process.env[key] || '';
+}
+
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeState(data) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
+
+function clearState() {
+  try {
+    fs.unlinkSync(STATE_FILE);
+  } catch { /* ignore */ }
 }
 
 function sendTelegram(botToken, chatId, text) {
@@ -56,6 +83,16 @@ async function main() {
 
   if (msRemaining > WARN_THRESHOLD_MS) {
     console.log(`Token OK — expires in ${minRemaining} min`);
+    clearState(); // token is valid again, reset so next expiry gets a fresh alert
+    process.exit(0);
+  }
+
+  // Token is expired — check if we already alerted recently
+  const state = readState();
+  const now = Date.now();
+  if (state?.lastAlertAt && now - state.lastAlertAt < RESEND_INTERVAL_MS) {
+    const nextIn = Math.round((RESEND_INTERVAL_MS - (now - state.lastAlertAt)) / 60000);
+    console.log(`Token expired but alert suppressed — next alert in ${nextIn} min`);
     process.exit(0);
   }
 
@@ -67,12 +104,10 @@ async function main() {
     process.exit(1);
   }
 
-  const msg = msRemaining <= 0
-    ? `⚠️ Claude Code token 已過期。請執行 /login 重新登入，Anlovely 才能繼續運作。`
-    : `⚠️ Claude Code token 將在 ${minRemaining} 分鐘後過期。請執行 /login 重新登入。`;
-
+  const msg = `⚠️ Claude Code token 已過期。請執行 /login 重新登入，Anlovely 才能繼續運作。`;
   console.log(msg);
   await sendTelegram(botToken, chatId, msg);
+  writeState({ lastAlertAt: now });
 }
 
 main();
