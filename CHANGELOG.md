@@ -2,6 +2,31 @@
 
 All notable changes to NanoClaw will be documented in this file.
 
+## [1.2.19] — 2026-03-29 (fork: yanggf8/nanoclaw)
+
+### OAuth token auto-refresh
+- **feat:** `scripts/refresh-token.mjs` — calls `platform.claude.com/v1/oauth/token` with the stored `refreshToken` to silently renew the OAuth access token. No user interaction, no Claude Code CLI session required.
+- **feat:** `launchd/com.nanoclaw.token-refresh.plist` — runs the refresh script every 4 hours so the ~5h token lifetime never lapses while the machine is on.
+- **fix:** `scripts/check-token-expiry.mjs` — alert script now attempts a token refresh before sending a Telegram warning; only alerts if the refresh itself fails. Rate-limited to one alert per 4 hours to prevent spam (previously fired every 30 min for the full duration of expiry). Alert threshold changed from "90 min before expiry" to "already expired".
+
+### Upstream cherry-picks (qwibitai/nanoclaw)
+- **fix:** Prevent full message history from being sent to container agents (`MAX_MESSAGES_PER_PROMPT`, default 10).
+- **fix(security):** Command injection prevention in `stopContainer`; mount path injection validation.
+- **fix:** Timezone validation — POSIX-style TZ values (e.g. `EST5EDT`) no longer crash the scheduler.
+- **fix:** Per-group trigger patterns — each group can now use a custom `@trigger` instead of the default `@AssistantName`.
+- **fix:** Agent-runner source cache now detects changes to any file in the tree, not just `index.ts`.
+- **fix(env):** Single-character `.env` values (e.g. `X=1`) no longer crash the parser.
+- **fix:** `isMain` flag is preserved on IPC group updates.
+- **fix:** Groups registered via IPC or at runtime now receive a `CLAUDE.md` from the global template so agents start with context.
+- **fix:** `isMain` groups always get the main CLAUDE.md template; existing files are never overwritten.
+- **fix(db):** Telegram DM backfill defaults to DMs instead of groups.
+- **fix:** Telegram `/start`, `/help`, and other non-command slash messages now pass through instead of being silently dropped.
+
+### Post-cherry-pick fixes
+- **fix:** `stopContainer` `execSync` now has a 15s timeout; `SIGKILL` fallback in container-runner is reachable again.
+- **fix:** Telegram bot-mention normalization (`@botUsername` → `@AssistantName`) now passes trigger gating in groups with custom triggers.
+- **fix:** Agent-runner cache staleness detection replaced with recursive directory mtime scan.
+
 ## [1.2.19] — 2026-03-27 (fork: yanggf8/nanoclaw)
 
 ### Apple Container compatibility
