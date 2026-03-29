@@ -91,9 +91,7 @@ export async function refreshOAuthToken(
           }
           const json = JSON.parse(Buffer.concat(chunks).toString());
           if (!json.access_token || typeof json.expires_in !== 'number') {
-            reject(
-              new Error('OAuth refresh response missing required fields'),
-            );
+            reject(new Error('OAuth refresh response missing required fields'));
             return;
           }
           resolve({
@@ -108,6 +106,56 @@ export async function refreshOAuthToken(
     req.write(body);
     req.end();
   });
+}
+
+export async function ensureValidToken(
+  credentialsPath: string,
+  tokenUrl = REFRESH_URL,
+  maxRetries = 3,
+): Promise<OAuthCredentials> {
+  const creds = readCredentials(credentialsPath);
+
+  // Token still valid (outside 5-minute buffer)
+  if (creds.expiresAt - Date.now() > REFRESH_BUFFER_MS) {
+    return creds;
+  }
+
+  logger.info('OAuth token expiring soon, refreshing...');
+
+  let lastError: Error | undefined;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const refreshed = await refreshOAuthToken(creds.refreshToken, tokenUrl);
+
+      // Write back to credentials file, preserving other fields
+      const raw = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
+      raw.claudeAiOauth = {
+        ...raw.claudeAiOauth,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: refreshed.expiresAt,
+      };
+      fs.writeFileSync(credentialsPath, JSON.stringify(raw, null, 2));
+
+      logger.info('OAuth token refreshed successfully');
+      return refreshed;
+    } catch (err) {
+      lastError = err as Error;
+      logger.warn(
+        { err, attempt, maxRetries },
+        'OAuth refresh attempt failed',
+      );
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  logger.error(
+    { err: lastError },
+    'All OAuth refresh attempts failed, using current token',
+  );
+  return creds;
 }
 
 export type AuthMode = 'api-key' | 'oauth';

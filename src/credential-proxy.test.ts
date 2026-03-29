@@ -18,6 +18,7 @@ import {
   startCredentialProxy,
   readCredentials,
   refreshOAuthToken,
+  ensureValidToken,
 } from './credential-proxy.js';
 
 function makeRequest(
@@ -303,5 +304,96 @@ describe('refreshOAuthToken', () => {
     await expect(
       refreshOAuthToken('some-token', 'http://127.0.0.1:59999/v1/oauth/token'),
     ).rejects.toThrow();
+  });
+});
+
+describe('ensureValidToken', () => {
+  let tmpDir: string;
+  let refreshServer: http.Server;
+  let refreshPort: number;
+  let refreshCallCount: number;
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-token-test-'));
+    refreshCallCount = 0;
+
+    refreshServer = http.createServer((req, res) => {
+      refreshCallCount++;
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            access_token: 'refreshed-access-token',
+            refresh_token: 'refreshed-refresh-token',
+            expires_in: 7200,
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      refreshServer.listen(0, '127.0.0.1', resolve),
+    );
+    refreshPort = (refreshServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((r) => refreshServer?.close(() => r()));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refreshes token when within 5 minutes of expiry', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'old-access',
+          refreshToken: 'valid-refresh',
+          expiresAt: Date.now() + 2 * 60 * 1000, // 2 min from now
+          scopes: ['read', 'write'],
+          subscriptionType: 'pro',
+        },
+      }),
+    );
+
+    const result = await ensureValidToken(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    expect(result.accessToken).toBe('refreshed-access-token');
+    expect(result.refreshToken).toBe('refreshed-refresh-token');
+    expect(result.expiresAt).toBeGreaterThan(Date.now());
+
+    // Verify file was written back with new tokens and original fields preserved
+    const written = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+    expect(written.claudeAiOauth.accessToken).toBe('refreshed-access-token');
+    expect(written.claudeAiOauth.refreshToken).toBe('refreshed-refresh-token');
+    expect(written.claudeAiOauth.scopes).toEqual(['read', 'write']);
+    expect(written.claudeAiOauth.subscriptionType).toBe('pro');
+  });
+
+  it('does not refresh when token is still valid', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'still-valid-access',
+          refreshToken: 'some-refresh',
+          expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour from now
+        },
+      }),
+    );
+
+    const result = await ensureValidToken(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    expect(result.accessToken).toBe('still-valid-access');
+    expect(refreshCallCount).toBe(0);
   });
 });
