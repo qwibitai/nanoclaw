@@ -361,6 +361,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
+  let lastErrorMessage = '';
   let outputSentToUser = false;
 
   const output = await runAgent(
@@ -401,12 +402,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
       if (result.status === 'error') {
         hadError = true;
+        lastErrorMessage = result.error || '';
       }
     },
   );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  if (output === 'fatal') {
+    // Permanent error — retrying will never help, advance cursor
+    return true;
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -437,7 +444,7 @@ async function runAgent(
   chatJid: string,
   imageAttachments: Array<{ relativePath: string; mediaType: string }>,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+): Promise<'success' | 'error' | 'fatal'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -502,13 +509,13 @@ async function runAgent(
 
     if (output.status === 'error') {
       // Clear stale session on fatal session errors to prevent retry loops
-      const fatalPatterns = [
+      const fatalSessionPatterns = [
         'No conversation found with session ID',
         'Could not process image',
       ];
       if (
         output.error &&
-        fatalPatterns.some((p) => output.error!.includes(p))
+        fatalSessionPatterns.some((p) => output.error!.includes(p))
       ) {
         delete sessions[group.folder];
         clearSession(group.folder);
@@ -517,6 +524,24 @@ async function runAgent(
           'Cleared stale session after fatal error',
         );
       }
+
+      // Permanent container errors — retrying will never help
+      const fatalContainerPatterns = [
+        'EACCES: permission denied',
+        'Cannot find module',
+        ...fatalSessionPatterns,
+      ];
+      if (
+        output.error &&
+        fatalContainerPatterns.some((p) => output.error!.includes(p))
+      ) {
+        logger.error(
+          { group: group.name, error: output.error },
+          'Fatal container error, skipping retry',
+        );
+        return 'fatal';
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',

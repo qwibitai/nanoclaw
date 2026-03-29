@@ -44,7 +44,7 @@ export interface SessionCommandDeps {
   runAgent: (
     prompt: string,
     onOutput: (result: AgentResult) => Promise<void>,
-  ) => Promise<'success' | 'error'>;
+  ) => Promise<'success' | 'error' | 'fatal'>;
   closeStdin: () => void;
   advanceCursor: (timestamp: string) => void;
   formatMessages: (msgs: NewMessage[], timezone: string) => string;

@@ -697,7 +697,7 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          error: `Container exited with code ${code}: ${stderr.slice(-200)}${stdout ? ' | stdout: ' + stdout.slice(-200) : ''}`,
         });
         return;
       }
