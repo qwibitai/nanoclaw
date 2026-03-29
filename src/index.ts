@@ -242,9 +242,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   // Track received messages for emoji status reactions
+  const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
   for (const msg of missedMessages) {
+    // For trigger-gated groups, only react to trigger messages and allowlisted senders
+    if (needsTrigger) {
+      const allowlistCfg = loadSenderAllowlist();
+      const isTrigger = TRIGGER_PATTERN.test(msg.content.trim()) &&
+        (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+      const allowed = isSenderAllowed(chatJid, msg.sender, allowlistCfg);
+      if (!isTrigger && !allowed) continue;
+    }
     const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-    statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
+    statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
   }
 
   // Advance user messages to THINKING (👀 → 💭)
@@ -252,7 +261,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
   );
   for (const msg of userMessages) {
-    statusTracker?.markThinking(msg.id);
+    statusTracker?.markThinking(msg.id, chatJid);
   }
 
   // Track idle timer for closing stdin when agent is idle
@@ -493,9 +502,21 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Track received messages for emoji status before advancing to THINKING
+            for (const msg of groupMessages) {
+              if (needsTrigger) {
+                const allowlistCfg = loadSenderAllowlist();
+                const isTrigger = TRIGGER_PATTERN.test(msg.content.trim()) &&
+                  (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+                const allowed = isSenderAllowed(chatJid, msg.sender, allowlistCfg);
+                if (!isTrigger && !allowed) continue;
+              }
+              const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+              statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
+            }
             // Agent is about to see these — advance to THINKING (👀 → 💭)
             for (const msg of groupMessages) {
-              statusTracker?.markThinking(msg.id);
+              statusTracker?.markThinking(msg.id, chatJid);
             }
             logger.debug(
               { chatJid, count: messagesToSend.length },
@@ -527,16 +548,51 @@ async function startMessageLoop(): Promise<void> {
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
  */
-function recoverPendingMessages(): void {
+function recoverPendingMessages(isStartup: boolean = false): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
+    const isMainGroup = group.isMain === true;
+
+    // For non-main trigger-gated groups, only recover if there's a trigger message
+    if (!isMainGroup && group.requiresTrigger !== false) {
+      const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+      const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+      if (pending.length === 0) continue;
+      const allowlistCfg = loadSenderAllowlist();
+      const hasTrigger = pending.some(
+        (m) =>
+          TRIGGER_PATTERN.test(m.content.trim()) &&
+          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
       );
+      if (!hasTrigger) continue;
+      if (isStartup) {
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: found unprocessed messages',
+        );
+      } else {
+        logger.debug(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: found unprocessed messages',
+        );
+      }
       queue.enqueueMessageCheck(chatJid);
+    } else {
+      const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+      const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+      if (pending.length > 0) {
+        if (isStartup) {
+          logger.info(
+            { group: group.name, pendingCount: pending.length },
+            'Recovery: found unprocessed messages',
+          );
+        } else {
+          logger.debug(
+            { group: group.name, pendingCount: pending.length },
+            'Recovery: found unprocessed messages',
+          );
+        }
+        queue.enqueueMessageCheck(chatJid);
+      }
     }
   }
 }
@@ -644,8 +700,11 @@ async function main(): Promise<void> {
       storeMessage(msg);
 
       // Fire 👀 immediately on real-time message event, not on next poll cycle
-      const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
-      statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
+      const group = registeredGroups[chatJid];
+      if (group?.isMain || group?.requiresTrigger === false) {
+        const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+        statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.sender, msg.is_bot_message === true);
+      }
     },
     onChatMetadata: (
       chatJid: string,
@@ -669,10 +728,10 @@ async function main(): Promise<void> {
       if (!channel) return;
       await channel.sendMessage(chatJid, text);
     },
+    isRegisteredGroup: (chatJid) => chatJid in registeredGroups,
     isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
     isContainerAlive: (chatJid) => queue.isActive(chatJid),
   });
-  await statusTracker.recover();
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
@@ -694,6 +753,9 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  // Recover status tracker AFTER channels are connected so reactions can be sent
+  await statusTracker.recover();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -764,7 +826,7 @@ async function main(): Promise<void> {
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);
-  recoverPendingMessages();
+  recoverPendingMessages(true);
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
