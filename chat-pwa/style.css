@@ -130,7 +130,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #chat-header { padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 600; font-size: 1em; display: flex; align-items: center; justify-content: space-between; }
 .mobile-back { display: none; }
-#chat-body { flex: 1; display: flex; min-height: 0; }
+#chat-body { flex: 1; display: flex; min-height: 0; position: relative; }
 #chat-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 /* Messages */
@@ -299,7 +299,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #members-list li .member-tag { font-size: 10px; color: var(--text-dim); margin-left: auto; flex-shrink: 0; }
 
 /* Bot detail panel */
-.bot-detail { width: 280px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+.bot-detail { position: absolute; left: 0; top: 0; width: 320px; height: 100%; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 50; box-shadow: 4px 0 12px rgba(0,0,0,0.3); }
 .bot-detail[hidden] { display: none; }
 .bot-detail-header { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px; color: var(--text-dim); }
 .bot-detail-form { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
