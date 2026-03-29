@@ -141,10 +141,7 @@ export async function ensureValidToken(
       return refreshed;
     } catch (err) {
       lastError = err as Error;
-      logger.warn(
-        { err, attempt, maxRetries },
-        'OAuth refresh attempt failed',
-      );
+      logger.warn({ err, attempt, maxRetries }, 'OAuth refresh attempt failed');
       if (attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -164,26 +161,41 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-export function startCredentialProxy(
+export async function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
+  credentialsPath = defaultCredentialsPath(),
 ): Promise<Server> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-  ]);
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL']);
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+
+  // For OAuth mode, read and validate token at startup (refreshes if near expiry)
+  let currentToken: string | undefined;
+  if (authMode === 'oauth') {
+    const creds = await ensureValidToken(credentialsPath);
+    currentToken = creds.accessToken;
+  }
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
+
+  let refreshTimer: ReturnType<typeof setInterval> | undefined;
+  if (authMode === 'oauth') {
+    const refreshInterval = async () => {
+      try {
+        const refreshed = await ensureValidToken(credentialsPath);
+        currentToken = refreshed.accessToken;
+      } catch (err) {
+        logger.error({ err }, 'Periodic OAuth refresh failed');
+      }
+    };
+    refreshTimer = setInterval(refreshInterval, 4 * 60 * 1000);
+    refreshTimer.unref();
+  }
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -214,8 +226,8 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            if (currentToken) {
+              headers['authorization'] = `Bearer ${currentToken}`;
             }
           }
         }
@@ -248,6 +260,10 @@ export function startCredentialProxy(
         upstream.write(body);
         upstream.end();
       });
+    });
+
+    server.on('close', () => {
+      if (refreshTimer) clearInterval(refreshTimer);
     });
 
     server.listen(port, host, () => {

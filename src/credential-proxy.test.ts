@@ -57,9 +57,13 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let tmpDir: string;
+  let credsPath: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-test-'));
+    credsPath = path.join(tmpDir, '.credentials.json');
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
@@ -76,13 +80,14 @@ describe('credential-proxy', () => {
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
     Object.assign(mockEnv, env, {
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
     });
-    proxyServer = await startCredentialProxy(0);
+    proxyServer = await startCredentialProxy(0, '127.0.0.1', credsPath);
     return (proxyServer.address() as AddressInfo).port;
   }
 
@@ -105,10 +110,18 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
-  it('OAuth mode replaces Authorization when container sends one', async () => {
-    proxyPort = await startProxy({
-      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
-    });
+  it('OAuth mode reads token from credentials file and injects Authorization', async () => {
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'creds-file-token',
+          refreshToken: 'refresh-token',
+          expiresAt: Date.now() + 3600000,
+        },
+      }),
+    );
+    proxyPort = await startProxy({});
 
     await makeRequest(
       proxyPort,
@@ -124,14 +137,22 @@ describe('credential-proxy', () => {
     );
 
     expect(lastUpstreamHeaders['authorization']).toBe(
-      'Bearer real-oauth-token',
+      'Bearer creds-file-token',
     );
   });
 
   it('OAuth mode does not inject Authorization when container omits it', async () => {
-    proxyPort = await startProxy({
-      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
-    });
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'creds-file-token',
+          refreshToken: 'refresh-token',
+          expiresAt: Date.now() + 3600000,
+        },
+      }),
+    );
+    proxyPort = await startProxy({});
 
     // Post-exchange: container uses x-api-key only, no Authorization header
     await makeRequest(
