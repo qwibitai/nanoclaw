@@ -39,7 +39,7 @@ Run commands directly—don't tell the user to run them.
 ```bash
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+./container/build.sh # Rebuild agent container (only for Dockerfile/dependency changes, NOT for agent-runner code)
 ```
 
 Service management:
@@ -72,6 +72,8 @@ This must be part of every deploy. See the deploy checklist in memory.
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+**Agent-runner code changes do NOT require container rebuild.** The entrypoint auto-recompiles TypeScript when the mounted source (`/app/src`) is newer than the compiled output (`/app/dist`). Just `git pull` on prod and restart the service. Rebuild is only needed for Dockerfile changes (apt packages, global npm installs, entrypoint script).
 
 ## Auth Mode Switching (Production)
 
