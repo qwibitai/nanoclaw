@@ -308,10 +308,10 @@ export class WhatsAppChannel implements Channel {
                   caption,
                 );
                 if (result) {
-                  const isGif =
-                    normalized?.videoMessage?.gifPlayback === true;
+                  const isGif = normalized?.videoMessage?.gifPlayback === true;
                   const label = isGif ? 'GIF' : 'Video';
-                  content = `[${label} frame: ${result.relativePath}] ${caption}`.trim();
+                  content =
+                    `[${label} frame: ${result.relativePath}] ${caption}`.trim();
                 }
               } catch (err) {
                 logger.warn(

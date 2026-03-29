@@ -191,7 +191,10 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result: to requester if cross-group, otherwise to target group
-          await deps.sendMessage(reportToJid || task.chat_jid, streamedOutput.result);
+          await deps.sendMessage(
+            reportToJid || task.chat_jid,
+            streamedOutput.result,
+          );
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
