@@ -1,2 +1,0 @@
-[    2052ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://colab.clients6.google.com/$rpc/google.internal.colab.v1.UserInfoService/GetUserInfo:0
-[    3399ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://colab.clients6.google.com/$rpc/google.internal.colab.v1.UserInfoService/GetUserInfo:0

@@ -1,5 +1,0 @@
-[    2430ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ https://www.mahadiscom.in/consumer/contact-us.php:0
-[    6636ms] TypeError: Cannot read properties of null (reading 'addEventListener')
-    at https://www.mahadiscom.in/consumer/contact-us.php:3487:41
-[    7241ms] Uncaught TypeError: Cannot read properties of null (reading 'appendChild')
-    at <anonymous> (https://translation-plugin.bhashini.co.in/v3/website_translation_utility.js?ver=202603101928:1338:16)

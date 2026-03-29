@@ -1,6 +1,0 @@
-{
-  "timestamp": "2026-03-25T16:46:11Z",
-  "trigger_command": "cd /tmp/cc-harness-fix && git remote set-url origin git@github.com:bandepanu/claude-code-harness.git && git push 2>&1",
-  "status": "completed",
-  "conclusion": "success"
-}

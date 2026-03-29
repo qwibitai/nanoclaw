@@ -33,4 +33,16 @@ secrets.yaml
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# Claude Code local state (not repo content)
+.claude/state/
+.claude/sessions/
+.claude/memory/
+.claude/hooks.json
+
+# Temp / runtime files
+*.pid
+Plans.md
+.env.bak
+.playwright-mcp/
+
 agents-sdk-docs

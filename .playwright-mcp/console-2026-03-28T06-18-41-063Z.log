@@ -1,4 +1,0 @@
-[    1387ms] [WARNING] The FedCM text color is ignored because background color was not provided @ https://blog.bytebytego.com/:0
-[    1597ms] [ERROR] When fetching the accounts endpoint, a 401 HTTP response code was received. @ https://blog.bytebytego.com/:0
-[    1598ms] [ERROR] The provider's accounts list fetch resulted in an error response code. @ https://blog.bytebytego.com/:0
-[   10662ms] Error retrieving a token.

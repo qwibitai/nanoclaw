@@ -1,9 +1,0 @@
-{"type":"session.start","ts":"2026-03-23T16:49:11Z","state":"initialized","data":{"cc_session_id":"43b47413-0a6c-4ee7-911a-75f33edcd22f","note":"no_archive_found"}}
-{"id":"event-000001","type":"session.resume","ts":"2026-03-23T16:49:11Z","state":"initialized"}
-{"id":"event-000002","type":"tool.bash","ts":"2026-03-23T16:49:28Z","state":"initialized","data":{"command":"pgrep -f "ingest.py" && tail -3 /home/psg/consulting/ingest.log"}}
-{"id":"event-000003","type":"tool.write","ts":"2026-03-23T16:49:56Z","state":"initialized","data":{"file_path":"/home/psg/.claude/projects/-home-psg-nanoclaw/memory/consulting_pipeline.md"}}
-{"id":"event-000004","type":"session.stop","ts":"2026-03-23T16:50:00Z","state":"stopped"}
-{"type":"session.resume","ts":"2026-03-23T16:50:20Z","state":"initialized","data":{"cc_session_id":"43b47413-0a6c-4ee7-911a-75f33edcd22f","method":"mapping"}}
-{"id":"event-000001","type":"session.start","ts":"2026-03-23T16:50:20Z","state":"initialized"}
-{"id":"event-000002","type":"tool.bash","ts":"2026-03-23T16:50:59Z","state":"initialized","data":{"command":"rm -f /home/psg/.claude/state/221869.json && ls /home/psg/.claude/state/ 2>/dev/null || echo "state dir empty""}}
-{"id":"event-000003","type":"session.stop","ts":"2026-03-23T16:51:02Z","state":"stopped"}
