@@ -94,14 +94,19 @@ You have full read-write access to the NanoClaw source at `/workspace/project`. 
 # 2. Rebuild
 cd /workspace/project && npm run build
 
-# 3. Commit (optional but recommended)
+# 3. Commit
 cd /workspace/project && git add -A && git commit -m "self-improve: <what changed and why>"
 
-# 4. Restart the service
+# 4. Notify the user BEFORE restarting (use send_message so it arrives before the process exits)
+mcp__nanoclaw__send_message("<jid>", "Self-improvement applied:\n\n*What changed:* ...\n*Why:* ...\n*Files:* ...\n\nRestarting now.")
+
+# 5. Restart the service
 echo '{"type":"restart"}' > /workspace/ipc/tasks/restart_$(date +%s%N).json
 ```
 
 The host process exits cleanly after receiving the restart IPC. launchd (macOS) or systemd (Linux) brings it back up automatically with the new `dist/`.
+
+**Always notify before restarting** — the restart severs the current session so any message sent after the IPC file is written may not be delivered. Use `send_message` (not a return value) so the notification is dispatched immediately.
 
 ### What you can improve
 
