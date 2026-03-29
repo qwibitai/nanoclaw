@@ -6,7 +6,12 @@ vi.mock('sharp', () => {
   const mockSharp = vi.fn(() => ({
     resize: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
-    toBuffer: vi.fn().mockResolvedValue(Buffer.from('resized-image-data')),
+    toBuffer: vi.fn().mockResolvedValue((() => {
+      // Create a buffer with valid JPEG header and minimum size
+      const buf = Buffer.alloc(2048);
+      buf[0] = 0xFF; buf[1] = 0xD8; buf[2] = 0xFF;
+      return buf;
+    })()),
   }));
   return { default: mockSharp };
 });

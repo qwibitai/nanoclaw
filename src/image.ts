@@ -74,6 +74,11 @@ export async function processImage(
     .jpeg({ quality: 85 })
     .toBuffer();
 
+  // Validate sharp output — corrupt input can produce tiny/invalid buffers
+  if (resized.length < 1024 || resized[0] !== 0xFF || resized[1] !== 0xD8) {
+    return null;
+  }
+
   const attachDir = path.join(groupDir, 'attachments');
   fs.mkdirSync(attachDir, { recursive: true });
 

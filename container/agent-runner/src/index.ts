@@ -450,7 +450,19 @@ async function runQuery(
     for (const img of containerInput.imageAttachments) {
       const imgPath = path.join('/workspace/group', img.relativePath);
       try {
-        const data = fs.readFileSync(imgPath).toString('base64');
+        const raw = fs.readFileSync(imgPath);
+        // Validate image before sending to API
+        const isValidJpeg = raw.length >= 3 && raw[0] === 0xFF && raw[1] === 0xD8 && raw[2] === 0xFF;
+        const isValidPng = raw.length >= 4 && raw[0] === 0x89 && raw[1] === 0x50 && raw[2] === 0x4E && raw[3] === 0x47;
+        if (!isValidJpeg && !isValidPng) {
+          log(`Skipping image with invalid header: ${imgPath} (${raw.length} bytes)`);
+          continue;
+        }
+        if (raw.length < 1024) {
+          log(`Skipping tiny image: ${imgPath} (${raw.length} bytes)`);
+          continue;
+        }
+        const data = raw.toString('base64');
         blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data } });
       } catch (err) {
         log(`Failed to load image: ${imgPath}`);
