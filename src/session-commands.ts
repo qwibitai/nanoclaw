@@ -19,13 +19,16 @@ export function extractSessionCommand(
 
 /**
  * Check if a session command sender is authorized.
- * Allowed: main group (any sender), or trusted/admin sender (is_from_me) in any group.
+ *
+ * Previously restricted to main group or admin (isFromMe). Opened to all
+ * senders so group members can /compact without admin intervention.
+ * To revert: `return isMainGroup || isFromMe;`
  */
 export function isSessionCommandAllowed(
-  isMainGroup: boolean,
-  isFromMe: boolean,
+  _isMainGroup: boolean,
+  _isFromMe: boolean,
 ): boolean {
-  return isMainGroup || isFromMe;
+  return true;
 }
 
 /** Minimal agent result interface — matches the subset of ContainerOutput used here. */
