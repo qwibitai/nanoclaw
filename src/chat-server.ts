@@ -258,16 +258,7 @@ async function authenticateRequest(
     return { ok: true, identity: tsUser };
   }
 
-  // No valid auth
-  if (!CHAT_SERVER_TOKEN) {
-    // No token configured — allow but warn
-    logger.warn(
-      { remoteIp },
-      'Remote connection without auth (no CHAT_SERVER_TOKEN configured)',
-    );
-    return { ok: true, identity: `user@${remoteIp}` };
-  }
-
+  // No valid auth — reject
   return { ok: false, reason: 'Unauthorized' };
 }
 
