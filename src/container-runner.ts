@@ -14,6 +14,8 @@ import {
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
+  HOST_CLAUDE_DIR,
+  HOME_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
@@ -104,7 +106,7 @@ function rewriteHookCommand(command: string): string {
  * merges with required NanoClaw env vars. Regenerates when host settings change.
  */
 function writeContainerSettings(settingsFile: string): void {
-  const hostSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+  const hostSettingsPath = path.join(HOST_CLAUDE_DIR, 'settings.json');
 
   // Required env vars for containers
   const containerEnv = {
@@ -254,7 +256,7 @@ function buildVolumeMounts(
   // Mount ~/.atlas into the container so enforcement hooks can access
   // state files, agents, lib, and other Atlas infrastructure.
   // Hooks use Path.home() / ".atlas" which resolves to /home/node/.atlas in container.
-  const atlasDir = path.join(os.homedir(), '.atlas');
+  const atlasDir = path.join(HOME_DIR, '.atlas');
   if (fs.existsSync(atlasDir)) {
     mounts.push({
       hostPath: atlasDir,

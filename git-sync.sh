@@ -161,3 +161,11 @@ if [ -d /home/atlas/projects/crownscape ]; then
     shopt -u nullglob
 fi
 
+# Heartbeat — log once per hour so VPS Atlas can confirm all routes are alive
+# (cron runs every 5min; MINUTE<5 catches the :00 run each hour)
+MINUTE=$(date +%M)
+if [ "$MINUTE" -lt 5 ]; then
+    ROUTES="nanoclaw atlas-core claude-config gpg/monthly-reporting gpg/ops-hub wisestream/social-post-studio crownscape/*"
+    TIMESTAMP_NOW=$(date +%Y-%m-%dT%H:%M:%S%z)
+    echo "$TIMESTAMP_NOW | HEARTBEAT | all | routes checked: $ROUTES" >> "$LOG"
+fi
