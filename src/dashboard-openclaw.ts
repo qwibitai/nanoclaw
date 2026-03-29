@@ -200,13 +200,15 @@ function getSessions(): Array<{ id: string; modified: string }> {
   return sessions;
 }
 
-function getUpdateInfo(): { available: boolean; latest: string | null; current: string | null } {
+function getUpdateInfo(currentVersion: string | null): { available: boolean; latest: string | null; current: string | null } {
   try {
     const updateCheck = readJson(path.join(OC_DIR, 'update-check.json'));
+    const latest = updateCheck?.lastAvailableVersion || null;
+    const current = currentVersion || updateCheck?.currentVersion || null;
     return {
-      available: !!updateCheck?.updateAvailable,
-      latest: updateCheck?.latestVersion || null,
-      current: updateCheck?.currentVersion || null,
+      available: !!(latest && current && latest !== current),
+      latest,
+      current,
     };
   } catch {
     return { available: false, latest: null, current: null };
@@ -220,7 +222,7 @@ function apiData() {
   const logs = getRecentLogs();
   const cronJobs = getCronJobs();
   const sessions = getSessions();
-  const update = getUpdateInfo();
+  const update = getUpdateInfo(service.version);
 
   const model = config?.agents?.defaults?.model?.primary || 'unknown';
   const fallbacks = config?.agents?.defaults?.model?.fallbacks || [];

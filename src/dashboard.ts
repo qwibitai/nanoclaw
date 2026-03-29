@@ -205,8 +205,38 @@ function getChannelStatus(): Array<{
     .map(name => ({ name, ...status[name] }));
 }
 
+function getNanoClawUpdate(): { available: boolean; current: string | null; latest: string | null } {
+  try {
+    const pkgPath = path.resolve(PROJECT_ROOT, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    const current = pkg.version || null;
+
+    // Check npm registry for latest version
+    const latest = execSync('npm view nanoclaw version 2>/dev/null', {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+
+    return {
+      available: !!(latest && current && latest !== current),
+      current,
+      latest: latest || null,
+    };
+  } catch {
+    // Fallback: just report current version
+    try {
+      const pkgPath = path.resolve(PROJECT_ROOT, 'package.json');
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      return { available: false, current: pkg.version || null, latest: null };
+    } catch {
+      return { available: false, current: null, latest: null };
+    }
+  }
+}
+
 const EMPTY_DATA = {
   service: { running: false, pid: null, uptime: null },
+  update: { available: false, current: null as string | null, latest: null as string | null },
   channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null; account: string | null }>,
   groups: [],
   groupFolders: [],
@@ -222,7 +252,7 @@ const EMPTY_DATA = {
 
 function apiData() {
   const db = getDb();
-  if (!db) return { ...EMPTY_DATA, channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
+  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
 
   const groups = db
     .prepare(
@@ -310,8 +340,11 @@ function apiData() {
 
   db.close();
 
+  const update = getNanoClawUpdate();
+
   return {
     service,
+    update,
     channels,
     groups,
     groupFolders,
@@ -503,6 +536,15 @@ const HTML = `<!DOCTYPE html>
     font-size: 11px;
     white-space: nowrap;
   }
+  .update-banner {
+    background: rgba(253,203,110,0.1);
+    border: 1px solid var(--orange);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--orange);
+  }
   .empty { color: var(--text2); font-style: italic; font-size: 13px; padding: 12px 0; }
   .time-ago { color: var(--text2); }
   @media (max-width: 768px) {
@@ -520,6 +562,7 @@ const HTML = `<!DOCTYPE html>
   </div>
 </header>
 
+<div id="update-banner"></div>
 <div class="grid" id="top-stats"></div>
 <div class="grid" id="main-content"></div>
 
@@ -567,12 +610,21 @@ function renderTopStats() {
   const svc = d.service;
   document.getElementById('status-dot').className = svc.running ? 'on' : 'off';
 
+  // Update banner
+  if (d.update && d.update.available) {
+    document.getElementById('update-banner').innerHTML =
+      '<div class="update-banner">Update available: <strong>v' + esc(d.update.latest) + '</strong> (current: v' + esc(d.update.current) + '). Run: <code>git pull && npm run build</code></div>';
+  } else if (d.update && d.update.current) {
+    document.getElementById('update-banner').innerHTML = '';
+  }
+
   let html = '';
   // Service status
   html += '<div class="card"><h2>Service</h2>';
   html += '<div class="stat-row"><span>Status</span><span class="stat-value">' + (svc.running ? '🟢 Running' : '🔴 Stopped') + '</span></div>';
   if (svc.pid) html += '<div class="stat-row"><span>PID</span><span class="stat-value">' + svc.pid + '</span></div>';
   if (svc.uptime) html += '<div class="stat-row"><span>Uptime</span><span class="stat-value">' + svc.uptime + '</span></div>';
+  if (d.update && d.update.current) html += '<div class="stat-row"><span>Version</span><span class="stat-value">v' + esc(d.update.current) + '</span></div>';
   html += '<div class="stat-row"><span>Containers</span><span class="stat-value">' + d.containers.length + ' / 5</span></div>';
   html += '</div>';
 
