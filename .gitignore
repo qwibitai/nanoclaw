@@ -36,6 +36,7 @@ container/gh
 .idea/
 .vscode/
 .claude/settings.local.json
+.claude/worktrees/
 
 # Skills system (local per-installation state)
 .nanoclaw/
