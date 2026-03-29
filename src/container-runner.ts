@@ -142,6 +142,7 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            NANOCLAW_MODEL: process.env.NANOCLAW_MODEL || '',
           },
         },
         null,
@@ -164,6 +165,27 @@ function buildVolumeMounts(
         if (err?.code === 'EACCES') {
           fs.rmSync(dstDir, { recursive: true, force: true });
           fs.cpSync(srcDir, dstDir, { recursive: true });
+        } else {
+          throw err;
+        }
+      }
+    }
+  }
+  // Sync agents from container/agents/ into each group's .claude/agents/
+  const agentsSrc = path.join(process.cwd(), 'container', 'agents');
+  const agentsDst = path.join(groupSessionsDir, 'agents');
+  if (fs.existsSync(agentsSrc)) {
+    fs.mkdirSync(agentsDst, { recursive: true });
+    for (const agentFile of fs.readdirSync(agentsSrc)) {
+      const srcFile = path.join(agentsSrc, agentFile);
+      if (fs.statSync(srcFile).isDirectory()) continue;
+      const dstFile = path.join(agentsDst, agentFile);
+      try {
+        fs.copyFileSync(srcFile, dstFile);
+      } catch (err: any) {
+        if (err?.code === 'EACCES') {
+          fs.rmSync(dstFile, { force: true });
+          fs.copyFileSync(srcFile, dstFile);
         } else {
           throw err;
         }

@@ -3,6 +3,15 @@
 ## Hora y fecha
 Para saber la hora actual, usa `date` en Bash. Tu timezone es America/Mexico_City.
 
+## Escalation a Sonnet
+Tienes acceso al subagente `deep-thinker` para delegar tareas complejas a un modelo más capaz. Úsalo cuando:
+- Te piden generar código no trivial (más de ~20 líneas, lógica compleja)
+- Necesitas análisis profundo o multi-step reasoning
+- La tarea requiere múltiples herramientas encadenadas (leer → analizar → escribir → verificar)
+- No estás seguro de tu respuesta en algo técnico
+
+Para conversación casual, preguntas simples, búsquedas web, y tareas rutinarias — responde tú directamente sin escalar.
+
 ## Errores de imagen
 Si recibes "Could not process image", NO reintentes. La imagen es incompatible con la API. Informa al usuario y continúa sin la imagen.
 

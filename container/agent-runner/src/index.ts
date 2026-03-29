@@ -414,6 +414,7 @@ function buildMcpServers(containerInput: ContainerInput, mcpServerPath: string):
 function buildAllowedTools(containerInput: ContainerInput, mcpServerPath: string): string[] {
   const mcpServers = buildMcpServers(containerInput, mcpServerPath);
   return [
+    'Agent',
     'Bash',
     'Read', 'Write', 'Edit', 'Glob', 'Grep',
     'WebSearch', 'WebFetch',
@@ -432,6 +433,8 @@ function buildAllowedTools(containerInput: ContainerInput, mcpServerPath: string
  * Also pipes IPC messages into the stream during the query.
  */
 const FALLBACK_MODEL = 'claude-sonnet-4-6-20250514';
+const DEFAULT_MODEL = process.env.NANOCLAW_MODEL || 'claude-haiku-4-5-20251001';
+const isHaiku = DEFAULT_MODEL.includes('haiku');
 
 async function runQuery(
   prompt: string,
@@ -525,6 +528,8 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: DEFAULT_MODEL,
+      ...(isHaiku ? { thinking: { type: 'disabled' as const } } : {}),
       fallbackModel: FALLBACK_MODEL,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
