@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type { AddressInfo } from 'net';
 
 const mockEnv: Record<string, string> = {};
@@ -11,7 +14,11 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import {
+  startCredentialProxy,
+  readCredentials,
+  refreshOAuthToken,
+} from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -188,5 +195,113 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+});
+
+describe('readCredentials', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cred-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads accessToken, refreshToken, expiresAt from credentials file', () => {
+    const credPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'at-123',
+          refreshToken: 'rt-456',
+          expiresAt: 1700000000000,
+        },
+      }),
+    );
+
+    const creds = readCredentials(credPath);
+    expect(creds.accessToken).toBe('at-123');
+    expect(creds.refreshToken).toBe('rt-456');
+    expect(creds.expiresAt).toBe(1700000000000);
+  });
+
+  it('throws if file does not exist', () => {
+    expect(() =>
+      readCredentials(path.join(tmpDir, 'nonexistent.json')),
+    ).toThrow();
+  });
+
+  it('throws if claudeAiOauth is missing', () => {
+    const credPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(credPath, JSON.stringify({ someOtherKey: {} }));
+
+    expect(() => readCredentials(credPath)).toThrow(/claudeAiOauth/);
+  });
+});
+
+describe('refreshOAuthToken', () => {
+  let tokenServer: http.Server;
+  let tokenPort: number;
+
+  beforeEach(async () => {
+    tokenServer = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const body = new URLSearchParams(Buffer.concat(chunks).toString());
+        const refreshToken = body.get('refresh_token');
+
+        if (refreshToken === 'valid-refresh') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              access_token: 'new-access-token',
+              refresh_token: 'new-refresh-token',
+              expires_in: 3600,
+            }),
+          );
+        } else {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_grant' }));
+        }
+      });
+    });
+    await new Promise<void>((resolve) =>
+      tokenServer.listen(0, '127.0.0.1', resolve),
+    );
+    tokenPort = (tokenServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((r) => tokenServer?.close(() => r()));
+  });
+
+  it('returns new tokens on successful refresh', async () => {
+    const result = await refreshOAuthToken(
+      'valid-refresh',
+      `http://127.0.0.1:${tokenPort}/v1/oauth/token`,
+    );
+
+    expect(result.accessToken).toBe('new-access-token');
+    expect(result.refreshToken).toBe('new-refresh-token');
+    expect(result.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it('throws on 401 response', async () => {
+    await expect(
+      refreshOAuthToken(
+        'invalid-refresh',
+        `http://127.0.0.1:${tokenPort}/v1/oauth/token`,
+      ),
+    ).rejects.toThrow(/401/);
+  });
+
+  it('throws on network error', async () => {
+    await expect(
+      refreshOAuthToken('some-token', 'http://127.0.0.1:59999/v1/oauth/token'),
+    ).rejects.toThrow();
   });
 });

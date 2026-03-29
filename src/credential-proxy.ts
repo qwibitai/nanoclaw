@@ -13,9 +13,102 @@
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+
+const REFRESH_URL = 'https://platform.claude.com/v1/oauth/token';
+// Anthropic Claude CLI OAuth client ID
+const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
+
+export interface OAuthCredentials {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+export function defaultCredentialsPath(): string {
+  return path.join(os.homedir(), '.claude', '.credentials.json');
+}
+
+export function readCredentials(credentialsPath: string): OAuthCredentials {
+  const raw = fs.readFileSync(credentialsPath, 'utf-8');
+  const data = JSON.parse(raw);
+  const oauth = data.claudeAiOauth;
+  if (!oauth) {
+    throw new Error(
+      'credentials file missing claudeAiOauth — run "claude" to authenticate',
+    );
+  }
+  return {
+    accessToken: oauth.accessToken,
+    refreshToken: oauth.refreshToken,
+    expiresAt: oauth.expiresAt,
+  };
+}
+
+export async function refreshOAuthToken(
+  refreshToken: string,
+  tokenUrl = REFRESH_URL,
+): Promise<OAuthCredentials> {
+  const url = new URL(tokenUrl);
+  const isHttps = url.protocol === 'https:';
+  const makeReq = isHttps ? httpsRequest : httpRequest;
+
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: CLIENT_ID,
+  }).toString();
+
+  return new Promise((resolve, reject) => {
+    const req = makeReq(
+      {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'content-length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            reject(
+              new Error(
+                `OAuth refresh failed with ${res.statusCode}: ${Buffer.concat(chunks).toString()}`,
+              ),
+            );
+            return;
+          }
+          const json = JSON.parse(Buffer.concat(chunks).toString());
+          if (!json.access_token || typeof json.expires_in !== 'number') {
+            reject(
+              new Error('OAuth refresh response missing required fields'),
+            );
+            return;
+          }
+          resolve({
+            accessToken: json.access_token,
+            refreshToken: json.refresh_token,
+            expiresAt: Date.now() + json.expires_in * 1000,
+          });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
 
 export type AuthMode = 'api-key' | 'oauth';
 
