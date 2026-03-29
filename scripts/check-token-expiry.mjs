@@ -9,6 +9,7 @@
  * preventing spam when nanoclaw is left unattended overnight.
  * The state file is cleared automatically when the token is no longer expired.
  */
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -85,6 +86,21 @@ async function main() {
     console.log(`Token OK — expires in ${minRemaining} min`);
     clearState(); // token is valid again, reset so next expiry gets a fresh alert
     process.exit(0);
+  }
+
+  // Token is expired — try to refresh it first before alerting
+  try {
+    const refreshScript = path.join(import.meta.dirname, 'refresh-token.mjs');
+    execFileSync(process.execPath, [refreshScript], { stdio: 'pipe', timeout: 30000 });
+    // Re-read credentials to check if refresh succeeded
+    const freshCreds = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, 'utf-8'));
+    if ((freshCreds?.claudeAiOauth?.expiresAt ?? 0) > Date.now()) {
+      console.log('Token refreshed automatically — no alert needed');
+      clearState();
+      process.exit(0);
+    }
+  } catch {
+    // refresh failed, fall through to alert
   }
 
   // Token is expired — check if we already alerted recently
