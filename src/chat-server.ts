@@ -252,13 +252,22 @@ async function authenticateRequest(
     return { ok: true, identity: `user@${remoteIp}` };
   }
 
-  // 4. Tailscale identity
+  // Check Tailscale identity
   const tsUser = await tailscaleWhois(remoteIp);
   if (tsUser) {
     return { ok: true, identity: tsUser };
   }
 
-  // 5. No valid auth — reject
+  // No valid auth
+  if (!CHAT_SERVER_TOKEN) {
+    // No token configured — allow but warn
+    logger.warn(
+      { remoteIp },
+      'Remote connection without auth (no CHAT_SERVER_TOKEN configured)',
+    );
+    return { ok: true, identity: `user@${remoteIp}` };
+  }
+
   return { ok: false, reason: 'Unauthorized' };
 }
 
@@ -826,8 +835,8 @@ function setupWebSocket(server: http.Server): void {
           client.identity = agent.agent_id;
           client.identity_type = 'agent';
         } else {
-          // Use identity from HTTP upgrade authentication (covers all auth methods)
-          client.identity = (req as any)._authIdentity ?? `user@${remoteIp}`;
+          const tsUser = await tailscaleWhois(remoteIp);
+          client.identity = tsUser ?? `user@${remoteIp}`;
           client.identity_type = 'user';
         }
         authenticated = true;
