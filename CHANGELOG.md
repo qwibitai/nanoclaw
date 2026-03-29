@@ -4,6 +4,10 @@ All notable changes to NanoClaw will be documented in this file.
 
 ## [1.2.19] — 2026-03-29 (fork: yanggf8/nanoclaw)
 
+### OAuth token auto-refresh (updated 2026-03-29)
+- **fix:** Token-refresh launchd plist is now generated dynamically by `setup/service.ts` (alongside `com.nanoclaw.plist`) using the resolved `nodePath` and `projectRoot` — no more hard-coded `/opt/homebrew/bin/node` or `/Users/gf/nanoclaw`. The static `launchd/com.nanoclaw.token-refresh.plist` file has been removed.
+- **fix:** Token-refresh job is now installed automatically by `/setup` — no manual plist copy required.
+
 ### OAuth token auto-refresh
 - **feat:** `scripts/refresh-token.mjs` — calls `platform.claude.com/v1/oauth/token` with the stored `refreshToken` to silently renew the OAuth access token. No user interaction, no Claude Code CLI session required.
 - **feat:** `launchd/com.nanoclaw.token-refresh.plist` — runs the refresh script every 4 hours so the ~5h token lifetime never lapses while the machine is on.
