@@ -1,6 +1,6 @@
 {
   "name": "nanoclaw",
-  "version": "1.2.34",
+  "version": "1.2.42",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
@@ -36,6 +36,7 @@
     "yaml": "^2.8.2",
     "grammy": "^1.39.3",
     "zod": "^4.3.6"
+    "cron-parser": "5.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

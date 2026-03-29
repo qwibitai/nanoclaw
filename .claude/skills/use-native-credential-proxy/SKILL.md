@@ -64,6 +64,16 @@ This merges in:
 
 If the merge reports conflicts beyond `package-lock.json`, resolve them by reading the conflicted files and understanding the intent of both sides.
 
+### Update main group CLAUDE.md
+
+Replace the OneCLI auth reference with the native proxy:
+
+In `groups/main/CLAUDE.md`, replace:
+> OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
+
+with:
+> The native credential proxy manages credentials (including Anthropic auth) via `.env` — see `src/credential-proxy.ts`.
+
 ### Validate code changes
 
 ```bash

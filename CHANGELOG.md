@@ -4,6 +4,10 @@ All notable changes to NanoClaw will be documented in this file.
 
 For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
 
+## [1.2.35] - 2026-03-26
+
+- [BREAKING] OneCLI Agent Vault replaces the built-in credential proxy. Existing `.env` credentials must be migrated to the vault. Run `/init-onecli` to install OneCLI and migrate credentials.
+
 ## [1.2.21] - 2026-03-22
 
 - Added opt-in diagnostics via PostHog with explicit user consent (Yes / No / Never ask again)
