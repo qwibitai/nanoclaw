@@ -16,6 +16,7 @@
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "dashboard": "tsx src/dashboard.ts",
+    "dashboard:openclaw": "tsx src/dashboard-openclaw.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
