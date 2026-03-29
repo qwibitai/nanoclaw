@@ -88,28 +88,46 @@ export function resetInteractiveCliFailures(): void {
   interactiveCliFailures = 0;
 }
 
-/** Probe CLI health by running a lightweight auth-testing command with a 30s timeout. */
+/**
+ * Probe CLI health: (1) binary exists via `claude --version`, (2) OAuth credentials
+ * file exists and token hasn't expired. This is free and instant — no API calls.
+ */
 function probeCli(): Promise<boolean> {
   return new Promise((resolve) => {
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
     delete env.CLAUDE_CODE_OAUTH_TOKEN;
 
-    // Use `claude -p` with a trivial prompt to test actual API auth,
-    // not just that the binary exists. This catches expired OAuth tokens.
-    const proc = spawn('claude', ['-p', 'Reply with exactly: ok', '--output-format', 'json', '--model', 'claude-haiku-4-5', '--max-turns', '1'], { env, timeout: 30000 });
+    // Step 1: verify the binary runs
+    const proc = spawn('claude', ['--version'], { env, timeout: 15000 });
     let stdout = '';
     proc.stdout?.on('data', (d: Buffer) => { stdout += d; });
     proc.on('close', (code) => {
-      if (code !== 0) {
+      if (code !== 0 || !stdout.trim()) {
+        logger.warn('CLI probe: binary check failed');
         resolve(false);
         return;
       }
-      // Verify we got a parseable response (proves auth worked)
+
+      // Step 2: verify OAuth credentials exist and aren't expired
+      const home = process.env.HOME || require('os').homedir();
+      const credsPath = path.join(home, '.claude', '.credentials.json');
       try {
-        const output = JSON.parse(stdout);
-        resolve(Array.isArray(output) && output.length > 0);
-      } catch {
+        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+        const oauth = creds.claudeAiOauth;
+        if (!oauth?.accessToken) {
+          logger.warn('CLI probe: no accessToken in credentials');
+          resolve(false);
+          return;
+        }
+        if (oauth.expiresAt && oauth.expiresAt < Date.now()) {
+          logger.warn({ expiresAt: new Date(oauth.expiresAt).toISOString() }, 'CLI probe: OAuth token expired');
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      } catch (err) {
+        logger.warn({ err }, 'CLI probe: failed to read credentials file');
         resolve(false);
       }
     });
