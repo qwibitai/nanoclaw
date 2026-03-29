@@ -265,7 +265,7 @@ async function buildContainerArgs(
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}:z`);
     }
   }
 
