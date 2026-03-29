@@ -3,6 +3,7 @@ import {
   BUDGET_INTERACTIVE,
   CLI_ENABLED,
   CLI_FALLBACK_ENABLED,
+  CLI_TIMEOUT,
   CONTAINER_TIMEOUT_MS,
   HISTORY_MESSAGE_LIMIT,
   IDLE_TIMEOUT,
@@ -249,7 +250,7 @@ async function runAgent(
           },
           (proc) => queue.registerProcess(chatJid, proc, `cli-interactive-${group.folder}`, group.folder),
         ),
-        CONTAINER_TIMEOUT_MS,
+        CLI_TIMEOUT + 30_000, // Grace period beyond CLI's own 10-min timeout (was CONTAINER_TIMEOUT_MS=5min, which killed CLI prematurely)
         'cli interactive agent',
       );
 
@@ -265,8 +266,14 @@ async function runAgent(
           logger.warn({ group: group.name, event: 'cli_interactive_fallback' }, 'Falling back to container (API credits)');
           // Fall through to container path below
         } else {
-          // CLI failed and no fallback — still try to send the error context
+          // CLI failed and no fallback — notify user instead of silent failure
           logger.error({ group: group.name, event: 'cli_interactive_no_fallback' }, 'CLI failed, no container fallback');
+          if (onOutput) {
+            await onOutput({
+              status: 'error',
+              result: "Sorry, I ran into a technical issue and couldn't complete that. Please try again in a moment.",
+            });
+          }
           return 'error';
         }
       } else {
@@ -287,6 +294,12 @@ async function runAgent(
       recordInteractiveCliFailure();
       if (!CLI_FALLBACK_ENABLED) {
         logger.error({ group: group.name }, 'CLI failed and CLI_FALLBACK_ENABLED=false');
+        if (onOutput) {
+          await onOutput({
+            status: 'error',
+            result: "Sorry, I ran into a technical issue and couldn't complete that. Please try again in a moment.",
+          });
+        }
         return 'error';
       }
     }

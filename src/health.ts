@@ -88,17 +88,31 @@ export function resetInteractiveCliFailures(): void {
   interactiveCliFailures = 0;
 }
 
-/** Probe CLI health by running `claude --version` with a 15s timeout. */
+/** Probe CLI health by running a lightweight auth-testing command with a 30s timeout. */
 function probeCli(): Promise<boolean> {
   return new Promise((resolve) => {
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
     delete env.CLAUDE_CODE_OAUTH_TOKEN;
 
-    const proc = spawn('claude', ['--version'], { env, timeout: 15000 });
+    // Use `claude -p` with a trivial prompt to test actual API auth,
+    // not just that the binary exists. This catches expired OAuth tokens.
+    const proc = spawn('claude', ['-p', 'Reply with exactly: ok', '--output-format', 'json', '--model', 'claude-haiku-4-5', '--max-turns', '1'], { env, timeout: 30000 });
     let stdout = '';
     proc.stdout?.on('data', (d: Buffer) => { stdout += d; });
-    proc.on('close', (code) => resolve(code === 0 && stdout.trim().length > 0));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        resolve(false);
+        return;
+      }
+      // Verify we got a parseable response (proves auth worked)
+      try {
+        const output = JSON.parse(stdout);
+        resolve(Array.isArray(output) && output.length > 0);
+      } catch {
+        resolve(false);
+      }
+    });
     proc.on('error', () => resolve(false));
   });
 }
