@@ -115,13 +115,46 @@ function setupLaunchd(
   fs.writeFileSync(plistPath, plist);
   logger.info({ plistPath }, 'Wrote launchd plist');
 
-  try {
-    execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
-      stdio: 'ignore',
-    });
-    logger.info('launchctl load succeeded');
-  } catch {
-    logger.warn('launchctl load failed (may already be loaded)');
+  // Token-refresh job — silently renews the OAuth token every 4h so it
+  // never lapses while the machine is on.
+  const refreshPlistPath = path.join(
+    homeDir,
+    'Library',
+    'LaunchAgents',
+    'com.nanoclaw.token-refresh.plist',
+  );
+  const refreshPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw.token-refresh</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodePath}</string>
+        <string>${projectRoot}/scripts/refresh-token.mjs</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>14400</integer>
+    <key>StandardOutPath</key>
+    <string>${projectRoot}/logs/token-refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>${projectRoot}/logs/token-refresh.log</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>`;
+  fs.writeFileSync(refreshPlistPath, refreshPlist);
+  logger.info({ refreshPlistPath }, 'Wrote token-refresh launchd plist');
+
+  for (const p of [plistPath, refreshPlistPath]) {
+    try {
+      // p is a path built from os.homedir() and projectRoot — no user input
+      execSync(`launchctl load ${JSON.stringify(p)}`, { stdio: 'ignore' });
+      logger.info({ p }, 'launchctl load succeeded');
+    } catch {
+      logger.warn({ p }, 'launchctl load failed (may already be loaded)');
+    }
   }
 
   // Verify
