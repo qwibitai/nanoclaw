@@ -32,6 +32,21 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
+## Standard Toolset
+
+Full tool manifest at `/home/psg/TOOLS_MANIFEST.md`. Key tools to prefer over custom code:
+
+**Data & Analytics:** `sqlite3`, `jq`, `duckdb`, `xsv`
+
+**ML / RAG Stack:**
+- `Docling` — Structured PDF/XLSX extraction → heading-aware markdown; venv at `~/.local/share/docling/.venv`
+- `LlamaIndex` — RAG pipeline (chunking, embedding, vector store, query engine); use project-local `.venv`
+- `ChromaDB` — Embedded vector store (SQLite-backed, no server); `chromadb.PersistentClient(path=...)` — keep storage local, not S3 (random I/O)
+
+**Scripting:** `just` (Justfile over Makefile), `entr` (auto-run on file change)
+
+**Monitoring:** `lnav` (log viewer), `btop` (system monitor)
+
 ## Development
 
 Run commands directly—don't tell the user to run them.
