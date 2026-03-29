@@ -1,1 +1,2 @@
 npm run format:fix
+git add -u
