@@ -552,6 +552,12 @@ command_rules:
       - agent-browser
     decision: allow
 
+  - name: allow-claude-code
+    description: Claude Code CLI (used by SDK Task and TeamCreate tools)
+    commands:
+      - claude
+    decision: allow
+
   - name: allow-agentsh
     description: agentsh tooling
     commands:
