@@ -81,7 +81,8 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 # TypeScript is pre-compiled at build time (npm run build → /app/dist/)
-RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# If host mounts newer source into /app/src, recompile before running (~2-3s)
+RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nif [ /app/src/index.ts -nt /app/dist/index.js ]; then\n  cd /app && npx tsc --outDir dist 2>/dev/null\nfi\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
