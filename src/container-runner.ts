@@ -158,7 +158,16 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      try {
+        fs.cpSync(srcDir, dstDir, { recursive: true });
+      } catch (err: any) {
+        if (err?.code === 'EACCES') {
+          fs.rmSync(dstDir, { recursive: true, force: true });
+          fs.cpSync(srcDir, dstDir, { recursive: true });
+        } else {
+          throw err;
+        }
+      }
     }
   }
   mounts.push({
