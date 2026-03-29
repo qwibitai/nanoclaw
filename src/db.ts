@@ -633,6 +633,36 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+export function updateRegisteredGroup(
+  jid: string,
+  updates: Partial<
+    Pick<RegisteredGroup, 'name' | 'trigger' | 'requiresTrigger'>
+  >,
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.name !== undefined) {
+    fields.push('name = ?');
+    values.push(updates.name);
+  }
+  if (updates.trigger !== undefined) {
+    fields.push('trigger_pattern = ?');
+    values.push(updates.trigger);
+  }
+  if (updates.requiresTrigger !== undefined) {
+    fields.push('requires_trigger = ?');
+    values.push(updates.requiresTrigger ? 1 : 0);
+  }
+  if (fields.length === 0) return;
+  values.push(jid);
+  db.prepare(`UPDATE registered_groups SET ${fields.join(', ')} WHERE jid = ?`)
+    .run(...values);
+}
+
+export function deleteRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+}
+
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
