@@ -18,6 +18,16 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+### Sending files
+
+To send files (screenshots, generated code, PDFs, etc.) as actual attachments, use `mcp__nanoclaw__send_message` with the `files` parameter:
+
+```
+mcp__nanoclaw__send_message({ text: "Here's the screenshot", files: ["/workspace/group/attachments/screenshot.png"] })
+```
+
+Files must be under `/workspace/group/` or `/workspace/extra/`. When you take a screenshot or generate a file that the user should see, always send it with `files` — don't just describe it in text.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:
