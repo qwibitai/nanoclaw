@@ -455,7 +455,7 @@ function renderTopStats() {
   // Update banner
   if (d.update.available) {
     document.getElementById('update-banner').innerHTML =
-      '<div class="update-banner">Update available: <strong>' + esc(d.update.latest) + '</strong> (current: ' + esc(d.update.current || svc.version) + '). Run: <code>openclaw update</code></div>';
+      '<div class="update-banner">Update available: <strong>' + esc(d.update.latest) + '</strong> (current: ' + esc(d.update.current || svc.version) + '). Run: <code>brew upgrade openclaw-cli</code></div>';
   }
 
   let html = '';
