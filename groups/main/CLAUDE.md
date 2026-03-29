@@ -81,13 +81,50 @@ This is the **main channel**, which has elevated privileges.
 
 Anthropic credentials must be either an API key from console.anthropic.com (`ANTHROPIC_API_KEY`) or a long-lived OAuth token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). Short-lived tokens from the system keychain or `~/.claude/.credentials.json` expire within hours and can cause recurring container 401s. The `/setup` skill walks through this. OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
 
+## Self-Improvement
+
+You have full read-write access to the NanoClaw source at `/workspace/project`. You can modify any part of the system — `src/`, `container/`, `groups/`, skills — and rebuild and restart to apply changes.
+
+### Workflow
+
+```bash
+# 1. Edit source files
+# e.g. nano /workspace/project/src/config.ts
+
+# 2. Rebuild
+cd /workspace/project && npm run build
+
+# 3. Commit (optional but recommended)
+cd /workspace/project && git add -A && git commit -m "self-improve: <what changed and why>"
+
+# 4. Restart the service
+echo '{"type":"restart"}' > /workspace/ipc/tasks/restart_$(date +%s%N).json
+```
+
+The host process exits cleanly after receiving the restart IPC. launchd (macOS) or systemd (Linux) brings it back up automatically with the new `dist/`.
+
+### What you can improve
+
+- `src/` — core NanoClaw logic (routing, scheduling, IPC, container runner)
+- `container/agent-runner/src/` — the agent harness that runs inside containers (per-group copy, recompiled on each invocation)
+- `container/skills/` — skills loaded into agent containers
+- `groups/*/CLAUDE.md` — any group's memory and instructions, including your own
+- `groups/global/CLAUDE.md` — global memory readable by all groups
+
+### Guidelines
+
+- Always run `npm run build` before restarting — a failed build leaves `dist/` stale but intact
+- Commit changes so improvements are tracked and reversible (`git log`, `git revert`)
+- Test changes that affect other groups carefully — you share the runtime with `idea-maze`
+- `.env` is shadowed and never accessible; do not try to read credentials from the project root
+
 ## Container Mounts
 
-Main has read-only access to the project and read-write access to its group folder:
+Main has read-write access to the project root and its group folder:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
-| `/workspace/project` | Project root | read-only |
+| `/workspace/project` | Project root | read-write |
 | `/workspace/group` | `groups/main/` | read-write |
 
 Key paths inside the container:
