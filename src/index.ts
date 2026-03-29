@@ -370,30 +370,28 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Track whether we've already persisted usage for this run (to avoid
-  // double-writes from multiple streamed outputs with the same cumulative totals).
-  let usagePersisted = false;
   const agentStart = Date.now();
 
   // Wrap onOutput to track session ID and persist token usage from streamed results.
   // Usage is persisted here (not after runContainerAgent resolves) because in
-  // streaming mode the container stays alive for the idle timeout — we want
-  // usage recorded as soon as the first result with tokens arrives.
+  // streaming mode the container stays alive for the idle timeout.
+  // One row is inserted per agent response (result outputs with non-null result).
+  // Session-update markers (result: null) are skipped — they carry cumulative
+  // session totals that would double-count.
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
-        // Persist token usage on the first output that has non-zero tokens
-        if (!usagePersisted && output.inputTokens != null) {
+        // Persist one run_usage row per agent response
+        if (output.result != null && output.inputTokens != null) {
           const hasTokens =
             (output.inputTokens ?? 0) > 0 ||
             (output.outputTokens ?? 0) > 0 ||
             (output.cacheReadInputTokens ?? 0) > 0 ||
             (output.cacheCreationInputTokens ?? 0) > 0;
           if (hasTokens) {
-            usagePersisted = true;
             insertRunUsage({
               group_folder: group.folder,
               chat_jid: chatJid,
