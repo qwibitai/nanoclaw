@@ -353,7 +353,13 @@ export function getNewMessages(
         LIMIT ?
       ) ORDER BY timestamp
     `;
-    params = [lastTimestamp, ...jids, `${botPrefix}:%`, ...allowBotsJids, limit];
+    params = [
+      lastTimestamp,
+      ...jids,
+      `${botPrefix}:%`,
+      ...allowBotsJids,
+      limit,
+    ];
   } else {
     sql = `
       SELECT * FROM (
