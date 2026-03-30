@@ -401,57 +401,22 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
-      // Detect stale/corrupt session: the SDK throws ENOENT when the session
-      // transcript file (.jsonl) doesn't exist inside the container. This
-      // happens after container restarts since the filesystem is ephemeral.
-      // Only clear + retry for this specific signal — transient errors
-      // (network, API) should fall through to the normal backoff path.
+      // Detect stale/corrupt session — clear it so the next retry starts fresh.
+      // The session .jsonl can go missing after a crash mid-write, manual
+      // deletion, or disk-full. The existing backoff in group-queue.ts
+      // handles the retry; we just need to remove the broken session ID.
       const isStaleSession =
         sessionId &&
         output.error &&
-        /ENOENT.*\.jsonl|session.*not found/i.test(output.error);
+        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(output.error);
 
       if (isStaleSession) {
         logger.warn(
           { group: group.name, staleSessionId: sessionId, error: output.error },
-          'Stale session detected (ENOENT on session transcript) — clearing and retrying with fresh session',
+          'Stale session detected — clearing for next retry',
         );
         delete sessions[group.folder];
         deleteSession(group.folder);
-
-        const freshOutput = await runContainerAgent(
-          group,
-          {
-            prompt,
-            sessionId: undefined,
-            groupFolder: group.folder,
-            chatJid,
-            isMain,
-            assistantName: ASSISTANT_NAME,
-          },
-          (proc, containerName) =>
-            queue.registerProcess(chatJid, proc, containerName, group.folder),
-          wrappedOnOutput,
-        );
-
-        if (freshOutput.newSessionId) {
-          sessions[group.folder] = freshOutput.newSessionId;
-          setSession(group.folder, freshOutput.newSessionId);
-        }
-
-        if (freshOutput.status === 'error') {
-          logger.error(
-            { group: group.name, error: freshOutput.error },
-            'Container agent error on fresh session retry',
-          );
-          return 'error';
-        }
-
-        logger.info(
-          { group: group.name, newSessionId: freshOutput.newSessionId },
-          'Fresh session retry succeeded',
-        );
-        return 'success';
       }
 
       logger.error(
