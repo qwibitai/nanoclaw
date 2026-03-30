@@ -337,6 +337,42 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'update_group',
+  `Update settings for an existing registered group. Main group only.
+
+Use this to change a group's name, trigger word, or whether it requires a trigger to respond. For example, set requiresTrigger to false to make a bot respond to all messages without needing a trigger word.`,
+  {
+    jid: z.string().describe('The chat JID of the group to update'),
+    name: z.string().optional().describe('New display name'),
+    trigger: z.string().optional().describe('New trigger word'),
+    requiresTrigger: z.boolean().optional().describe('Whether the bot requires a trigger word to respond (false = respond to all messages)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can update group settings.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, unknown> = {
+      type: 'update_group',
+      jid: args.jid,
+      timestamp: new Date().toISOString(),
+    };
+    if (args.name !== undefined) data.name = args.name;
+    if (args.trigger !== undefined) data.trigger = args.trigger;
+    if (args.requiresTrigger !== undefined) data.requiresTrigger = args.requiresTrigger;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Group "${args.jid}" settings updated.` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

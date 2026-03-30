@@ -486,6 +486,47 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'update_group':
+      // Only main group can update other groups' settings
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized update_group attempt blocked',
+        );
+        break;
+      }
+      if (data.jid) {
+        const existing = registeredGroups[data.jid];
+        if (!existing) {
+          logger.warn(
+            { sourceGroup, jid: data.jid },
+            'update_group: group not found',
+          );
+          break;
+        }
+        const updated: RegisteredGroup = { ...existing };
+        if (data.name !== undefined) updated.name = data.name;
+        if (data.trigger !== undefined) updated.trigger = data.trigger;
+        if (data.requiresTrigger !== undefined)
+          updated.requiresTrigger = data.requiresTrigger;
+        // Never allow isMain to be changed via IPC
+        deps.registerGroup(data.jid, updated);
+        logger.info(
+          {
+            jid: data.jid,
+            updates: {
+              name: data.name,
+              trigger: data.trigger,
+              requiresTrigger: data.requiresTrigger,
+            },
+          },
+          'Group updated via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'Invalid update_group request - missing jid');
+      }
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
