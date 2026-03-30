@@ -123,7 +123,10 @@ export async function sendPoolMessage(
         'Assigned and renamed pool bot',
       );
     } catch (err) {
-      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+      logger.warn(
+        { sender, err },
+        'Failed to rename pool bot (sending anyway)',
+      );
     }
   }
 

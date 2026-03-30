@@ -536,8 +536,7 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Update reaction target so the processGroupMessages callback
             // clears the reaction from this (newer) message when it responds.
-            const lastPipedMsgId =
-              messagesToSend[messagesToSend.length - 1].id;
+            const lastPipedMsgId = messagesToSend[messagesToSend.length - 1].id;
             pendingReactionMsgId.set(chatJid, lastPipedMsgId);
             // Show typing indicator and 🤔 reaction while container processes
             channel
