@@ -417,4 +417,163 @@ describe('ensureValidToken', () => {
     expect(result.accessToken).toBe('still-valid-access');
     expect(refreshCallCount).toBe(0);
   });
+
+  it('re-reads credentials from disk before each retry (picks up external refresh)', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-access',
+          refreshToken: 'dead-refresh-token',
+          expiresAt: Date.now() - 1000,
+        },
+      }),
+    );
+
+    await new Promise<void>((r) => refreshServer.close(() => r()));
+    refreshCallCount = 0;
+    refreshServer = http.createServer((req, res) => {
+      refreshCallCount++;
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const body = new URLSearchParams(Buffer.concat(chunks).toString());
+        const rt = body.get('refresh_token');
+        if (rt === 'externally-refreshed') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              access_token: 'new-access-from-retry',
+              refresh_token: 'new-refresh-from-retry',
+              expires_in: 7200,
+            }),
+          );
+        } else {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: 'invalid_grant',
+              error_description: 'Refresh token not found or invalid',
+            }),
+          );
+        }
+      });
+    });
+    await new Promise<void>((resolve) =>
+      refreshServer.listen(0, '127.0.0.1', resolve),
+    );
+    refreshPort = (refreshServer.address() as AddressInfo).port;
+
+    setTimeout(() => {
+      fs.writeFileSync(
+        credsPath,
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'externally-set-access',
+            refreshToken: 'externally-refreshed',
+            expiresAt: Date.now() - 1000,
+          },
+        }),
+      );
+    }, 1500);
+
+    const result = await ensureValidToken(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    expect(result.accessToken).toBe('new-access-from-retry');
+    expect(result.refreshToken).toBe('new-refresh-from-retry');
+  });
+
+  it('throws when all retries fail and token on disk is still expired', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-access',
+          refreshToken: 'permanently-dead',
+          expiresAt: Date.now() - 1000,
+        },
+      }),
+    );
+
+    await new Promise<void>((r) => refreshServer.close(() => r()));
+    refreshServer = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'invalid_grant',
+            error_description: 'Refresh token not found or invalid',
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      refreshServer.listen(0, '127.0.0.1', resolve),
+    );
+    refreshPort = (refreshServer.address() as AddressInfo).port;
+
+    await expect(
+      ensureValidToken(
+        credsPath,
+        `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+      ),
+    ).rejects.toThrow(/OAuth refresh failed/);
+  });
+
+  it('returns valid token from disk without refreshing if externally refreshed during retries', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-access',
+          refreshToken: 'dead-refresh',
+          expiresAt: Date.now() - 1000,
+        },
+      }),
+    );
+
+    await new Promise<void>((r) => refreshServer.close(() => r()));
+    refreshCallCount = 0;
+    refreshServer = http.createServer((req, res) => {
+      refreshCallCount++;
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_grant' }));
+      });
+    });
+    await new Promise<void>((resolve) =>
+      refreshServer.listen(0, '127.0.0.1', resolve),
+    );
+    refreshPort = (refreshServer.address() as AddressInfo).port;
+
+    setTimeout(() => {
+      fs.writeFileSync(
+        credsPath,
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'fresh-from-login',
+            refreshToken: 'fresh-refresh',
+            expiresAt: Date.now() + 3600000,
+          },
+        }),
+      );
+    }, 1500);
+
+    const result = await ensureValidToken(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    expect(result.accessToken).toBe('fresh-from-login');
+  });
 });
