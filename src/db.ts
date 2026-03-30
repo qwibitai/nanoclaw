@@ -5,6 +5,7 @@ import path from 'path';
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { redactSensitiveData } from './redact.js';
 import {
   NewMessage,
   RegisteredGroup,
@@ -289,7 +290,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.chat_jid,
     msg.sender,
     msg.sender_name,
-    msg.content,
+    redactSensitiveData(msg.content),
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
@@ -316,7 +317,7 @@ export function storeMessageDirect(msg: {
     msg.chat_jid,
     msg.sender,
     msg.sender_name,
-    msg.content,
+    redactSensitiveData(msg.content),
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
