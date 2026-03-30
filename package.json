@@ -36,7 +36,6 @@
     "yaml": "^2.8.2",
     "grammy": "^1.39.3",
     "zod": "^4.3.6"
-    "cron-parser": "5.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
