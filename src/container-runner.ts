@@ -201,7 +201,10 @@ function buildVolumeMounts(
       (fs.existsSync(srcIndex) &&
         fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
     if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, {
+        recursive: true,
+        filter: (src) => !src.endsWith('.test.ts'),
+      });
     }
   }
   mounts.push({

@@ -19,6 +19,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { WORKSPACE_ROOT } from './workspace.js';
 
 interface ContainerInput {
   prompt: string;
@@ -56,7 +57,6 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT ?? '/workspace';
 const IPC_INPUT_DIR = path.join(WORKSPACE_ROOT, 'ipc', 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
