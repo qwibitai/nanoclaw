@@ -257,6 +257,84 @@ function getGoogleStatus(): {
   }
 }
 
+function getNotionStatus(): {
+  connected: boolean;
+  workspace: string | null;
+  botName: string | null;
+  pageCount: number | null;
+} {
+  // Check if NOTION_API_KEY is configured
+  const envPath = path.resolve(PROJECT_ROOT, '.env');
+  let notionKey: string | null = null;
+  try {
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    const match = envContent.match(/NOTION_API_KEY=(\S+)/);
+    if (match) notionKey = match[1];
+  } catch {}
+
+  if (!notionKey) return { connected: false, workspace: null, botName: null, pageCount: null };
+
+  // Test the key by calling /v1/users/me
+  try {
+    const meResult = execSync(
+      `curl -s https://api.notion.com/v1/users/me -H "Authorization: Bearer ${notionKey}" -H "Notion-Version: 2022-06-28"`,
+      { encoding: 'utf-8', timeout: 8000 },
+    );
+    const me = JSON.parse(meResult);
+    if (me.object !== 'user') return { connected: false, workspace: null, botName: null, pageCount: null };
+
+    const workspace = me.bot?.workspace_name || null;
+    const botName = me.name || null;
+
+    // Get page count
+    let pageCount: number | null = null;
+    try {
+      const searchResult = execSync(
+        `curl -s https://api.notion.com/v1/search -H "Authorization: Bearer ${notionKey}" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"page_size":1}'`,
+        { encoding: 'utf-8', timeout: 8000 },
+      );
+      const search = JSON.parse(searchResult);
+      // has_more tells us there's more than 1, but we can't get exact count easily
+      // Do a larger search to estimate
+      const fullSearch = execSync(
+        `curl -s https://api.notion.com/v1/search -H "Authorization: Bearer ${notionKey}" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"page_size":100}'`,
+        { encoding: 'utf-8', timeout: 8000 },
+      );
+      const full = JSON.parse(fullSearch);
+      pageCount = full.results?.length || 0;
+      if (full.has_more) pageCount = pageCount + '+' as any; // will render as "100+"
+    } catch {}
+
+    return { connected: true, workspace, botName, pageCount };
+  } catch {
+    return { connected: false, workspace: null, botName: null, pageCount: null };
+  }
+}
+
+function getRecentErrors(): Array<{ time: string; message: string }> {
+  const errors: Array<{ time: string; message: string }> = [];
+  const logPath = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
+  if (!fs.existsSync(logPath)) return errors;
+
+  try {
+    const tail = execSync(`tail -1000 ${JSON.stringify(logPath)} 2>/dev/null`, {
+      encoding: 'utf-8', timeout: 5000,
+    });
+    for (const line of tail.split('\n')) {
+      if (!line.includes('ERROR') && !line.includes('WARN')) continue;
+      const timeMatch = line.match(/\[(\d{2}:\d{2}:\d{2}\.\d{3})\]/);
+      // Strip ANSI codes
+      const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
+      const msgMatch = clean.match(/(?:ERROR|WARN)\s*(?:\([^)]*\))?\s*:\s*(.+)/);
+      if (timeMatch && msgMatch) {
+        errors.push({ time: timeMatch[1], message: msgMatch[1].substring(0, 120) });
+      }
+    }
+  } catch {}
+
+  return errors.slice(-10);
+}
+
 function getMicrosoftStatus(): {
   connected: boolean;
   account: string | null;
@@ -331,6 +409,9 @@ const EMPTY_DATA = {
   service: { running: false, pid: null, uptime: null },
   update: { available: false, current: null as string | null, latest: null as string | null },
   google: { connected: false, account: null as string | null, scopes: [] as string[], tokenExpiry: null as string | null, tokenValid: false },
+  microsoft: { connected: false, account: null as string | null, name: null as string | null, services: [] as any[], tokenExpiry: null as string | null, tokenValid: false },
+  notion: { connected: false, workspace: null as string | null, botName: null as string | null, pageCount: null as number | null },
+  recentErrors: [] as Array<{ time: string; message: string }>,
   channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null; account: string | null }>,
   groups: [],
   groupFolders: [],
@@ -349,7 +430,7 @@ const EMPTY_DATA = {
 
 function apiData() {
   const db = getDb();
-  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), google: getGoogleStatus(), microsoft: getMicrosoftStatus(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
+  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), google: getGoogleStatus(), microsoft: getMicrosoftStatus(), notion: getNotionStatus(), recentErrors: getRecentErrors(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
 
   const groups = db
     .prepare(
@@ -470,12 +551,16 @@ function apiData() {
   const update = getNanoClawUpdate();
   const google = getGoogleStatus();
   const microsoft = getMicrosoftStatus();
+  const notion = getNotionStatus();
+  const recentErrors = getRecentErrors();
 
   return {
     service,
     update,
     google,
     microsoft,
+    notion,
+    recentErrors,
     channels,
     groups,
     groupFolders,
@@ -821,6 +906,56 @@ function renderTopStats() {
   html += '<div class="stat-row"><span>Last 24h</span><span class="stat-value">' + (d.messageStats.last_24h||0) + '</span></div>';
   html += '<div class="stat-row"><span>Last 7d</span><span class="stat-value">' + (d.messageStats.last_7d||0) + '</span></div>';
   html += '<div class="stat-row"><span>Total</span><span class="stat-value">' + (d.messageStats.total||0).toLocaleString() + '</span></div>';
+  html += '</div>';
+
+  // Notion
+  html += '<div class="card"><h2>Notion</h2>';
+  const n = d.notion;
+  if (n && n.connected) {
+    if (n.workspace) html += '<div class="stat-row"><span>Workspace</span><span class="stat-value">' + esc(n.workspace) + '</span></div>';
+    if (n.botName) html += '<div class="stat-row"><span>Integration</span><span class="stat-value">' + esc(n.botName) + '</span></div>';
+    html += '<div class="stat-row"><span>Status</span><span>' + badge('connected', 'green') + '</span></div>';
+    if (n.pageCount !== null) html += '<div class="stat-row"><span>Pages</span><span class="stat-value">' + n.pageCount + '</span></div>';
+  } else {
+    html += '<div class="empty">Not connected</div>';
+  }
+  html += '</div>';
+
+  // Recent Errors
+  html += '<div class="card"><h2>Recent Errors</h2>';
+  if (!d.recentErrors || d.recentErrors.length === 0) {
+    html += '<div class="stat-row"><span>' + badge('all clear', 'green') + '</span><span class="time-ago">No recent errors</span></div>';
+  } else {
+    d.recentErrors.slice(-5).forEach(e => {
+      html += '<div class="stat-row" style="font-size:11px;gap:8px"><span class="time-ago" style="white-space:nowrap">' + esc(e.time) + '</span><span style="color:var(--red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(e.message) + '">' + esc(e.message) + '</span></div>';
+    });
+  }
+  html += '</div>';
+
+  // Token Expiry Alerts
+  html += '<div class="card"><h2>Token Health</h2>';
+  const tokens = [];
+  if (d.google && d.google.connected) {
+    const hoursLeft = d.google.tokenExpiry ? Math.floor((new Date(d.google.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
+    tokens.push({ name: 'Google', valid: d.google.tokenValid, expiry: d.google.tokenExpiry, hoursLeft });
+  }
+  if (d.microsoft && d.microsoft.connected) {
+    const hoursLeft = d.microsoft.tokenExpiry ? Math.floor((new Date(d.microsoft.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
+    tokens.push({ name: 'Microsoft', valid: d.microsoft.tokenValid, expiry: d.microsoft.tokenExpiry, hoursLeft });
+  }
+  if (tokens.length === 0) {
+    html += '<div class="empty">No tokens to monitor</div>';
+  } else {
+    tokens.forEach(t => {
+      let status;
+      if (!t.valid) status = badge('expired', 'red');
+      else if (t.hoursLeft !== null && t.hoursLeft < 2) status = badge('expiring soon', 'orange');
+      else if (t.hoursLeft !== null && t.hoursLeft < 24) status = badge('< 24h', 'orange');
+      else status = badge('healthy', 'green');
+      const expInfo = t.expiry ? ' <span class="time-ago">expires ' + timeAgo(t.expiry) + '</span>' : '';
+      html += '<div class="stat-row"><span>' + esc(t.name) + '</span><span>' + status + expInfo + '</span></div>';
+    });
+  }
   html += '</div>';
 
   document.getElementById('top-stats').innerHTML = html;
