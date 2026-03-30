@@ -640,14 +640,29 @@ function renderTopStats() {
 
   let actHtml = '<div class="grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px">';
   actHtml += renderChart('24 Hours', hourData, d => d.key + ':00', 'msgs');
-  actHtml += renderChart('7 Days', act.dailyVolume || [], d => {
-    const dow = parseInt(d.dow);
-    return dayNames[dow] || d.day;
-  }, 'msgs');
-  actHtml += renderChart('30 Days', act.monthDailyVolume || [], d => {
-    const parts = d.day.split('-');
-    return parseInt(parts[2]) + ' ' + monthNames[parseInt(parts[1]) - 1];
-  }, 'msgs');
+
+  // Fill all 7 days
+  const dayMap = {};
+  (act.dailyVolume || []).forEach(d => { dayMap[d.day] = d.count; });
+  const weekData = [];
+  for (let i = 6; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 86400000);
+    const key = dt.toISOString().split('T')[0];
+    weekData.push({ key: dayNames[dt.getDay()], count: dayMap[key] || 0 });
+  }
+  actHtml += renderChart('7 Days', weekData, d => d.key, 'msgs');
+
+  // Fill all 30 days
+  const mDayMap = {};
+  (act.monthDailyVolume || []).forEach(d => { mDayMap[d.day] = d.count; });
+  const monthData = [];
+  for (let i = 29; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 86400000);
+    const key = dt.toISOString().split('T')[0];
+    const label = dt.getDate() + ' ' + monthNames[dt.getMonth()];
+    monthData.push({ key: label, count: mDayMap[key] || 0 });
+  }
+  actHtml += renderChart('30 Days', monthData, d => d.key, 'msgs');
   actHtml += renderChart('3 Months', act.weeklyVolume || [], d => {
     const parts = d.week.split('-');
     return 'W' + (parts[1] || d.week);
