@@ -7,6 +7,7 @@ import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
+  InlineButton,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
@@ -28,16 +29,121 @@ async function sendTelegramMessage(
   chatId: string | number,
   text: string,
   options: { message_thread_id?: number } = {},
-): Promise<void> {
+  buttons?: InlineButton[][],
+): Promise<number | undefined> {
+  const replyMarkup = buttons?.length
+    ? {
+        inline_keyboard: buttons.map((row) =>
+          row.map((btn) => ({
+            text: btn.text,
+            callback_data: btn.data.slice(0, 64),
+          })),
+        ),
+      }
+    : undefined;
   try {
-    await api.sendMessage(chatId, text, {
+    const msg = await api.sendMessage(chatId, text, {
       ...options,
       parse_mode: 'Markdown',
+      reply_markup: replyMarkup,
     });
+    return msg.message_id;
   } catch (err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
-    await api.sendMessage(chatId, text, options);
+    const msg = await api.sendMessage(chatId, text, {
+      ...options,
+      reply_markup: replyMarkup,
+    });
+    return msg.message_id;
+  }
+}
+
+// --- Bot pool for agent teams ---
+// Send-only Api instances, one per pool bot token
+const poolApis: Api[] = [];
+// Maps "{groupFolder}:{senderName}" → pool index for stable per-sender assignment
+const senderBotMap = new Map<string, number>();
+let nextPoolIndex = 0;
+
+/**
+ * Initialize send-only Api instances for the bot pool.
+ * Call once at startup with the tokens from TELEGRAM_BOT_POOL.
+ */
+export async function initBotPool(tokens: string[]): Promise<void> {
+  for (const token of tokens) {
+    try {
+      const api = new Api(token);
+      const me = await api.getMe();
+      poolApis.push(api);
+      logger.info(
+        { username: me.username, id: me.id, poolSize: poolApis.length },
+        'Pool bot initialized',
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to initialize pool bot');
+    }
+  }
+  if (poolApis.length > 0) {
+    logger.info({ count: poolApis.length }, 'Telegram bot pool ready');
+  }
+}
+
+/**
+ * Send a message via a pool bot assigned to the given sender name.
+ * Assigns bots round-robin on first use; subsequent messages from the same
+ * sender in the same group always use the same bot.
+ * On first assignment, renames the bot to match the sender's role.
+ */
+export async function sendPoolMessage(
+  chatId: string,
+  text: string,
+  sender: string,
+  groupFolder: string,
+): Promise<void> {
+  if (poolApis.length === 0) {
+    logger.warn(
+      { chatId, sender },
+      'Pool message dropped: no pool bots initialized',
+    );
+    return;
+  }
+
+  const key = `${groupFolder}:${sender}`;
+  let idx = senderBotMap.get(key);
+  if (idx === undefined) {
+    idx = nextPoolIndex % poolApis.length;
+    nextPoolIndex++;
+    senderBotMap.set(key, idx);
+    try {
+      await poolApis[idx].setMyName(sender);
+      await new Promise((r) => setTimeout(r, 2000));
+      logger.info(
+        { sender, groupFolder, poolIndex: idx },
+        'Assigned and renamed pool bot',
+      );
+    } catch (err) {
+      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+    }
+  }
+
+  const api = poolApis[idx];
+  try {
+    const numericId = chatId.replace(/^tg:/, '');
+    const MAX_LENGTH = 4096;
+    if (text.length <= MAX_LENGTH) {
+      await api.sendMessage(numericId, text);
+    } else {
+      for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        await api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
+      }
+    }
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
+  } catch (err) {
+    logger.error({ chatId, sender, err }, 'Failed to send pool message');
   }
 }
 
@@ -47,6 +153,10 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  // Last bot message ID per chat, used to detect 👎 reactions for retry
+  private lastBotMessageId = new Map<string, number>();
+  // Maps callback_data → human-readable button label for display in chat
+  private buttonLabels = new Map<string, string>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -216,6 +326,73 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
+    // Handle emoji reactions — 👎 on the last bot message triggers a retry
+    this.bot.on('message_reaction', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const reactedMsgId = ctx.messageReaction.message_id;
+      const lastBotMsgId = this.lastBotMessageId.get(chatJid);
+      if (reactedMsgId !== lastBotMsgId) return;
+
+      const hasThumbsDown = ctx.messageReaction.new_reaction.some(
+        (r) => r.type === 'emoji' && r.emoji === '👎',
+      );
+      if (!hasThumbsDown) return;
+
+      const user = ctx.messageReaction.user;
+      const senderName =
+        user?.first_name || user?.username || user?.id.toString() || 'User';
+      const sender = user?.id.toString() || '';
+      const timestamp = new Date().toISOString();
+
+      logger.info({ chatJid }, 'Thumbs-down reaction — triggering retry');
+      this.opts.onMessage(chatJid, {
+        id: `reaction-retry-${Date.now()}`,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content:
+          '[👎 on your last response — please try again with a different approach]',
+        timestamp,
+        is_from_me: false,
+      });
+    });
+
+    // Handle inline button presses — deliver the button data as a user message
+    this.bot.on('callback_query:data', async (ctx) => {
+      const chatJid = `tg:${ctx.chat?.id ?? ctx.callbackQuery.from.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      // Always answer the callback to remove the spinner
+      await ctx.answerCallbackQuery().catch(() => {});
+
+      // Remove the inline keyboard from the original message so it can't be pressed again
+      await ctx
+        .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+
+      if (!group) return;
+
+      const data = ctx.callbackQuery.data;
+      const label = this.buttonLabels.get(data) ?? data;
+      const user = ctx.callbackQuery.from;
+      const senderName = user.first_name || user.username || user.id.toString();
+      const timestamp = new Date().toISOString();
+
+      logger.info({ chatJid, label }, 'Button pressed');
+      this.opts.onMessage(chatJid, {
+        id: `btn-${Date.now()}`,
+        chat_jid: chatJid,
+        sender: user.id.toString(),
+        sender_name: senderName,
+        content: data,
+        timestamp,
+        is_from_me: false,
+      });
+    });
+
     // Handle errors gracefully
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
@@ -243,10 +420,20 @@ export class TelegramChannel implements Channel {
     jid: string,
     text: string,
     threadId?: string,
+    buttons?: InlineButton[][],
   ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
+    }
+
+    // Store button label→data mapping so callback_query handler can display the label
+    if (buttons) {
+      for (const row of buttons) {
+        for (const btn of row) {
+          this.buttonLabels.set(btn.data.slice(0, 64), btn.text);
+        }
+      }
     }
 
     try {
@@ -255,22 +442,35 @@ export class TelegramChannel implements Channel {
         ? { message_thread_id: parseInt(threadId, 10) }
         : {};
 
-      // Telegram has a 4096 character limit per message — split if needed
+      // Telegram has a 4096 character limit per message — split if needed.
+      // Buttons only attach to the last chunk.
       const MAX_LENGTH = 4096;
+      let lastSentId: number | undefined;
       if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text, options);
+        lastSentId = await sendTelegramMessage(
+          this.bot.api,
+          numericId,
+          text,
+          options,
+          buttons,
+        );
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
+          const isLast = i + MAX_LENGTH >= text.length;
+          lastSentId = await sendTelegramMessage(
             this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
             options,
+            isLast ? buttons : undefined,
           );
         }
       }
+      if (lastSentId !== undefined) {
+        this.lastBotMessageId.set(jid, lastSentId);
+      }
       logger.info(
-        { jid, length: text.length, threadId },
+        { jid, length: text.length, threadId, hasButtons: !!buttons },
         'Telegram message sent',
       );
     } catch (err) {
@@ -301,6 +501,50 @@ export class TelegramChannel implements Channel {
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+    }
+  }
+
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericId = parseInt(jid.replace(/^tg:/, ''), 10);
+    const numericMsgId = parseInt(messageId, 10);
+    // Use fetch directly to guarantee reaction:[] is sent as an explicit empty
+    // array (some grammy versions omit falsy/empty parameters from the body).
+    const body = JSON.stringify({
+      chat_id: numericId,
+      message_id: numericMsgId,
+      reaction: emoji ? [{ type: 'emoji', emoji }] : [],
+    });
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/bot${this.botToken}/setMessageReaction`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        },
+      );
+      const json = (await res.json()) as { ok: boolean; description?: string };
+      if (!json.ok) {
+        logger.warn(
+          { jid, messageId, emoji, description: json.description },
+          'Telegram setMessageReaction failed',
+        );
+      } else {
+        logger.info(
+          { jid, messageId, emoji: emoji ?? 'cleared' },
+          'Reaction updated',
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { jid, messageId, emoji, err },
+        'Failed to set Telegram reaction',
+      );
     }
   }
 }

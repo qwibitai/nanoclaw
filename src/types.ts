@@ -81,15 +81,35 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+/** A single button in an inline keyboard row. */
+export interface InlineButton {
+  /** Text shown on the button. */
+  text: string;
+  /** Message delivered to the agent when the button is pressed. */
+  data: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  /** buttons is a 2-D array: outer = rows, inner = buttons per row. */
+  sendMessage(
+    jid: string,
+    text: string,
+    threadId?: string,
+    buttons?: InlineButton[][],
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: emoji reaction on a specific message. Pass null emoji to clear.
+  setReaction?(
+    jid: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

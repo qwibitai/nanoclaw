@@ -10,10 +10,13 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
+  CREDENTIAL_PROXY_PORT,
   ONECLI_URL,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
 } from './config.js';
+import { initBotPool } from './channels/telegram.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -28,7 +31,9 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  CONTAINER_HOST_GATEWAY,
 } from './container-runtime.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -75,6 +80,9 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+// Maps chatJid → message ID of the last user message that has a 🤔 reaction pending.
+// Updated by both processGroupMessages (new container) and the piping path (follow-ups).
+const pendingReactionMsgId = new Map<string, string>();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -277,7 +285,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  const lastUserMsgId = missedMessages[missedMessages.length - 1].id;
+  pendingReactionMsgId.set(chatJid, lastUserMsgId);
   await channel.setTyping?.(chatJid, true);
+  await channel.setReaction?.(chatJid, lastUserMsgId, '🤔');
   let hadError = false;
   let outputSentToUser = false;
 
@@ -289,10 +300,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? result.result
           : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      // Parse optional <buttons>[[{"text":"...","data":"..."}]]</buttons> tag
+      const buttonsMatch = raw.match(/<buttons>([\s\S]*?)<\/buttons>/);
+      let buttons: import('./types.js').InlineButton[][] | undefined;
+      if (buttonsMatch) {
+        try {
+          buttons = JSON.parse(buttonsMatch[1].trim());
+        } catch {
+          logger.warn({ group: group.name }, 'Failed to parse <buttons> tag');
+        }
+      }
+      const text = raw
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .replace(/<buttons>[\s\S]*?<\/buttons>/g, '')
+        .trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await channel.sendMessage(chatJid, text, undefined, buttons);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -301,10 +325,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+      const reactionMsgId = pendingReactionMsgId.get(chatJid);
+      if (reactionMsgId) {
+        await channel.setReaction?.(chatJid, reactionMsgId, null);
+        pendingReactionMsgId.delete(chatJid);
+      }
     }
 
     if (result.status === 'error') {
       hadError = true;
+      const reactionMsgId = pendingReactionMsgId.get(chatJid);
+      if (reactionMsgId) {
+        await channel.setReaction?.(chatJid, reactionMsgId, null);
+        pendingReactionMsgId.delete(chatJid);
+      }
     }
   });
 
@@ -500,11 +534,24 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Show typing indicator while the container processes the piped message
+            // Update reaction target so the processGroupMessages callback
+            // clears the reaction from this (newer) message when it responds.
+            const lastPipedMsgId =
+              messagesToSend[messagesToSend.length - 1].id;
+            pendingReactionMsgId.set(chatJid, lastPipedMsgId);
+            // Show typing indicator and 🤔 reaction while container processes
             channel
               .setTyping?.(chatJid, true)
               ?.catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+              );
+            channel
+              .setReaction?.(chatJid, lastPipedMsgId, '🤔')
+              ?.catch((err) =>
+                logger.warn(
+                  { chatJid, err },
+                  'Failed to set thinking reaction',
+                ),
               );
           } else {
             // No active container — enqueue for a new one
@@ -548,6 +595,7 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT, CONTAINER_HOST_GATEWAY);
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -671,6 +719,10 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
   }
 
   // Start subsystems (independently of connection handler)

@@ -13,7 +13,7 @@ const envConfig = readEnvFile([
 ]);
 
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Afton';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -99,3 +99,13 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
+
+// When set, swarm pool messages triggered from a private Telegram chat are
+// redirected to this group JID so pool bots can actually send them.
+export const TELEGRAM_SWARM_GROUP_JID =
+  process.env.TELEGRAM_SWARM_GROUP_JID || '';
