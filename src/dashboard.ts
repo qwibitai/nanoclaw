@@ -839,7 +839,10 @@ function renderTopStats() {
   }
 
   let html = '';
-  // Service status
+
+  // === ROW 1: Service, Channels, Token Health, Recent Errors ===
+
+  // Service
   html += '<div class="card"><h2>Service</h2>';
   html += '<div class="stat-row"><span>Status</span><span class="stat-value">' + (svc.running ? '🟢 Running' : '🔴 Stopped') + '</span></div>';
   if (svc.pid) html += '<div class="stat-row"><span>PID</span><span class="stat-value">' + svc.pid + '</span></div>';
@@ -862,7 +865,54 @@ function renderTopStats() {
   }
   html += '</div>';
 
-  // Google Integration
+  // Token Health
+  html += '<div class="card"><h2>Token Health</h2>';
+  const tokens = [];
+  if (d.google && d.google.connected) {
+    const hoursLeft = d.google.tokenExpiry ? Math.floor((new Date(d.google.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
+    tokens.push({ name: 'Google', valid: d.google.tokenValid, expiry: d.google.tokenExpiry, hoursLeft });
+  }
+  if (d.microsoft && d.microsoft.connected) {
+    const hoursLeft = d.microsoft.tokenExpiry ? Math.floor((new Date(d.microsoft.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
+    tokens.push({ name: 'Microsoft', valid: d.microsoft.tokenValid, expiry: d.microsoft.tokenExpiry, hoursLeft });
+  }
+  if (tokens.length === 0) {
+    html += '<div class="empty">No tokens to monitor</div>';
+  } else {
+    tokens.forEach(t => {
+      let status;
+      if (!t.valid) status = badge('expired', 'red');
+      else if (t.hoursLeft !== null && t.hoursLeft < 2) status = badge('expiring soon', 'orange');
+      else if (t.hoursLeft !== null && t.hoursLeft < 24) status = badge('< 24h', 'orange');
+      else status = badge('healthy', 'green');
+      const expInfo = t.expiry ? ' <span class="time-ago">expires ' + timeAgo(t.expiry) + '</span>' : '';
+      html += '<div class="stat-row"><span>' + esc(t.name) + '</span><span>' + status + expInfo + '</span></div>';
+    });
+  }
+  html += '</div>';
+
+  // Recent Errors
+  html += '<div class="card"><h2>Recent Errors</h2>';
+  if (!d.recentErrors || d.recentErrors.length === 0) {
+    html += '<div class="stat-row"><span>' + badge('all clear', 'green') + '</span><span class="time-ago">No recent errors</span></div>';
+  } else {
+    d.recentErrors.slice(-5).forEach(e => {
+      html += '<div class="stat-row" style="font-size:11px;gap:8px"><span class="time-ago" style="white-space:nowrap">' + esc(e.time) + '</span><span style="color:var(--red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(e.message) + '">' + esc(e.message) + '</span></div>';
+    });
+  }
+  html += '</div>';
+
+  // === ROW 2: Messages, Google, Microsoft, Notion ===
+
+  // Messages
+  html += '<div class="card"><h2>Messages</h2>';
+  html += '<div class="stat-row"><span>Last hour</span><span class="stat-value">' + (d.messageStats.last_hour||0) + '</span></div>';
+  html += '<div class="stat-row"><span>Last 24h</span><span class="stat-value">' + (d.messageStats.last_24h||0) + '</span></div>';
+  html += '<div class="stat-row"><span>Last 7d</span><span class="stat-value">' + (d.messageStats.last_7d||0) + '</span></div>';
+  html += '<div class="stat-row"><span>Total</span><span class="stat-value">' + (d.messageStats.total||0).toLocaleString() + '</span></div>';
+  html += '</div>';
+
+  // Google
   html += '<div class="card"><h2>Google</h2>';
   const g = d.google;
   if (g.connected) {
@@ -900,14 +950,6 @@ function renderTopStats() {
   }
   html += '</div>';
 
-  // Message stats
-  html += '<div class="card"><h2>Messages</h2>';
-  html += '<div class="stat-row"><span>Last hour</span><span class="stat-value">' + (d.messageStats.last_hour||0) + '</span></div>';
-  html += '<div class="stat-row"><span>Last 24h</span><span class="stat-value">' + (d.messageStats.last_24h||0) + '</span></div>';
-  html += '<div class="stat-row"><span>Last 7d</span><span class="stat-value">' + (d.messageStats.last_7d||0) + '</span></div>';
-  html += '<div class="stat-row"><span>Total</span><span class="stat-value">' + (d.messageStats.total||0).toLocaleString() + '</span></div>';
-  html += '</div>';
-
   // Notion
   html += '<div class="card"><h2>Notion</h2>';
   const n = d.notion;
@@ -918,43 +960,6 @@ function renderTopStats() {
     if (n.pageCount !== null) html += '<div class="stat-row"><span>Pages</span><span class="stat-value">' + n.pageCount + '</span></div>';
   } else {
     html += '<div class="empty">Not connected</div>';
-  }
-  html += '</div>';
-
-  // Recent Errors
-  html += '<div class="card"><h2>Recent Errors</h2>';
-  if (!d.recentErrors || d.recentErrors.length === 0) {
-    html += '<div class="stat-row"><span>' + badge('all clear', 'green') + '</span><span class="time-ago">No recent errors</span></div>';
-  } else {
-    d.recentErrors.slice(-5).forEach(e => {
-      html += '<div class="stat-row" style="font-size:11px;gap:8px"><span class="time-ago" style="white-space:nowrap">' + esc(e.time) + '</span><span style="color:var(--red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(e.message) + '">' + esc(e.message) + '</span></div>';
-    });
-  }
-  html += '</div>';
-
-  // Token Expiry Alerts
-  html += '<div class="card"><h2>Token Health</h2>';
-  const tokens = [];
-  if (d.google && d.google.connected) {
-    const hoursLeft = d.google.tokenExpiry ? Math.floor((new Date(d.google.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
-    tokens.push({ name: 'Google', valid: d.google.tokenValid, expiry: d.google.tokenExpiry, hoursLeft });
-  }
-  if (d.microsoft && d.microsoft.connected) {
-    const hoursLeft = d.microsoft.tokenExpiry ? Math.floor((new Date(d.microsoft.tokenExpiry).getTime() - Date.now()) / 3600000) : null;
-    tokens.push({ name: 'Microsoft', valid: d.microsoft.tokenValid, expiry: d.microsoft.tokenExpiry, hoursLeft });
-  }
-  if (tokens.length === 0) {
-    html += '<div class="empty">No tokens to monitor</div>';
-  } else {
-    tokens.forEach(t => {
-      let status;
-      if (!t.valid) status = badge('expired', 'red');
-      else if (t.hoursLeft !== null && t.hoursLeft < 2) status = badge('expiring soon', 'orange');
-      else if (t.hoursLeft !== null && t.hoursLeft < 24) status = badge('< 24h', 'orange');
-      else status = badge('healthy', 'green');
-      const expInfo = t.expiry ? ' <span class="time-ago">expires ' + timeAgo(t.expiry) + '</span>' : '';
-      html += '<div class="stat-row"><span>' + esc(t.name) + '</span><span>' + status + expInfo + '</span></div>';
-    });
   }
   html += '</div>';
 
