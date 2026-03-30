@@ -5,6 +5,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -50,7 +51,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { ApprovalStore } from './approval.js';
+import { ApprovalStore, startApprovalExpiryTimer, writeApprovalResult } from './approval.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { ChannelType } from './text-styles.js';
 import {
@@ -684,6 +685,8 @@ async function main(): Promise<void> {
     }
   }
 
+  const approvalStore = new ApprovalStore(getDb());
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -694,6 +697,31 @@ async function main(): Promise<void> {
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // Approval response detection — intercept YES/NO replies
+      const approvalMatch = msg.content.trim().match(/^(YES|NO)\b/i);
+      if (approvalMatch && !msg.is_from_me && !msg.is_bot_message) {
+        const idMatch = msg.content.match(/\[ID:\s*(apr-[^\]]+)\]/);
+        if (idMatch) {
+          const approved = approvalMatch[1].toUpperCase() === 'YES';
+          const approvalId = idMatch[1];
+          const channelName = findChannel(channels, chatJid)?.name || 'unknown';
+          const resolved = approvalStore.resolve(approvalId, approved, `${channelName}:${msg.sender}`);
+          if (resolved) {
+            writeApprovalResult(DATA_DIR, resolved.groupFolder, approvalId, {
+              requestId: approvalId,
+              approved,
+              respondedBy: `${channelName}:${msg.sender}`,
+              respondedAt: new Date().toISOString(),
+            });
+            const channel = findChannel(channels, chatJid);
+            if (channel) {
+              channel.sendMessage(chatJid, `Approval ${approvalId}: ${approved ? 'Approved ✓' : 'Rejected ✗'}`).catch(() => {});
+            }
+            return; // Don't store as regular message
+          }
+        }
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
@@ -762,6 +790,8 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+  startApprovalExpiryTimer(approvalStore, DATA_DIR);
+
   startIpcWatcher({
     sendMessage: (jid, rawText) => {
       const channel = findChannel(channels, jid);
@@ -798,7 +828,7 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
-    approvalStore: new ApprovalStore(getDb()),
+    approvalStore,
     sendToGroup: async (groupFolder: string, text: string) => {
       for (const [jid, group] of Object.entries(registeredGroups)) {
         if (group.folder === groupFolder) {

@@ -174,3 +174,33 @@ export class ApprovalStore {
     };
   }
 }
+
+export function startApprovalExpiryTimer(
+  store: ApprovalStore,
+  dataDir: string,
+  intervalMs = 30_000,
+): NodeJS.Timeout {
+  return setInterval(() => {
+    const expired = store.expireStale();
+    if (expired > 0) {
+      logger.info({ count: expired }, 'Expired stale approvals');
+      // Write expired results so the polling container gets unblocked
+      const db = (store as any).db as Database.Database;
+      const recentlyExpired = db.prepare(`
+        SELECT id, group_folder FROM pending_approvals
+        WHERE status = 'expired' AND responded_at IS NULL
+      `).all() as { id: string; group_folder: string }[];
+
+      for (const row of recentlyExpired) {
+        writeApprovalResult(dataDir, row.group_folder, row.id, {
+          requestId: row.id,
+          approved: false,
+          respondedBy: 'system:expired',
+          respondedAt: new Date().toISOString(),
+        });
+        // Mark as having been notified
+        db.prepare(`UPDATE pending_approvals SET responded_at = datetime('now') WHERE id = ?`).run(row.id);
+      }
+    }
+  }, intervalMs);
+}
