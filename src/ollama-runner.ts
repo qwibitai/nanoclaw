@@ -13,10 +13,8 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
-export const OLLAMA_URL =
-  process.env.OLLAMA_URL || 'http://localhost:11434';
-export const OLLAMA_MODEL =
-  process.env.OLLAMA_MODEL || 'llama3.2:3b';
+export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 
 export interface ContainerInput {
   prompt: string;
@@ -54,11 +52,16 @@ function sessionFilePath(groupFolder: string): string {
   return path.join(dir, 'ollama-session.json');
 }
 
-function loadSession(groupFolder: string, sessionId?: string): ConversationSession {
+function loadSession(
+  groupFolder: string,
+  sessionId?: string,
+): ConversationSession {
   const filePath = sessionFilePath(groupFolder);
   if (sessionId && fs.existsSync(filePath)) {
     try {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as ConversationSession;
+      const data = JSON.parse(
+        fs.readFileSync(filePath, 'utf-8'),
+      ) as ConversationSession;
       if (data.sessionId === sessionId) {
         return data;
       }
@@ -121,7 +124,10 @@ async function callOllama(messages: OllamaMessage[]): Promise<string> {
     throw new Error(`Ollama API error ${response.status}: ${text}`);
   }
 
-  const data = (await response.json()) as { message?: { content?: string }; error?: string };
+  const data = (await response.json()) as {
+    message?: { content?: string };
+    error?: string;
+  };
   if (data.error) throw new Error(data.error);
   return data.message?.content ?? '';
 }
@@ -138,7 +144,11 @@ export async function runContainerAgent(
     // Check Ollama is reachable
     const health = await fetch(`${OLLAMA_URL}/api/tags`).catch(() => null);
     if (!health?.ok) {
-      return { status: 'error', result: null, error: 'Ollama is not reachable at ' + OLLAMA_URL };
+      return {
+        status: 'error',
+        result: null,
+        error: 'Ollama is not reachable at ' + OLLAMA_URL,
+      };
     }
 
     const assistantName = input.assistantName || 'Andy';
@@ -148,15 +158,21 @@ export async function runContainerAgent(
     const session = loadSession(input.groupFolder, input.sessionId);
 
     // Prepend system message if session is fresh
-    const messages: OllamaMessage[] = session.messages.length === 0
-      ? [{ role: 'system', content: systemPrompt }]
-      : session.messages;
+    const messages: OllamaMessage[] =
+      session.messages.length === 0
+        ? [{ role: 'system', content: systemPrompt }]
+        : session.messages;
 
     // Add new user message
     messages.push({ role: 'user', content: input.prompt });
 
     logger.info(
-      { group: group.name, model: OLLAMA_MODEL, sessionId: session.sessionId, turns: messages.length },
+      {
+        group: group.name,
+        model: OLLAMA_MODEL,
+        sessionId: session.sessionId,
+        turns: messages.length,
+      },
       'Calling Ollama',
     );
 
@@ -168,7 +184,10 @@ export async function runContainerAgent(
     saveSession(input.groupFolder, session);
 
     const duration = Date.now() - startTime;
-    logger.info({ group: group.name, duration, replyLength: reply.length }, 'Ollama response received');
+    logger.info(
+      { group: group.name, duration, replyLength: reply.length },
+      'Ollama response received',
+    );
 
     const output: ContainerOutput = {
       status: 'success',
@@ -178,7 +197,11 @@ export async function runContainerAgent(
 
     if (onOutput) {
       await onOutput(output);
-      return { status: 'success', result: null, newSessionId: session.sessionId };
+      return {
+        status: 'success',
+        result: null,
+        newSessionId: session.sessionId,
+      };
     }
 
     return output;
@@ -220,5 +243,8 @@ export function writeGroupsSnapshot(
  */
 export function ensureOllamaRunning(): void {
   // Async check done at first agent call — nothing to do synchronously.
-  logger.info({ url: OLLAMA_URL, model: OLLAMA_MODEL }, 'Ollama runner configured');
+  logger.info(
+    { url: OLLAMA_URL, model: OLLAMA_MODEL },
+    'Ollama runner configured',
+  );
 }
