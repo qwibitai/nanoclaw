@@ -100,9 +100,9 @@ export interface LcmSummary {
   depth: number;
   content: string;
   token_estimate: number;
-  source_message_ids: string | null;   // JSON array of lcm_messages.id (for depth 0)
-  parent_summary_ids: string | null;   // JSON array of lcm_summaries.id (for depth 1+)
-  child_summary_ids: string | null;    // JSON array of lcm_summaries.id condensed into this node
+  source_message_ids: string | null; // JSON array of lcm_messages.id (for depth 0)
+  parent_summary_ids: string | null; // JSON array of lcm_summaries.id (for depth 1+)
+  child_summary_ids: string | null; // JSON array of lcm_summaries.id condensed into this node
   min_sequence: number | null;
   max_sequence: number | null;
   created_at: string;
