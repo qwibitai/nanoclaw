@@ -26,7 +26,9 @@ function isTokenValid(token: string): boolean {
     const payload = JSON.parse(
       Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
     );
-    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60;
+    return (
+      typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60
+    );
   } catch {
     return true; // not a JWT or can't decode — assume valid
   }

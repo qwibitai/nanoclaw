@@ -43,7 +43,6 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
-
 }
 
 export interface ContainerOutput {
@@ -170,6 +169,30 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+          },
+          hooks: {
+            UserPromptSubmit: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command:
+                      'MEMORIES=$(mnemon recall "${CLAUDE_USER_PROMPT}" 2>/dev/null | head -30); if [ -n "$MEMORIES" ]; then echo "<system-reminder>Relevant memories from mnemon:\\n$MEMORIES</system-reminder>"; fi',
+                  },
+                ],
+              },
+            ],
+            Stop: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command:
+                      'echo \'Session ending. If you learned anything important this session (user preferences, facts, decisions), store it now: mnemon remember "content" --cat <category> --imp <1-5>\'',
+                  },
+                ],
+              },
+            ],
           },
         },
         null,

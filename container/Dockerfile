@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -45,6 +46,10 @@ COPY agent-runner/package*.json ./
 
 # Install dependencies
 RUN npm install
+
+# Replace vendored ripgrep with system build (vendored rg uses jemalloc which
+# crashes on kernels with non-4KB page sizes, e.g. Raspberry Pi 5 at 16KB)
+RUN cp /usr/bin/rg /app/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux/rg
 
 # Copy source code
 COPY agent-runner/ ./
