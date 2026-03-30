@@ -257,7 +257,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Push-notify devices not connected via WebSocket
         const connectedIds = channel.getConnectedDeviceIds?.() ?? [];
         const pushBody = text.length > 200 ? text.slice(0, 200) + '…' : text;
-        sendPushToOfflineDevices(connectedIds, ASSISTANT_NAME, pushBody, { type: 'chat' });
+        sendPushToOfflineDevices(connectedIds, ASSISTANT_NAME, pushBody, {
+          type: 'chat',
+        }).catch((err) => logger.error({ err }, 'Offline push failed'));
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -685,7 +687,9 @@ async function main(): Promise<void> {
   });
   startDailyNudgeCron();
   startICloudPolling(() => {
-    logger.info('iCloud calendar changed — clients will see updates on next fetch');
+    logger.info(
+      'iCloud calendar changed — clients will see updates on next fetch',
+    );
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {

@@ -27,7 +27,9 @@ function loadConfig(): ApnsConfig | null {
   const env = readEnvFile(['APNS_KEY_PATH', 'APNS_KEY_ID', 'APNS_TEAM_ID']);
 
   if (!env.APNS_KEY_PATH || !env.APNS_KEY_ID || !env.APNS_TEAM_ID) {
-    logger.warn('APNs not configured — missing APNS_KEY_PATH, APNS_KEY_ID, or APNS_TEAM_ID in .env');
+    logger.warn(
+      'APNs not configured — missing APNS_KEY_PATH, APNS_KEY_ID, or APNS_TEAM_ID in .env',
+    );
     return null;
   }
 
@@ -92,7 +94,7 @@ export async function sendPush(
   const notification = new Notification(token, {
     alert: { title, body },
     sound: 'default',
-    ...customData,
+    data: customData,
   });
 
   try {
@@ -104,15 +106,21 @@ export async function sendPush(
       const reason = (err as ApnsError & { reason?: string }).reason;
       if (reason === Errors.badDeviceToken || reason === Errors.unregistered) {
         // Token is no longer valid — remove from DB
-        logger.warn({ token: token.slice(0, 8) + '...', reason }, 'Invalid device token, removing');
+        logger.warn(
+          { token: token.slice(0, 8) + '...', reason },
+          'Invalid device token, removing',
+        );
         const allTokens = getAllDeviceTokens();
-        const match = allTokens.find(t => t.apns_token === token);
+        const match = allTokens.find((t) => t.apns_token === token);
         if (match) removeDeviceToken(match.device_id);
         return false;
       }
     }
 
-    logger.error({ err, token: token.slice(0, 8) + '...' }, 'Failed to send push notification');
+    logger.error(
+      { err, token: token.slice(0, 8) + '...' },
+      'Failed to send push notification',
+    );
     return false;
   }
 }
@@ -121,7 +129,10 @@ export async function sendPush(
  * Send a push notification to ALL registered devices.
  * Returns the number of successful sends.
  */
-export async function sendPushToAll(title: string, body: string): Promise<number> {
+export async function sendPushToAll(
+  title: string,
+  body: string,
+): Promise<number> {
   const tokens = getAllDeviceTokens();
   if (tokens.length === 0) {
     logger.warn('No device tokens registered — push not sent');
@@ -152,7 +163,7 @@ export async function sendPushToOfflineDevices(
   if (tokens.length === 0) return 0;
 
   const connectedSet = new Set(connectedDeviceIds);
-  const offlineTokens = tokens.filter(t => !connectedSet.has(t.device_id));
+  const offlineTokens = tokens.filter((t) => !connectedSet.has(t.device_id));
 
   if (offlineTokens.length === 0) {
     logger.debug('All devices connected via WebSocket — skipping push');
@@ -161,10 +172,19 @@ export async function sendPushToOfflineDevices(
 
   let sent = 0;
   for (const t of offlineTokens) {
-    const ok = await sendPush(t.apns_token, t.environment, title, body, customData);
+    const ok = await sendPush(
+      t.apns_token,
+      t.environment,
+      title,
+      body,
+      customData,
+    );
     if (ok) sent++;
   }
 
-  logger.info({ sent, total: offlineTokens.length, skipped: connectedSet.size }, 'Offline push broadcast complete');
+  logger.info(
+    { sent, total: offlineTokens.length, skipped: connectedSet.size },
+    'Offline push broadcast complete',
+  );
   return sent;
 }
