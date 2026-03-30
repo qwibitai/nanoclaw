@@ -142,6 +142,15 @@ export class GroupQueue {
   }
 
   /**
+   * Check whether a group has an active (running) container.
+   * Used by the status tracker heartbeat to detect dead containers.
+   */
+  isActive(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.active === true;
+  }
+
+  /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
    * If tasks are pending, preempt the idle container immediately.
    */

@@ -22,6 +22,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  statusHeartbeat?: () => void;
   onTasksChanged: () => void;
 }
 
@@ -145,6 +146,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
+    }
+
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    try {
+      deps.statusHeartbeat?.();
+    } catch (err) {
+      logger.error({ err }, 'Error in statusHeartbeat');
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -441,9 +449,9 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC.                                                                                                                                    
-        // Preserve isMain from the existing registration so IPC config                                                                                                                          
-        // updates (e.g. adding additionalMounts) don't strip the flag.                                                                                                                          
+        // Defense in depth: agent cannot set isMain via IPC.
+        // Preserve isMain from the existing registration so IPC config
+        // updates (e.g. adding additionalMounts) don't strip the flag.
         const existingGroup = registeredGroups[data.jid];
         deps.registerGroup(data.jid, {
           name: data.name,
