@@ -73,14 +73,14 @@ Examples:
 Haiku, no thinking config (most groups):
 ```json
 {
-  "model": "claude-haiku-4-5-20251001"
+  "model": "haiku"
 }
 ```
 
 Opus with adaptive thinking (research/planning groups):
 ```json
 {
-  "model": "claude-opus-4-6",
+  "model": "opus",
   "thinking": { "type": "adaptive" }
 }
 ```
