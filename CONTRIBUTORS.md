@@ -16,3 +16,4 @@ Thanks to everyone who has contributed to NanoClaw!
 - [flobo3](https://github.com/flobo3) — Flo
 - [edwinwzhe](https://github.com/edwinwzhe) — Edwin He
 - [scottgl9](https://github.com/scottgl9) — Scott Glover
+- [jorgenclaw](https://github.com/jorgenclaw) — Jorgenclaw
