@@ -102,14 +102,17 @@ END;
 // --- Database ---
 
 let db: Database.Database | null = null;
+let dbInitialized = false;
 
 export function initLcmDatabase(dbPath: string): Database.Database {
+  if (dbInitialized && db) return db;
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA_SQL);
   db.exec(FTS_SQL);
   db.exec(TRIGGERS_SQL);
+  dbInitialized = true;
   return db;
 }
 
@@ -120,9 +123,9 @@ export function getLcmDb(): Database.Database {
 
 // --- Helpers ---
 
-function contentHash(sessionId: string, sequence: number, role: string, content: string): string {
+export function contentHash(sessionId: string, role: string, content: string): string {
   const hash = crypto.createHash('sha256');
-  hash.update(`${sessionId}:${sequence}:${role}:${content}`);
+  hash.update(`${sessionId}:${role}:${content}`);
   return hash.digest('hex').slice(0, 16);
 }
 
@@ -132,27 +135,34 @@ function estimateTokens(text: string): number {
 
 // --- Store functions ---
 
+/**
+ * Store messages in the LCM database with content-hash dedup.
+ * Returns the number of newly inserted messages (0 for duplicates).
+ */
 export function storeMessages(
   sessionId: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   startSequence: number = 0,
-): void {
+): number {
   const database = getLcmDb();
   const stmt = database.prepare(`
     INSERT OR IGNORE INTO lcm_messages (id, session_id, role, content, token_estimate, sequence, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
+  let insertedCount = 0;
   const insertMany = database.transaction((msgs: typeof messages) => {
     for (let i = 0; i < msgs.length; i++) {
       const msg = msgs[i];
       const seq = startSequence + i;
-      const id = contentHash(sessionId, seq, msg.role, msg.content);
-      stmt.run(id, sessionId, msg.role, msg.content, estimateTokens(msg.content), seq, new Date().toISOString());
+      const id = contentHash(sessionId, msg.role, msg.content);
+      const result = stmt.run(id, sessionId, msg.role, msg.content, estimateTokens(msg.content), seq, new Date().toISOString());
+      if (result.changes > 0) insertedCount++;
     }
   });
 
   insertMany(messages);
+  return insertedCount;
 }
 
 export function storeSummary(summary: Omit<LcmSummary, 'token_estimate'>): void {

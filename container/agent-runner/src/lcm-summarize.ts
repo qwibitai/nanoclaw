@@ -66,9 +66,18 @@ function deterministicCondensation(summaryContents: string[]): string {
 
 // --- API-based summarization ---
 
+function hasApiCredentials(): boolean {
+  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+}
+
 async function callAnthropicAPI(systemPrompt: string, userContent: string): Promise<string | null> {
+  if (!hasApiCredentials()) {
+    console.error('[lcm-summarize] No API key or auth token available, skipping API call');
+    return null;
+  }
+
   const baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || '';
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LCM_SUMMARIZE_TIMEOUT_MS);
@@ -154,11 +163,36 @@ export async function createCondensedSummary(
   const maxChildDepth = Math.max(...summaries.map(s => s.depth));
   const newDepth = maxChildDepth + 1;
 
-  // Cap at MAX_CONDENSE_DEPTH
+  // Cap at MAX_CONDENSE_DEPTH — still summarize (or truncate) rather than
+  // concatenating unbounded content.
   if (newDepth > MAX_CONDENSE_DEPTH) {
+    const TOKEN_CAP = 10000; // ~40KB of text
+    const charCap = TOKEN_CAP * 4;
+
+    // Try API summarization first, fall back to truncated concatenation
+    const userContent = summaries
+      .map((s, i) => `--- Summary ${i + 1} ---\n${s.content}`)
+      .join('\n\n');
+
+    const apiResult = await callAnthropicAPI(
+      'You are condensing multiple conversation summaries into one. Be comprehensive but concise. Under 400 words.',
+      userContent,
+    );
+
+    let content: string;
+    if (apiResult) {
+      content = apiResult;
+    } else {
+      // Deterministic fallback with token cap
+      const joined = summaries.map(s => s.content).join('\n\n---\n\n');
+      content = joined.length > charCap
+        ? joined.slice(0, charCap) + '\n\n[Truncated — exceeded token cap]'
+        : joined;
+    }
+
     return {
       id,
-      content: summaries.map(s => s.content).join('\n\n---\n\n'),
+      content,
       childSummaryIds: summaries.map(s => s.id),
       minSequence: Math.min(...summaries.map(s => s.min_sequence ?? Infinity)),
       maxSequence: Math.max(...summaries.map(s => s.max_sequence ?? -Infinity)),
