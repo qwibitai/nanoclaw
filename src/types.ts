@@ -82,6 +82,32 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- LCM (Lossless Context Management) types ---
+
+export interface LcmMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  token_estimate: number;
+  sequence: number;
+  created_at: string;
+}
+
+export interface LcmSummary {
+  id: string;
+  session_id: string;
+  depth: number;
+  content: string;
+  token_estimate: number;
+  source_message_ids: string | null;   // JSON array of lcm_messages.id (for depth 0)
+  parent_summary_ids: string | null;   // JSON array of lcm_summaries.id (for depth 1+)
+  child_summary_ids: string | null;    // JSON array of lcm_summaries.id condensed into this node
+  min_sequence: number | null;
+  max_sequence: number | null;
+  created_at: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
