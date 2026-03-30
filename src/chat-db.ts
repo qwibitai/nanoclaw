@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { logger } from './logger.js';
+import { redactSensitiveData } from './redact.js';
 
 let db: Database.Database | null = null;
 
@@ -99,14 +100,6 @@ export function initChatDatabase(dataDir: string): void {
     );
   `);
 
-  // Seed default rooms
-  const ins = db.prepare(
-    'INSERT OR IGNORE INTO chat_rooms (id, name) VALUES (?, ?)',
-  );
-  ins.run('general', 'general');
-  ins.run('homebot', 'homebot');
-  ins.run('dev', 'dev');
-
   logger.info({ dbPath }, 'Chat database initialized');
 }
 
@@ -174,11 +167,12 @@ export function storeChatMessage(
 ): ChatMessage {
   const id = randomUUID();
   const now = Date.now();
+  const safeContent = redactSensitiveData(content);
   getDb()
     .prepare(
       'INSERT INTO chat_messages (id, room_id, sender, sender_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     )
-    .run(id, roomId, sender, senderType, content, now);
+    .run(id, roomId, sender, senderType, safeContent, now);
   return getChatMessageById(id)!;
 }
 
@@ -191,7 +185,7 @@ export function storeFileMessage(
 ): ChatMessage {
   const id = randomUUID();
   const now = Date.now();
-  const content = caption || fileMeta.filename;
+  const content = redactSensitiveData(caption || fileMeta.filename);
   getDb()
     .prepare(
       'INSERT INTO chat_messages (id, room_id, sender, sender_type, content, message_type, file_meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

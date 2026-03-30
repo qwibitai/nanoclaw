@@ -1,4 +1,4 @@
-const CACHE = 'nanoclaw-chat-v28';
+const CACHE = 'nanoclaw-chat-v29';
 const ASSETS = ['/', '/index.html', '/app.js', '/style.css', '/marked.min.js', '/dompurify.min.js', '/logo-dark.svg', '/logo-light.svg'];
 const VENDORED = new Set(['/marked.min.js', '/dompurify.min.js', '/logo-dark.svg', '/logo-light.svg']);
 

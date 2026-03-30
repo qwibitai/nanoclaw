@@ -610,6 +610,7 @@ function appendSystem(text) {
   div.className = 'msg system';
   div.textContent = text;
   $('#messages').appendChild(div);
+  return div;
 }
 
 function renderFileBubble(meta) {
@@ -689,8 +690,14 @@ function renderFilePreview() {
   $('#file-preview-remove').addEventListener('click', clearStagedFile);
 }
 
+const CHUNK_THRESHOLD = 512 * 1024; // Use chunked upload for files > 512KB
+const CHUNK_SIZE = 512 * 1024;      // 512KB per chunk
+
 async function uploadFile(file, caption) {
   if (!currentRoom) return;
+  if (file.size > CHUNK_THRESHOLD) {
+    return uploadFileChunked(file, caption);
+  }
   const form = new FormData();
   form.append('file', file);
   if (caption) form.append('caption', caption);
@@ -708,6 +715,59 @@ async function uploadFile(file, caption) {
     console.error('Upload error:', err);
     appendSystem('Upload failed: ' + err.message);
   }
+}
+
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+async function uploadFileChunked(file, caption) {
+  const uploadId = crypto.randomUUID();
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const statusMsg = appendSystem(`Uploading ${file.name} (0/${totalChunks})...`);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const slice = file.slice(start, end);
+    const buf = await slice.arrayBuffer();
+    const b64 = arrayBufferToBase64(buf);
+
+    const body = {
+      uploadId,
+      chunkIndex: i,
+      totalChunks,
+      filename: file.name,
+      mime: file.type || 'application/octet-stream',
+      data: b64,
+    };
+    // Include caption on the last chunk
+    if (i === totalChunks - 1 && caption) body.caption = caption;
+
+    try {
+      const res = await authFetch(
+        `/api/rooms/${encodeURIComponent(currentRoom)}/upload/chunk`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (statusMsg) statusMsg.textContent = `Upload failed: ${err.error || res.statusText}`;
+        return;
+      }
+    } catch (err) {
+      if (statusMsg) statusMsg.textContent = `Upload failed: ${err.message}`;
+      return;
+    }
+    if (statusMsg) statusMsg.textContent = `Uploading ${file.name} (${i + 1}/${totalChunks})...`;
+  }
+  if (statusMsg) statusMsg.remove();
 }
 
 function scrollToBottom(instant) {
