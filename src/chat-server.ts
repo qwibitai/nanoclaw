@@ -17,6 +17,7 @@
  *   WS   /ws            → WebSocket chat
  */
 import http from 'http';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -144,6 +145,7 @@ type ChatMessageCallback = (
   message: import('./chat-db.js').ChatMessage,
 ) => void;
 let onNewMessageCallback: ChatMessageCallback | null = null;
+let onGroupUpdatedCallback: (() => void) | null = null;
 
 export function setOnNewMessage(cb: ChatMessageCallback): void {
   onNewMessageCallback = cb;
@@ -151,6 +153,14 @@ export function setOnNewMessage(cb: ChatMessageCallback): void {
 
 export function clearOnNewMessage(): void {
   onNewMessageCallback = null;
+}
+
+export function setOnGroupUpdated(cb: () => void): void {
+  onGroupUpdatedCallback = cb;
+}
+
+export function clearOnGroupUpdated(): void {
+  onGroupUpdatedCallback = null;
 }
 
 export function isChatServerRunning(): boolean {
@@ -189,15 +199,73 @@ async function tailscaleWhois(ip: string): Promise<string | null> {
 
 // ── Authentication ────────────────────────────────────────────────────────
 const CHAT_SERVER_TOKEN = process.env.CHAT_SERVER_TOKEN || '';
-const TRUSTED_PROXY_IPS = new Set(
-  (process.env.TRUSTED_PROXY_IPS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-);
+const TRUSTED_PROXY_RAW = (process.env.TRUSTED_PROXY_IPS || '').trim();
+
+// Trusted proxy modes:
+//   "auto" — accept identity from any platform-managed proxy, detected per-request
+//   "*"    — trust the configured header from any source IP
+//   IPs    — explicit IP/CIDR allowlist
+const TRUST_ANY_PLATFORM =
+  TRUSTED_PROXY_RAW === 'auto' || TRUSTED_PROXY_RAW === '*';
+
+const TRUSTED_PROXY_ENTRIES = TRUST_ANY_PLATFORM
+  ? []
+  : TRUSTED_PROXY_RAW.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
 const TRUSTED_PROXY_HEADER = (
   process.env.TRUSTED_PROXY_HEADER || 'x-forwarded-user'
 ).toLowerCase();
+
+/** Known platform-managed identity headers. When "auto" is set, if any of
+ *  these are present alongside their verification companion header, the
+ *  request is trusted regardless of source IP. */
+const PLATFORM_HEADERS: Array<{
+  identity: string;
+  verify: string;
+  name: string;
+}> = [
+  // Azure App Service EasyAuth — x-ms-client-principal is a signed blob
+  // that only the platform can inject
+  {
+    identity: 'x-ms-client-principal-name',
+    verify: 'x-ms-client-principal',
+    name: 'Azure EasyAuth',
+  },
+  // Cloudflare Access — Cf-Access-Jwt-Assertion accompanies the email header
+  {
+    identity: 'cf-access-authenticated-user-email',
+    verify: 'cf-access-jwt-assertion',
+    name: 'Cloudflare Access',
+  },
+];
+
+function ipToInt(ip: string): number {
+  return (
+    ip
+      .split('.')
+      .reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0
+  );
+}
+
+function isIpInCidr(ip: string, cidr: string): boolean {
+  const [network, prefixStr] = cidr.split('/');
+  const prefix = parseInt(prefixStr, 10);
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  return (ipToInt(ip) & mask) === (ipToInt(network) & mask);
+}
+
+function isTrustedProxyIp(ip: string): boolean {
+  for (const entry of TRUSTED_PROXY_ENTRIES) {
+    if (entry.includes('/')) {
+      if (isIpInCidr(ip, entry)) return true;
+    } else {
+      if (ip === entry) return true;
+    }
+  }
+  return false;
+}
 
 function isLocalhost(ip: string): boolean {
   const clean = ip.replace(/^::ffff:/, '');
@@ -208,16 +276,39 @@ function authenticateTrustedProxy(
   req: http.IncomingMessage,
   remoteIp: string,
 ): { ok: boolean; identity?: string } | null {
-  if (TRUSTED_PROXY_IPS.size === 0) return null;
   const cleanIp = remoteIp.replace(/^::ffff:/, '');
-  if (!TRUSTED_PROXY_IPS.has(cleanIp)) return null;
-  const rawUser = req.headers[TRUSTED_PROXY_HEADER];
-  if (Array.isArray(rawUser)) {
-    logger.warn(
-      { header: TRUSTED_PROXY_HEADER, values: rawUser.length },
-      'Trusted proxy header has multiple values — using the first',
-    );
+
+  // Auto mode: detect platform-managed proxies from request headers
+  if (TRUST_ANY_PLATFORM) {
+    for (const ph of PLATFORM_HEADERS) {
+      const identity = req.headers[ph.identity];
+      const proof = req.headers[ph.verify];
+      if (identity && proof) {
+        const user = Array.isArray(identity) ? identity[0] : identity;
+        logger.debug(
+          { identity: user, platform: ph.name },
+          'Platform proxy auth',
+        );
+        return { ok: true, identity: user };
+      }
+    }
+    // In auto mode with no platform headers, fall back to configured header
+    const rawUser = req.headers[TRUSTED_PROXY_HEADER];
+    const user = Array.isArray(rawUser) ? rawUser[0] : rawUser;
+    if (user) {
+      logger.debug(
+        { identity: user, remoteIp: cleanIp },
+        'Trusted proxy auth (auto fallback)',
+      );
+      return { ok: true, identity: user };
+    }
+    return null;
   }
+
+  // Explicit IP mode
+  if (TRUSTED_PROXY_ENTRIES.length === 0) return null;
+  if (!isTrustedProxyIp(cleanIp)) return null;
+  const rawUser = req.headers[TRUSTED_PROXY_HEADER];
   const user = Array.isArray(rawUser) ? rawUser[0] : rawUser;
   if (!user) return null;
   logger.debug({ identity: user, remoteIp: cleanIp }, 'Trusted proxy auth');
@@ -267,6 +358,34 @@ async function authenticateRequest(
 
 // ── File upload helpers ────────────────────────────────────────────────────
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
+const CHUNK_SIZE = 512 * 1024; // 512KB chunks (stays well under Azure's 2MB limit)
+const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutes to complete a chunked upload
+
+// Track in-progress chunked uploads
+const pendingChunkedUploads = new Map<
+  string,
+  {
+    groupFolder: string;
+    roomId: string;
+    filename: string;
+    mime: string;
+    totalChunks: number;
+    receivedChunks: Set<number>;
+    tempDir: string;
+    sender: string;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+
+function cleanupChunkedUpload(uploadId: string): void {
+  const upload = pendingChunkedUploads.get(uploadId);
+  if (!upload) return;
+  clearTimeout(upload.timer);
+  try {
+    fs.rmSync(upload.tempDir, { recursive: true, force: true });
+  } catch {}
+  pendingChunkedUploads.delete(uploadId);
+}
 
 function resolveGroupFolder(roomId: string): string | null {
   const jid = `chat:${roomId}`;
@@ -696,6 +815,7 @@ async function handleHttp(
       const updates = JSON.parse(body);
       const jid = decodeURIComponent(botMatch[1]);
       updateRegisteredGroup(jid, updates);
+      if (onGroupUpdatedCallback) onGroupUpdatedCallback();
       json(200, { ok: true });
     } catch (err: any) {
       json(400, { error: err.message || 'Invalid JSON' });
@@ -934,6 +1054,124 @@ async function handleHttp(
     return;
   }
 
+  // ── Chunked file upload ─────────────────────────────────────────────────
+  const chunkMatch = url.pathname.match(
+    /^\/api\/rooms\/([^/]+)\/upload\/chunk$/,
+  );
+  if (chunkMatch && method === 'POST') {
+    const roomId = chunkMatch[1];
+    const body = await readBody();
+    let parsed: {
+      uploadId: string;
+      chunkIndex: number;
+      totalChunks: number;
+      filename: string;
+      mime: string;
+      data: string;
+      caption?: string;
+    };
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return json(400, { error: 'Invalid JSON' });
+    }
+
+    const { uploadId, chunkIndex, totalChunks, filename, mime, data } = parsed;
+    if (!uploadId || chunkIndex == null || !totalChunks || !filename || !data) {
+      return json(400, { error: 'Missing required fields' });
+    }
+
+    const groupFolder = resolveGroupFolder(roomId);
+    if (!groupFolder)
+      return json(404, { error: 'Room not registered as a group' });
+
+    // Initialize or retrieve upload state
+    let upload = pendingChunkedUploads.get(uploadId);
+    if (!upload) {
+      const tempDir = path.join(os.tmpdir(), `nanoclaw-chunk-${uploadId}`);
+      fs.mkdirSync(tempDir, { recursive: true });
+      upload = {
+        groupFolder,
+        roomId,
+        filename,
+        mime: mime || 'application/octet-stream',
+        totalChunks,
+        receivedChunks: new Set(),
+        tempDir,
+        sender: senderIdentity,
+        timer: setTimeout(() => cleanupChunkedUpload(uploadId), CHUNK_UPLOAD_TIMEOUT),
+      };
+      pendingChunkedUploads.set(uploadId, upload);
+    }
+
+    // Write chunk
+    const chunkBuf = Buffer.from(data, 'base64');
+    fs.writeFileSync(path.join(upload.tempDir, String(chunkIndex)), chunkBuf);
+    upload.receivedChunks.add(chunkIndex);
+
+    // Check if all chunks received
+    if (upload.receivedChunks.size < upload.totalChunks) {
+      return json(200, {
+        ok: true,
+        received: upload.receivedChunks.size,
+        total: upload.totalChunks,
+      });
+    }
+
+    // All chunks received — reassemble
+    clearTimeout(upload.timer);
+    const uploadsDir = getUploadsDir(groupFolder);
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const id = randomUUID();
+    const ext = path.extname(filename) || '';
+    const safeFilename = `${id}${ext}`;
+    const finalPath = path.join(uploadsDir, safeFilename);
+
+    const writeStream = fs.createWriteStream(finalPath);
+    let totalSize = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkPath = path.join(upload.tempDir, String(i));
+      const chunk = fs.readFileSync(chunkPath);
+      totalSize += chunk.length;
+      writeStream.write(chunk);
+    }
+    writeStream.end();
+
+    // Cleanup temp
+    fs.rmSync(upload.tempDir, { recursive: true, force: true });
+    pendingChunkedUploads.delete(uploadId);
+
+    if (totalSize > MAX_UPLOAD_SIZE) {
+      try {
+        fs.unlinkSync(finalPath);
+      } catch {}
+      return json(413, {
+        error: `File exceeds ${MAX_UPLOAD_SIZE / 1024 / 1024}MB limit`,
+      });
+    }
+
+    const fileMeta = {
+      url: `/api/files/${encodeURIComponent(groupFolder)}/${safeFilename}`,
+      filename,
+      mime: upload.mime,
+      size: totalSize,
+    };
+    const caption = parsed.caption || '';
+    const stored = storeFileMessage(
+      roomId,
+      upload.sender,
+      'user',
+      fileMeta,
+      caption,
+    );
+    broadcast(roomId, { type: 'message', ...stored });
+    if (onNewMessageCallback) {
+      onNewMessageCallback(roomId, stored);
+    }
+
+    return json(200, { ...fileMeta, caption });
+  }
+
   // Serve uploaded files
   const fileMatch = url.pathname.match(/^\/api\/files\/([^/]+)\/([^/]+)$/);
   if (fileMatch && method === 'GET') {
@@ -1049,8 +1287,16 @@ function setupWebSocket(server: http.Server): void {
           client.identity = agent.agent_id;
           client.identity_type = 'agent';
         } else {
-          const tsUser = await tailscaleWhois(remoteIp);
-          client.identity = tsUser ?? `user@${remoteIp}`;
+          // Use identity from trusted proxy (set during upgrade auth)
+          const proxyIdentity = (req as any)._authIdentity as
+            | string
+            | undefined;
+          if (proxyIdentity && proxyIdentity !== `user@${remoteIp}`) {
+            client.identity = proxyIdentity;
+          } else {
+            const tsUser = await tailscaleWhois(remoteIp);
+            client.identity = tsUser ?? `user@${remoteIp}`;
+          }
           client.identity_type = 'user';
         }
         authenticated = true;
