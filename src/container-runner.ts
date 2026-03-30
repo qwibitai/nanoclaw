@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -209,6 +210,19 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // 1Password MCP token (main group only)
+  if (isMain) {
+    const homeDir = os.homedir();
+    const opDir = path.join(homeDir, '.1password-mcp');
+    if (fs.existsSync(opDir)) {
+      mounts.push({
+        hostPath: opDir,
+        containerPath: '/home/node/.1password-mcp',
+        readonly: true,
+      });
+    }
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {

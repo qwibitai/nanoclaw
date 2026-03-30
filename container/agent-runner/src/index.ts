@@ -391,6 +391,31 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
+
+  // 1Password MCP — conditional on mounted token file
+  const opTokenPath = '/home/node/.1password-mcp/token';
+  const opMcpPath = path.join(path.dirname(mcpServerPath), '1password-mcp.js');
+  if (fs.existsSync(opTokenPath) && fs.existsSync(opMcpPath)) {
+    mcpServers['1password'] = {
+      command: 'node',
+      args: [opMcpPath],
+      env: {
+        OP_TOKEN_PATH: opTokenPath,
+      },
+    };
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -409,23 +434,14 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        ...Object.keys(mcpServers).filter(k => k !== 'nanoclaw').map(k => `mcp__${k}__*`),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-      },
+      mcpServers,
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
