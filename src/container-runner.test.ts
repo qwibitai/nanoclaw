@@ -15,6 +15,7 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  SHARED_FILES_DIR: '/tmp/nanoclaw-files',
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -100,6 +101,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -220,5 +222,58 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner volume mounts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('includes a writable shared-files mount for the group', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    // Emit output so the container resolves cleanly
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-789',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnMock = vi.mocked(spawn);
+    expect(spawnMock).toHaveBeenCalled();
+    const spawnArgs: string[] = spawnMock.mock.calls[0][1] as string[];
+
+    // Find the -v flag whose value contains /workspace/shared-files
+    const vFlagIndex = spawnArgs.findIndex(
+      (arg, i) =>
+        spawnArgs[i - 1] === '-v' && arg.includes('/workspace/shared-files'),
+    );
+    const mountArg = spawnArgs.find(
+      (arg, i) =>
+        spawnArgs[i - 1] === '-v' && arg.includes('/workspace/shared-files'),
+    );
+
+    expect(mountArg).toBeDefined();
+
+    // Verify the host path includes the group folder and shared-files base
+    expect(mountArg).toContain('/tmp/nanoclaw-files/test-group');
+
+    // Verify the mount is writable (not read-only — no :ro suffix)
+    expect(mountArg).not.toMatch(/:ro$/);
   });
 });

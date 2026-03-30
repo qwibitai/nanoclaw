@@ -14,6 +14,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  SHARED_FILES_DIR,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -282,6 +283,16 @@ function buildVolumeMounts(
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
+    readonly: false,
+  });
+
+  // Shared files directory: agents write files here and they become
+  // accessible at code.goette.co/files/<group>/
+  const sharedFilesDir = path.join(SHARED_FILES_DIR, group.folder);
+  fs.mkdirSync(sharedFilesDir, { recursive: true });
+  mounts.push({
+    hostPath: sharedFilesDir,
+    containerPath: '/workspace/shared-files',
     readonly: false,
   });
 
