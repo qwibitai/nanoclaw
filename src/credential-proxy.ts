@@ -129,10 +129,13 @@ export async function ensureValidToken(
   tokenUrl = REFRESH_URL,
   maxRetries = 3,
 ): Promise<OAuthCredentials> {
+  // Initial check only — retries re-read via freshCreds inside the loop.
   const creds = readCredentials(credentialsPath);
 
   // Token still valid (outside 5-minute buffer)
+  const minutesRemaining = Math.round((creds.expiresAt - Date.now()) / 60000);
   if (creds.expiresAt - Date.now() > REFRESH_BUFFER_MS) {
+    logger.info({ minutesRemaining }, 'OAuth token valid');
     return creds;
   }
 
@@ -141,14 +144,27 @@ export async function ensureValidToken(
     return refreshInProgress;
   }
 
-  logger.info('OAuth token expiring soon, refreshing...');
+  logger.info({ minutesRemaining }, 'OAuth token expiring soon, refreshing...');
 
   refreshInProgress = (async () => {
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Re-read credentials from disk before each attempt — an external
+      // process (e.g. `claude` CLI login) may have refreshed the token.
+      const freshCreds = readCredentials(credentialsPath);
+      const now = Date.now();
+      if (freshCreds.expiresAt - now > REFRESH_BUFFER_MS) {
+        const freshMinutes = Math.round((freshCreds.expiresAt - now) / 60000);
+        logger.info(
+          { minutesRemaining: freshMinutes },
+          'OAuth token refreshed externally, using disk credentials',
+        );
+        return freshCreds;
+      }
+
       try {
         const refreshed = await refreshOAuthToken(
-          creds.refreshToken,
+          freshCreds.refreshToken,
           tokenUrl,
         );
 
@@ -178,11 +194,16 @@ export async function ensureValidToken(
       }
     }
 
-    logger.error(
-      { err: lastError },
-      'All OAuth refresh attempts failed, using current token',
+    // Final check: maybe an external process refreshed while we were retrying
+    const finalCreds = readCredentials(credentialsPath);
+    if (finalCreds.expiresAt - Date.now() > REFRESH_BUFFER_MS) {
+      logger.info('OAuth token refreshed externally after retries exhausted');
+      return finalCreds;
+    }
+
+    throw new Error(
+      `OAuth refresh failed after ${maxRetries} attempts: ${lastError?.message}`,
     );
-    return creds;
   })();
 
   try {
