@@ -298,6 +298,9 @@ const EMPTY_DATA = {
   chats: [],
   messageStats: { total: 0, last_hour: 0, last_24h: 0, last_7d: 0 },
   hourlyVolume: [],
+  dailyVolume: [],
+  monthDailyVolume: [],
+  weeklyVolume: [],
   channelStats: [],
   containers: [],
   timestamp: new Date().toISOString(),
@@ -369,6 +372,36 @@ function apiData() {
     )
     .all() as Array<{ hour: string; count: number }>;
 
+  // Message volume by day (last 7 days)
+  const dailyVolume = db
+    .prepare(
+      `SELECT strftime('%w', timestamp) as dow, strftime('%Y-%m-%d', timestamp) as day, COUNT(*) as count
+       FROM messages
+       WHERE timestamp > datetime('now', '-7 days')
+       GROUP BY day ORDER BY day`,
+    )
+    .all() as Array<{ dow: string; day: string; count: number }>;
+
+  // Message volume by day (last month)
+  const monthDailyVolume = db
+    .prepare(
+      `SELECT strftime('%Y-%m-%d', timestamp) as day, COUNT(*) as count
+       FROM messages
+       WHERE timestamp > datetime('now', '-1 month')
+       GROUP BY day ORDER BY day`,
+    )
+    .all() as Array<{ day: string; count: number }>;
+
+  // Message volume by week (last 3 months)
+  const weeklyVolume = db
+    .prepare(
+      `SELECT strftime('%Y-%W', timestamp) as week, COUNT(*) as count
+       FROM messages
+       WHERE timestamp > datetime('now', '-3 months')
+       GROUP BY week ORDER BY week`,
+    )
+    .all() as Array<{ week: string; count: number }>;
+
   // Messages by channel
   const channelStats = db
     .prepare(
@@ -408,6 +441,9 @@ function apiData() {
     chats,
     messageStats,
     hourlyVolume,
+    dailyVolume,
+    monthDailyVolume,
+    weeklyVolume,
     channelStats,
     containers,
     timestamp: new Date().toISOString(),
@@ -724,33 +760,72 @@ function renderTopStats() {
 
   document.getElementById('top-stats').innerHTML = html;
 
-  // 24h Activity — full width
-  let actHtml = '<div class="card" style="margin-bottom:24px"><h2 style="display:flex;justify-content:space-between;align-items:center">24h Activity';
-  if (d.channelStats.length > 0) {
-    actHtml += '<span style="display:flex;gap:8px">';
-    d.channelStats.forEach(cs => {
-      actHtml += '<span class="channel-pill">' + channelIcon(cs.channel) + ' ' + esc(cs.channel || 'unknown') + ' <span class="count">' + cs.count + '</span></span>';
+  // Activity charts — 4 panels
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function renderChart(title, data, labelFn, totalLabel) {
+    if (!data || data.length === 0) return '<div class="card"><h2>' + title + '</h2><div class="empty">No data</div></div>';
+    const max = Math.max(...data.map(d => d.count), 1);
+    const total = data.reduce((s, d) => s + d.count, 0);
+    let h = '<div class="card"><h2 style="display:flex;justify-content:space-between">' + title + '<span class="stat-value" style="font-size:13px">' + total.toLocaleString() + ' ' + totalLabel + '</span></h2>';
+    h += '<div class="bar-chart" style="height:100px">';
+    data.forEach(d => {
+      const pct = Math.max((d.count / max) * 100, 2);
+      h += '<div class="bar" style="height:' + pct + '%" title="' + labelFn(d) + ' — ' + d.count + ' msgs"></div>';
     });
-    actHtml += '</span>';
+    h += '</div>';
+    h += '<div class="bar-label">';
+    if (data.length > 0) h += '<span>' + labelFn(data[0]) + '</span>';
+    if (data.length > 2) h += '<span>' + labelFn(data[Math.floor(data.length/2)]) + '</span>';
+    if (data.length > 1) h += '<span>' + labelFn(data[data.length-1]) + '</span>';
+    h += '</div></div>';
+    return h;
   }
-  actHtml += '</h2>';
-  if (d.hourlyVolume.length > 0) {
-    const max = Math.max(...d.hourlyVolume.map(h => h.count), 1);
-    const hours = {};
-    d.hourlyVolume.forEach(h => { hours[h.hour] = h.count; });
-    actHtml += '<div class="bar-chart" style="height:120px">';
-    for (let i = 0; i < 24; i++) {
-      const h = String(i).padStart(2, '0');
-      const c = hours[h] || 0;
-      const pct = Math.max((c / max) * 100, 2);
-      actHtml += '<div class="bar" style="height:' + pct + '%" title="' + h + ':00 — ' + c + ' msgs"></div>';
-    }
-    actHtml += '</div>';
-    actHtml += '<div class="bar-label"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>';
-  } else {
-    actHtml += '<div class="empty">No messages in the last 24 hours</div>';
+
+  // Build 24h data (fill all 24 hours)
+  const hourMap = {};
+  (d.hourlyVolume || []).forEach(h => { hourMap[h.hour] = h.count; });
+  const hourData = [];
+  for (let i = 0; i < 24; i++) {
+    const h = String(i).padStart(2, '0');
+    hourData.push({ key: h, count: hourMap[h] || 0 });
   }
+
+  let actHtml = '<div class="grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px">';
+
+  // 24 Hours
+  actHtml += renderChart('24 Hours', hourData, d => d.key + ':00', 'msgs');
+
+  // Week
+  actHtml += renderChart('7 Days', d.dailyVolume || [], d => {
+    const dow = parseInt(d.dow);
+    return dayNames[dow] || d.day;
+  }, 'msgs');
+
+  // Month
+  actHtml += renderChart('30 Days', d.monthDailyVolume || [], d => {
+    const parts = d.day.split('-');
+    return parseInt(parts[2]) + ' ' + monthNames[parseInt(parts[1]) - 1];
+  }, 'msgs');
+
+  // 3 Months
+  actHtml += renderChart('3 Months', d.weeklyVolume || [], d => {
+    const parts = d.week.split('-');
+    return 'W' + (parts[1] || d.week);
+  }, 'msgs');
+
   actHtml += '</div>';
+
+  // Channel pills
+  if (d.channelStats.length > 0) {
+    actHtml += '<div style="display:flex;gap:8px;margin-bottom:24px;margin-top:-16px">';
+    d.channelStats.forEach(cs => {
+      actHtml += '<span class="channel-pill">' + channelIcon(cs.channel) + ' ' + esc(cs.channel || 'unknown') + ' <span class="count">' + cs.count + ' (24h)</span></span>';
+    });
+    actHtml += '</div>';
+  }
+
   document.getElementById('activity-bar').innerHTML = actHtml;
 }
 
