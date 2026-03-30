@@ -33,6 +33,7 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
   getMessagesSince,
@@ -402,6 +403,51 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Detect stale/corrupt session: container failed while resuming an existing session.
+      // Clear the session and retry once with a fresh session to avoid infinite retry loops.
+      if (sessionId) {
+        logger.warn(
+          { group: group.name, staleSessionId: sessionId, error: output.error },
+          'Container failed with existing session — clearing stale session and retrying with fresh session',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+
+        const freshOutput = await runContainerAgent(
+          group,
+          {
+            prompt,
+            sessionId: undefined,
+            groupFolder: group.folder,
+            chatJid,
+            isMain,
+            assistantName: ASSISTANT_NAME,
+          },
+          (proc, containerName) =>
+            queue.registerProcess(chatJid, proc, containerName, group.folder),
+          wrappedOnOutput,
+        );
+
+        if (freshOutput.newSessionId) {
+          sessions[group.folder] = freshOutput.newSessionId;
+          setSession(group.folder, freshOutput.newSessionId);
+        }
+
+        if (freshOutput.status === 'error') {
+          logger.error(
+            { group: group.name, error: freshOutput.error },
+            'Container agent error on fresh session retry',
+          );
+          return 'error';
+        }
+
+        logger.info(
+          { group: group.name, newSessionId: freshOutput.newSessionId },
+          'Fresh session retry succeeded',
+        );
+        return 'success';
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
