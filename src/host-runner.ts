@@ -172,22 +172,30 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   // Build the agent-runner entry point path
-  const agentRunnerPkg = path.join(
-    process.cwd(),
-    'container',
-    'agent-runner',
-  );
+  const projectRoot = process.cwd();
+  const agentRunnerPkg = path.join(projectRoot, 'container', 'agent-runner');
+
+  // Use the project-local tsx binary to avoid PATH issues in launchd/systemd
+  const tsxBin = path.join(projectRoot, 'node_modules', '.bin', 'tsx');
 
   // Build environment for the child process
+  // Ensure PATH includes the directory of the current node binary,
+  // which may be missing in launchd/systemd environments.
+  const nodeBinDir = path.dirname(process.execPath);
+  const currentPath = process.env.PATH || '';
+  const augmentedPath = currentPath.includes(nodeBinDir)
+    ? currentPath
+    : `${nodeBinDir}:${currentPath}`;
+
   const childEnv: Record<string, string> = {
     ...process.env as Record<string, string>,
+    PATH: augmentedPath,
     // Host-mode path configuration (agent-runner reads these instead of hardcoded /workspace/*)
     NANOCLAW_HOST_MODE: '1',
     NANOCLAW_GROUP_DIR: paths.groupDir,
     NANOCLAW_IPC_DIR: paths.ipcDir,
     NANOCLAW_CLAUDE_DIR: paths.claudeDir,
     NANOCLAW_PROJECT_DIR: paths.projectRoot,
-    HOME: path.dirname(paths.claudeDir), // So .claude/ is at $HOME/.claude
     TZ: TIMEZONE,
   };
 
@@ -200,7 +208,7 @@ export async function runContainerAgent(
   }
 
   return new Promise((resolve) => {
-    const child = spawn('npx', ['tsx', path.join(agentRunnerPkg, 'src', 'index.ts')], {
+    const child = spawn(tsxBin, [path.join(agentRunnerPkg, 'src', 'index.ts')], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: paths.groupDir,
       env: childEnv,

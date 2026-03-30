@@ -37,6 +37,8 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
+  // Track the latest user message ts per channel for thread replies
+  private lastUserMessageTs = new Map<string, string>();
 
   private opts: SlackChannelOpts;
 
@@ -118,6 +120,12 @@ export class SlackChannel implements Channel {
         }
       }
 
+      // Track the user message ts for thread replies (use thread_ts if already in a thread)
+      if (!isBotMessage) {
+        const threadTs = (msg as GenericMessageEvent).thread_ts || msg.ts;
+        this.lastUserMessageTs.set(jid, threadTs);
+      }
+
       this.opts.onMessage(jid, {
         id: msg.ts,
         chat_jid: jid,
@@ -170,14 +178,22 @@ export class SlackChannel implements Channel {
     }
 
     try {
+      // Reply in the thread of the last user message (if any)
+      const threadTs = this.lastUserMessageTs.get(jid);
+
       // Slack limits messages to ~4000 characters; split if needed
       if (text.length <= MAX_MESSAGE_LENGTH) {
-        await this.app.client.chat.postMessage({ channel: channelId, text });
+        await this.app.client.chat.postMessage({
+          channel: channelId,
+          text,
+          ...(threadTs ? { thread_ts: threadTs } : {}),
+        });
       } else {
         for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
           await this.app.client.chat.postMessage({
             channel: channelId,
             text: text.slice(i, i + MAX_MESSAGE_LENGTH),
+            ...(threadTs ? { thread_ts: threadTs } : {}),
           });
         }
       }
