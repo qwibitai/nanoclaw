@@ -215,6 +215,97 @@ function getUpdateInfo(currentVersion: string | null): { available: boolean; lat
   }
 }
 
+function getMessageActivity(): {
+  hourlyVolume: Array<{ hour: string; count: number }>;
+  dailyVolume: Array<{ day: string; dow: string; count: number }>;
+  monthDailyVolume: Array<{ day: string; count: number }>;
+  weeklyVolume: Array<{ week: string; count: number }>;
+} {
+  const empty = { hourlyVolume: [], dailyVolume: [], monthDailyVolume: [], weeklyVolume: [] };
+  const timestamps: Date[] = [];
+
+  // Parse all session JSONL files for message timestamps
+  try {
+    if (fs.existsSync(SESSIONS_DIR)) {
+      for (const f of fs.readdirSync(SESSIONS_DIR)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const filePath = path.join(SESSIONS_DIR, f);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        for (const line of content.split('\n')) {
+          if (!line.includes('"type":"message"')) continue;
+          try {
+            const j = JSON.parse(line);
+            if (j.type === 'message' && j.timestamp) {
+              timestamps.push(new Date(j.timestamp));
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  // Also parse gateway log for sendMessage events
+  try {
+    if (fs.existsSync(LOG_PATH)) {
+      const logContent = execSync(`tail -5000 ${JSON.stringify(LOG_PATH)} 2>/dev/null`, {
+        encoding: 'utf-8', timeout: 5000,
+      });
+      for (const line of logContent.split('\n')) {
+        if (!line.includes('sendMessage')) continue;
+        const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+        if (timeMatch) timestamps.push(new Date(timeMatch[1]));
+      }
+    }
+  } catch {}
+
+  if (timestamps.length === 0) return empty;
+
+  const now = new Date();
+  const h24Ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const d7Ago = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const d30Ago = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const d90Ago = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  // 24h hourly
+  const hourCounts: Record<string, number> = {};
+  // 7d daily
+  const dayCounts: Record<string, { count: number; dow: string }> = {};
+  // 30d daily
+  const monthDayCounts: Record<string, number> = {};
+  // 3mo weekly
+  const weekCounts: Record<string, number> = {};
+
+  for (const ts of timestamps) {
+    if (ts > h24Ago) {
+      const h = String(ts.getHours()).padStart(2, '0');
+      hourCounts[h] = (hourCounts[h] || 0) + 1;
+    }
+    if (ts > d7Ago) {
+      const day = ts.toISOString().split('T')[0];
+      if (!dayCounts[day]) dayCounts[day] = { count: 0, dow: String(ts.getDay()) };
+      dayCounts[day].count++;
+    }
+    if (ts > d30Ago) {
+      const day = ts.toISOString().split('T')[0];
+      monthDayCounts[day] = (monthDayCounts[day] || 0) + 1;
+    }
+    if (ts > d90Ago) {
+      // ISO week approximation
+      const startOfYear = new Date(ts.getFullYear(), 0, 1);
+      const weekNum = Math.ceil(((ts.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7);
+      const key = ts.getFullYear() + '-' + String(weekNum).padStart(2, '0');
+      weekCounts[key] = (weekCounts[key] || 0) + 1;
+    }
+  }
+
+  return {
+    hourlyVolume: Object.entries(hourCounts).map(([hour, count]) => ({ hour, count })).sort((a, b) => a.hour.localeCompare(b.hour)),
+    dailyVolume: Object.entries(dayCounts).map(([day, d]) => ({ day, dow: d.dow, count: d.count })).sort((a, b) => a.day.localeCompare(b.day)),
+    monthDailyVolume: Object.entries(monthDayCounts).map(([day, count]) => ({ day, count })).sort((a, b) => a.day.localeCompare(b.day)),
+    weeklyVolume: Object.entries(weekCounts).map(([week, count]) => ({ week, count })).sort((a, b) => a.week.localeCompare(b.week)),
+  };
+}
+
 function apiData() {
   const config = readJson(CONFIG_PATH);
   const service = getServiceStatus();
@@ -223,6 +314,12 @@ function apiData() {
   const cronJobs = getCronJobs();
   const sessions = getSessions();
   const update = getUpdateInfo(service.version);
+  let activity;
+  try {
+    activity = getMessageActivity();
+  } catch (err) {
+    activity = { hourlyVolume: [], dailyVolume: [], monthDailyVolume: [], weeklyVolume: [], error: String(err) };
+  }
 
   const model = config?.agents?.defaults?.model?.primary || 'unknown';
   const fallbacks = config?.agents?.defaults?.model?.fallbacks || [];
@@ -237,6 +334,7 @@ function apiData() {
     cronJobs,
     sessions,
     update,
+    activity,
     timestamp: new Date().toISOString(),
   };
 }
@@ -420,6 +518,7 @@ const HTML = `<!DOCTYPE html>
 
 <div id="update-banner"></div>
 <div class="grid" id="top-stats"></div>
+<div id="activity-bar"></div>
 <div class="grid" id="main-content"></div>
 
 <script>
@@ -506,6 +605,56 @@ function renderTopStats() {
   html += '</div>';
 
   document.getElementById('top-stats').innerHTML = html;
+
+  // Activity charts
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const act = d.activity || {};
+
+  function renderChart(title, data, labelFn, totalLabel) {
+    if (!data || data.length === 0) return '<div class="card"><h2>' + title + '</h2><div class="empty">No data</div></div>';
+    const max = Math.max(...data.map(d => d.count), 1);
+    const total = data.reduce((s, d) => s + d.count, 0);
+    let h = '<div class="card"><h2 style="display:flex;justify-content:space-between">' + title + '<span class="stat-value" style="font-size:13px">' + total.toLocaleString() + ' ' + totalLabel + '</span></h2>';
+    h += '<div class="bar-chart" style="height:100px">';
+    data.forEach(d => {
+      const pct = Math.max((d.count / max) * 100, 2);
+      h += '<div class="bar" style="height:' + pct + '%" title="' + labelFn(d) + ' — ' + d.count + ' msgs"></div>';
+    });
+    h += '</div>';
+    h += '<div class="bar-label">';
+    if (data.length > 0) h += '<span>' + labelFn(data[0]) + '</span>';
+    if (data.length > 2) h += '<span>' + labelFn(data[Math.floor(data.length/2)]) + '</span>';
+    if (data.length > 1) h += '<span>' + labelFn(data[data.length-1]) + '</span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  // Fill all 24 hours
+  const hourMap = {};
+  (act.hourlyVolume || []).forEach(h => { hourMap[h.hour] = h.count; });
+  const hourData = [];
+  for (let i = 0; i < 24; i++) {
+    const h = String(i).padStart(2, '0');
+    hourData.push({ key: h, count: hourMap[h] || 0 });
+  }
+
+  let actHtml = '<div class="grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px">';
+  actHtml += renderChart('24 Hours', hourData, d => d.key + ':00', 'msgs');
+  actHtml += renderChart('7 Days', act.dailyVolume || [], d => {
+    const dow = parseInt(d.dow);
+    return dayNames[dow] || d.day;
+  }, 'msgs');
+  actHtml += renderChart('30 Days', act.monthDailyVolume || [], d => {
+    const parts = d.day.split('-');
+    return parseInt(parts[2]) + ' ' + monthNames[parseInt(parts[1]) - 1];
+  }, 'msgs');
+  actHtml += renderChart('3 Months', act.weeklyVolume || [], d => {
+    const parts = d.week.split('-');
+    return 'W' + (parts[1] || d.week);
+  }, 'msgs');
+  actHtml += '</div>';
+  document.getElementById('activity-bar').innerHTML = actHtml;
 }
 
 function renderMain() {
