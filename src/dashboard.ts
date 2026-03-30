@@ -87,8 +87,8 @@ function getChannelStatus(): Array<{
   if (!fs.existsSync(LOG_PATH)) return channels.map(name => ({ name, ...status[name] }));
 
   try {
-    // Read last 500 lines of log for channel events
-    const log = execSync(`tail -500 ${JSON.stringify(LOG_PATH)} 2>/dev/null`, {
+    // Read last 2000 lines of log for channel events
+    const log = execSync(`tail -2000 ${JSON.stringify(LOG_PATH)} 2>/dev/null`, {
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -120,16 +120,14 @@ function getChannelStatus(): Array<{
 
       for (const ch of channels) {
         if (connectPatterns[ch]?.some(p => lineLower.includes(p))) {
-          status[ch] = { connected: true, lastEvent: 'connected', lastEventTime: time };
+          status[ch] = { connected: true, lastEvent: 'connected', lastEventTime: time, account: status[ch].account };
         } else if (stopPatterns[ch]?.some(p => lineLower.includes(p))) {
-          status[ch] = { connected: false, lastEvent: 'stopped', lastEventTime: time };
-        } else if (lineLower.includes(ch.toLowerCase()) && lineLower.includes('delivered')) {
-          if (!status[ch].connected) {
-            status[ch] = { connected: true, lastEvent: 'active', lastEventTime: time };
-          } else {
-            status[ch].lastEvent = 'active';
-            status[ch].lastEventTime = time;
-          }
+          status[ch] = { connected: false, lastEvent: 'stopped', lastEventTime: time, account: status[ch].account };
+        } else if (lineLower.includes(ch.toLowerCase()) && (lineLower.includes('delivered') || lineLower.includes('message sent') || lineLower.includes('message stored'))) {
+          // Any message activity proves the channel is connected
+          status[ch].connected = true;
+          status[ch].lastEvent = 'active';
+          status[ch].lastEventTime = time;
         }
       }
     }
