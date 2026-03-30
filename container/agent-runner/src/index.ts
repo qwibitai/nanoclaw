@@ -34,9 +34,6 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
-  model?: string;
-  effort?: 'low' | 'medium' | 'high' | 'max';
-  thinking?: ThinkingConfig;
 }
 
 interface ContainerOutput {
@@ -474,9 +471,6 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
       ],
-      model: containerInput.model,
-      effort: containerInput.effort,
-      thinking: containerInput.thinking,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,

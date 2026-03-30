@@ -5,7 +5,7 @@ description: Enable per-invocation model, effort, and thinking configuration for
 
 # Add Model Configuration
 
-This skill adds optional `model`, `effort`, and `thinking` fields to `ContainerInput` so each container invocation can specify the Claude model and reasoning mode to use. Omitting them leaves SDK defaults unchanged.
+This skill adds optional `model`, `effort`, and `thinking` fields to `ContainerInput` so each container invocation can specify the Claude model and reasoning mode. Omitting them leaves SDK defaults unchanged — existing behaviour is fully preserved.
 
 ## Phase 1: Pre-flight
 
@@ -17,58 +17,64 @@ grep -q "model\?:" src/container-runner.ts && echo "already applied" || echo "no
 
 If already applied, stop here.
 
-## Phase 2: Apply Code Changes
+## Phase 2: Edit source files
 
-### Ensure upstream remote
+### 1. `src/container-runner.ts` — add ThinkingConfig type and three fields to ContainerInput
 
-```bash
-git remote -v
+Find the `ContainerInput` interface (search for `export interface ContainerInput`). Directly above it, add the `ThinkingConfig` type:
+
+```typescript
+export type ThinkingConfig =
+  | { type: 'adaptive' }
+  | { type: 'enabled'; budgetTokens?: number }
+  | { type: 'disabled' };
 ```
 
-If `upstream` is missing, add it:
+Then, inside `ContainerInput`, add three optional fields after `script?`:
 
-```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```typescript
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  thinking?: ThinkingConfig;
 ```
 
-### Merge the skill branch
+### 2. `container/agent-runner/src/index.ts` — import ThinkingConfig and extend ContainerInput
 
-```bash
-git fetch upstream
-git merge upstream/skill/model-mode-passthrough
+At the top of the file, add `ThinkingConfig` to the existing SDK import:
+
+```typescript
+import { query, HookCallback, PreCompactHookInput, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk';
 ```
 
-If the merge reports conflicts in `package-lock.json`, resolve by taking theirs:
+Inside the local `ContainerInput` interface, add three optional fields after `script?`:
 
-```bash
-git checkout --theirs package-lock.json
-git add package-lock.json
-git merge --continue
+```typescript
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  thinking?: ThinkingConfig;
 ```
 
-For other conflicts, read both sides and resolve by intent.
+In `runQuery()`, find the `query()` call. Add the three fields to its options, just before the `env:` line:
 
-This merges:
-- `src/container-runner.ts` — adds `ThinkingConfig` type export and `model?`, `effort?`, `thinking?` fields to `ContainerInput`
-- `container/agent-runner/src/index.ts` — imports `ThinkingConfig` from the SDK, adds the three fields to its local `ContainerInput`, and forwards them to `query()`
+```typescript
+      model: containerInput.model,
+      effort: containerInput.effort,
+      thinking: containerInput.thinking,
+```
 
-### Validate
+## Phase 3: Validate and rebuild
 
 ```bash
 npm run build
 ```
 
-Build must be clean before proceeding.
-
-## Phase 3: Rebuild Container
-
-The agent runner inside the container has changed, so the container image must be rebuilt:
+Build must be clean. Then rebuild the container image (the agent runner inside has changed):
 
 ```bash
 ./container/build.sh
 ```
 
-Then restart the service:
+Restart the service:
 
 ```bash
 # macOS:
@@ -87,14 +93,8 @@ Container invocations now accept three optional fields on `ContainerInput`:
 | `effort` | `'low' \| 'medium' \| 'high' \| 'max'` | Reasoning effort level |
 | `thinking` | `ThinkingConfig` | `{ type: 'adaptive' }`, `{ type: 'enabled', budgetTokens?: number }`, or `{ type: 'disabled' }` |
 
-All three are optional. Omitting them leaves the SDK defaults unchanged (existing behaviour is preserved).
-
 ## Removal
 
-To remove:
-
-1. Remove `ThinkingConfig` export and the three fields from `ContainerInput` in `src/container-runner.ts`
-2. Remove the three fields from `ContainerInput` and the `query()` options in `container/agent-runner/src/index.ts`
-3. Remove the `ThinkingConfig` import in `container/agent-runner/src/index.ts`
-4. Rebuild: `npm run build && ./container/build.sh`
-5. Restart the service
+1. Remove `ThinkingConfig` and the three fields from `ContainerInput` in `src/container-runner.ts`
+2. Remove `ThinkingConfig` from the import, the three fields from `ContainerInput`, and the three lines from `query()` options in `container/agent-runner/src/index.ts`
+3. `npm run build && ./container/build.sh` and restart
