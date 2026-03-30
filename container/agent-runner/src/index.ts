@@ -20,6 +20,34 @@ import { execFile } from 'child_process';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+/**
+ * Path where the host mounts system-prompt.md read-only inside the container.
+ *
+ * The file lives at the project root on the host (system-prompt.md) and is
+ * mounted read-only by container-runner.ts so agents have NO write access.
+ * Only the user (on the host) can change it. Its contents are prepended to
+ * every agent invocation's system prompt, for every group without exception.
+ */
+const SYSTEM_PROMPT_PATH = '/workspace/system-prompt.md';
+
+/**
+ * Read the user-controlled system prompt from the write-protected mount.
+ * Returns the file contents, or an empty string if the file is absent
+ * (so the system still works without the file, e.g. in tests).
+ */
+function readSystemPrompt(): string {
+  try {
+    if (fs.existsSync(SYSTEM_PROMPT_PATH)) {
+      return fs.readFileSync(SYSTEM_PROMPT_PATH, 'utf-8').trim();
+    }
+  } catch (err) {
+    console.error(
+      `[agent-runner] Failed to read system prompt: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return '';
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -375,6 +403,13 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Build system prompt: the write-protected system-prompt.md always comes first
+  // (for every group including main), then the global CLAUDE.md for non-main groups.
+  // system-prompt.md is mounted read-only — agents cannot change it.
+  const systemPromptText = readSystemPrompt();
+  const parts = [systemPromptText, globalClaudeMd].filter(Boolean);
+  const systemPromptAppend = parts.join('\n\n') || undefined;
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -398,8 +433,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      systemPrompt: systemPromptAppend
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptAppend }
         : undefined,
       allowedTools: [
         'Bash',
