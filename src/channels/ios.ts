@@ -330,6 +330,10 @@ export class IosChannel implements Channel {
     logger.info('iOS channel stopped');
   }
 
+  getConnectedDeviceIds(): string[] {
+    return Array.from(this.clients.values()).map(c => c.deviceId);
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     // Broadcast typing to ALL connected iOS clients
     const payload = JSON.stringify({ type: 'typing', isTyping });

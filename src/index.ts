@@ -62,6 +62,7 @@ import http from 'http';
 
 import { recoverTasksOnStartup } from './dev-tasks.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { sendPushToOfflineDevices } from './apns.js';
 import { startDailyNudgeCron } from './daily-nudge.js';
 import { startICloudPolling } from './icloud-calendar.js';
 import {
@@ -252,6 +253,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           is_from_me: true,
           is_bot_message: true,
         });
+
+        // Push-notify devices not connected via WebSocket
+        const connectedIds = channel.getConnectedDeviceIds?.() ?? [];
+        const pushBody = text.length > 200 ? text.slice(0, 200) + '…' : text;
+        sendPushToOfflineDevices(connectedIds, ASSISTANT_NAME, pushBody, { type: 'chat' });
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();

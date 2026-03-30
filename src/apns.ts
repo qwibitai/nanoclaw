@@ -81,6 +81,7 @@ export async function sendPush(
   environment: string,
   title: string,
   body: string,
+  customData?: Record<string, unknown>,
 ): Promise<boolean> {
   const client = getClient(environment);
   if (!client) {
@@ -91,6 +92,7 @@ export async function sendPush(
   const notification = new Notification(token, {
     alert: { title, body },
     sound: 'default',
+    ...customData,
   });
 
   try {
@@ -133,5 +135,36 @@ export async function sendPushToAll(title: string, body: string): Promise<number
   }
 
   logger.info({ sent, total: tokens.length }, 'Push broadcast complete');
+  return sent;
+}
+
+/**
+ * Send a push notification only to devices NOT currently connected via WebSocket.
+ * connectedDeviceIds is the list of device IDs with active WebSocket connections.
+ */
+export async function sendPushToOfflineDevices(
+  connectedDeviceIds: string[],
+  title: string,
+  body: string,
+  customData?: Record<string, unknown>,
+): Promise<number> {
+  const tokens = getAllDeviceTokens();
+  if (tokens.length === 0) return 0;
+
+  const connectedSet = new Set(connectedDeviceIds);
+  const offlineTokens = tokens.filter(t => !connectedSet.has(t.device_id));
+
+  if (offlineTokens.length === 0) {
+    logger.debug('All devices connected via WebSocket — skipping push');
+    return 0;
+  }
+
+  let sent = 0;
+  for (const t of offlineTokens) {
+    const ok = await sendPush(t.apns_token, t.environment, title, body, customData);
+    if (ok) sent++;
+  }
+
+  logger.info({ sent, total: offlineTokens.length, skipped: connectedSet.size }, 'Offline push broadcast complete');
   return sent;
 }

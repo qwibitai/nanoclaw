@@ -90,6 +90,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: returns device IDs of currently connected clients (for smart push delivery).
+  getConnectedDeviceIds?(): string[];
 }
 
 // Callback type that channels use to deliver inbound messages
