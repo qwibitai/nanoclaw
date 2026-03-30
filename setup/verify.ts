@@ -82,18 +82,16 @@ export async function run(_args: string[]): Promise<void> {
   }
   logger.info({ service }, 'Service status');
 
-  // 2. Check container runtime
-  let containerRuntime = 'none';
-  try {
-    execSync('command -v container', { stdio: 'ignore' });
-    containerRuntime = 'apple-container';
-  } catch {
-    try {
-      execSync('docker info', { stdio: 'ignore' });
-      containerRuntime = 'docker';
-    } catch {
-      // No runtime
-    }
+  // 2. Check agent runner dependencies (host mode)
+  let agentRunner = 'missing';
+  const agentRunnerModules = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'node_modules',
+  );
+  if (fs.existsSync(agentRunnerModules)) {
+    agentRunner = 'installed';
   }
 
   // 3. Check credentials
@@ -178,7 +176,7 @@ export async function run(_args: string[]): Promise<void> {
 
   emitStatus('VERIFY', {
     SERVICE: service,
-    CONTAINER_RUNTIME: containerRuntime,
+    AGENT_RUNNER: agentRunner,
     CREDENTIALS: credentials,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),

@@ -96,7 +96,7 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
 - If HAS_AUTH=true → WhatsApp is already configured, note for step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
-- Record APPLE_CONTAINER and DOCKER values for step 3
+- Check if agent-runner dependencies are installed
 
 ## 2a. Timezone
 
@@ -105,47 +105,26 @@ Run `npx tsx setup/index.ts --step timezone` and parse the status block.
 - If NEEDS_USER_INPUT=true → The system timezone could not be autodetected (e.g. POSIX-style TZ like `IST-2`). AskUserQuestion: "What is your timezone?" with common options (America/New_York, Europe/London, Asia/Jerusalem, Asia/Tokyo) and an "Other" escape. Then re-run: `npx tsx setup/index.ts --step timezone -- --tz <their-answer>`.
 - If STATUS=success → Timezone is configured. Note RESOLVED_TZ for reference.
 
-## 3. Container Runtime
+## 3. Agent Runner Dependencies
 
-### 3a. Choose runtime
-
-Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
-
-- PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
-- PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
-
-### 3a-docker. Install Docker
-
-- DOCKER=running → continue to 4b
-- DOCKER=installed_not_running → start Docker: `open -a Docker` (macOS) or `sudo systemctl start docker` (Linux). Wait 15s, re-check with `docker info`.
-- DOCKER=not_found → Use `AskUserQuestion: Docker is required for running agents. Would you like me to install it?` If confirmed:
-  - macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download at https://docker.com/products/docker-desktop
-  - Linux: install with `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`. Note: user may need to log out/in for group membership.
-
-### 3b. Apple Container conversion gate (if needed)
-
-**If the chosen runtime is Apple Container**, you MUST check whether the source code has already been converted from Docker to Apple Container. Do NOT skip this step. Run:
+NanoClaw runs agents as local Node.js processes (host mode). The agent-runner has its own dependencies that must be installed.
 
 ```bash
-grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "ALREADY_CONVERTED" || echo "NEEDS_CONVERSION"
+cd container/agent-runner && npm install && cd ../..
 ```
 
-**If NEEDS_CONVERSION**, the source code still uses Docker as the runtime. You MUST run the `/convert-to-apple-container` skill NOW, before proceeding to the build step.
+Verify the install succeeded by checking that `container/agent-runner/node_modules/@anthropic-ai/claude-agent-sdk` exists.
 
-**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
+Also verify Claude Code CLI is available (the agent SDK requires it):
 
-**If the chosen runtime is Docker**, no conversion is needed. Continue to 3c.
+```bash
+claude --version
+```
 
-### 3c. Build and test
-
-Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse the status block.
-
-**If BUILD_OK=false:** Read `logs/setup.log` tail for the build error.
-- Cache issue (stale layers): `docker builder prune -f` (Docker) or `container builder stop && container builder rm && container builder start` (Apple Container). Retry.
-- Dockerfile syntax or missing files: diagnose from the log and fix, then retry.
-
-**If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
+If `claude` is not found, install it:
+```bash
+npm install -g @anthropic-ai/claude-code
+```
 
 ## 4. Anthropic Credentials via OneCLI
 
@@ -276,7 +255,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 **Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), OneCLI not running (check `curl http://127.0.0.1:10254/api/health`), missing channel credentials (re-invoke channel skill).
 
-**Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
+**Agent fails ("Claude Code process exited with code 1"):** Check agent logs in `groups/main/logs/agent-*.log`. Common causes: missing agent-runner dependencies (`cd container/agent-runner && npm install`), missing Claude Code CLI (`npm install -g @anthropic-ai/claude-code`), or OneCLI not running (`curl http://127.0.0.1:10254/api/health`).
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
