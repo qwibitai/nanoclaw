@@ -511,7 +511,93 @@ describe('DiscordChannel', () => {
   // --- Attachments ---
 
   describe('attachments', () => {
-    it('stores image attachment with placeholder', async () => {
+    it('downloads image attachment as base64 and passes in images field', async () => {
+      const imageBytes = Buffer.from('fakepngbytes');
+      const arrayBuf = imageBytes.buffer.slice(
+        imageBytes.byteOffset,
+        imageBytes.byteOffset + imageBytes.byteLength,
+      );
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => arrayBuf,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        [
+          'att1',
+          {
+            name: 'photo.png',
+            contentType: 'image/png',
+            url: 'https://cdn.discordapp.com/attachments/123/photo.png',
+          },
+        ],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '',
+          images: [
+            {
+              data: imageBytes.toString('base64'),
+              mediaType: 'image/png',
+              name: 'photo.png',
+            },
+          ],
+        }),
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('falls back to placeholder when image download fails', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        [
+          'att1',
+          {
+            name: 'photo.png',
+            contentType: 'image/png',
+            url: 'https://cdn.discordapp.com/attachments/123/photo.png',
+          },
+        ],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Image: photo.png]',
+          images: undefined,
+        }),
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('falls back to placeholder when image attachment has no URL', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -625,6 +711,41 @@ describe('DiscordChannel', () => {
           content: '[Image: a.png]\n[File: b.txt]',
         }),
       );
+    });
+
+    it('downloads image URLs embedded in message text', async () => {
+      const imageBytes = Buffer.from('fakepngbytes');
+      const arrayBuf = imageBytes.buffer.slice(
+        imageBytes.byteOffset,
+        imageBytes.byteOffset + imageBytes.byteLength,
+      );
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => arrayBuf,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        content: '@Andy check this https://example.com/screenshot.png out',
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          images: [
+            { data: imageBytes.toString('base64'), mediaType: 'image/png' },
+          ],
+        }),
+      );
+
+      vi.unstubAllGlobals();
     });
   });
 
