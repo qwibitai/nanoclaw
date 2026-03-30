@@ -161,14 +161,14 @@ Example config file:
 
 ```json
 {
-  "model": "claude-haiku-4-5-20251001",
+  "model": "haiku",
   "effort": "low"
 }
 ```
 
 ```json
 {
-  "model": "claude-opus-4-6",
+  "model": "opus",
   "thinking": { "type": "adaptive" }
 }
 ```

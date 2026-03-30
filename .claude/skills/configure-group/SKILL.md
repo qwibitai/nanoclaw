@@ -41,9 +41,9 @@ Based on what the group does, recommend the right model and explain your reasoni
 
 | Use case | Recommended | Reasoning |
 |---|---|---|
-| General chat, reminders, simple tasks | `claude-haiku-4-5-20251001` | Fast and cheap; haiku handles most day-to-day assistant work well |
-| Structured tasks, coding, analysis | `claude-sonnet-4-6` | Better reasoning without the cost of opus |
-| Deep research, complex planning | `claude-opus-4-6` with `thinking: { "type": "adaptive" }` | Opus with adaptive thinking for tasks that benefit from extended reasoning |
+| General chat, reminders, simple tasks | `haiku` | Fast and cheap; haiku handles most day-to-day assistant work well |
+| Structured tasks, coding, analysis | `sonnet` | Better reasoning without the cost of opus |
+| Deep research, complex planning | `opus` with `thinking: { "type": "adaptive" }` | Opus with adaptive thinking for tasks that benefit from extended reasoning |
 
 For `effort`:
 - Omit it for most cases (let the model decide)
