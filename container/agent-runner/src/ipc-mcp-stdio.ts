@@ -10,6 +10,8 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+// @ts-ignore - Copied during Docker build from container/skills/
+import { createXTools } from './skills/x-integration/tools.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -401,6 +403,10 @@ server.tool(
     };
   },
 );
+
+if (isMain) {
+  createXTools(server);
+}
 
 // Start the stdio transport
 const transport = new StdioServerTransport();

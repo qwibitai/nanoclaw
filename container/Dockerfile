@@ -44,6 +44,10 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Copy social monitor and X integration skills
+COPY skills/social-monitor/ ./src/skills/social-monitor/
+COPY skills/x-integration/ ./src/skills/x-integration/
+
 # Build TypeScript
 RUN npm run build
 
