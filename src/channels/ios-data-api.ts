@@ -786,17 +786,20 @@ function handleCreateDevTask(req: http.IncomingMessage, res: http.ServerResponse
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
     try {
-      const { title, description } = JSON.parse(body);
+      const { title, description, source } = JSON.parse(body);
       if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Missing title' }));
         return;
       }
 
+      const validSources = ['fambot', 'chat', 'claude-code', 'claude'] as const;
+      const resolvedSource = validSources.includes(source) ? source : 'fambot';
+
       const task = createDevTask({
         title,
         description: description || undefined,
-        source: 'fambot',
+        source: resolvedSource,
       });
 
       if (broadcastDevTasksChange) broadcastDevTasksChange();
