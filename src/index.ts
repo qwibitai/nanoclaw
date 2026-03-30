@@ -370,14 +370,13 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  const agentStart = Date.now();
-
   // Wrap onOutput to track session ID and persist token usage from streamed results.
   // Usage is persisted here (not after runContainerAgent resolves) because in
   // streaming mode the container stays alive for the idle timeout.
   // One row is inserted per agent response (result outputs with non-null result).
   // Session-update markers (result: null) are skipped — they carry cumulative
   // session totals that would double-count.
+  let lastTurnStart = Date.now();
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
@@ -392,17 +391,22 @@ async function runAgent(
             (output.cacheReadInputTokens ?? 0) > 0 ||
             (output.cacheCreationInputTokens ?? 0) > 0;
           if (hasTokens) {
-            insertRunUsage({
-              group_folder: group.folder,
-              chat_jid: chatJid,
-              completed_at: new Date().toISOString(),
-              duration_ms: Date.now() - agentStart,
-              input_tokens: output.inputTokens ?? 0,
-              output_tokens: output.outputTokens ?? 0,
-              cache_read_input_tokens: output.cacheReadInputTokens ?? 0,
-              cache_creation_input_tokens: output.cacheCreationInputTokens ?? 0,
-            });
+            try {
+              insertRunUsage({
+                group_folder: group.folder,
+                chat_jid: chatJid,
+                completed_at: new Date().toISOString(),
+                duration_ms: Date.now() - lastTurnStart,
+                input_tokens: output.inputTokens ?? 0,
+                output_tokens: output.outputTokens ?? 0,
+                cache_read_input_tokens: output.cacheReadInputTokens ?? 0,
+                cache_creation_input_tokens: output.cacheCreationInputTokens ?? 0,
+              });
+            } catch (err) {
+              logger.warn({ group: group.folder, err }, 'Failed to persist token usage');
+            }
           }
+          lastTurnStart = Date.now();
         }
         await onOutput(output);
       }
