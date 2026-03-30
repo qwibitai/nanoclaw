@@ -245,17 +245,31 @@ async function buildContainerArgs(
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
-  } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+  // Retry a few times if unreachable — Docker restarts can temporarily take OneCLI down.
+  const ONECLI_MAX_RETRIES = 5;
+  const ONECLI_RETRY_DELAY_MS = 3000;
+  let onecliApplied = false;
+  for (let attempt = 1; attempt <= ONECLI_MAX_RETRIES; attempt++) {
+    onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
+      break;
+    }
+    if (attempt < ONECLI_MAX_RETRIES) {
+      logger.info(
+        { containerName, attempt, maxRetries: ONECLI_MAX_RETRIES },
+        'OneCLI gateway not reachable, retrying…',
+      );
+      await new Promise((r) => setTimeout(r, ONECLI_RETRY_DELAY_MS));
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable after retries — container will have no credentials',
+      );
+    }
   }
 
   // Forward non-secret env vars (e.g. GH_TOKEN for gh CLI)
