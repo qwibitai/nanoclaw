@@ -777,7 +777,6 @@ function renderTopStats() {
     h += '</div>';
     h += '<div class="bar-label">';
     if (data.length > 0) h += '<span>' + labelFn(data[0]) + '</span>';
-    if (data.length > 2) h += '<span>' + labelFn(data[Math.floor(data.length/2)]) + '</span>';
     if (data.length > 1) h += '<span>' + labelFn(data[data.length-1]) + '</span>';
     h += '</div></div>';
     return h;
