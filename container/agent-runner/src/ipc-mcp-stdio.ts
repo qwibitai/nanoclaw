@@ -503,6 +503,214 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- LCM Retrieval Tools ---
+
+import {
+  initLcmDatabase,
+  searchMessages,
+  searchSummaries,
+  getSummaryById,
+  getMessagesForSummary,
+  getChildSummaries,
+  getMessagesBySequenceRange,
+} from './lcm-store.js';
+import type { LcmSummary, LcmMessage } from './lcm-store.js';
+
+const LCM_DB_PATH = '/home/node/.claude/lcm.db';
+
+function ensureLcmDb(): boolean {
+  try {
+    if (!fs.existsSync(LCM_DB_PATH)) return false;
+    initLcmDatabase(LCM_DB_PATH);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+server.tool(
+  'lcm_grep',
+  `Search compacted conversation history using full-text search. Returns matching messages and/or summaries from previous conversation segments that were compacted. Use this to find specific topics, decisions, or details from earlier in the conversation.`,
+  {
+    query: z.string().describe('Search query (supports FTS5 syntax: AND, OR, NOT, "exact phrase")'),
+    scope: z.enum(['messages', 'summaries', 'both']).default('both').describe('Search scope: messages (raw), summaries (condensed), or both'),
+    limit: z.number().default(10).describe('Maximum number of results to return'),
+  },
+  async (args) => {
+    if (!ensureLcmDb()) {
+      return { content: [{ type: 'text' as const, text: 'No LCM history available yet. History is built as conversations are compacted.' }] };
+    }
+
+    const results: string[] = [];
+
+    try {
+      if (args.scope === 'messages' || args.scope === 'both') {
+        const msgs = searchMessages(args.query, args.limit);
+        if (msgs.length > 0) {
+          results.push(`## Messages (${msgs.length} matches)\n`);
+          for (const msg of msgs) {
+            const preview = msg.content.length > 300 ? msg.content.slice(0, 300) + '...' : msg.content;
+            results.push(`- [${msg.role}] (seq ${msg.sequence}, session ${msg.session_id}): ${preview}\n`);
+          }
+        }
+      }
+
+      if (args.scope === 'summaries' || args.scope === 'both') {
+        const sums = searchSummaries(args.query, args.limit);
+        if (sums.length > 0) {
+          results.push(`## Summaries (${sums.length} matches)\n`);
+          for (const sum of sums) {
+            const preview = sum.content.length > 300 ? sum.content.slice(0, 300) + '...' : sum.content;
+            results.push(`- [${sum.id}] depth=${sum.depth}, seq ${sum.min_sequence}-${sum.max_sequence}: ${preview}\n`);
+          }
+        }
+      }
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Search error: ${err instanceof Error ? err.message : String(err)}. Try simpler query terms.` }],
+        isError: true,
+      };
+    }
+
+    if (results.length === 0) {
+      return { content: [{ type: 'text' as const, text: `No results found for "${args.query}".` }] };
+    }
+
+    return { content: [{ type: 'text' as const, text: results.join('\n') }] };
+  },
+);
+
+server.tool(
+  'lcm_describe',
+  `Inspect a specific LCM summary node. Returns metadata about the summary including its depth in the DAG, token count, parent/child relationships, creation time, and source message count. Use the summary ID from lcm_grep results.`,
+  {
+    id: z.string().describe('Summary ID (starts with "sum_")'),
+  },
+  async (args) => {
+    if (!ensureLcmDb()) {
+      return { content: [{ type: 'text' as const, text: 'No LCM history available.' }] };
+    }
+
+    const summary = getSummaryById(args.id);
+    if (!summary) {
+      return { content: [{ type: 'text' as const, text: `Summary "${args.id}" not found.` }], isError: true };
+    }
+
+    const sourceIds: string[] = summary.source_message_ids ? JSON.parse(summary.source_message_ids) : [];
+    const childIds: string[] = summary.child_summary_ids ? JSON.parse(summary.child_summary_ids) : [];
+    const parentIds: string[] = summary.parent_summary_ids ? JSON.parse(summary.parent_summary_ids) : [];
+
+    const info = [
+      `**Summary: ${summary.id}**`,
+      `- Depth: ${summary.depth} (${summary.depth === 0 ? 'leaf — from raw messages' : 'condensed — from child summaries'})`,
+      `- Session: ${summary.session_id}`,
+      `- Token estimate: ${summary.token_estimate}`,
+      `- Sequence range: ${summary.min_sequence} — ${summary.max_sequence}`,
+      `- Created: ${summary.created_at}`,
+      `- Source messages: ${sourceIds.length}${sourceIds.length > 0 ? ` (${sourceIds.slice(0, 5).join(', ')}${sourceIds.length > 5 ? '...' : ''})` : ''}`,
+      `- Child summaries: ${childIds.length}${childIds.length > 0 ? ` (${childIds.join(', ')})` : ''}`,
+      `- Parent summaries: ${parentIds.length}${parentIds.length > 0 ? ` (${parentIds.join(', ')})` : ''}`,
+      ``,
+      `**Content preview:**`,
+      summary.content.length > 500 ? summary.content.slice(0, 500) + '...' : summary.content,
+    ];
+
+    return { content: [{ type: 'text' as const, text: info.join('\n') }] };
+  },
+);
+
+server.tool(
+  'lcm_expand',
+  `Drill into a summary to recover details. For leaf summaries (depth 0), returns the original messages. For condensed summaries (depth 1+), returns child summaries. Use this to get more detail when a summary mentions something you need to explore.`,
+  {
+    id: z.string().describe('Summary ID to expand (starts with "sum_")'),
+    levels: z.number().default(1).describe('How many levels of the DAG to traverse downward (1 = immediate children only)'),
+    include_messages: z.boolean().default(true).describe('For leaf summaries, include the original raw messages'),
+  },
+  async (args) => {
+    if (!ensureLcmDb()) {
+      return { content: [{ type: 'text' as const, text: 'No LCM history available.' }] };
+    }
+
+    const summary = getSummaryById(args.id);
+    if (!summary) {
+      return { content: [{ type: 'text' as const, text: `Summary "${args.id}" not found.` }], isError: true };
+    }
+
+    const TOKEN_CAP = 50000; // ~200KB of text
+    let tokenCount = 0;
+    const parts: string[] = [`**Expanding ${summary.id} (depth ${summary.depth}):**\n`];
+
+    function expandNode(node: LcmSummary, currentLevel: number, maxLevels: number): void {
+      if (tokenCount >= TOKEN_CAP) {
+        parts.push('\n[Token cap reached, truncating output]');
+        return;
+      }
+
+      if (node.depth === 0) {
+        // Leaf node — show source messages if requested
+        if (args.include_messages) {
+          const messages = getMessagesForSummary(node.id);
+          if (messages.length > 0) {
+            parts.push(`\n### Source messages for ${node.id} (${messages.length} messages):\n`);
+            for (const msg of messages) {
+              const tokens = msg.token_estimate || Math.ceil(msg.content.length / 4);
+              if (tokenCount + tokens > TOKEN_CAP) {
+                parts.push('[Token cap reached]');
+                return;
+              }
+              parts.push(`**[${msg.role}]** (seq ${msg.sequence}):\n${msg.content}\n`);
+              tokenCount += tokens;
+            }
+          } else {
+            // Fall back to sequence range
+            if (node.min_sequence != null && node.max_sequence != null) {
+              const msgs = getMessagesBySequenceRange(node.session_id, node.min_sequence, node.max_sequence);
+              parts.push(`\n### Messages for ${node.id} (seq ${node.min_sequence}-${node.max_sequence}, ${msgs.length} messages):\n`);
+              for (const msg of msgs) {
+                const tokens = msg.token_estimate || Math.ceil(msg.content.length / 4);
+                if (tokenCount + tokens > TOKEN_CAP) {
+                  parts.push('[Token cap reached]');
+                  return;
+                }
+                parts.push(`**[${msg.role}]** (seq ${msg.sequence}):\n${msg.content}\n`);
+                tokenCount += tokens;
+              }
+            }
+          }
+        } else {
+          parts.push(`\n${node.id}: ${node.content}\n`);
+          tokenCount += node.token_estimate || Math.ceil(node.content.length / 4);
+        }
+        return;
+      }
+
+      // Condensed node — show children
+      if (currentLevel >= maxLevels) {
+        parts.push(`\n### ${node.id} (depth ${node.depth}, not expanded further):\n${node.content}\n`);
+        tokenCount += node.token_estimate || Math.ceil(node.content.length / 4);
+        return;
+      }
+
+      const children = getChildSummaries(node.id);
+      if (children.length === 0) {
+        parts.push(`\n${node.id}: ${node.content}\n`);
+        tokenCount += node.token_estimate || Math.ceil(node.content.length / 4);
+        return;
+      }
+
+      parts.push(`\n### Children of ${node.id} (${children.length} summaries):\n`);
+      for (const child of children) {
+        expandNode(child, currentLevel + 1, maxLevels);
+      }
+    }
+
+    expandNode(summary, 0, args.levels);
+
+    return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
