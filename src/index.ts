@@ -83,13 +83,13 @@ function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
+    (res: { created: boolean }) => {
       logger.info(
         { jid, identifier, created: res.created },
         'OneCLI agent ensured',
       );
     },
-    (err) => {
+    (err: unknown) => {
       logger.debug(
         { jid, identifier, err: String(err) },
         'OneCLI agent ensure skipped',

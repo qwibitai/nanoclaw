@@ -78,10 +78,12 @@ export class WhatsAppChannel implements Channel {
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        keys: makeCacheableSignalKeyStore(state.keys, logger as any),
       },
       printQRInTerminal: false,
-      logger,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      logger: logger as any,
       browser: Browsers.macOS('Chrome'),
     });
 
