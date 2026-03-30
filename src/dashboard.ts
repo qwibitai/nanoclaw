@@ -257,6 +257,47 @@ function getGoogleStatus(): {
   }
 }
 
+function getMicrosoftStatus(): {
+  connected: boolean;
+  account: string | null;
+  name: string | null;
+  services: Array<{ name: string; permissions: string[] }>;
+  tokenExpiry: string | null;
+  tokenValid: boolean;
+} {
+  const credsPath = path.join(os.homedir(), '.outlook-mcp', 'credentials.json');
+  if (!fs.existsSync(credsPath)) {
+    return { connected: false, account: null, name: null, services: [], tokenExpiry: null, tokenValid: false };
+  }
+
+  try {
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+    const account = creds.account?.username || null;
+    const name = creds.account?.name || null;
+    const scopeList: string[] = creds.scopes || [];
+    const svcMap: Record<string, string[]> = {};
+
+    for (const scope of scopeList) {
+      const perm = scope.split('/').pop() || scope;
+      if (scope.includes('Mail.')) { (svcMap['Mail'] ??= []).push(perm); }
+      else if (scope.includes('Calendars.')) { (svcMap['Calendar'] ??= []).push(perm); }
+      else if (scope.includes('Contacts.')) { (svcMap['Contacts'] ??= []).push(perm); }
+      else if (scope.includes('Files.')) { (svcMap['OneDrive'] ??= []).push(perm); }
+      else if (scope.includes('User.')) { (svcMap['User Profile'] ??= []).push(perm); }
+      else if (scope.includes('Teams.') || scope.includes('Chat.')) { (svcMap['Teams'] ??= []).push(perm); }
+    }
+
+    const services = Object.entries(svcMap).map(([n, p]) => ({ name: n, permissions: p }));
+    const expiryStr = creds.expiresOn || creds.expires_at || null;
+    const expiryDate = expiryStr ? new Date(expiryStr) : null;
+    const tokenValid = expiryDate ? expiryDate.getTime() > Date.now() : false;
+
+    return { connected: true, account, name, services, tokenExpiry: expiryDate?.toISOString() || null, tokenValid };
+  } catch {
+    return { connected: false, account: null, name: null, services: [], tokenExpiry: null, tokenValid: false };
+  }
+}
+
 function getNanoClawUpdate(): { available: boolean; current: string | null; latest: string | null } {
   try {
     const pkgPath = path.resolve(PROJECT_ROOT, 'package.json');
@@ -308,7 +349,7 @@ const EMPTY_DATA = {
 
 function apiData() {
   const db = getDb();
-  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), google: getGoogleStatus(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
+  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), google: getGoogleStatus(), microsoft: getMicrosoftStatus(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
 
   const groups = db
     .prepare(
@@ -428,11 +469,13 @@ function apiData() {
 
   const update = getNanoClawUpdate();
   const google = getGoogleStatus();
+  const microsoft = getMicrosoftStatus();
 
   return {
     service,
     update,
     google,
+    microsoft,
     channels,
     groups,
     groupFolders,
@@ -745,6 +788,28 @@ function renderTopStats() {
       html += '<div class="stat-row"><span>Services</span><span>' + g.scopes.map(s => badge(s, 'blue')).join(' ') + '</span></div>';
     }
     if (g.tokenExpiry) html += '<div class="stat-row"><span>Expires</span><span class="time-ago">' + timeAgo(g.tokenExpiry) + '</span></div>';
+  } else {
+    html += '<div class="empty">Not connected</div>';
+  }
+  html += '</div>';
+
+  // Microsoft
+  html += '<div class="card"><h2>Microsoft 365</h2>';
+  const ms = d.microsoft;
+  if (ms && ms.connected) {
+    const tokenBadge = ms.tokenValid ? badge('valid', 'green') : badge('expired', 'red');
+    if (ms.account) html += '<div class="stat-row"><span>Account</span><span class="stat-value" style="font-size:11px">' + esc(ms.account) + '</span></div>';
+    if (ms.name) html += '<div class="stat-row"><span>Name</span><span class="stat-value">' + esc(ms.name) + '</span></div>';
+    html += '<div class="stat-row"><span>Token</span><span>' + tokenBadge + '</span></div>';
+    if (ms.services && ms.services.length > 0) {
+      html += '<div class="stat-row" style="flex-direction:column;gap:6px"><span>Services</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">';
+      ms.services.forEach(svc => {
+        const perms = svc.permissions.join(', ');
+        html += '<span class="badge badge-blue" title="' + esc(perms) + '">' + esc(svc.name) + '</span>';
+      });
+      html += '</div></div>';
+    }
+    if (ms.tokenExpiry) html += '<div class="stat-row"><span>Expires</span><span class="time-ago">' + timeAgo(ms.tokenExpiry) + '</span></div>';
   } else {
     html += '<div class="empty">Not connected</div>';
   }
