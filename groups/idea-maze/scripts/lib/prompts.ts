@@ -77,6 +77,57 @@ Return JSON with this exact structure:
 Return 1-3 insights. Only include high-confidence signals. Return an empty insights array if nothing meaningful can be extracted.`;
 }
 
+export function buildBatchHarvestUserPrompt(items: Array<{
+  index: number;
+  source: string;
+  channel_or_label?: string | null;
+  title: string;
+  text: string;
+  harvest_score: number;
+}>): string {
+  const itemBlocks = items.map((item) => `
+--- ITEM ${item.index} ---
+Source: ${item.source}
+Channel/Label: ${item.channel_or_label ?? "None"}
+Title: ${item.title || "None"}
+Harvest Score: ${item.harvest_score}
+Content:
+${item.text.slice(0, 1500)}`).join("\n");
+
+  return `Analyze each source item below and extract product opportunity insights.
+
+${itemBlocks}
+
+Return JSON with this exact structure:
+{
+  "items": [
+    {
+      "index": <item index>,
+      "insights": [
+        {
+          "insight_type": "pain_point" | "demand_signal" | "workflow_gap" | "distribution_clue" | "willingness_to_pay" | "competitor_move" | "implementation_constraint",
+          "summary": "One clear sentence describing the insight",
+          "evidence_score": 0.0,
+          "confidence": 0.0,
+          "metadata_json": {
+            "pain_point": "...",
+            "actor": "...",
+            "current_workaround": "...",
+            "repetitive_task": "...",
+            "adjacent_pains": "...",
+            "workflow_stage": "...",
+            "evidence_strength": "...",
+            "why_now": "..."
+          }
+        }
+      ]
+    }
+  ]
+}
+
+Include an entry for every item index. Return empty insights array for items with no meaningful signal. Return 0-3 insights per item.`;
+}
+
 export const RESEARCH_SYSTEM_PROMPT = `You are a product researcher turning a shortlisted opportunity into a reviewable research artifact.
 
 ## Core Principles
@@ -107,15 +158,20 @@ export function buildResearchUserPrompt(opp: {
   telegram_evidence: string[];
   reddit_evidence: string[];
   external_research: string[];
+  search_synthesis?: string[];
 }): string {
   const fmtList = (items: string[]) => items.length ? items.map((s) => `- ${s}`).join("\n") : "- None";
+
+  const synthSection = opp.search_synthesis?.length
+    ? `\n## Web Search Synthesis\n${opp.search_synthesis.map((a, i) => `Query ${i + 1}: ${a}`).join("\n\n")}\n`
+    : "";
 
   return `Research this opportunity and produce a detailed draft.
 
 Opportunity: ${opp.slug}
 Title: ${opp.title}
 Current Thesis: ${opp.thesis}
-
+${synthSection}
 ## Evidence from Inbox
 ${fmtList(opp.inbox_evidence)}
 

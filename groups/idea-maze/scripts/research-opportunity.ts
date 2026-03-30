@@ -9,7 +9,7 @@
 
 import { getDb, closeDb } from "./lib/db.ts";
 import { initSchema } from "./lib/schema.ts";
-import { isLlmConfigured, generateJson } from "./lib/llm.ts";
+import { isLlmConfigured, generateResearchJson as generateJson } from "./lib/llm.ts";
 import { RESEARCH_SYSTEM_PROMPT, buildResearchUserPrompt } from "./lib/prompts.ts";
 import {
   enrichOpportunityWithSearch,
@@ -49,6 +49,7 @@ async function buildLlmDraft(
   opp: { slug: string; title: string; thesis: string },
   sourceItems: any[],
   searchItems: SearchEvidenceItem[],
+  searchAnswers: string[],
 ): Promise<Omit<ResearchDraft, "opportunity_slug" | "source_refs">> {
   const inbox = sourceItems.filter((s) => s.source === "gmail").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
   const telegram = sourceItems.filter((s) => s.source === "telegram").slice(0, 5).map((s: any) => `${s.id}: ${s.text.slice(0, 220)}`);
@@ -63,6 +64,7 @@ async function buildLlmDraft(
     telegram_evidence: telegram,
     reddit_evidence: reddit,
     external_research: external,
+    search_synthesis: searchAnswers,
   });
 
   return generateJson<Omit<ResearchDraft, "opportunity_slug" | "source_refs">>(
@@ -163,9 +165,11 @@ async function main() {
   console.log(`Found ${sourceItems.length} linked source items.`);
 
   let searchItems: SearchEvidenceItem[] = [];
+  let searchAnswers: string[] = [];
   let searchTrace: {
     provider: string;
     queries: string[];
+    answers: string[];
     result_count: number;
     source_item_ids: number[];
   } | null = null;
@@ -178,14 +182,17 @@ async function main() {
         runId,
       );
       searchItems = enrichment.items;
+      searchAnswers = enrichment.answers;
       searchTrace = {
         provider: enrichment.provider,
         queries: enrichment.queries,
+        answers: enrichment.answers,
         result_count: enrichment.items.length,
         source_item_ids: enrichment.item_ids,
       };
+      const answerNote = searchAnswers.length ? `, ${searchAnswers.length} synthesized answer(s)` : "";
       console.log(
-        `Search enrichment: ${searchItems.length} result(s) across ${enrichment.queries.length} quer${enrichment.queries.length === 1 ? "y" : "ies"}.`,
+        `Search enrichment: ${searchItems.length} result(s) across ${enrichment.queries.length} quer${enrichment.queries.length === 1 ? "y" : "ies"}${answerNote}.`,
       );
     } catch (err) {
       console.warn(`Search enrichment failed, continuing without external research: ${err}`);
@@ -200,7 +207,7 @@ async function main() {
   if (isLlmConfigured()) {
     try {
       console.log("Building draft via LLM...");
-      draftBody = await buildLlmDraft(opp, sourceItems, searchItems);
+      draftBody = await buildLlmDraft(opp, sourceItems, searchItems, searchAnswers);
     } catch (err) {
       console.warn(`LLM draft failed, using template: ${err}`);
       draftBody = buildTemplateDraft(opp, sourceItems, searchItems);

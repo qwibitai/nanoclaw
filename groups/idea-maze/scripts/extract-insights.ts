@@ -11,8 +11,8 @@
 import { getDb, closeDb } from "./lib/db.ts";
 import { initSchema } from "./lib/schema.ts";
 import { getUnprocessedItems, type SourceItemRow } from "./lib/queries.ts";
-import { isLlmConfigured, generateJson } from "./lib/llm.ts";
-import { HARVEST_SYSTEM_PROMPT, buildHarvestUserPrompt } from "./lib/prompts.ts";
+import { isLlmConfigured, generateBatchJson, EXTRACTION_BATCH_SIZE } from "./lib/llm.ts";
+import { HARVEST_SYSTEM_PROMPT, buildBatchHarvestUserPrompt } from "./lib/prompts.ts";
 
 // --- Types ---
 
@@ -110,31 +110,43 @@ function summaryFor(type: InsightType, title: string, text: string): string {
 
 // --- Extraction strategies ---
 
-async function llmInsights(item: SourceItemRow): Promise<InsightPayload[]> {
-  const harvestScore = harvestScoreFromMeta(item.metadata_json);
-  const prompt = buildHarvestUserPrompt({
+interface LlmBatchResponse {
+  items: Array<{ index: number; insights: LlmInsightBatch["insights"] }>;
+}
+
+async function llmBatchInsights(items: SourceItemRow[]): Promise<Map<number, InsightPayload[]>> {
+  const batchInput = items.map((item, i) => ({
+    index: i,
     source: item.source,
     channel_or_label: item.channel_or_label,
     title: item.title ?? "",
     text: item.text,
-    harvest_score: harvestScore,
-  });
-
-  const result = await generateJson<LlmInsightBatch>(HARVEST_SYSTEM_PROMPT, prompt);
-
-  return (result.insights ?? []).map((gen) => ({
-    source_item_id: item.id,
-    insight_type: gen.insight_type,
-    summary: gen.summary,
-    evidence_score: Math.min(1.0, Math.round((gen.evidence_score + harvestScore * 0.15) * 100) / 100),
-    confidence: gen.confidence,
-    metadata_json: {
-      strategy: "llm",
-      flow: "harvest",
-      source_harvest_score: harvestScore,
-      ...gen.metadata_json,
-    },
+    harvest_score: harvestScoreFromMeta(item.metadata_json),
   }));
+
+  const prompt = buildBatchHarvestUserPrompt(batchInput);
+  const result = await generateBatchJson<LlmBatchResponse>(HARVEST_SYSTEM_PROMPT, prompt);
+
+  const out = new Map<number, InsightPayload[]>();
+  for (const entry of result.items ?? []) {
+    const item = items[entry.index];
+    if (!item) continue;
+    const harvestScore = harvestScoreFromMeta(item.metadata_json);
+    out.set(entry.index, (entry.insights ?? []).map((gen) => ({
+      source_item_id: item.id,
+      insight_type: gen.insight_type,
+      summary: gen.summary,
+      evidence_score: Math.min(1.0, Math.round((gen.evidence_score + harvestScore * 0.15) * 100) / 100),
+      confidence: gen.confidence,
+      metadata_json: {
+        strategy: "llm",
+        flow: "harvest",
+        source_harvest_score: harvestScore,
+        ...gen.metadata_json,
+      },
+    })));
+  }
+  return out;
 }
 
 function heuristicInsights(item: SourceItemRow): InsightPayload[] {
@@ -196,9 +208,10 @@ async function main() {
     return;
   }
 
+  const PARALLEL_BATCHES = 3;
   console.log(`Processing ${items.length} unprocessed source items...`);
   const useLlm = isLlmConfigured();
-  console.log(`Strategy: ${useLlm ? "LLM with heuristic fallback" : "heuristic only"}`);
+  console.log(`Strategy: ${useLlm ? `LLM batch (size=${EXTRACTION_BATCH_SIZE}, parallel=${PARALLEL_BATCHES})` : "heuristic only"}`);
 
   const insertInsight = db.prepare(`
     INSERT INTO insights (source_item_id, insight_type, summary, evidence_score, confidence, status, metadata_json, created_at_utc)
@@ -207,35 +220,62 @@ async function main() {
 
   let totalCreated = 0;
 
-  for (const item of items) {
-    let payloads: InsightPayload[];
-
-    if (useLlm) {
-      try {
-        payloads = await llmInsights(item);
-      } catch (err) {
-        console.warn(`  LLM failed for item ${item.id}, falling back to heuristics: ${err}`);
-        payloads = heuristicInsights(item);
-      }
-    } else {
-      payloads = heuristicInsights(item);
+  if (useLlm) {
+    // Split into batches
+    const batches: SourceItemRow[][] = [];
+    for (let i = 0; i < items.length; i += EXTRACTION_BATCH_SIZE) {
+      batches.push(items.slice(i, i + EXTRACTION_BATCH_SIZE));
     }
 
-    for (const p of payloads) {
-      insertInsight.run(
-        p.source_item_id,
-        p.insight_type,
-        p.summary,
-        p.evidence_score,
-        p.confidence,
-        JSON.stringify(p.metadata_json),
-        new Date().toISOString(),
+    // Process batches with limited parallelism
+    for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
+      const chunk = batches.slice(i, i + PARALLEL_BATCHES);
+      const results = await Promise.all(
+        chunk.map((batch) =>
+          llmBatchInsights(batch).catch((err) => {
+            console.warn(`  Batch failed, falling back to heuristics: ${err}`);
+            const fallback = new Map<number, InsightPayload[]>();
+            batch.forEach((item, idx) => fallback.set(idx, heuristicInsights(item)));
+            return fallback;
+          }),
+        ),
       );
-      totalCreated++;
-    }
 
-    if (payloads.length) {
-      console.log(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]`);
+      for (let b = 0; b < chunk.length; b++) {
+        const batch = chunk[b];
+        const resultMap = results[b];
+        for (let idx = 0; idx < batch.length; idx++) {
+          const item = batch[idx];
+          const payloads = resultMap.get(idx) ?? heuristicInsights(item);
+          for (const p of payloads) {
+            insertInsight.run(
+              p.source_item_id, p.insight_type, p.summary,
+              p.evidence_score, p.confidence,
+              JSON.stringify(p.metadata_json), new Date().toISOString(),
+            );
+            totalCreated++;
+          }
+          if (payloads.length) {
+            process.stdout.write(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]\n`);
+          }
+        }
+      }
+      console.log(`  Batches ${i + 1}-${Math.min(i + PARALLEL_BATCHES, batches.length)} / ${batches.length} done`);
+    }
+  } else {
+    for (const item of items) {
+      const payloads = heuristicInsights(item);
+      for (const p of payloads) {
+        insertInsight.run(
+          p.source_item_id, p.insight_type, p.summary,
+          p.evidence_score, p.confidence,
+          JSON.stringify(p.metadata_json), new Date().toISOString(),
+        );
+        totalCreated++;
+      }
+      if (payloads.length) {
+        console.log(`  Item ${item.id}: ${payloads.length} insight(s) [${payloads.map((p) => p.insight_type).join(", ")}]`);
+      }
     }
   }
 

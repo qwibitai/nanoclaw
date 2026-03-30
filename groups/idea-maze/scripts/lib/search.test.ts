@@ -18,20 +18,32 @@ describe("buildSearchQueries", () => {
     );
 
     expect(queries[0]).toBe("Finance Ops Opportunity");
-    expect(queries).toHaveLength(2);
+    expect(queries.length).toBeGreaterThanOrEqual(2);
     expect(queries[1]).toContain("invoice");
   });
 
-  it("falls back to a cluster query when the title already covers the strong keywords", () => {
+  it("falls back to a cluster query with pricing/alternatives angle when the title already covers the strong keywords", () => {
     const queries = buildSearchQueries(
       { title: "Invoice Reconciliation", cluster_key: "invoice-reconciliation" },
       [{ title: "Invoice reconciliation workflow", text: "Invoice reconciliation is painful." }],
     );
 
-    expect(queries).toEqual([
-      "Invoice Reconciliation",
-      "invoice reconciliation software pain points",
-    ]);
+    expect(queries[0]).toBe("Invoice Reconciliation");
+    expect(queries[1]).toContain("alternatives");
+    expect(queries[1]).toContain("invoice-reconciliation".replace(/-/g, " "));
+  });
+
+  it("emits up to 3 queries including a market landscape angle", () => {
+    const queries = buildSearchQueries(
+      { title: "Finance Ops Opportunity", cluster_key: "finance-ops" },
+      [
+        { title: "Teams keep reconciling invoices by hand", text: "Manual invoice reconciliation." },
+        { title: null, text: "People copy paste invoice data into spreadsheets." },
+      ],
+    );
+
+    expect(queries.length).toBeGreaterThanOrEqual(2);
+    expect(queries.length).toBeLessThanOrEqual(3);
   });
 });
 

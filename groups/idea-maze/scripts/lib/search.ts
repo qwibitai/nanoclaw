@@ -4,8 +4,8 @@ import { dirname, resolve } from "node:path";
 import { upsertSourceItem, type SourceItemRow, type UpsertSourceItem } from "./queries.ts";
 
 const GROUP_DIR = process.env.WORKSPACE_GROUP ?? "/workspace/group";
-const TAVILY_API = "https://api.tavily.com/search";
-const MAX_QUERIES = 2;
+const TAVILY_SEARCH_API = "https://api.tavily.com/search";
+const MAX_QUERIES = 3;
 const MAX_RESULTS_PER_QUERY = 5;
 
 const STOP_WORDS = new Set([
@@ -36,6 +36,7 @@ export interface SearchEvidenceItem {
 export interface SearchEnrichment {
   provider: "tavily";
   queries: string[];
+  answers: string[];
   item_ids: number[];
   items: SearchEvidenceItem[];
 }
@@ -50,6 +51,7 @@ interface TavilyResult {
 
 interface TavilyResponse {
   results?: TavilyResult[];
+  answer?: string;
 }
 
 function hashText(value: string): string {
@@ -125,7 +127,11 @@ export function buildSearchQueries(
   }
 
   if (queries.length < limit) {
-    add(`${target.cluster_key.replace(/-/g, " ")} software pain points`);
+    add(`${target.cluster_key.replace(/-/g, " ")} alternatives pricing complaints`);
+  }
+
+  if (queries.length < limit) {
+    add(`${target.title} market size competitors`);
   }
 
   return queries.slice(0, limit);
@@ -173,30 +179,46 @@ export function toSearchSourceItem(args: {
   };
 }
 
-async function tavilySearch(query: string): Promise<TavilyResponse> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const isRateLimit = err instanceof Error && /4(29|32)/.test(err.message);
+      if (!isRateLimit || attempt === maxRetries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
+async function tavilySearch(query: string, depth: "basic" | "advanced" = "advanced"): Promise<TavilyResponse> {
   const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) {
-    throw new Error("TAVILY_API_KEY not set");
-  }
+  if (!apiKey) throw new Error("TAVILY_API_KEY not set");
 
-  const res = await fetch(TAVILY_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      topic: "general",
-      search_depth: "advanced",
-      max_results: MAX_RESULTS_PER_QUERY,
-    }),
+  return withRetry(async () => {
+    const res = await fetch(TAVILY_SEARCH_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        topic: "general",
+        search_depth: depth,
+        max_results: MAX_RESULTS_PER_QUERY,
+        include_answer: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Tavily API ${res.status}: ${body}`);
+    }
+
+    return res.json() as Promise<TavilyResponse>;
   });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Tavily API ${res.status}: ${body}`);
-  }
-
-  return res.json() as Promise<TavilyResponse>;
 }
 
 export async function enrichOpportunityWithSearch(
@@ -210,12 +232,19 @@ export async function enrichOpportunityWithSearch(
 
   const queries = buildSearchQueries(target, sourceItems);
   const items: SearchEvidenceItem[] = [];
+  const answers: string[] = [];
 
-  for (const query of queries) {
+  for (const [queryIndex, query] of queries.entries()) {
+    // Use basic depth for fallback queries to save API credits
+    const depth = queryIndex === 0 ? "advanced" : "basic";
     const timestamp = new Date();
-    const payload = await tavilySearch(query);
+    const payload = await tavilySearch(query, depth);
     const rawPath = rawPathForSearch(runId, query, timestamp);
     writeJson(rawPath, payload);
+
+    if (payload.answer) {
+      answers.push(payload.answer);
+    }
 
     for (const [index, result] of (payload.results ?? []).entries()) {
       const sourceItem = toSearchSourceItem({
@@ -241,6 +270,7 @@ export async function enrichOpportunityWithSearch(
   return {
     provider: "tavily",
     queries,
+    answers,
     item_ids: [...new Set(items.map((item) => item.id))],
     items,
   };

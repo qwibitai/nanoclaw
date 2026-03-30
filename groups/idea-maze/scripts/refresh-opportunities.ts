@@ -14,14 +14,35 @@ import { initSchema } from "./lib/schema.ts";
 // --- Helpers ---
 
 const STOP_WORDS = new Set([
+  // Articles, conjunctions, prepositions
   "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-  "of", "with", "by", "from", "is", "it", "that", "this", "was", "are",
-  "be", "has", "have", "had", "not", "they", "we", "you", "he", "she",
-  "its", "my", "our", "your", "their", "can", "will", "just", "don",
-  "should", "now", "than", "then", "also", "into", "been", "being",
-  "some", "what", "when", "where", "which", "who", "how", "all", "each",
-  "every", "both", "few", "more", "most", "other", "like", "about",
-  "would", "could", "there", "these", "those", "over", "such",
+  "of", "with", "by", "from", "into", "over", "such", "per",
+  // Pronouns
+  "it", "its", "they", "we", "you", "he", "she", "my", "our", "your",
+  "their", "this", "that", "these", "those", "there", "who", "which",
+  "what", "when", "where", "how",
+  // Common verbs
+  "is", "are", "was", "were", "be", "been", "being", "has", "have", "had",
+  "do", "does", "did", "get", "gets", "got", "use", "uses", "used",
+  "make", "made", "need", "needs", "want", "wants", "can", "will",
+  "would", "could", "should", "may", "might", "let", "set", "run",
+  // Common adverbs / filler
+  "not", "just", "now", "than", "then", "also", "very", "more", "most",
+  "some", "any", "all", "each", "every", "both", "few", "often",
+  "still", "even", "only", "about", "like", "well", "already", "always",
+  "never", "really", "quite", "rather", "much", "many",
+  // Common generic adjectives
+  "good", "new", "old", "big", "small", "large", "great", "high", "low",
+  "long", "short", "same", "other", "own", "right", "next", "last",
+  "little", "general", "clear", "actual", "certain", "free", "full",
+  "able", "due", "real", "early", "easy", "hard", "simple", "true",
+  "open", "public", "specific", "best", "better", "worse", "common",
+  "around", "concrete", "actual", "honest", "boring", "genuine",
+  "blind", "conscious", "brief", "correct", "dark", "direct", "done",
+  // Pipeline template words
+  "signal", "signals", "potential", "demand", "clue", "mentioned",
+  "productized", "monitoring", "point", "constraint", "caveat",
+  "opportunity", "insight", "around", "pricing",
 ]);
 
 function topKeywords(texts: string[], limit = 2): string[] {
@@ -65,7 +86,8 @@ function main() {
 
   // Fetch recent insights with their source items
   const insights = db.prepare(`
-    SELECT i.*, si.source as si_source, si.metadata_json as si_metadata_json
+    SELECT i.*, si.source as si_source, si.title as si_title, si.text as si_text,
+           si.metadata_json as si_metadata_json
     FROM insights i
     JOIN source_items si ON si.id = i.source_item_id
     ORDER BY i.created_at_utc DESC
@@ -80,10 +102,11 @@ function main() {
 
   console.log(`Clustering ${insights.length} recent insights...`);
 
-  // Group by cluster key (top keyword from summary)
+  // Group by top keyword extracted from source item text (more content than summary)
   const clusters = new Map<string, any[]>();
   for (const insight of insights) {
-    const keywords = topKeywords([insight.summary], 2);
+    const sourceText = `${insight.si_title ?? ""} ${insight.si_text ?? ""}`;
+    const keywords = topKeywords([sourceText, insight.summary], 3);
     const clusterKey = keywords[0] ?? insight.insight_type;
     if (!clusters.has(clusterKey)) clusters.set(clusterKey, []);
     clusters.get(clusterKey)!.push(insight);
@@ -113,7 +136,15 @@ function main() {
 
   let created = 0;
 
-  for (const [clusterKey, clusterInsights] of clusters) {
+  // Filter out small / single-type clusters
+  const MIN_INSIGHTS = 3;
+  const filteredClusters = [...clusters.entries()].filter(
+    ([, items]) => items.length >= MIN_INSIGHTS,
+  );
+
+  console.log(`Found ${clusters.size} raw clusters, ${filteredClusters.length} with ≥${MIN_INSIGHTS} insights.`);
+
+  for (const [clusterKey, clusterInsights] of filteredClusters) {
     // Rank insights by evidence_score + harvest_score
     const ranked = clusterInsights.sort((a: any, b: any) => {
       const scoreA = a.evidence_score + harvestScoreFromMeta(a.si_metadata_json);
@@ -122,7 +153,11 @@ function main() {
       return (b.created_at_utc ?? "").localeCompare(a.created_at_utc ?? "");
     });
 
-    const title = `${clusterKey.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())} Opportunity`;
+    // Build bigram title from combined text of all insights in cluster
+    const allText = ranked.map((i: any) => `${i.si_title ?? ""} ${i.si_text ?? ""} ${i.summary}`).join(" ");
+    const topWords = topKeywords([allText], 3);
+    const bigramLabel = topWords.slice(0, 2).join("-") || clusterKey;
+    const title = bigramLabel.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const slug = slugify(title);
     const thesis = ranked[0].summary;
 
@@ -153,6 +188,7 @@ function main() {
 
     const metadata = {
       insight_count: ranked.length,
+      source_count: uniqueSources,
       highlights: ranked.slice(0, 5).map((i: any) => i.summary),
       average_harvest_score: Math.round(avgSourceScore * 1000) / 1000,
       top_source_patterns: [...patternCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),

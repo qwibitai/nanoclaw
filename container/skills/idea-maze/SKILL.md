@@ -22,8 +22,6 @@ cd /workspace/group/scripts && tsx <script>.ts [args]
 
 ### Ingestion
 - `ingest-reddit.ts` — Harvest from configured subreddits
-- `ingest-gmail.ts` — Harvest from Gmail inbox
-- `ingest-telegram.ts` — Harvest from Telegram channels (requires setup)
 
 ### Analysis
 - `extract-insights.ts` — Extract typed insights from unprocessed source items (LLM + heuristic fallback)
@@ -36,9 +34,19 @@ cd /workspace/group/scripts && tsx <script>.ts [args]
 - `approve-run.ts <run_id> [notes]` — Approve a run, write Markdown artifact
 - `reject-run.ts <run_id> [notes]` — Reject a run, record decision
 
+## Long-running Operations
+
+Before executing any script that takes more than a few seconds (pipeline, research, insight extraction), **always send an immediate acknowledgment first**:
+
+```
+Call mcp__nanoclaw__send_message with text like "⏳ Running pipeline..." before executing the script.
+```
+
+This lets the user know the request was received while the work runs.
+
 ## Pipeline Stages
 
-1. **Harvest** — Ingest from Gmail, Reddit, Telegram channels → `source_items` with harvest scores
+1. **Harvest** — Ingest from Reddit → `source_items` with harvest scores
 2. **Insights** — Extract typed signals: pain_point, demand_signal, workflow_gap, distribution_clue, willingness_to_pay, competitor_move, implementation_constraint
 3. **Opportunities** — Cluster insights by keyword, score by evidence + diversity
 4. **Research** — Draft thesis, evidence, MVP scope, risks → lands in `review_gate`
@@ -70,8 +78,7 @@ console.log(JSON.stringify(counts, null, 2));
 
 ### Full harvest
 ```bash
-cd /workspace/group/scripts
-tsx ingest-reddit.ts && tsx ingest-gmail.ts && tsx extract-insights.ts
+cd /workspace/group/scripts && tsx run-pipeline.ts
 ```
 
 ### Review pending research
@@ -92,7 +99,7 @@ Set up recurring jobs using `mcp__nanoclaw__schedule_task`. All tasks target the
 
 **Full pipeline** (ingestion + insights + opportunities) — every 60 minutes:
 ```
-prompt: "Run the full harvest pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts --skip-gmail. Report results summary."
+prompt: "Run the full harvest pipeline. Execute: cd /workspace/group/scripts && tsx run-pipeline.ts. Report results summary."
 schedule_type: interval
 schedule_value: "3600000"
 context_mode: isolated

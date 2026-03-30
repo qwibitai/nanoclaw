@@ -1,12 +1,12 @@
 /**
  * Run the full harvest pipeline with run-lock protection.
  *
- * Stages: ingest-reddit → ingest-gmail → extract-insights → refresh-opportunities
+ * Stages: ingest-reddit → extract-insights → refresh-opportunities
  *
  * Used by scheduled tasks to run the pipeline safely without overlap.
  * Skips stages that fail and reports results.
  *
- * Usage: tsx run-pipeline.ts [--skip-gmail] [--skip-reddit]
+ * Usage: tsx run-pipeline.ts
  */
 
 import { execSync } from "node:child_process";
@@ -16,8 +16,6 @@ import { initSchema } from "./lib/schema.ts";
 import { acquireRunLock, releaseRunLock, getCounts } from "./lib/queries.ts";
 
 const SCRIPTS_DIR = resolve(import.meta.dirname ?? ".");
-const skipGmail = process.argv.includes("--skip-gmail");
-const skipReddit = process.argv.includes("--skip-reddit");
 
 interface StageResult {
   stage: string;
@@ -56,12 +54,7 @@ function main() {
 
   try {
     // Ingestion
-    if (!skipReddit) {
-      results.push(runStage("ingest-reddit", "ingest-reddit.ts"));
-    }
-    if (!skipGmail) {
-      results.push(runStage("ingest-gmail", "ingest-gmail.ts"));
-    }
+    results.push(runStage("ingest-reddit", "ingest-reddit.ts"));
 
     // Analysis
     results.push(runStage("extract-insights", "extract-insights.ts"));
