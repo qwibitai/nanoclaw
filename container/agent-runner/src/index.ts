@@ -402,6 +402,71 @@ function formatTranscriptMarkdown(
   return lines.join('\n');
 }
 
+// --- LCM Context Assembly ---
+const LCM_CONTEXT_WINDOW_TOKENS = parseInt(process.env.LCM_CONTEXT_WINDOW_TOKENS || '200000', 10);
+const LCM_SUMMARY_BUDGET_PCT = parseInt(process.env.LCM_SUMMARY_BUDGET_PCT || '25', 10);
+
+/**
+ * Assemble LCM summary context for injection into system prompt on session resume.
+ * Returns formatted XML summary blocks, or null if no summaries are available.
+ */
+function assembleLcmContext(sessionId: string): string | null {
+  try {
+    initLcmDatabase(LCM_DB_PATH);
+  } catch {
+    return null;
+  }
+
+  const allSummaries = getSummariesForSession(sessionId);
+  if (allSummaries.length === 0) return null;
+
+  // Build set of leaf IDs covered by condensed summaries
+  const coveredLeafIds = new Set<string>();
+  const condensed = allSummaries.filter(s => s.depth > 0);
+  for (const cs of condensed) {
+    if (cs.child_summary_ids) {
+      for (const childId of JSON.parse(cs.child_summary_ids) as string[]) {
+        coveredLeafIds.add(childId);
+      }
+    }
+  }
+
+  // Prioritize: condensed (high depth) first, then uncovered leaves
+  const uncoveredLeaves = allSummaries.filter(s => s.depth === 0 && !coveredLeafIds.has(s.id));
+  const sorted = [
+    ...condensed.sort((a, b) => b.depth - a.depth || (a.min_sequence ?? 0) - (b.min_sequence ?? 0)),
+    ...uncoveredLeaves.sort((a, b) => (a.min_sequence ?? 0) - (b.min_sequence ?? 0)),
+  ];
+
+  // Fit within budget
+  const budgetTokens = Math.floor(LCM_SUMMARY_BUDGET_PCT / 100 * LCM_CONTEXT_WINDOW_TOKENS);
+  let remainingBudget = budgetTokens;
+  const selected: typeof sorted = [];
+
+  for (const summary of sorted) {
+    const tokens = summary.token_estimate || Math.ceil(summary.content.length / 4);
+    if (tokens > remainingBudget) continue;
+    selected.push(summary);
+    remainingBudget -= tokens;
+  }
+
+  if (selected.length === 0) return null;
+
+  // Sort selected by sequence for chronological presentation
+  selected.sort((a, b) => (a.min_sequence ?? 0) - (b.min_sequence ?? 0));
+
+  // Format as XML blocks
+  const blocks = selected.map(s =>
+    `<lcm_summary id="${s.id}" depth="${s.depth}" tokens="${s.token_estimate}" created="${s.created_at}">\n${s.content}\n</lcm_summary>`
+  );
+
+  return `## Conversation History (LCM Summaries)
+
+The following are summaries of previous conversation segments that were compacted from this session's history. They are ordered chronologically. You can use the lcm_grep, lcm_describe, and lcm_expand MCP tools to search and drill into specific details.
+
+${blocks.join('\n\n')}`;
+}
+
 /**
  * Check for _close sentinel.
  */
@@ -532,6 +597,19 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // LCM: Assemble summary context on session resume
+  let lcmContext: string | null = null;
+  if (sessionId) {
+    try {
+      lcmContext = assembleLcmContext(sessionId);
+      if (lcmContext) {
+        log(`LCM: Assembled summary context for session ${sessionId} (${lcmContext.length} chars)`);
+      }
+    } catch (err) {
+      log(`LCM context assembly error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -555,12 +633,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
+      systemPrompt: (globalClaudeMd || lcmContext)
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: [globalClaudeMd, lcmContext].filter(Boolean).join('\n\n') }
         : undefined,
       allowedTools: [
         'Bash',
