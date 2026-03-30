@@ -33,6 +33,7 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
   secretKeys?: string[]; // Extra .env keys to read and pass via stdin (SDK-only)
   envKeys?: string[]; // Keys from secrets to also set in container process.env (Bash-visible)
+  dockerNetwork?: string; // Docker network to join (e.g. 'nanoclaw')
 }
 
 export interface RegisteredGroup {

@@ -100,6 +100,19 @@ export function ensureContainerRuntimeRunning(): void {
   }
 }
 
+/** Create the shared 'nanoclaw' Docker network idempotently. */
+export function ensureDockerNetwork(): void {
+  try {
+    execSync(`${CONTAINER_RUNTIME_BIN} network create nanoclaw`, {
+      stdio: 'pipe',
+    });
+    logger.info('Created Docker network: nanoclaw');
+  } catch {
+    // Network already exists — expected on subsequent startups
+    logger.debug('Docker network "nanoclaw" already exists');
+  }
+}
+
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {

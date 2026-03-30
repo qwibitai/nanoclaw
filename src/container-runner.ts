@@ -246,8 +246,13 @@ function readSecrets(extraKeys: string[] = []): Record<string, string> {
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  containerConfig?: import('./types.js').ContainerConfig,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  if (containerConfig?.dockerNetwork) {
+    args.push('--network', containerConfig.dockerNetwork);
+  }
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -316,7 +321,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group.containerConfig);
 
   logger.debug(
     {
