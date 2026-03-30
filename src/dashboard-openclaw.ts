@@ -490,6 +490,29 @@ const HTML = `<!DOCTYPE html>
   .log-msg { word-break: break-word; }
   .log-msg.error { color: var(--red); }
   .log-msg.warn { color: var(--orange); }
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 60px;
+    padding-top: 8px;
+  }
+  .bar {
+    flex: 1;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+    position: relative;
+    transition: background 0.2s;
+  }
+  .bar:hover { background: var(--accent2); }
+  .bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text2);
+    margin-top: 8px;
+  }
   .empty { color: var(--text2); font-style: italic; font-size: 13px; padding: 12px 0; }
   .time-ago { color: var(--text2); }
   .update-banner {

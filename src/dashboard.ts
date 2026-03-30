@@ -600,7 +600,7 @@ const HTML = `<!DOCTYPE html>
     justify-content: space-between;
     font-size: 10px;
     color: var(--text2);
-    margin-top: 4px;
+    margin-top: 8px;
   }
   .channel-pills {
     display: flex;
