@@ -400,10 +400,14 @@ async function runAgent(
                 input_tokens: output.inputTokens ?? 0,
                 output_tokens: output.outputTokens ?? 0,
                 cache_read_input_tokens: output.cacheReadInputTokens ?? 0,
-                cache_creation_input_tokens: output.cacheCreationInputTokens ?? 0,
+                cache_creation_input_tokens:
+                  output.cacheCreationInputTokens ?? 0,
               });
             } catch (err) {
-              logger.warn({ group: group.folder, err }, 'Failed to persist token usage');
+              logger.warn(
+                { group: group.folder, err },
+                'Failed to persist token usage',
+              );
             }
           }
           lastTurnStart = Date.now();
