@@ -14,6 +14,8 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  getGroupByFolder: (folder: string) => RegisteredGroup | undefined;
+  updateGroupConfig: (folder: string, config: import('./types.js').ContainerConfig) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -173,6 +175,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For configure_llm
+    llmProvider?: import('./types.js').LLMProviderConfig;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -454,6 +458,41 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'configure_llm':
+      // Only main group can configure LLM providers
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized configure_llm attempt blocked',
+        );
+        break;
+      }
+      if (data.groupFolder) {
+        const group = deps.getGroupByFolder(data.groupFolder);
+        if (group) {
+          const updatedConfig = {
+            ...group.containerConfig,
+            llmProvider: data.llmProvider,
+          };
+          deps.updateGroupConfig(data.groupFolder, updatedConfig);
+          logger.info(
+            { groupFolder: data.groupFolder, provider: data.llmProvider?.type || 'claude' },
+            'LLM provider configured',
+          );
+        } else {
+          logger.warn(
+            { groupFolder: data.groupFolder },
+            'Invalid configure_llm request - group not found',
+          );
+        }
+      } else {
+        logger.warn(
+          { data },
+          'Invalid configure_llm request - missing groupFolder',
         );
       }
       break;

@@ -20,6 +20,20 @@ import { execFile } from 'child_process';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+import { routeQuery, stripRoutingPrefix } from './llm-router.js';
+import { OpenAIClient, formatMessage } from './openai-client.js';
+import * as llmSession from './llm-session.js';
+
+interface LLMProviderConfig {
+  type: 'claude' | 'openai-compatible';
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  routingMode?: 'always' | 'simple' | 'manual' | 'hybrid';
+  maxTokensForLocal?: number;
+  allowToolUse?: boolean;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -29,6 +43,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  llmProvider?: LLMProviderConfig;
 }
 
 interface ContainerOutput {
@@ -326,6 +341,69 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Run query with local LLM (OpenAI-compatible)
+ */
+async function runLocalLLM(
+  prompt: string,
+  sessionId: string | undefined,
+  containerInput: ContainerInput,
+): Promise<{ newSessionId?: string }> {
+  const config = containerInput.llmProvider!;
+  const client = new OpenAIClient(config);
+  const provider = config.baseUrl?.includes('localhost:1234') ? 'lm-studio' :
+                   config.baseUrl?.includes('localhost:11434') ? 'ollama' : 'openai';
+
+  // Load or create session
+  const effectiveSessionId = sessionId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let session = llmSession.loadSession(provider, effectiveSessionId);
+
+  if (!session) {
+    session = llmSession.createSession(provider, effectiveSessionId);
+    log(`Created new local session: ${effectiveSessionId}`);
+  } else {
+    log(`Resumed local session: ${effectiveSessionId}, ${session.messages.length} messages`);
+  }
+
+  // Add user message to session
+  llmSession.addMessage(session, 'user', prompt);
+
+  // Get context messages for API call
+  const messages = llmSession.getContextMessages(session);
+
+  // Stream completion
+  let result = '';
+  try {
+    for await (const chunk of client.streamCompletion(messages)) {
+      if (chunk.type === 'text' && chunk.text) {
+        result += chunk.text;
+        // Could stream partial results here if needed
+      }
+    }
+  } catch (error) {
+    log(`Local LLM error: ${error}`);
+    throw error;
+  }
+
+  // Add assistant response to session
+  llmSession.addMessage(session, 'assistant', result);
+
+  // Trim session to keep it manageable
+  llmSession.trimSession(session);
+
+  // Save session
+  llmSession.saveSession(session);
+
+  // Write output
+  writeOutput({
+    status: 'success',
+    result,
+    newSessionId: effectiveSessionId,
+  });
+
+  return { newSessionId: effectiveSessionId };
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -582,7 +660,39 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      // Route query to appropriate LLM provider
+      let queryResult: { newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery?: boolean };
+
+      if (containerInput.llmProvider && containerInput.llmProvider.type === 'openai-compatible') {
+        // Determine routing
+        const provider = containerInput.llmProvider.baseUrl?.includes('localhost:1234') ? 'lm-studio' :
+                        containerInput.llmProvider.baseUrl?.includes('localhost:11434') ? 'ollama' : 'openai';
+        const session = sessionId ? llmSession.loadSession(provider, sessionId) : null;
+        const turnCount = session ? llmSession.countTurns(session) : 0;
+
+        const routingDecision = routeQuery(prompt, containerInput.llmProvider, turnCount);
+        log(`Routing decision: ${routingDecision.type} - ${routingDecision.reason}`);
+
+        if (routingDecision.type === 'local') {
+          // Use local LLM
+          const cleanPrompt = stripRoutingPrefix(prompt);
+          try {
+            queryResult = await runLocalLLM(cleanPrompt, sessionId, containerInput);
+          } catch (error) {
+            // Fallback to Claude on local LLM error
+            log(`Local LLM failed, falling back to Claude: ${error}`);
+            queryResult = await runQuery(cleanPrompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+          }
+        } else {
+          // Use Claude
+          const cleanPrompt = stripRoutingPrefix(prompt);
+          queryResult = await runQuery(cleanPrompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        }
+      } else {
+        // Default to Claude
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      }
+
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
