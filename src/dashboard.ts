@@ -205,6 +205,58 @@ function getChannelStatus(): Array<{
     .map(name => ({ name, ...status[name] }));
 }
 
+function getGoogleStatus(): {
+  connected: boolean;
+  account: string | null;
+  scopes: string[];
+  tokenExpiry: string | null;
+  tokenValid: boolean;
+} {
+  const credsPath = path.join(os.homedir(), '.gmail-mcp', 'credentials.json');
+  if (!fs.existsSync(credsPath)) {
+    return { connected: false, account: null, scopes: [], tokenExpiry: null, tokenValid: false };
+  }
+
+  try {
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+    const scopeStr = creds.scope || '';
+    const scopes: string[] = [];
+    if (scopeStr.includes('gmail')) scopes.push('Gmail');
+    if (scopeStr.includes('calendar')) scopes.push('Calendar');
+    if (scopeStr.includes('spreadsheets')) scopes.push('Sheets');
+    if (scopeStr.includes('drive')) scopes.push('Drive');
+    if (scopeStr.includes('docs')) scopes.push('Docs');
+
+    const expiryDate = creds.expiry_date ? new Date(creds.expiry_date) : null;
+    const tokenValid = expiryDate ? expiryDate.getTime() > Date.now() : false;
+
+    // Try to get account email from Gmail channel log
+    let account = creds.email || null;
+    if (!account) {
+      try {
+        const logPath = path.resolve(PROJECT_ROOT, 'logs', 'nanoclaw.log');
+        if (fs.existsSync(logPath)) {
+          const logTail = execSync(`tail -2000 ${JSON.stringify(logPath)} 2>/dev/null`, {
+            encoding: 'utf-8', timeout: 5000,
+          });
+          const matches = [...logTail.matchAll(/Gmail channel connected[\s\S]*?email.*?:\s*"([^"]+)"/g)];
+          if (matches.length > 0) account = matches[matches.length - 1][1];
+        }
+      } catch {}
+    }
+
+    return {
+      connected: !!creds.refresh_token || !!creds.access_token,
+      account,
+      scopes,
+      tokenExpiry: expiryDate ? expiryDate.toISOString() : null,
+      tokenValid,
+    };
+  } catch {
+    return { connected: false, account: null, scopes: [], tokenExpiry: null, tokenValid: false };
+  }
+}
+
 function getNanoClawUpdate(): { available: boolean; current: string | null; latest: string | null } {
   try {
     const pkgPath = path.resolve(PROJECT_ROOT, 'package.json');
@@ -237,6 +289,7 @@ function getNanoClawUpdate(): { available: boolean; current: string | null; late
 const EMPTY_DATA = {
   service: { running: false, pid: null, uptime: null },
   update: { available: false, current: null as string | null, latest: null as string | null },
+  google: { connected: false, account: null as string | null, scopes: [] as string[], tokenExpiry: null as string | null, tokenValid: false },
   channels: [] as Array<{ name: string; connected: boolean; lastEvent: string | null; lastEventTime: string | null; account: string | null }>,
   groups: [],
   groupFolders: [],
@@ -252,7 +305,7 @@ const EMPTY_DATA = {
 
 function apiData() {
   const db = getDb();
-  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
+  if (!db) return { ...EMPTY_DATA, update: getNanoClawUpdate(), google: getGoogleStatus(), channels: getChannelStatus(), containers: getContainers(), service: getServiceStatus(), timestamp: new Date().toISOString() };
 
   const groups = db
     .prepare(
@@ -341,10 +394,12 @@ function apiData() {
   db.close();
 
   const update = getNanoClawUpdate();
+  const google = getGoogleStatus();
 
   return {
     service,
     update,
+    google,
     channels,
     groups,
     groupFolders,
@@ -639,6 +694,22 @@ function renderTopStats() {
       const acct = ch.account ? '<br><span class="time-ago" style="font-size:11px">' + esc(ch.account) + '</span>' : '';
       html += '<div class="stat-row" style="align-items:flex-start"><span>' + icon + ' ' + esc(ch.name) + acct + '</span><span>' + connBadge + '</span></div>';
     });
+  }
+  html += '</div>';
+
+  // Google Integration
+  html += '<div class="card"><h2>Google</h2>';
+  const g = d.google;
+  if (g.connected) {
+    const tokenBadge = g.tokenValid ? badge('valid', 'green') : badge('expired', 'red');
+    if (g.account) html += '<div class="stat-row"><span>Account</span><span class="stat-value">' + esc(g.account) + '</span></div>';
+    html += '<div class="stat-row"><span>Token</span><span>' + tokenBadge + '</span></div>';
+    if (g.scopes.length > 0) {
+      html += '<div class="stat-row"><span>Services</span><span>' + g.scopes.map(s => badge(s, 'blue')).join(' ') + '</span></div>';
+    }
+    if (g.tokenExpiry) html += '<div class="stat-row"><span>Expires</span><span class="time-ago">' + timeAgo(g.tokenExpiry) + '</span></div>';
+  } else {
+    html += '<div class="empty">Not connected</div>';
   }
   html += '</div>';
 
