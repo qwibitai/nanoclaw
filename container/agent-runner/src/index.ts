@@ -23,6 +23,18 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  initLcmDatabase,
+  storeMessages as lcmStoreMessages,
+  storeSummary,
+  getSummariesForSession,
+  getMaxSequence,
+} from './lcm-store.js';
+import {
+  createLeafSummary,
+  createCondensedSummary,
+  LCM_CONDENSE_THRESHOLD,
+} from './lcm-summarize.js';
 
 interface ContainerInput {
   prompt: string;
@@ -156,8 +168,13 @@ function getSessionSummary(
   return null;
 }
 
+// --- LCM Configuration ---
+const LCM_FRESHNESS_WINDOW = parseInt(process.env.LCM_FRESHNESS_WINDOW || '32', 10);
+const LCM_DB_PATH = '/home/node/.claude/lcm.db';
+
 /**
  * Archive the full transcript to conversations/ before compaction.
+ * Enhanced with LCM: persist messages to SQLite, summarize compacted chunks.
  */
 function createPreCompactHook(assistantName?: string): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -179,6 +196,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
         return {};
       }
 
+      // --- Existing archival logic ---
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
@@ -197,6 +215,101 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // --- LCM: Persist messages and summarize ---
+      try {
+        initLcmDatabase(LCM_DB_PATH);
+
+        // Determine start sequence (continue from last stored message)
+        const currentMaxSeq = getMaxSequence(sessionId);
+        const startSequence = currentMaxSeq + 1;
+
+        // Store all messages (INSERT OR IGNORE handles dedup)
+        lcmStoreMessages(sessionId, messages, startSequence);
+        log(`LCM: Stored ${messages.length} messages (start seq: ${startSequence})`);
+
+        // Identify compaction candidates: messages outside the freshness window
+        const totalMessages = messages.length;
+        const compactCount = Math.max(0, totalMessages - LCM_FRESHNESS_WINDOW);
+
+        if (compactCount > 0) {
+          const compactedMessages = messages.slice(0, compactCount);
+          const compactedMinSeq = startSequence;
+          const compactedMaxSeq = startSequence + compactCount - 1;
+
+          // Build message IDs for the compacted chunk (same hash as storeMessages)
+          const crypto = await import('crypto');
+          const messageIds = compactedMessages.map((msg, i) => {
+            const seq = startSequence + i;
+            const hash = crypto.createHash('sha256');
+            hash.update(`${sessionId}:${seq}:${msg.role}:${msg.content}`);
+            return hash.digest('hex').slice(0, 16);
+          });
+
+          // Create leaf summary
+          const leafResult = await createLeafSummary(
+            compactedMessages,
+            messageIds,
+            compactedMinSeq,
+            compactedMaxSeq,
+          );
+
+          storeSummary({
+            id: leafResult.id,
+            session_id: sessionId,
+            depth: 0,
+            content: leafResult.content,
+            source_message_ids: JSON.stringify(leafResult.sourceMessageIds),
+            parent_summary_ids: null,
+            child_summary_ids: null,
+            min_sequence: leafResult.minSequence,
+            max_sequence: leafResult.maxSequence,
+            created_at: new Date().toISOString(),
+          });
+
+          log(`LCM: Created leaf summary ${leafResult.id} (seq ${compactedMinSeq}-${compactedMaxSeq})`);
+
+          // Check if condensation is needed
+          const leafSummaries = getSummariesForSession(sessionId, { depth: 0 });
+          if (leafSummaries.length >= LCM_CONDENSE_THRESHOLD) {
+            // Take the oldest leaves that aren't already covered by a condensed summary
+            const condensedSummaries = getSummariesForSession(sessionId).filter(s => s.depth > 0);
+            const coveredLeafIds = new Set<string>();
+            for (const cs of condensedSummaries) {
+              if (cs.child_summary_ids) {
+                for (const childId of JSON.parse(cs.child_summary_ids) as string[]) {
+                  coveredLeafIds.add(childId);
+                }
+              }
+            }
+            const uncoveredLeaves = leafSummaries.filter(s => !coveredLeafIds.has(s.id));
+
+            if (uncoveredLeaves.length >= LCM_CONDENSE_THRESHOLD) {
+              const toCondense = uncoveredLeaves.slice(0, LCM_CONDENSE_THRESHOLD);
+              const condensedResult = await createCondensedSummary(toCondense);
+
+              storeSummary({
+                id: condensedResult.id,
+                session_id: sessionId,
+                depth: condensedResult.depth,
+                content: condensedResult.content,
+                source_message_ids: null,
+                parent_summary_ids: null,
+                child_summary_ids: JSON.stringify(condensedResult.childSummaryIds),
+                min_sequence: condensedResult.minSequence,
+                max_sequence: condensedResult.maxSequence,
+                created_at: new Date().toISOString(),
+              });
+
+              log(`LCM: Created condensed summary ${condensedResult.id} (depth ${condensedResult.depth}, ${toCondense.length} children)`);
+            }
+          }
+        } else {
+          log(`LCM: All ${totalMessages} messages within freshness window, no compaction needed`);
+        }
+      } catch (lcmErr) {
+        log(`LCM error (non-fatal): ${lcmErr instanceof Error ? lcmErr.message : String(lcmErr)}`);
+      }
     } catch (err) {
       log(
         `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
