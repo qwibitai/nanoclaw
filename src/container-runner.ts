@@ -34,6 +34,11 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+export type ThinkingConfig =
+  | { type: 'adaptive' }
+  | { type: 'enabled'; budgetTokens?: number }
+  | { type: 'disabled' };
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -43,6 +48,9 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  thinking?: ThinkingConfig;
 }
 
 export interface ContainerOutput {
