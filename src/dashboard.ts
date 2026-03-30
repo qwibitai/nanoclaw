@@ -885,8 +885,7 @@ function renderTopStats() {
       else if (t.hoursLeft !== null && t.hoursLeft < 2) status = badge('expiring soon', 'orange');
       else if (t.hoursLeft !== null && t.hoursLeft < 24) status = badge('< 24h', 'orange');
       else status = badge('healthy', 'green');
-      const expInfo = t.expiry ? ' <span class="time-ago">expires ' + timeAgo(t.expiry) + '</span>' : '';
-      html += '<div class="stat-row"><span>' + esc(t.name) + '</span><span>' + status + expInfo + '</span></div>';
+      html += '<div class="stat-row"><span>' + esc(t.name) + '</span><span>' + status + '</span></div>';
     });
   }
   html += '</div>';
