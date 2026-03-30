@@ -61,7 +61,11 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { startChatServer, stopChatServer } from './chat-server.js';
+import {
+  startChatServer,
+  stopChatServer,
+  setOnGroupUpdated,
+} from './chat-server.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -738,6 +742,10 @@ async function main(): Promise<void> {
     },
   });
   await startChatServer();
+  setOnGroupUpdated(() => {
+    registeredGroups = getAllRegisteredGroups();
+    logger.info('Registered groups reloaded after update');
+  });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
