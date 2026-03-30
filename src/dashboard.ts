@@ -619,6 +619,7 @@ const HTML = `<!DOCTYPE html>
 
 <div id="update-banner"></div>
 <div class="grid" id="top-stats"></div>
+<div id="activity-bar"></div>
 <div class="grid" id="main-content"></div>
 
 <script>
@@ -721,32 +722,36 @@ function renderTopStats() {
   html += '<div class="stat-row"><span>Total</span><span class="stat-value">' + (d.messageStats.total||0).toLocaleString() + '</span></div>';
   html += '</div>';
 
-  // Hourly chart + channel breakdown
-  html += '<div class="card"><h2>24h Activity</h2>';
+  document.getElementById('top-stats').innerHTML = html;
+
+  // 24h Activity — full width
+  let actHtml = '<div class="card" style="margin-bottom:24px"><h2 style="display:flex;justify-content:space-between;align-items:center">24h Activity';
+  if (d.channelStats.length > 0) {
+    actHtml += '<span style="display:flex;gap:8px">';
+    d.channelStats.forEach(cs => {
+      actHtml += '<span class="channel-pill">' + channelIcon(cs.channel) + ' ' + esc(cs.channel || 'unknown') + ' <span class="count">' + cs.count + '</span></span>';
+    });
+    actHtml += '</span>';
+  }
+  actHtml += '</h2>';
   if (d.hourlyVolume.length > 0) {
     const max = Math.max(...d.hourlyVolume.map(h => h.count), 1);
     const hours = {};
     d.hourlyVolume.forEach(h => { hours[h.hour] = h.count; });
-    html += '<div class="bar-chart">';
+    actHtml += '<div class="bar-chart" style="height:120px">';
     for (let i = 0; i < 24; i++) {
       const h = String(i).padStart(2, '0');
       const c = hours[h] || 0;
       const pct = Math.max((c / max) * 100, 2);
-      html += '<div class="bar" style="height:' + pct + '%" title="' + h + ':00 — ' + c + ' msgs"></div>';
+      actHtml += '<div class="bar" style="height:' + pct + '%" title="' + h + ':00 — ' + c + ' msgs"></div>';
     }
-    html += '</div>';
-    html += '<div class="bar-label"><span>00:00</span><span>12:00</span><span>23:00</span></div>';
+    actHtml += '</div>';
+    actHtml += '<div class="bar-label"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>';
+  } else {
+    actHtml += '<div class="empty">No messages in the last 24 hours</div>';
   }
-  if (d.channelStats.length > 0) {
-    html += '<div class="channel-pills" style="margin-top:12px">';
-    d.channelStats.forEach(cs => {
-      html += '<div class="channel-pill">' + channelIcon(cs.channel) + ' ' + esc(cs.channel || 'unknown') + ' <span class="count">' + cs.count + '</span></div>';
-    });
-    html += '</div>';
-  }
-  html += '</div>';
-
-  document.getElementById('top-stats').innerHTML = html;
+  actHtml += '</div>';
+  document.getElementById('activity-bar').innerHTML = actHtml;
 }
 
 function renderMain() {
