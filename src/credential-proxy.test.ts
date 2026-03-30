@@ -168,6 +168,31 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['transfer-encoding']).toBeUndefined();
   });
 
+  it('retries on EADDRINUSE and succeeds when port frees up', async () => {
+    proxyPort = await startProxy({ ANTHROPIC_API_KEY: 'sk-ant-real-key' });
+
+    // Start a second proxy on the same port — it should retry and fail gracefully
+    // First, occupy the port with a blocker that we'll release after a short delay
+    const blocker = http.createServer();
+    const blockerPort = await new Promise<number>((resolve) => {
+      blocker.listen(0, '127.0.0.1', () => {
+        resolve((blocker.address() as AddressInfo).port);
+      });
+    });
+
+    // Close the blocker after 1.5s so the retry succeeds
+    setTimeout(() => blocker.close(), 1500);
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    const retryServer = await startCredentialProxy(blockerPort);
+    const retryPort = (retryServer.address() as AddressInfo).port;
+    expect(retryPort).toBe(blockerPort);
+    await new Promise<void>((r) => retryServer.close(() => r()));
+  }, 15000);
+
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: 'sk-ant-real-key',
