@@ -165,6 +165,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Per-group persistent data directory for skills.
+  // Skills that need to persist state across sessions (caches, auth tokens,
+  // learned preferences) write here instead of polluting /workspace/group/.
+  // Each group gets its own directory — no cross-group access.
+  // Exposed inside the container as SKILL_DATA_DIR=/workspace/skill-data.
+  const skillDataDir = path.join(DATA_DIR, 'sessions', group.folder, 'skill-data');
+  fs.mkdirSync(skillDataDir, { recursive: true });
+  mounts.push({
+    hostPath: skillDataDir,
+    containerPath: '/workspace/skill-data',
+    readonly: false,
+  });
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -232,6 +245,10 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Persistent storage for skills — survives container restarts.
+  // Skills use this env var to locate their data directory.
+  args.push('-e', 'SKILL_DATA_DIR=/workspace/skill-data');
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.

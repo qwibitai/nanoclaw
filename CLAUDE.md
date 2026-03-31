@@ -20,6 +20,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+| `data/sessions/{group}/skill-data/` | Per-group persistent storage for container skills (`SKILL_DATA_DIR`) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
@@ -43,6 +44,18 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 | `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials to it |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+
+## Container Skill Data
+
+Container skills that need persistent storage (caches, auth state, learned preferences) should use the `SKILL_DATA_DIR` environment variable. This points to `/workspace/skill-data` inside the container — a writable, per-group directory that survives container restarts.
+
+```bash
+# In a skill's bash commands:
+mkdir -p "$SKILL_DATA_DIR/my-skill"
+echo '{"token": "..."}' > "$SKILL_DATA_DIR/my-skill/auth.json"
+```
+
+Each group (user) gets an isolated `skill-data/` directory. Skills share the same code but never share data across groups. On the host, data lives at `data/sessions/{group}/skill-data/`.
 
 ## Contributing
 
