@@ -13,6 +13,10 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OMLX_API_KEY,
+  OMLX_ADMIN_TOOLS,
+  OMLX_ENABLED,
+  OMLX_HOST,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
@@ -233,6 +237,16 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // oMLX local model server — pass connection details to the container.
+  // OMLX_API_KEY is a local-only key (oMLX runs on localhost) — it never
+  // leaves the machine, but it does bypass the OneCLI credential boundary.
+  if (OMLX_ENABLED) {
+    args.push('-e', `OMLX_ENABLED=true`);
+    if (OMLX_HOST) args.push('-e', `OMLX_HOST=${OMLX_HOST}`);
+    if (OMLX_API_KEY) args.push('-e', `OMLX_API_KEY=${OMLX_API_KEY}`);
+    if (OMLX_ADMIN_TOOLS) args.push('-e', `OMLX_ADMIN_TOOLS=true`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -400,7 +414,14 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (line) {
+          // Surface oMLX activity at info level for visibility
+          if (line.includes('[OMLX]')) {
+            logger.info({ container: group.folder }, line);
+          } else {
+            logger.debug({ container: group.folder }, line);
+          }
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

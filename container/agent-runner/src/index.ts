@@ -409,7 +409,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__omlx__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -425,6 +426,17 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.OMLX_ENABLED === 'true' ? {
+          omlx: {
+            command: 'node',
+            args: [path.join(path.dirname(mcpServerPath), 'omlx-mcp-stdio.js')],
+            env: {
+              OMLX_HOST: process.env.OMLX_HOST || '',
+              OMLX_API_KEY: process.env.OMLX_API_KEY || '',
+              OMLX_ADMIN_TOOLS: process.env.OMLX_ADMIN_TOOLS || '',
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
