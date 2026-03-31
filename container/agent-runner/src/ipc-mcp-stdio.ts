@@ -550,7 +550,7 @@ server.tool(
           results.push(`## Messages (${msgs.length} matches)\n`);
           for (const msg of msgs) {
             const preview = msg.content.length > 300 ? msg.content.slice(0, 300) + '...' : msg.content;
-            results.push(`- [${msg.role}] (seq ${msg.sequence}, session ${msg.session_id}): ${preview}\n`);
+            results.push(`- [${msg.role}] (seq ${msg.sequence}, conversation ${msg.conversation_id}): ${preview}\n`);
           }
         }
       }
@@ -603,7 +603,7 @@ server.tool(
     const info = [
       `**Summary: ${summary.id}**`,
       `- Depth: ${summary.depth} (${summary.depth === 0 ? 'leaf — from raw messages' : 'condensed — from child summaries'})`,
-      `- Session: ${summary.session_id}`,
+      `- Conversation: ${summary.conversation_id}`,
       `- Token estimate: ${summary.token_estimate}`,
       `- Sequence range: ${summary.min_sequence} — ${summary.max_sequence}`,
       `- Created: ${summary.created_at}`,
@@ -665,7 +665,7 @@ server.tool(
           } else {
             // Fall back to sequence range
             if (node.min_sequence != null && node.max_sequence != null) {
-              const msgs = getMessagesBySequenceRange(node.session_id, node.min_sequence, node.max_sequence);
+              const msgs = getMessagesBySequenceRange(node.conversation_id, node.min_sequence, node.max_sequence);
               parts.push(`\n### Messages for ${node.id} (seq ${node.min_sequence}-${node.max_sequence}, ${msgs.length} messages):\n`);
               for (const msg of msgs) {
                 const tokens = msg.token_estimate || Math.ceil(msg.content.length / 4);

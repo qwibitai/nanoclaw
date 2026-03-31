@@ -27,7 +27,7 @@ import {
   initLcmDatabase,
   storeMessages as lcmStoreMessages,
   storeSummary,
-  getSummariesForSession,
+  getSummariesForConversation,
   getMaxSequence,
   contentHash,
 } from './lcm-store.js';
@@ -71,6 +71,10 @@ interface SDKUserMessage {
   message: { role: 'user'; content: string };
   parent_tool_use_id: null;
   session_id: string;
+}
+
+function getConversationId(containerInput: ContainerInput): string {
+  return `${containerInput.groupFolder}:${containerInput.chatJid}`;
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -172,12 +176,20 @@ function getSessionSummary(
 // --- LCM Configuration ---
 const LCM_FRESHNESS_WINDOW = parseInt(process.env.LCM_FRESHNESS_WINDOW || '32', 10);
 const LCM_DB_PATH = '/home/node/.claude/lcm.db';
+const LCM_CONTEXT_WINDOW_FALLBACK = parseInt(process.env.LCM_CONTEXT_WINDOW_TOKENS || '1000000', 10);
+let detectedContextWindow: number | null = null;
+
+function getContextWindowTokens(): number {
+  return detectedContextWindow ?? LCM_CONTEXT_WINDOW_FALLBACK;
+}
+
+const LCM_COMPACTION_THRESHOLD_PCT = parseInt(process.env.LCM_COMPACTION_THRESHOLD_PCT || '75', 10);
 
 /**
  * Archive the full transcript to conversations/ before compaction.
  * Enhanced with LCM: persist messages to SQLite, summarize compacted chunks.
  */
-function createPreCompactHook(assistantName?: string): HookCallback {
+function createPreCompactHook(assistantName?: string, conversationId?: string): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
@@ -222,11 +234,12 @@ function createPreCompactHook(assistantName?: string): HookCallback {
         initLcmDatabase(LCM_DB_PATH);
 
         // Determine start sequence (continue from last stored message)
-        const currentMaxSeq = getMaxSequence(sessionId);
+        const lcmConvId = conversationId || sessionId;
+        const currentMaxSeq = getMaxSequence(lcmConvId);
         const startSequence = currentMaxSeq + 1;
 
         // Store all messages (INSERT OR IGNORE handles dedup via content hash)
-        const newlyInserted = lcmStoreMessages(sessionId, messages, startSequence);
+        const newlyInserted = lcmStoreMessages(lcmConvId, messages, startSequence);
         log(`LCM: Stored ${newlyInserted}/${messages.length} new messages (start seq: ${startSequence})`);
 
         // Only summarize if there are newly inserted messages outside the freshness window
@@ -243,7 +256,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
             // Build message IDs using the same content hash as storeMessages
             const messageIds = compactedMessages.map((msg) => {
-              return contentHash(sessionId, msg.role, msg.content);
+              return contentHash(lcmConvId, msg.role, msg.content);
             });
 
             // Create leaf summary
@@ -256,7 +269,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
             storeSummary({
               id: leafResult.id,
-              session_id: sessionId,
+              conversation_id: lcmConvId,
               depth: 0,
               content: leafResult.content,
               source_message_ids: JSON.stringify(leafResult.sourceMessageIds),
@@ -270,10 +283,10 @@ function createPreCompactHook(assistantName?: string): HookCallback {
             log(`LCM: Created leaf summary ${leafResult.id} (seq ${compactedMinSeq}-${compactedMaxSeq})`);
 
             // Check if condensation is needed
-            const leafSummaries = getSummariesForSession(sessionId, { depth: 0 });
+            const leafSummaries = getSummariesForConversation(lcmConvId, { depth: 0 });
             if (leafSummaries.length >= LCM_CONDENSE_THRESHOLD) {
               // Take the oldest leaves that aren't already covered by a condensed summary
-              const condensedSummaries = getSummariesForSession(sessionId).filter(s => s.depth > 0);
+              const condensedSummaries = getSummariesForConversation(lcmConvId).filter(s => s.depth > 0);
               const coveredLeafIds = new Set<string>();
               for (const cs of condensedSummaries) {
                 if (cs.child_summary_ids) {
@@ -290,7 +303,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 
                 storeSummary({
                   id: condensedResult.id,
-                  session_id: sessionId,
+                  conversation_id: lcmConvId,
                   depth: condensedResult.depth,
                   content: condensedResult.content,
                   source_message_ids: null,
@@ -406,21 +419,20 @@ function formatTranscriptMarkdown(
 }
 
 // --- LCM Context Assembly ---
-const LCM_CONTEXT_WINDOW_TOKENS = parseInt(process.env.LCM_CONTEXT_WINDOW_TOKENS || '200000', 10);
 const LCM_SUMMARY_BUDGET_PCT = parseInt(process.env.LCM_SUMMARY_BUDGET_PCT || '25', 10);
 
 /**
  * Assemble LCM summary context for injection into system prompt on session resume.
  * Returns formatted XML summary blocks, or null if no summaries are available.
  */
-function assembleLcmContext(sessionId: string): string | null {
+function assembleLcmContext(conversationId: string): string | null {
   try {
     initLcmDatabase(LCM_DB_PATH);
   } catch {
     return null;
   }
 
-  const allSummaries = getSummariesForSession(sessionId);
+  const allSummaries = getSummariesForConversation(conversationId);
   if (allSummaries.length === 0) return null;
 
   // Build set of leaf IDs covered by condensed summaries
@@ -442,7 +454,7 @@ function assembleLcmContext(sessionId: string): string | null {
   ];
 
   // Fit within budget
-  const budgetTokens = Math.floor(LCM_SUMMARY_BUDGET_PCT / 100 * LCM_CONTEXT_WINDOW_TOKENS);
+  const budgetTokens = Math.floor(LCM_SUMMARY_BUDGET_PCT / 100 * getContextWindowTokens());
   let remainingBudget = budgetTokens;
   const selected: typeof sorted = [];
 
@@ -590,6 +602,8 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastInputTokens: number | undefined;
+  let lastOutputTokens: number | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -602,11 +616,12 @@ async function runQuery(
 
   // LCM: Assemble summary context on session resume
   let lcmContext: string | null = null;
+  const conversationId = getConversationId(containerInput);
   if (sessionId) {
     try {
-      lcmContext = assembleLcmContext(sessionId);
+      lcmContext = assembleLcmContext(conversationId);
       if (lcmContext) {
-        log(`LCM: Assembled summary context for session ${sessionId} (${lcmContext.length} chars)`);
+        log(`LCM: Assembled summary context for conversation ${conversationId} (${lcmContext.length} chars)`);
       }
     } catch (err) {
       log(`LCM context assembly error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -677,7 +692,7 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
+          { hooks: [createPreCompactHook(containerInput.assistantName, conversationId)] },
         ],
       },
     },
@@ -790,6 +805,146 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
+function shouldProactivelyCompact(lastInputTokens?: number): boolean {
+  if (!lastInputTokens) return false;
+  if (LCM_COMPACTION_THRESHOLD_PCT <= 0 || LCM_COMPACTION_THRESHOLD_PCT >= 100) return false;
+  const contextWindow = getContextWindowTokens();
+  const usagePct = (lastInputTokens / contextWindow) * 100;
+  log(`LCM: Context usage: ${lastInputTokens}/${contextWindow} (${usagePct.toFixed(1)}%)`);
+  return usagePct >= LCM_COMPACTION_THRESHOLD_PCT;
+}
+
+async function performProactiveCompaction(conversationId: string, assistantName?: string): Promise<void> {
+  log('LCM: Starting proactive compaction...');
+
+  try {
+    initLcmDatabase(LCM_DB_PATH);
+
+    // Find the transcript - look for session files
+    const projectsDir = '/home/node/.claude/projects';
+    if (!fs.existsSync(projectsDir)) {
+      log('LCM: No projects directory found, skipping proactive compaction');
+      return;
+    }
+
+    // Glob for session transcript files
+    let transcriptPath: string | null = null;
+    const findTranscript = (dir: string): string | null => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            const found = findTranscript(fullPath);
+            if (found) return found;
+          } else if (entry.name.endsWith('.jsonl')) {
+            // Pick the most recently modified .jsonl
+            if (!transcriptPath || fs.statSync(fullPath).mtimeMs > fs.statSync(transcriptPath).mtimeMs) {
+              return fullPath;
+            }
+          }
+        }
+      } catch { /* ignore permission errors */ }
+      return null;
+    };
+
+    transcriptPath = findTranscript(projectsDir);
+    if (!transcriptPath) {
+      log('LCM: No transcript file found, skipping proactive compaction');
+      return;
+    }
+
+    const content = fs.readFileSync(transcriptPath, 'utf-8');
+    const messages = parseTranscript(content);
+
+    if (messages.length === 0) {
+      log('LCM: No messages in transcript, skipping');
+      return;
+    }
+
+    // Persist messages
+    const currentMaxSeq = getMaxSequence(conversationId);
+    const startSequence = currentMaxSeq + 1;
+    const newlyInserted = lcmStoreMessages(conversationId, messages, startSequence);
+    log(`LCM: Proactive compaction stored ${newlyInserted}/${messages.length} messages`);
+
+    if (newlyInserted > 0) {
+      const compactCount = Math.max(0, messages.length - LCM_FRESHNESS_WINDOW);
+
+      if (compactCount > 0) {
+        const compactedMessages = messages.slice(0, compactCount);
+        const compactedMinSeq = startSequence;
+        const compactedMaxSeq = startSequence + compactCount - 1;
+
+        const messageIds = compactedMessages.map((msg) => {
+          return contentHash(conversationId, msg.role, msg.content);
+        });
+
+        const leafResult = await createLeafSummary(
+          compactedMessages,
+          messageIds,
+          compactedMinSeq,
+          compactedMaxSeq,
+        );
+
+        storeSummary({
+          id: leafResult.id,
+          conversation_id: conversationId,
+          depth: 0,
+          content: leafResult.content,
+          source_message_ids: JSON.stringify(leafResult.sourceMessageIds),
+          parent_summary_ids: null,
+          child_summary_ids: null,
+          min_sequence: leafResult.minSequence,
+          max_sequence: leafResult.maxSequence,
+          created_at: new Date().toISOString(),
+        });
+
+        log(`LCM: Proactive compaction created leaf summary ${leafResult.id}`);
+
+        // Check condensation
+        const leafSummaries = getSummariesForConversation(conversationId, { depth: 0 });
+        if (leafSummaries.length >= LCM_CONDENSE_THRESHOLD) {
+          const condensedSummaries = getSummariesForConversation(conversationId).filter(s => s.depth > 0);
+          const coveredLeafIds = new Set<string>();
+          for (const cs of condensedSummaries) {
+            if (cs.child_summary_ids) {
+              for (const childId of JSON.parse(cs.child_summary_ids) as string[]) {
+                coveredLeafIds.add(childId);
+              }
+            }
+          }
+          const uncoveredLeaves = leafSummaries.filter(s => !coveredLeafIds.has(s.id));
+
+          if (uncoveredLeaves.length >= LCM_CONDENSE_THRESHOLD) {
+            const toCondense = uncoveredLeaves.slice(0, LCM_CONDENSE_THRESHOLD);
+            const condensedResult = await createCondensedSummary(toCondense);
+
+            storeSummary({
+              id: condensedResult.id,
+              conversation_id: conversationId,
+              depth: condensedResult.depth,
+              content: condensedResult.content,
+              source_message_ids: null,
+              parent_summary_ids: null,
+              child_summary_ids: JSON.stringify(condensedResult.childSummaryIds),
+              min_sequence: condensedResult.minSequence,
+              max_sequence: condensedResult.maxSequence,
+              created_at: new Date().toISOString(),
+            });
+
+            log(`LCM: Proactive compaction condensed ${toCondense.length} leaves into ${condensedResult.id}`);
+          }
+        }
+      }
+    }
+
+    log('LCM: Proactive compaction complete');
+  } catch (err) {
+    log(`LCM: Proactive compaction error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -810,6 +965,8 @@ async function main(): Promise<void> {
     });
     process.exit(1);
   }
+
+  const conversationId = getConversationId(containerInput);
 
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
@@ -885,6 +1042,14 @@ async function main(): Promise<void> {
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // Proactive compaction check
+      if (shouldProactivelyCompact(queryResult.lastInputTokens)) {
+        log('LCM: Proactive compaction triggered — resetting session');
+        await performProactiveCompaction(conversationId, containerInput.assistantName);
+        sessionId = undefined;
+        resumeAt = undefined;
       }
 
       // If _close was consumed during the query, exit immediately.

@@ -12,7 +12,7 @@ import path from 'path';
 
 export interface LcmMessage {
   id: string;
-  session_id: string;
+  conversation_id: string;
   role: 'user' | 'assistant';
   content: string;
   token_estimate: number;
@@ -22,7 +22,7 @@ export interface LcmMessage {
 
 export interface LcmSummary {
   id: string;
-  session_id: string;
+  conversation_id: string;
   depth: number;
   content: string;
   token_estimate: number;
@@ -39,18 +39,18 @@ export interface LcmSummary {
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS lcm_messages (
   id TEXT NOT NULL UNIQUE,
-  session_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   token_estimate INTEGER,
   sequence INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_lcm_messages_session ON lcm_messages(session_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_lcm_messages_conversation ON lcm_messages(conversation_id, sequence);
 
 CREATE TABLE IF NOT EXISTS lcm_summaries (
   id TEXT NOT NULL UNIQUE,
-  session_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
   depth INTEGER NOT NULL,
   content TEXT NOT NULL,
   token_estimate INTEGER,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS lcm_summaries (
   max_sequence INTEGER,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_lcm_summaries_session ON lcm_summaries(session_id, depth);
+CREATE INDEX IF NOT EXISTS idx_lcm_summaries_conversation ON lcm_summaries(conversation_id, depth);
 `;
 
 // FTS5 tables and triggers - created separately since they use IF NOT EXISTS
@@ -112,6 +112,15 @@ export function initLcmDatabase(dbPath: string): Database.Database {
   db.exec(SCHEMA_SQL);
   db.exec(FTS_SQL);
   db.exec(TRIGGERS_SQL);
+
+  // Migration: rename session_id to conversation_id if needed
+  try {
+    db.exec(`ALTER TABLE lcm_messages RENAME COLUMN session_id TO conversation_id`);
+    db.exec(`ALTER TABLE lcm_summaries RENAME COLUMN session_id TO conversation_id`);
+  } catch {
+    /* columns already renamed or don't exist */
+  }
+
   dbInitialized = true;
   return db;
 }
@@ -123,9 +132,9 @@ export function getLcmDb(): Database.Database {
 
 // --- Helpers ---
 
-export function contentHash(sessionId: string, role: string, content: string): string {
+export function contentHash(conversationId: string, role: string, content: string): string {
   const hash = crypto.createHash('sha256');
-  hash.update(`${sessionId}:${role}:${content}`);
+  hash.update(`${conversationId}:${role}:${content}`);
   return hash.digest('hex').slice(0, 16);
 }
 
@@ -140,13 +149,13 @@ function estimateTokens(text: string): number {
  * Returns the number of newly inserted messages (0 for duplicates).
  */
 export function storeMessages(
-  sessionId: string,
+  conversationId: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   startSequence: number = 0,
 ): number {
   const database = getLcmDb();
   const stmt = database.prepare(`
-    INSERT OR IGNORE INTO lcm_messages (id, session_id, role, content, token_estimate, sequence, created_at)
+    INSERT OR IGNORE INTO lcm_messages (id, conversation_id, role, content, token_estimate, sequence, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -155,8 +164,8 @@ export function storeMessages(
     for (let i = 0; i < msgs.length; i++) {
       const msg = msgs[i];
       const seq = startSequence + i;
-      const id = contentHash(sessionId, msg.role, msg.content);
-      const result = stmt.run(id, sessionId, msg.role, msg.content, estimateTokens(msg.content), seq, new Date().toISOString());
+      const id = contentHash(conversationId, msg.role, msg.content);
+      const result = stmt.run(id, conversationId, msg.role, msg.content, estimateTokens(msg.content), seq, new Date().toISOString());
       if (result.changes > 0) insertedCount++;
     }
   });
@@ -169,11 +178,11 @@ export function storeSummary(summary: Omit<LcmSummary, 'token_estimate'>): void 
   const database = getLcmDb();
   const tokenEstimate = estimateTokens(summary.content);
   database.prepare(`
-    INSERT OR IGNORE INTO lcm_summaries (id, session_id, depth, content, token_estimate, source_message_ids, parent_summary_ids, child_summary_ids, min_sequence, max_sequence, created_at)
+    INSERT OR IGNORE INTO lcm_summaries (id, conversation_id, depth, content, token_estimate, source_message_ids, parent_summary_ids, child_summary_ids, min_sequence, max_sequence, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     summary.id,
-    summary.session_id,
+    summary.conversation_id,
     summary.depth,
     summary.content,
     tokenEstimate,
@@ -186,13 +195,13 @@ export function storeSummary(summary: Omit<LcmSummary, 'token_estimate'>): void 
   );
 }
 
-export function getSummariesForSession(
-  sessionId: string,
+export function getSummariesForConversation(
+  conversationId: string,
   opts?: { depth?: number; minSequence?: number; maxSequence?: number },
 ): LcmSummary[] {
   const database = getLcmDb();
-  let sql = 'SELECT * FROM lcm_summaries WHERE session_id = ?';
-  const params: unknown[] = [sessionId];
+  let sql = 'SELECT * FROM lcm_summaries WHERE conversation_id = ?';
+  const params: unknown[] = [conversationId];
 
   if (opts?.depth !== undefined) {
     sql += ' AND depth = ?';
@@ -228,16 +237,16 @@ export function getMessagesForSummary(summaryId: string): LcmMessage[] {
   return database.prepare(`SELECT * FROM lcm_messages WHERE id IN (${placeholders}) ORDER BY sequence`).all(...ids) as LcmMessage[];
 }
 
-export function getMessagesBySequenceRange(sessionId: string, minSeq: number, maxSeq: number): LcmMessage[] {
+export function getMessagesBySequenceRange(conversationId: string, minSeq: number, maxSeq: number): LcmMessage[] {
   const database = getLcmDb();
   return database.prepare(
-    'SELECT * FROM lcm_messages WHERE session_id = ? AND sequence >= ? AND sequence <= ? ORDER BY sequence',
-  ).all(sessionId, minSeq, maxSeq) as LcmMessage[];
+    'SELECT * FROM lcm_messages WHERE conversation_id = ? AND sequence >= ? AND sequence <= ? ORDER BY sequence',
+  ).all(conversationId, minSeq, maxSeq) as LcmMessage[];
 }
 
-export function getMaxSequence(sessionId: string): number {
+export function getMaxSequence(conversationId: string): number {
   const database = getLcmDb();
-  const row = database.prepare('SELECT MAX(sequence) as max_seq FROM lcm_messages WHERE session_id = ?').get(sessionId) as { max_seq: number | null } | undefined;
+  const row = database.prepare('SELECT MAX(sequence) as max_seq FROM lcm_messages WHERE conversation_id = ?').get(conversationId) as { max_seq: number | null } | undefined;
   return row?.max_seq ?? -1;
 }
 
