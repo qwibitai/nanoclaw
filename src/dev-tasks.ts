@@ -92,11 +92,21 @@ function counterPath(): string {
 /**
  * Allocate the next task ID. Reads counter.json, increments, writes back.
  * File-level atomicity is sufficient — NanoClaw is single-process.
+ *
+ * If the allocated ID already has a task file on disk (counter drift from
+ * failed pushes or external writes), skip forward until a free ID is found.
  */
 export function allocateId(): number {
   const file = counterPath();
   const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
-  const id: number = data.next_id;
+  let id: number = data.next_id;
+
+  // Skip past any IDs that already have task files on disk
+  while (fs.existsSync(taskFilePath(id))) {
+    logger.warn({ skippedId: id }, 'ID collision detected — skipping to next');
+    id += 1;
+  }
+
   data.next_id = id + 1;
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
   return id;

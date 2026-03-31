@@ -62,6 +62,21 @@ describe('dev-tasks', () => {
       expect(allocateId()).toBe(42);
       expect(allocateId()).toBe(43);
     });
+
+    it('skips IDs that already have task files on disk', () => {
+      // Simulate counter drift: counter says 1, but files 1.md and 2.md exist
+      fs.writeFileSync(path.join(testDir, '1.md'), '---\nid: 1\n---\n');
+      fs.writeFileSync(path.join(testDir, '2.md'), '---\nid: 2\n---\n');
+
+      const id = allocateId();
+      expect(id).toBe(3);
+
+      // Counter should be updated past the collision
+      const data = JSON.parse(
+        fs.readFileSync(path.join(testDir, 'counter.json'), 'utf-8'),
+      );
+      expect(data.next_id).toBe(4);
+    });
   });
 
   // --- Status transitions ---
