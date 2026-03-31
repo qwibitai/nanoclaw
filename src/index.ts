@@ -410,7 +410,9 @@ async function runAgent(
       const isStaleSession =
         sessionId &&
         output.error &&
-        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(output.error);
+        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+          output.error,
+        );
 
       if (isStaleSession) {
         logger.warn(
@@ -706,6 +708,9 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  // Channels that fail to connect are retried in the background with exponential backoff
+  // so the service stays alive even if the network is temporarily down.
+  let configuredChannelCount = 0;
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -716,11 +721,20 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    configuredChannelCount++;
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.warn(
+        { channel: channelName, err },
+        'Channel failed to connect -- will retry in background',
+      );
+      retryChannelConnect(channel, channels);
+    }
   }
-  if (channels.length === 0) {
-    logger.fatal('No channels connected');
+  if (configuredChannelCount === 0) {
+    logger.fatal('No channels configured');
     process.exit(1);
   }
 
