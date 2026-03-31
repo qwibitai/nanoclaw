@@ -15,7 +15,7 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 /** Hostname/IP containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY =
   CONTAINER_RUNTIME_BIN === 'container'
-    ? '192.168.64.1'  // Apple Container vmnet gateway
+    ? '192.168.64.1' // Apple Container vmnet gateway
     : 'host.docker.internal'; // Docker Desktop
 
 /**
@@ -60,8 +60,14 @@ export function hostGatewayArgs(): string[] {
 }
 
 /** Returns CLI args for a readonly bind mount. */
-export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
+export function readonlyMountArgs(
+  hostPath: string,
+  containerPath: string,
+): string[] {
+  return [
+    '--mount',
+    `type=bind,source=${hostPath},target=${containerPath},readonly`,
+  ];
 }
 
 /** Returns the shell command to stop a container by name. */
@@ -78,7 +84,10 @@ function isRuntimeReachable(): boolean {
     // Try to start it automatically
     try {
       logger.info('Container runtime not running, attempting auto-start...');
-      execSync(`${CONTAINER_RUNTIME_BIN} system start`, { stdio: 'pipe', timeout: 30000 });
+      execSync(`${CONTAINER_RUNTIME_BIN} system start`, {
+        stdio: 'pipe',
+        timeout: 30000,
+      });
       logger.info('Container runtime started');
       return true;
     } catch {
@@ -99,7 +108,10 @@ export function ensureContainerRuntimeRunning(): boolean {
   }
 
   // Retry every 10 seconds for up to 5 minutes (0 retries in test via env)
-  const RETRY_INTERVAL = parseInt(process.env.CONTAINER_RETRY_INTERVAL || '10000', 10);
+  const RETRY_INTERVAL = parseInt(
+    process.env.CONTAINER_RETRY_INTERVAL || '10000',
+    10,
+  );
   const MAX_RETRIES = parseInt(process.env.CONTAINER_MAX_RETRIES || '30', 10);
   let attempt = 0;
 
@@ -121,7 +133,10 @@ export function ensureContainerRuntimeRunning(): boolean {
       setContainerStatus(true, CONTAINER_RUNTIME_BIN);
       return true;
     }
-    logger.warn({ attempt, maxRetries: MAX_RETRIES }, 'Container runtime still unavailable');
+    logger.warn(
+      { attempt, maxRetries: MAX_RETRIES },
+      'Container runtime still unavailable',
+    );
   }
 
   // Degraded mode — start without container support
@@ -149,17 +164,26 @@ export function cleanupOrphans(): void {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
+    const containers: { status: string; configuration: { id: string } }[] =
+      JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter(
+        (c) =>
+          c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'),
+      )
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');

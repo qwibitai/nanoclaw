@@ -88,9 +88,7 @@ describe('claude-session', () => {
       const result = await spawnClaudeSession(makeTask(), '/tmp/sigma-task-1');
 
       expect(result.status).toBe('pr_ready');
-      expect(result.prUrl).toBe(
-        'https://github.com/fambot/Sigma/pull/99',
-      );
+      expect(result.prUrl).toBe('https://github.com/fambot/Sigma/pull/99');
     });
 
     it('reports needs_session when no PR URL in result', async () => {

@@ -9,7 +9,11 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../logger.js';
-import { getMessageHistory, getMessageHistoryAllIos, upsertDeviceToken } from '../db.js';
+import {
+  getMessageHistory,
+  getMessageHistoryAllIos,
+  upsertDeviceToken,
+} from '../db.js';
 import { runDailyNudge } from '../daily-nudge.js';
 import { sendPushToAll } from '../apns.js';
 import { getThisWeekEvents } from '../calendar-service.js';
@@ -23,7 +27,11 @@ import {
   type DevTask,
 } from '../dev-tasks.js';
 
-const SIGMA_REPO = path.join(process.env.HOME || '/Users/fambot', 'Projects', 'Sigma');
+const SIGMA_REPO = path.join(
+  process.env.HOME || '/Users/fambot',
+  'Projects',
+  'Sigma',
+);
 const INITIATIVES_DIR = path.join(SIGMA_REPO, 'initiatives');
 const IDEAS_NITS_FILE = path.join(SIGMA_REPO, 'ideas-and-nits.md');
 const TASKS_DIR = path.join(SIGMA_REPO, 'tasks');
@@ -108,7 +116,10 @@ export function watchWorkFiles(
           debounceTimer = setTimeout(() => {
             const payload = JSON.stringify(scanInitiatives());
             onChanged(payload, 'initiatives');
-            logger.info({ file: entry.name }, 'Initiative file changed, broadcasting update');
+            logger.info(
+              { file: entry.name },
+              'Initiative file changed, broadcasting update',
+            );
           }, 500);
         });
         watchers.push(watcher);
@@ -218,7 +229,9 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
 
     try {
       // Support both flat files (some-idea.md) and folders (some-idea/initiative.md)
-      const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+      const entries = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name));
 
       for (const entry of entries) {
         let filePath: string;
@@ -251,7 +264,9 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
         const isReady = content.includes('[ready]');
 
         // Extract completed date (format: completed: 2026-03-19)
-        const completedMatch = content.match(/^completed:\s*(\d{4}-\d{2}-\d{2})/m);
+        const completedMatch = content.match(
+          /^completed:\s*(\d{4}-\d{2}-\d{2})/m,
+        );
         const completedDate = completedMatch ? completedMatch[1] : null;
 
         // Check for learnings section
@@ -295,7 +310,9 @@ function scanInitiatives(): Record<string, InitiativeData[]> {
 /**
  * Parse steps from initiative markdown, tracking which phase they belong to.
  */
-function parseSteps(content: string): { title: string; isDone: boolean; phase: string | null }[] {
+function parseSteps(
+  content: string,
+): { title: string; isDone: boolean; phase: string | null }[] {
   const lines = content.split('\n');
   const steps: { title: string; isDone: boolean; phase: string | null }[] = [];
   let currentPhase: string | null = null;
@@ -358,7 +375,9 @@ export function handleDataApi(
   }
 
   if (req.method === 'PUT' && url === '/api/ideas-and-nits') {
-    authGuard(req, res, token, () => handlePutFile(req, res, IDEAS_NITS_FILE, 'ideas-and-nits'));
+    authGuard(req, res, token, () =>
+      handlePutFile(req, res, IDEAS_NITS_FILE, 'ideas-and-nits'),
+    );
     return true;
   }
 
@@ -389,15 +408,22 @@ export function handleDataApi(
   // --- DevTask endpoints ---
 
   // List tasks: GET /api/dev-tasks?status=open
-  if (req.method === 'GET' && url.startsWith('/api/dev-tasks') && !url.includes('/api/dev-tasks/')) {
+  if (
+    req.method === 'GET' &&
+    url.startsWith('/api/dev-tasks') &&
+    !url.includes('/api/dev-tasks/')
+  ) {
     authGuard(req, res, token, () => handleListDevTasks(req, res));
     return true;
   }
 
   // Get single task: GET /api/dev-tasks/:id
-  const getTaskMatch = req.method === 'GET' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
+  const getTaskMatch =
+    req.method === 'GET' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
   if (getTaskMatch) {
-    authGuard(req, res, token, () => handleGetDevTask(res, parseInt(getTaskMatch[1], 10)));
+    authGuard(req, res, token, () =>
+      handleGetDevTask(res, parseInt(getTaskMatch[1], 10)),
+    );
     return true;
   }
 
@@ -408,23 +434,32 @@ export function handleDataApi(
   }
 
   // Update task: PUT /api/dev-tasks/:id
-  const putTaskMatch = req.method === 'PUT' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
+  const putTaskMatch =
+    req.method === 'PUT' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
   if (putTaskMatch) {
-    authGuard(req, res, token, () => handleUpdateDevTask(req, res, parseInt(putTaskMatch[1], 10)));
+    authGuard(req, res, token, () =>
+      handleUpdateDevTask(req, res, parseInt(putTaskMatch[1], 10)),
+    );
     return true;
   }
 
   // Delete task: DELETE /api/dev-tasks/:id
-  const deleteTaskMatch = req.method === 'DELETE' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
+  const deleteTaskMatch =
+    req.method === 'DELETE' && url.match(/^\/api\/dev-tasks\/(\d+)$/);
   if (deleteTaskMatch) {
-    authGuard(req, res, token, () => handleDeleteDevTask(res, parseInt(deleteTaskMatch[1], 10)));
+    authGuard(req, res, token, () =>
+      handleDeleteDevTask(res, parseInt(deleteTaskMatch[1], 10)),
+    );
     return true;
   }
 
   // Dispatch task: POST /api/dev-tasks/:id/dispatch
-  const dispatchMatch = req.method === 'POST' && url.match(/^\/api\/dev-tasks\/(\d+)\/dispatch$/);
+  const dispatchMatch =
+    req.method === 'POST' && url.match(/^\/api\/dev-tasks\/(\d+)\/dispatch$/);
   if (dispatchMatch) {
-    authGuard(req, res, token, () => handleDispatchDevTask(res, parseInt(dispatchMatch[1], 10)));
+    authGuard(req, res, token, () =>
+      handleDispatchDevTask(res, parseInt(dispatchMatch[1], 10)),
+    );
     return true;
   }
 
@@ -463,13 +498,18 @@ function handleGetInitiatives(res: http.ServerResponse): void {
   }
 }
 
-function handleGetInitiativeFile(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleGetInitiativeFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   try {
     // URL: /api/initiatives/{status}/{slug}
     const parts = (req.url || '').replace('/api/initiatives/', '').split('/');
     if (parts.length !== 2) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Expected /api/initiatives/{status}/{slug}' }));
+      res.end(
+        JSON.stringify({ error: 'Expected /api/initiatives/{status}/{slug}' }),
+      );
       return;
     }
     const [status, slug] = parts;
@@ -509,7 +549,10 @@ function resolveInitiativePath(status: string, slug: string): string | null {
   return null;
 }
 
-function handleCreateInitiative(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleCreateInitiative(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
@@ -549,7 +592,10 @@ function handleCreateInitiative(req: http.IncomingMessage, res: http.ServerRespo
   });
 }
 
-function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleMoveInitiative(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
@@ -562,14 +608,20 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
         res.end(JSON.stringify({ error: 'Missing slug, from, or to' }));
         return;
       }
-      if (!isSafePathSegment(slug) || !isValidStatus(from) || !isValidStatus(to)) {
+      if (
+        !isSafePathSegment(slug) ||
+        !isValidStatus(from) ||
+        !isValidStatus(to)
+      ) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid slug, from, or to status' }));
         return;
       }
 
       // Support both flat files and folders
-      const isFolder = fs.existsSync(path.join(INITIATIVES_DIR, from, slug, 'initiative.md'));
+      const isFolder = fs.existsSync(
+        path.join(INITIATIVES_DIR, from, slug, 'initiative.md'),
+      );
       const srcPath = isFolder
         ? path.join(INITIATIVES_DIR, from, slug)
         : path.join(INITIATIVES_DIR, from, `${slug}.md`);
@@ -579,7 +631,9 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
 
       if (!fs.existsSync(srcPath)) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: `Initiative ${slug} not found in ${from}` }));
+        res.end(
+          JSON.stringify({ error: `Initiative ${slug} not found in ${from}` }),
+        );
         return;
       }
 
@@ -603,7 +657,10 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
       // Remove completion timestamp when moving out of done
       if (from === 'done' && to !== 'done') {
         let fileContent = fs.readFileSync(initFilePath, 'utf-8');
-        fileContent = fileContent.replace(/^completed:\s*\d{4}-\d{2}-\d{2}\n/, '');
+        fileContent = fileContent.replace(
+          /^completed:\s*\d{4}-\d{2}-\d{2}\n/,
+          '',
+        );
         fs.writeFileSync(initFilePath, fileContent, 'utf-8');
       }
 
@@ -625,7 +682,10 @@ function handleMoveInitiative(req: http.IncomingMessage, res: http.ServerRespons
 
 // MARK: - Device Token Registration
 
-function handleRegisterDeviceToken(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleRegisterDeviceToken(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
@@ -640,7 +700,10 @@ function handleRegisterDeviceToken(req: http.IncomingMessage, res: http.ServerRe
       }
 
       upsertDeviceToken(deviceId, token, environment || 'production');
-      logger.info({ deviceId, environment: environment || 'production' }, 'Device token registered');
+      logger.info(
+        { deviceId, environment: environment || 'production' },
+        'Device token registered',
+      );
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -654,7 +717,10 @@ function handleRegisterDeviceToken(req: http.IncomingMessage, res: http.ServerRe
 
 // MARK: - Test Push
 
-function handleTestPush(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleTestPush(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
@@ -708,13 +774,18 @@ async function handleGetCalendar(res: http.ServerResponse): Promise<void> {
 
 // MARK: - Messages
 
-function handleGetMessages(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleGetMessages(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   try {
     const url = new URL(req.url || '', 'http://localhost');
     const jid = url.searchParams.get('jid');
     const limit = parseInt(url.searchParams.get('limit') || '200', 10);
 
-    const messages = jid ? getMessageHistory(jid, limit) : getMessageHistoryAllIos(limit);
+    const messages = jid
+      ? getMessageHistory(jid, limit)
+      : getMessageHistoryAllIos(limit);
 
     const cleaned = messages.map((m) => ({
       id: m.id,
@@ -749,7 +820,10 @@ function handleGetFile(res: http.ServerResponse, filePath: string): void {
 
 // MARK: - DevTask handlers
 
-function handleListDevTasks(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleListDevTasks(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   try {
     const url = new URL(req.url || '', 'http://localhost');
     const status = url.searchParams.get('status') || undefined;
@@ -781,9 +855,14 @@ function handleGetDevTask(res: http.ServerResponse, id: number): void {
   }
 }
 
-function handleCreateDevTask(req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleCreateDevTask(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
   let body = '';
-  req.on('data', (chunk) => { body += chunk; });
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
   req.on('end', () => {
     try {
       const { title, description, source } = JSON.parse(body);
@@ -820,13 +899,22 @@ function handleUpdateDevTask(
   id: number,
 ): void {
   let body = '';
-  req.on('data', (chunk) => { body += chunk; });
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
   req.on('end', () => {
     try {
       const raw = JSON.parse(body);
       // Runtime allowlist — strip disallowed fields and undefined values
       const allowed: Record<string, unknown> = {};
-      for (const key of ['title', 'description', 'status', 'pr_url', 'branch', 'session_notes']) {
+      for (const key of [
+        'title',
+        'description',
+        'status',
+        'pr_url',
+        'branch',
+        'session_notes',
+      ]) {
         if (raw[key] !== undefined) allowed[key] = raw[key];
       }
       const task = updateDevTask(id, allowed);
@@ -873,7 +961,10 @@ function handleDeleteDevTask(res: http.ServerResponse, id: number): void {
   }
 }
 
-async function handleDispatchDevTask(res: http.ServerResponse, id: number): Promise<void> {
+async function handleDispatchDevTask(
+  res: http.ServerResponse,
+  id: number,
+): Promise<void> {
   try {
     const task = await dispatchAndRun(id, {
       onProgress: () => {

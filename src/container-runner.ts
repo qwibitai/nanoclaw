@@ -171,9 +171,7 @@ function buildVolumeMounts(
     // Write hooks config to project-level .claude/settings.json
     const hooksConfigFile = path.join(hooksSrc, 'hooks.json');
     if (fs.existsSync(hooksConfigFile)) {
-      const hooksConfig = JSON.parse(
-        fs.readFileSync(hooksConfigFile, 'utf-8'),
-      );
+      const hooksConfig = JSON.parse(fs.readFileSync(hooksConfigFile, 'utf-8'));
       const projectSettingsFile = path.join(projectClaudeDir, 'settings.json');
       const projectSettings = fs.existsSync(projectSettingsFile)
         ? JSON.parse(fs.readFileSync(projectSettingsFile, 'utf-8'))

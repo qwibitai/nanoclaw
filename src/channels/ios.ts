@@ -11,7 +11,11 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
-import { handleDataApi, watchDevTasks, watchWorkFiles } from './ios-data-api.js';
+import {
+  handleDataApi,
+  watchDevTasks,
+  watchWorkFiles,
+} from './ios-data-api.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
 let WebSocketServer: any;
@@ -84,7 +88,10 @@ export class IosChannel implements Channel {
     });
   }
 
-  private handleHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleHttp(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     // No CORS headers — FamBot is a native app making direct HTTP requests,
     // not a browser. Removing wildcard CORS prevents cross-origin exfiltration
     // from malicious websites on the home network.
@@ -111,7 +118,10 @@ export class IosChannel implements Channel {
     res.end('Not found');
   }
 
-  private handlePostMessage(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handlePostMessage(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     // Auth check
     const authHeader = req.headers.authorization || '';
     const token = authHeader.replace('Bearer ', '');
@@ -122,7 +132,9 @@ export class IosChannel implements Channel {
     }
 
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       try {
         const data = JSON.parse(body);
@@ -139,7 +151,13 @@ export class IosChannel implements Channel {
         const msgId = `ios-${Date.now()}`;
 
         // Store chat metadata
-        this.opts.onChatMetadata(jid, timestamp, senderName || 'iOS User', 'ios', false);
+        this.opts.onChatMetadata(
+          jid,
+          timestamp,
+          senderName || 'iOS User',
+          'ios',
+          false,
+        );
 
         // Check if group is registered
         const group = this.opts.registeredGroups()[jid];
@@ -161,7 +179,10 @@ export class IosChannel implements Channel {
           is_from_me: false,
         });
 
-        logger.info({ jid, sender: senderName || 'iOS User' }, 'iOS message stored');
+        logger.info(
+          { jid, sender: senderName || 'iOS User' },
+          'iOS message stored',
+        );
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'received', registered: true }));
@@ -200,11 +221,19 @@ export class IosChannel implements Channel {
           const timestamp = new Date().toISOString();
           const msgId = `ios-${Date.now()}`;
 
-          this.opts.onChatMetadata(jid, timestamp, msg.senderName || 'iOS User', 'ios', false);
+          this.opts.onChatMetadata(
+            jid,
+            timestamp,
+            msg.senderName || 'iOS User',
+            'ios',
+            false,
+          );
 
           const group = this.opts.registeredGroups()[jid];
           if (!group) {
-            ws.send(JSON.stringify({ type: 'error', error: 'Device not registered' }));
+            ws.send(
+              JSON.stringify({ type: 'error', error: 'Device not registered' }),
+            );
             return;
           }
 
@@ -259,7 +288,11 @@ export class IosChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     // Broadcast bot responses to ALL connected iOS clients so every
     // device sees the reply in real time (not just the one that asked).
-    const payload = JSON.stringify({ type: 'message', text, from: 'assistant' });
+    const payload = JSON.stringify({
+      type: 'message',
+      text,
+      from: 'assistant',
+    });
     let sent = 0;
     for (const client of this.clients.values()) {
       if (client.ws.readyState === 1) {
@@ -331,7 +364,7 @@ export class IosChannel implements Channel {
   }
 
   getConnectedDeviceIds(): string[] {
-    return Array.from(this.clients.values()).map(c => c.deviceId);
+    return Array.from(this.clients.values()).map((c) => c.deviceId);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -351,13 +384,16 @@ export class IosChannel implements Channel {
 
 registerChannel('ios', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['IOS_CHANNEL_TOKEN', 'IOS_CHANNEL_PORT']);
-  const token = process.env.IOS_CHANNEL_TOKEN || envVars.IOS_CHANNEL_TOKEN || '';
+  const token =
+    process.env.IOS_CHANNEL_TOKEN || envVars.IOS_CHANNEL_TOKEN || '';
   if (!token) {
     logger.warn('iOS: IOS_CHANNEL_TOKEN not set');
     return null;
   }
   const port = parseInt(
-    process.env.IOS_CHANNEL_PORT || envVars.IOS_CHANNEL_PORT || String(DEFAULT_PORT),
+    process.env.IOS_CHANNEL_PORT ||
+      envVars.IOS_CHANNEL_PORT ||
+      String(DEFAULT_PORT),
     10,
   );
   return new IosChannel(port, token, opts);

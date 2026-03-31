@@ -708,9 +708,7 @@ export function upsertDeviceToken(
 }
 
 export function getAllDeviceTokens(): DeviceToken[] {
-  return db
-    .prepare('SELECT * FROM device_tokens')
-    .all() as DeviceToken[];
+  return db.prepare('SELECT * FROM device_tokens').all() as DeviceToken[];
 }
 
 export function removeDeviceToken(deviceId: string): void {

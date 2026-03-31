@@ -6,8 +6,15 @@
  * This Week view, agent skills) call this instead of individual sources.
  */
 
-import { getICloudEvents, isICloudAvailable, type CalendarEvent } from './icloud-calendar.js';
-import { getSchoolEvents, isSchoolCalendarAvailable } from './school-calendar.js';
+import {
+  getICloudEvents,
+  isICloudAvailable,
+  type CalendarEvent,
+} from './icloud-calendar.js';
+import {
+  getSchoolEvents,
+  isSchoolCalendarAvailable,
+} from './school-calendar.js';
 import { logger } from './logger.js';
 
 export type { CalendarEvent } from './icloud-calendar.js';
@@ -16,7 +23,10 @@ export type { CalendarEvent } from './icloud-calendar.js';
  * Get events for a date range from all calendar sources.
  * Returns merged, sorted events tagged with their source.
  */
-export async function getEvents(start: Date, end: Date): Promise<CalendarEvent[]> {
+export async function getEvents(
+  start: Date,
+  end: Date,
+): Promise<CalendarEvent[]> {
   const results = await Promise.allSettled([
     getICloudEvents(start, end),
     getSchoolEvents(start, end),

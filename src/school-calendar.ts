@@ -10,7 +10,8 @@ import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import type { CalendarEvent } from './icloud-calendar.js';
 
-const DEFAULT_URL = 'https://online.schoolbytes.education/calendar_export_ical/4830/af67a497-b471-481e-b8d4-52041c73cfba';
+const DEFAULT_URL =
+  'https://online.schoolbytes.education/calendar_export_ical/4830/af67a497-b471-481e-b8d4-52041c73cfba';
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 let cachedEvents: CalendarEvent[] = [];
@@ -79,7 +80,8 @@ function parseICS(content: string): CalendarEvent[] {
     else if (trimmed.startsWith('SUMMARY:')) summary = trimmed.slice(8);
     else if (trimmed.startsWith('DTSTART')) dtstart = trimmed;
     else if (trimmed.startsWith('DTEND')) dtend = trimmed;
-    else if (trimmed.startsWith('DESCRIPTION:')) description = trimmed.slice(12);
+    else if (trimmed.startsWith('DESCRIPTION:'))
+      description = trimmed.slice(12);
   }
 
   return events;
@@ -148,7 +150,7 @@ export async function getSchoolEvents(
   const startISO = start.toISOString();
   const endISO = end.toISOString();
 
-  return cachedEvents.filter(e => {
+  return cachedEvents.filter((e) => {
     return e.startDate >= startISO && e.startDate < endISO;
   });
 }

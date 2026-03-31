@@ -22,7 +22,13 @@ interface ICloudConfig {
   calendarNames: string[];
 }
 
-const CREDS_PATH = path.join(os.homedir(), '.config', 'nanoclaw', 'icloud-caldav', 'credentials.json');
+const CREDS_PATH = path.join(
+  os.homedir(),
+  '.config',
+  'nanoclaw',
+  'icloud-caldav',
+  'credentials.json',
+);
 
 function loadConfig(): ICloudConfig | null {
   // Read credentials from ~/.config/nanoclaw/icloud-caldav/credentials.json
@@ -34,7 +40,10 @@ function loadConfig(): ICloudConfig | null {
     appleId = creds.appleId;
     appPassword = creds.appPassword;
   } catch {
-    logger.warn({ path: CREDS_PATH }, 'iCloud CalDAV credentials file not found');
+    logger.warn(
+      { path: CREDS_PATH },
+      'iCloud CalDAV credentials file not found',
+    );
   }
 
   if (!appleId || !appPassword) {
@@ -49,7 +58,7 @@ function loadConfig(): ICloudConfig | null {
     appleId,
     appPassword,
     calendarNames: env.ICLOUD_CALENDAR_NAMES
-      ? env.ICLOUD_CALENDAR_NAMES.split(',').map(n => n.trim())
+      ? env.ICLOUD_CALENDAR_NAMES.split(',').map((n) => n.trim())
       : [],
   };
 }
@@ -76,20 +85,22 @@ async function ensureClient(): Promise<DAVClient | null> {
     // Fetch all visible calendars
     calendars = await client.fetchCalendars();
     logger.info(
-      { calendars: calendars.map(c => c.displayName) },
+      { calendars: calendars.map((c) => c.displayName) },
       'iCloud CalDAV connected',
     );
 
     // Filter to configured calendar names if specified
     if (config.calendarNames.length > 0) {
-      calendars = calendars.filter(c => {
-        const displayName = String(c.displayName || '').toLowerCase().trim();
-        return config.calendarNames.some(name =>
+      calendars = calendars.filter((c) => {
+        const displayName = String(c.displayName || '')
+          .toLowerCase()
+          .trim();
+        return config.calendarNames.some((name) =>
           displayName.startsWith(name.toLowerCase()),
         );
       });
       logger.info(
-        { filtered: calendars.map(c => c.displayName) },
+        { filtered: calendars.map((c) => c.displayName) },
         'Filtered to configured calendars',
       );
     }
@@ -107,18 +118,21 @@ async function ensureClient(): Promise<DAVClient | null> {
 export interface CalendarEvent {
   id: string;
   summary: string;
-  startDate: string;  // ISO string
+  startDate: string; // ISO string
   endDate: string | null;
   isAllDay: boolean;
   description: string | null;
-  source: string;  // calendar display name
-  calendarUrl: string | null;  // for deep-linking
+  source: string; // calendar display name
+  calendarUrl: string | null; // for deep-linking
 }
 
 /**
  * Parse a VEVENT from ICS data into a CalendarEvent.
  */
-function parseVEvent(icsData: string, calendarName: string): CalendarEvent | null {
+function parseVEvent(
+  icsData: string,
+  calendarName: string,
+): CalendarEvent | null {
   const lines = icsData.split(/\r?\n/);
   let inEvent = false;
   let uid = '';
@@ -129,8 +143,14 @@ function parseVEvent(icsData: string, calendarName: string): CalendarEvent | nul
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (line === 'BEGIN:VEVENT') { inEvent = true; continue; }
-    if (line === 'END:VEVENT') { inEvent = false; break; }
+    if (line === 'BEGIN:VEVENT') {
+      inEvent = true;
+      continue;
+    }
+    if (line === 'END:VEVENT') {
+      inEvent = false;
+      break;
+    }
     if (!inEvent) continue;
 
     if (line.startsWith('UID:')) uid = line.slice(4);
@@ -148,7 +168,10 @@ function parseVEvent(icsData: string, calendarName: string): CalendarEvent | nul
 
   return {
     id: uid || `ical-${Date.now()}-${Math.random()}`,
-    summary: summary.replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\n/g, ' '),
+    summary: summary
+      .replace(/\\,/g, ',')
+      .replace(/\\;/g, ';')
+      .replace(/\\n/g, ' '),
     startDate: start.toISOString(),
     endDate: end ? end.toISOString() : null,
     isAllDay,
@@ -209,15 +232,22 @@ export async function getICloudEvents(
 
       for (const obj of objects) {
         if (!obj.data) continue;
-        const icsData = typeof obj.data === 'string' ? obj.data : String(obj.data);
-        const event = parseVEvent(icsData, String(calendar.displayName || 'Unknown'));
+        const icsData =
+          typeof obj.data === 'string' ? obj.data : String(obj.data);
+        const event = parseVEvent(
+          icsData,
+          String(calendar.displayName || 'Unknown'),
+        );
         if (event) {
           event.calendarUrl = obj.url || null;
           allEvents.push(event);
         }
       }
     } catch (err) {
-      logger.error({ err, calendar: calendar.displayName }, 'Failed to fetch iCloud calendar events');
+      logger.error(
+        { err, calendar: calendar.displayName },
+        'Failed to fetch iCloud calendar events',
+      );
     }
   }
 
@@ -268,16 +298,21 @@ export function startICloudPolling(onChange?: () => void): void {
       for (const calendar of calendars) {
         // Re-fetch calendar metadata to get current ctag
         const refreshed = await davClient.fetchCalendars();
-        const match = refreshed.find(c => c.url === calendar.url);
+        const match = refreshed.find((c) => c.url === calendar.url);
         if (!match) continue;
 
-        const currentCtag = String((match as Record<string, unknown>).ctag || '');
+        const currentCtag = String(
+          (match as Record<string, unknown>).ctag || '',
+        );
         const storedCtag = storedCtags.get(calendar.url || '') || '';
 
         if (currentCtag && currentCtag !== storedCtag) {
           storedCtags.set(calendar.url || '', currentCtag);
           changed = true;
-          logger.info({ calendar: calendar.displayName }, 'iCloud calendar changed (ctag updated)');
+          logger.info(
+            { calendar: calendar.displayName },
+            'iCloud calendar changed (ctag updated)',
+          );
         }
       }
 
@@ -289,7 +324,10 @@ export function startICloudPolling(onChange?: () => void): void {
     }
   }, POLL_INTERVAL_MS);
 
-  logger.info({ intervalMs: POLL_INTERVAL_MS }, 'iCloud CalDAV polling started');
+  logger.info(
+    { intervalMs: POLL_INTERVAL_MS },
+    'iCloud CalDAV polling started',
+  );
 }
 
 /**

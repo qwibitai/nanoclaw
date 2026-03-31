@@ -49,12 +49,11 @@ export function startCredentialProxy(
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
-      const headers: Record<string, string | number | string[] | undefined> =
-        {
-          ...(req.headers as Record<string, string>),
-          host: upstreamUrl.host,
-          'content-length': body.length,
-        };
+      const headers: Record<string, string | number | string[] | undefined> = {
+        ...(req.headers as Record<string, string>),
+        host: upstreamUrl.host,
+        'content-length': body.length,
+      };
 
       // Strip hop-by-hop headers that must not be forwarded by proxies
       delete headers['connection'];
@@ -93,10 +92,7 @@ export function startCredentialProxy(
       );
 
       upstream.on('error', (err) => {
-        logger.error(
-          { err, url: req.url },
-          'Credential proxy upstream error',
-        );
+        logger.error({ err, url: req.url }, 'Credential proxy upstream error');
         if (!res.headersSent) {
           res.writeHead(502);
           res.end('Bad Gateway');
@@ -127,7 +123,12 @@ function listenWithRetry(
       if (err.code === 'EADDRINUSE' && attempt < MAX_RETRIES) {
         const delay = BASE_DELAY_MS * Math.pow(2, Math.min(attempt, 4));
         logger.warn(
-          { port, attempt: attempt + 1, maxRetries: MAX_RETRIES, retryInMs: delay },
+          {
+            port,
+            attempt: attempt + 1,
+            maxRetries: MAX_RETRIES,
+            retryInMs: delay,
+          },
           'Port in use, retrying...',
         );
         setTimeout(() => {

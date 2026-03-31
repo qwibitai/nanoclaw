@@ -146,19 +146,19 @@ async function runCheck(): Promise<void> {
 export function startHealthChecks(): void {
   // Run first check after 30 seconds (give Telegram time to connect)
   setTimeout(() => {
-    runCheck().catch((err) =>
-      logger.error({ err }, 'Health check error'),
-    );
+    runCheck().catch((err) => logger.error({ err }, 'Health check error'));
     // Then run on interval
     checkTimer = setInterval(() => {
-      runCheck().catch((err) =>
-        logger.error({ err }, 'Health check error'),
-      );
+      runCheck().catch((err) => logger.error({ err }, 'Health check error'));
     }, CHECK_INTERVAL);
   }, 30000);
 
   logger.info(
-    { intervalMs: CHECK_INTERVAL, window: WINDOW_SIZE, threshold: FAILURE_THRESHOLD },
+    {
+      intervalMs: CHECK_INTERVAL,
+      window: WINDOW_SIZE,
+      threshold: FAILURE_THRESHOLD,
+    },
     'Health checks started',
   );
 }

@@ -80,9 +80,7 @@ describe('dev-tasks', () => {
     });
 
     it('allows working → needs_session', () => {
-      expect(() =>
-        transitionStatus('working', 'needs_session'),
-      ).not.toThrow();
+      expect(() => transitionStatus('working', 'needs_session')).not.toThrow();
     });
 
     it('allows working → open (reset)', () => {
@@ -164,9 +162,7 @@ describe('dev-tasks', () => {
 
       expect(parsed.id).toBe(1);
       expect(parsed.title).toBe('Fix the login bug');
-      expect(parsed.description).toBe(
-        'The login page throws a 500 on submit',
-      );
+      expect(parsed.description).toBe('The login page throws a 500 on submit');
       expect(parsed.status).toBe('open');
       expect(parsed.source).toBe('fambot');
     });

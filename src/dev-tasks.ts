@@ -246,9 +246,7 @@ export function updateTask(
  * List all tasks, optionally filtered by status.
  * Returns tasks sorted by ID ascending.
  */
-export function listTasks(filter?: {
-  status?: DevTaskStatus;
-}): DevTask[] {
+export function listTasks(filter?: { status?: DevTaskStatus }): DevTask[] {
   const tasks: DevTask[] = [];
 
   let files: string[];

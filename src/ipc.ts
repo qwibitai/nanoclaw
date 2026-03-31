@@ -484,10 +484,7 @@ export async function processTaskIpc(
           if (data.dispatch) {
             try {
               await dispatchAndRun(task.id);
-              logger.info(
-                { taskId: task.id },
-                'DevTask dispatched via IPC',
-              );
+              logger.info({ taskId: task.id }, 'DevTask dispatched via IPC');
             } catch (err) {
               logger.error(
                 { taskId: task.id, err },
@@ -545,7 +542,10 @@ export async function processTaskIpc(
             );
           }
         } catch (err) {
-          logger.error({ err, devTaskId: data.devTaskId }, 'Failed to update DevTask via IPC');
+          logger.error(
+            { err, devTaskId: data.devTaskId },
+            'Failed to update DevTask via IPC',
+          );
         }
       } else {
         logger.warn({ data }, 'update_dev_task missing devTaskId');

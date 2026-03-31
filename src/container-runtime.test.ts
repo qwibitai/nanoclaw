@@ -62,7 +62,9 @@ describe('ensureContainerRuntimeRunning', () => {
       `${CONTAINER_RUNTIME_BIN} system status`,
       { stdio: 'pipe' },
     );
-    expect(logger.debug).toHaveBeenCalledWith('Container runtime already running');
+    expect(logger.debug).toHaveBeenCalledWith(
+      'Container runtime already running',
+    );
   });
 
   it('auto-starts when system status fails', () => {
