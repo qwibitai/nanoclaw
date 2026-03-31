@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -236,6 +237,24 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass Notion API key to container if configured
+  const notionEnv = readEnvFile(['NOTION_API_KEY']);
+  if (notionEnv.NOTION_API_KEY) {
+    args.push('-e', `NOTION_API_KEY=${notionEnv.NOTION_API_KEY}`);
+  }
+
+  // Pass GitHub credentials to container if configured.
+  // GITHUB_TOKEN / GH_TOKEN: used by gh CLI and git credential helper.
+  // GH_REPO: sets the default repository so the agent can omit --repo on every gh command.
+  const githubEnv = readEnvFile(['GITHUB_TOKEN', 'GH_REPO']);
+  if (githubEnv.GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${githubEnv.GITHUB_TOKEN}`);
+    args.push('-e', `GH_TOKEN=${githubEnv.GITHUB_TOKEN}`);
+  }
+  if (githubEnv.GH_REPO) {
+    args.push('-e', `GH_REPO=${githubEnv.GH_REPO}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -507,11 +526,7 @@ export async function runContainerAgent(
         // Full input is only included at verbose level to avoid
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
-          logLines.push(
-            `=== Input ===`,
-            JSON.stringify(input, null, 2),
-            ``,
-          );
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
         } else {
           logLines.push(
             `=== Input Summary ===`,
