@@ -159,7 +159,10 @@ async function handleCheckout(req: http.IncomingMessage, res: http.ServerRespons
     return;
   }
   // Validate date format and reject past dates
-  const today = new Date().toISOString().split('T')[0];
+  // Use local date (TZ=America/Chicago) — .toISOString() returns UTC which
+  // causes today's date to be rejected as "past" after 7pm CDT
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   for (const d of body.dates) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
       json(res, 400, { error: 'Invalid date format. Use YYYY-MM-DD.' });
