@@ -125,6 +125,15 @@ export function initLcmDatabase(dbPath: string): Database.Database {
   return db;
 }
 
+/** @internal - for tests only. Creates a fresh in-memory LCM database. */
+export function _initTestLcmDatabase(): void {
+  db = new Database(':memory:');
+  db.exec(SCHEMA_SQL);
+  db.exec(FTS_SQL);
+  db.exec(TRIGGERS_SQL);
+  dbInitialized = true;
+}
+
 export function getLcmDb(): Database.Database {
   if (!db) throw new Error('LCM database not initialized. Call initLcmDatabase() first.');
   return db;
