@@ -969,7 +969,8 @@ async function main(): Promise<void> {
           await channel.sendMessage(jid, text);
         }
         if (messageId && taskId) {
-          createThreadContext({
+          const groupFolder = registeredGroups[jid]?.folder;
+          const ctx = createThreadContext({
             chatJid: jid,
             threadId: null,
             sessionId: sessionId || null,
@@ -977,6 +978,41 @@ async function main(): Promise<void> {
             source: 'scheduled_task',
             taskId: parseInt(taskId, 10),
           });
+          // Copy session files from the task's session directory to the new
+          // thread context directory so replies can resume the conversation.
+          if (sessionId && groupFolder) {
+            const taskSessionDir = path.join(
+              DATA_DIR,
+              'sessions',
+              groupFolder,
+              `task_${taskId}`,
+            );
+            const ctxSessionDir = path.join(
+              DATA_DIR,
+              'sessions',
+              groupFolder,
+              `ctx-${ctx.id}`,
+            );
+            try {
+              if (fs.existsSync(taskSessionDir)) {
+                fs.cpSync(taskSessionDir, ctxSessionDir, { recursive: true });
+                // Ensure container user can write to copied session data
+                const claudeDir = path.join(ctxSessionDir, '.claude');
+                if (fs.existsSync(claudeDir)) {
+                  try {
+                    fs.chownSync(claudeDir, 1000, 1000);
+                  } catch {
+                    /* best-effort */
+                  }
+                }
+              }
+            } catch (err) {
+              logger.warn(
+                { taskId, ctxId: ctx.id, err },
+                'Failed to copy task session to thread context',
+              );
+            }
+          }
         }
       }
     },
