@@ -189,6 +189,20 @@ You have a persistent knowledge base at `/workspace/group/knowledge/`. Use it to
 ### At conversation end
 Did you learn something new about a person, decision, or preference? Save it. If nothing stands out, skip it.
 
+## Cross-Group Knowledge Sharing
+
+Some knowledge applies to all groups, not just yours. When you learn something that other groups should know about, write it to the **global** knowledge directory (mounted at `/workspace/global/knowledge/` for non-main groups).
+
+### What goes in global knowledge
+- **Constraints** (`/workspace/global/knowledge/constraints.md`) — API limitations, geographic restrictions, cost preferences, technical limitations. If a constraint would prevent another group from proposing something that won't work, it belongs here.
+- **PR outcomes** (`/workspace/global/knowledge/pr-outcomes.md`) — which PRs were merged or rejected and why. Updated by the deep think loop. Don't edit this directly unless correcting an error.
+
+### What stays in local knowledge
+- Group-specific project details
+- Conversation context
+- People notes
+- Anything only relevant to your group's work
+
 ## Use Subagents for Complex Tasks
 
 When a task involves multiple independent parts (research + implementation, multiple files, comparing options), **delegate to subagents** using `TeamCreate`/`SendMessage` rather than doing everything sequentially yourself. This is faster, avoids hitting output limits, and produces better results.
