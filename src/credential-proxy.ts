@@ -13,7 +13,7 @@
  *             inject it as x-api-key on all subsequent inference requests.
  *
  *             Token freshness: the proxy reads ~/.claude/.credentials.json on
- *             each request (cached 60s) so it picks up auto-refreshed tokens
+ *             each request (cached 4h) so it picks up auto-refreshed tokens
  *             without needing a nanoclaw restart. The secrets.yaml only needs
  *             a non-empty placeholder for CLAUDE_CODE_OAUTH_TOKEN to enable
  *             OAuth mode.
@@ -121,7 +121,7 @@ export function startCredentialProxy(
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: read the freshest token on each request (cached 60s)
+          // OAuth mode: read the freshest token on each request (cached 4h)
           // so auto-refreshed tokens are picked up without a restart.
           const oauthToken = getLiveOAuthToken(envOauthToken);
 

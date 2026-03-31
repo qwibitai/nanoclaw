@@ -9,4 +9,4 @@ import './gmail.js';
 
 // telegram
 
-import './whatsapp.js';
+// whatsapp

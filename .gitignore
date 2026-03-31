@@ -23,6 +23,9 @@ groups/global/*
 .env
 secrets.yaml
 
+# Temp files
+.tmp-*
+
 # OS
 .DS_Store
 

@@ -5,65 +5,61 @@ description: Add Slack as a channel. Can replace WhatsApp entirely or run alongs
 
 # Add Slack Channel
 
-This skill adds Slack support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Slack support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `slack` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/slack.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
-1. **Mode**: Replace WhatsApp or add alongside it?
-   - Replace → will set `SLACK_ONLY=true`
-   - Alongside → both channels active (default)
-
-2. **Do they already have a Slack app configured?** If yes, collect the Bot Token and App Token now. If no, we'll create one in Phase 3.
+**Do they already have a Slack app configured?** If yes, collect the Bot Token and App Token now. If no, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `slack` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-slack
+git remote add slack https://github.com/qwibitai/nanoclaw-slack.git
 ```
 
-This deterministically:
-- Adds `src/channels/slack.ts` (SlackChannel class implementing Channel interface)
-- Adds `src/channels/slack.test.ts` (46 unit tests)
-- Three-way merges Slack support into `src/index.ts` (multi-channel support, conditional channel creation)
-- Three-way merges Slack config into `src/config.ts` (SLACK_ONLY export)
-- Three-way merges updated routing tests into `src/routing.test.ts`
-- Installs the `@slack/bolt` npm dependency
-- Updates `.env.example` with `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_ONLY`
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
-- `modify/src/config.ts.intent.md` — what changed for config.ts
-- `modify/src/routing.test.ts.intent.md` — what changed for routing tests
+```bash
+git fetch slack main
+git merge slack/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This merges in:
+- `src/channels/slack.ts` (SlackChannel class with self-registration via `registerChannel`)
+- `src/channels/slack.test.ts` (46 unit tests)
+- `import './slack.js'` appended to the channel barrel file `src/channels/index.ts`
+- `@slack/bolt` npm dependency in `package.json`
+- `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/slack.test.ts
 ```
 
-All tests must pass (including the new slack tests) and build must be clean before proceeding.
+All tests must pass (including the new Slack tests) and build must be clean before proceeding.
 
 ## Phase 3: Setup
 
@@ -89,11 +85,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-token
 ```
 
-If they chose to replace WhatsApp:
-
-```bash
-SLACK_ONLY=true
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 
@@ -126,30 +118,18 @@ Wait for the user to provide the channel ID.
 
 ### Register the channel
 
-Use the IPC register flow or register directly. The channel ID, name, and folder name are needed.
+The channel ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
-For a main channel (responds to all messages, uses the `main` folder):
+For a main channel (responds to all messages):
 
-```typescript
-registerGroup("slack:<channel-id>", {
-  name: "<channel-name>",
-  folder: "main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "slack:<channel-id>" --name "<channel-name>" --folder "slack_main" --trigger "@${ASSISTANT_NAME}" --channel slack --no-trigger-required --is-main
 ```
 
 For additional channels (trigger-only):
 
-```typescript
-registerGroup("slack:<channel-id>", {
-  name: "<channel-name>",
-  folder: "<folder-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "slack:<channel-id>" --name "<channel-name>" --folder "slack_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel slack
 ```
 
 ## Phase 5: Verify
@@ -215,7 +195,7 @@ The Slack channel supports:
 - **Public channels** — Bot must be added to the channel
 - **Private channels** — Bot must be invited to the channel
 - **Direct messages** — Users can DM the bot directly
-- **Multi-channel** — Can run alongside WhatsApp (default) or replace it (`SLACK_ONLY=true`)
+- **Multi-channel** — Can run alongside WhatsApp or other channels (auto-enabled by credentials)
 
 ## Known Limitations
 
