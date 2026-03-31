@@ -48,6 +48,10 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 
 Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, SKILL.md format rules, PR requirements, and the pre-submission checklist (searching for existing PRs/issues, testing, description format).
 
+## Automated Daily Update
+
+A scheduled Claude Code task runs `/update-nanoclaw` daily at ~09:00. It merges upstream, rebuilds if needed, pushes, and restarts the service. **It requires a clean working tree** — uncommitted changes will block the update. Always commit or stash local changes before ending a session.
+
 ## Development
 
 Run commands directly—don't tell the user to run them.

@@ -8,6 +8,8 @@ export interface AnonymizeConfig {
   enabled: boolean;
   piiCheck?: boolean;
   piiModel?: string;
+  mediaPiiCheck?: boolean;
+  piiVisionModel?: string;
   mappings: Record<string, string>;
 }
 
@@ -127,6 +129,12 @@ function loadAnonymizeConfigUncached(
     enabled: true,
     piiCheck: obj.piiCheck === true,
     piiModel: typeof obj.piiModel === 'string' ? obj.piiModel : undefined,
+    mediaPiiCheck:
+      typeof obj.mediaPiiCheck === 'boolean'
+        ? obj.mediaPiiCheck
+        : obj.piiCheck === true,
+    piiVisionModel:
+      typeof obj.piiVisionModel === 'string' ? obj.piiVisionModel : undefined,
     mappings,
   };
 }

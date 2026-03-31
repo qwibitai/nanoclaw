@@ -1,7 +1,7 @@
 import { AnonymizeConfig } from './anonymize.js';
 import { logger } from './logger.js';
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const DEFAULT_MODEL = 'qwen2.5:7b';
 const TIMEOUT_MS = 30_000;
 
@@ -15,6 +15,8 @@ export interface PiiItem {
   suggestion: string;
   /** Set when matchVariant detects this is likely a nickname of an existing mapping. */
   variantOf?: string;
+  /** Source file when PII was found in media (e.g. "report.pdf", "img-1234.jpg"). */
+  source?: string;
 }
 
 export interface PiiResult {
@@ -212,20 +214,37 @@ export function matchVariant(
 
 /** Format a PII alert message for the user. */
 export function formatPiiAlert(result: PiiResult): string {
-  const items = result.found
-    .map((item) => {
-      const linkNote = item.variantOf ? ` (variant of ${item.variantOf})` : '';
-      return `  - "${item.text}" (${item.type})${linkNote} — suggest mapping to "${item.suggestion}"`;
-    })
-    .join('\n');
+  const textItems = result.found.filter((i) => !i.source);
+  const mediaItems = result.found.filter((i) => i.source);
+  const hasImagePii = mediaItems.some((i) =>
+    /\.(jpe?g|png|gif|webp)$/i.test(i.source!),
+  );
 
-  return [
-    'PII detected in pending message:',
-    items,
-    '',
-    'Reply:',
-    `  "${PII_CMD_APPROVE}" — add suggested mappings and send`,
-    `  "${PII_CMD_SKIP}" — send without new mappings`,
+  const formatItem = (item: PiiItem): string => {
+    const linkNote = item.variantOf ? ` (variant of ${item.variantOf})` : '';
+    const sourceNote = item.source ? `, in ${item.source}` : '';
+    return `  - "${item.text}" (${item.type}${sourceNote})${linkNote} — suggest mapping to "${item.suggestion}"`;
+  };
+
+  const lines: string[] = ['PII detected in pending message:'];
+  for (const item of [...textItems, ...mediaItems]) {
+    lines.push(formatItem(item));
+  }
+
+  if (hasImagePii) {
+    lines.push('');
+    lines.push(
+      'Note: Image content cannot be anonymized. Approving will send the image to the agent with PII visible.',
+    );
+  }
+
+  lines.push('');
+  lines.push('Reply:');
+  lines.push(`  "${PII_CMD_APPROVE}" — add suggested mappings and send`);
+  lines.push(`  "${PII_CMD_SKIP}" — send without new mappings`);
+  lines.push(
     `  "${PII_CMD_MAP_PREFIX}X > Y" — use custom pseudonym (e.g. "map Livvy > Lulu")`,
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }

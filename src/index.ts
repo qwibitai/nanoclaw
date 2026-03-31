@@ -65,9 +65,16 @@ import {
   PII_CMD_APPROVE,
   PII_CMD_MAP_PREFIX,
   PII_CMD_SKIP,
+  PiiItem,
   PiiResult,
   warmupPiiModel,
 } from './pii-check.js';
+import {
+  checkImagePii,
+  MediaCheckFailure,
+  substitutePdfContent,
+  warmupVisionModel,
+} from './media-pii.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -286,51 +293,113 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Anonymization: load per-group config, apply mappings, optionally run PII check
   const anonConfig = loadAnonymizeConfig(group.folder);
-  const anonPrompt = anonConfig ? anonymize(prompt, anonConfig) : prompt;
+  let anonPrompt = anonConfig ? anonymize(prompt, anonConfig) : prompt;
+  const mediaFailures: MediaCheckFailure[] = [];
+
+  const groupDir = anonConfig ? resolveGroupFolderPath(group.folder) : '';
 
   if (anonConfig) {
     logger.debug(
       { group: group.name, changed: anonPrompt !== prompt },
       'anonymize: mappings applied',
     );
+
+    // Substitute PDF content with anonymized extracted text (deterministic, no Ollama).
+    // If extraction fails, the reference is STRIPPED to prevent container access.
+    const pdfResult = await substitutePdfContent(
+      anonPrompt,
+      groupDir,
+      anonConfig,
+    );
+    anonPrompt = pdfResult.prompt;
+    mediaFailures.push(...pdfResult.failures);
   }
 
-  if (anonConfig?.piiCheck) {
+  const shouldCheckTextPii = anonConfig?.piiCheck === true;
+  const shouldCheckMediaPii =
+    (anonConfig?.mediaPiiCheck ?? anonConfig?.piiCheck) === true;
+
+  if (shouldCheckTextPii || shouldCheckMediaPii) {
     if (piiApproved.has(chatJid)) {
       piiApproved.delete(chatJid);
     } else {
-      let piiResult: PiiResult | null;
-      try {
-        piiResult = await checkForPii(anonPrompt, anonConfig);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'PII check failed';
-        logger.error(
-          { err, group: group.name },
-          'PII check failed, message blocked',
-        );
-        await channel.sendMessage(
-          chatJid,
-          `PII check failed: ${msg}\nMessage NOT sent. Ensure Ollama is running, then resend.`,
-        );
-        return true; // Don't retry — user must resend after fixing Ollama
+      const allPiiItems: PiiItem[] = [];
+
+      // Text PII check (covers original text + inlined PDF content)
+      if (shouldCheckTextPii) {
+        let piiResult: PiiResult | null;
+        try {
+          piiResult = await checkForPii(anonPrompt, anonConfig!);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'PII check failed';
+          logger.error(
+            { err, group: group.name },
+            'PII check failed, message blocked',
+          );
+          await channel.sendMessage(
+            chatJid,
+            `PII check failed: ${msg}\nMessage NOT sent. Ensure Ollama is running, then resend.`,
+          );
+          return true; // Don't retry — user must resend after fixing Ollama
+        }
+        if (piiResult) allPiiItems.push(...piiResult.found);
       }
-      if (piiResult && piiResult.found.length > 0) {
+
+      // Image PII check — fail-closed: strip images that can't be checked
+      if (shouldCheckMediaPii && imageAttachments.length > 0) {
+        const checkedImages: typeof imageAttachments = [];
+        for (const img of imageAttachments) {
+          const imgPath = path.join(groupDir, img.relativePath);
+          const result = await checkImagePii(
+            imgPath,
+            path.basename(img.relativePath),
+            anonConfig!,
+          );
+          allPiiItems.push(...result.items);
+          if (result.failure) {
+            mediaFailures.push(result.failure);
+          } else {
+            checkedImages.push(img);
+          }
+        }
+        // Replace attachments with only the successfully checked ones
+        imageAttachments.length = 0;
+        imageAttachments.push(...checkedImages);
+      }
+
+      if (allPiiItems.length > 0) {
         // Hold message until user approves mappings
+        const piiResult: PiiResult = { found: allPiiItems };
         pendingAnon.set(chatJid, {
           anonPrompt,
           imageAttachments,
           piiResult,
-          anonConfig,
+          anonConfig: anonConfig!,
           heldAt: Date.now(),
         });
         await channel.sendMessage(chatJid, formatPiiAlert(piiResult));
         logger.info(
-          { group: group.name, piiCount: piiResult.found.length },
+          { group: group.name, piiCount: allPiiItems.length },
           'PII detected, message held for approval',
         );
         return true;
       }
     }
+  }
+
+  // Warn user about any media that was stripped due to failed PII checks
+  if (mediaFailures.length > 0) {
+    const stripped = mediaFailures
+      .map((f) => `${f.filename} (${f.reason})`)
+      .join(', ');
+    await channel.sendMessage(
+      chatJid,
+      `Could not check for PII — content withheld: ${stripped}\nText portion sent without these attachments.`,
+    );
+    logger.warn(
+      { group: group.name, failures: mediaFailures },
+      'Media stripped due to PII check failure',
+    );
   }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -675,9 +744,20 @@ async function startMessageLoop(): Promise<void> {
 
           // Hook C: Anonymize piped messages (container only sees pseudonyms)
           const pipeAnonConfig = loadAnonymizeConfig(group.folder);
-          const anonFormatted = pipeAnonConfig
+          let anonFormatted = pipeAnonConfig
             ? anonymize(formatted, pipeAnonConfig)
             : formatted;
+
+          // Substitute PDF content with anonymized text (deterministic, no Ollama)
+          if (pipeAnonConfig) {
+            const pipeGroupDir = resolveGroupFolderPath(group.folder);
+            const pdfResult = await substitutePdfContent(
+              anonFormatted,
+              pipeGroupDir,
+              pipeAnonConfig,
+            );
+            anonFormatted = pdfResult.prompt;
+          }
 
           if (
             queue.sendMessage(chatJid, {
@@ -940,10 +1020,24 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
 
-  // Pre-load Ollama PII models for groups with piiCheck enabled (fire-and-forget)
+  // Pre-load Ollama PII models (deduplicated by model name, fire-and-forget)
+  const warmedModels = new Set<string>();
   for (const group of Object.values(registeredGroups)) {
     const anonCfg = loadAnonymizeConfig(group.folder);
-    if (anonCfg?.piiCheck) warmupPiiModel(anonCfg);
+    if (anonCfg?.piiCheck) {
+      const m = anonCfg.piiModel || 'qwen2.5:7b';
+      if (!warmedModels.has(m)) {
+        warmupPiiModel(anonCfg);
+        warmedModels.add(m);
+      }
+    }
+    if (anonCfg?.mediaPiiCheck ?? anonCfg?.piiCheck) {
+      const m = anonCfg.piiVisionModel || 'llava:7b';
+      if (!warmedModels.has(m)) {
+        warmupVisionModel(anonCfg);
+        warmedModels.add(m);
+      }
+    }
   }
 
   recoverPendingMessages();

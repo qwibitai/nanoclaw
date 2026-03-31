@@ -5,7 +5,8 @@ import sharp from 'sharp';
 import type { WAMessage } from '@whiskeysockets/baileys';
 
 const MAX_DIMENSION = 1024;
-const IMAGE_REF_PATTERN = /\[Image: (attachments\/[^\]]+)\]/g;
+export const IMAGE_REF_SOURCE = String.raw`\[Image: (attachments\/[^\]]+)\]`;
+const IMAGE_REF_PATTERN = new RegExp(IMAGE_REF_SOURCE, 'g');
 
 export interface ProcessedImage {
   content: string;
