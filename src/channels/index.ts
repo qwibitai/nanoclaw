@@ -3,6 +3,9 @@
 
 // discord
 
+// github
+import './github.js';
+
 // gmail
 
 // slack
