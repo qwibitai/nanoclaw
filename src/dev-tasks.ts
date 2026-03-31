@@ -171,6 +171,17 @@ export function createTask(opts: {
 
   fs.writeFileSync(taskFilePath(id), serializeTask(task));
   logger.info({ taskId: id, title: opts.title }, 'DevTask created');
+
+  // Commit and push so the task file is immediately available on other machines
+  try {
+    git(`add "${taskFilePath(id)}" "${counterPath()}"`);
+    git(`commit -m "task(${id}): ${opts.title}"`);
+    git('push');
+    logger.info({ taskId: id }, 'DevTask committed and pushed');
+  } catch (err) {
+    logger.warn({ taskId: id, err }, 'Failed to push DevTask to git');
+  }
+
   return task;
 }
 
