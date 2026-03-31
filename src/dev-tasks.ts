@@ -157,12 +157,15 @@ function commitAndPush(message: string, files: string[]): void {
   try {
     git(`add ${files.map((f) => `"${f}"`).join(' ')}`);
     git(`commit -m "${message}"`);
-    // Pull --rebase first to handle commits pushed from other machines
+    // Pull --rebase before push to handle commits from other machines.
+    // --autostash handles dirty working tree (e.g. submodule pointer drift).
     try {
-      git('pull --rebase');
+      git('pull --rebase --autostash');
     } catch {
-      // Rebase conflicts are unlikely for task files but log if they happen
-      logger.warn({ message }, 'Git pull --rebase failed, attempting push anyway');
+      logger.warn(
+        { message },
+        'Git pull --rebase failed, attempting push anyway',
+      );
     }
     git('push');
     logger.info({ message }, 'Git commit and push succeeded');
