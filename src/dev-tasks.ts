@@ -157,6 +157,13 @@ function commitAndPush(message: string, files: string[]): void {
   try {
     git(`add ${files.map((f) => `"${f}"`).join(' ')}`);
     git(`commit -m "${message}"`);
+    // Pull --rebase first to handle commits pushed from other machines
+    try {
+      git('pull --rebase');
+    } catch {
+      // Rebase conflicts are unlikely for task files but log if they happen
+      logger.warn({ message }, 'Git pull --rebase failed, attempting push anyway');
+    }
     git('push');
     logger.info({ message }, 'Git commit and push succeeded');
   } catch (err) {
@@ -189,7 +196,10 @@ export function createTask(opts: {
   fs.writeFileSync(taskFilePath(id), serializeTask(task));
   logger.info({ taskId: id, title: opts.title }, 'DevTask created');
 
-  commitAndPush(`task(${id}): ${opts.title}`, [taskFilePath(id), counterPath()]);
+  commitAndPush(`task(${id}): ${opts.title}`, [
+    taskFilePath(id),
+    counterPath(),
+  ]);
 
   return task;
 }
