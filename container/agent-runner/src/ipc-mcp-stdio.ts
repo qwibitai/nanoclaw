@@ -802,6 +802,201 @@ server.tool(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Video analysis tool (Gemini)
+// ---------------------------------------------------------------------------
+
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1beta/files';
+const VIDEO_INLINE_MAX_BYTES = 20 * 1024 * 1024; // 20MB
+
+const VIDEO_MIME_MAP: Record<string, string> = {
+  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+  '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.3gp': 'video/3gpp',
+  '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg',
+};
+
+async function analyzeVideoWithGemini(
+  videoPath: string,
+  prompt: string,
+  model: string = 'gemini-2.5-flash',
+): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
+
+  const videoBuffer = fs.readFileSync(videoPath);
+  const ext = path.extname(videoPath).toLowerCase();
+  const mimeType = VIDEO_MIME_MAP[ext] || 'video/mp4';
+  const fileSize = videoBuffer.length;
+
+  let resultText: string;
+
+  if (fileSize <= VIDEO_INLINE_MAX_BYTES) {
+    // Inline: send as base64
+    const videoB64 = videoBuffer.toString('base64');
+    const res = await fetch(
+      `${GEMINI_API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inlineData: { mimeType, data: videoB64 } },
+              { text: prompt },
+            ],
+          }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Gemini API ${res.status}: ${errText.slice(0, 300)}`);
+    }
+    const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    resultText = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n') || '';
+  } else {
+    // File API: upload then analyze
+    // Step 1: Start resumable upload
+    const metadata = JSON.stringify({ file: { displayName: path.basename(videoPath) } });
+    const initRes = await fetch(`${GEMINI_UPLOAD_BASE}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(fileSize),
+        'X-Goog-Upload-Header-Content-Type': mimeType,
+        'Content-Type': 'application/json',
+      },
+      body: metadata,
+    });
+    const uploadUrl = initRes.headers.get('X-Goog-Upload-URL');
+    if (!uploadUrl) throw new Error('No upload URL from Gemini File API');
+
+    // Step 2: Upload file data
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Length': String(fileSize),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize',
+      },
+      body: videoBuffer,
+    });
+    const uploadResult = await uploadRes.json() as { file?: { name?: string; uri?: string }; name?: string; uri?: string };
+    const fileInfo = uploadResult.file || uploadResult;
+    const fileName = fileInfo.name || '';
+    const fileUri = fileInfo.uri || '';
+    if (!fileUri) throw new Error('No file URI from upload');
+
+    // Step 3: Wait for processing
+    for (let i = 0; i < 60; i++) {
+      const statusRes = await fetch(`${GEMINI_API_BASE}/${fileName}?key=${GEMINI_API_KEY}`);
+      const status = await statusRes.json() as { state?: string };
+      if (status.state === 'ACTIVE') break;
+      if (status.state === 'FAILED') throw new Error('Video processing failed on Gemini');
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+
+    // Step 4: Analyze
+    const analyzeRes = await fetch(
+      `${GEMINI_API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { fileData: { mimeType, fileUri } },
+              { text: prompt },
+            ],
+          }],
+        }),
+      },
+    );
+    if (!analyzeRes.ok) {
+      const errText = await analyzeRes.text();
+      // Cleanup
+      await fetch(`${GEMINI_API_BASE}/${fileName}?key=${GEMINI_API_KEY}`, { method: 'DELETE' }).catch(() => {});
+      throw new Error(`Gemini API ${analyzeRes.status}: ${errText.slice(0, 300)}`);
+    }
+    const data = await analyzeRes.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    resultText = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n') || '';
+
+    // Cleanup uploaded file
+    await fetch(`${GEMINI_API_BASE}/${fileName}?key=${GEMINI_API_KEY}`, { method: 'DELETE' }).catch(() => {});
+  }
+
+  if (!resultText) throw new Error('No text in Gemini response');
+  return resultText;
+}
+
+server.tool(
+  'analyze_video',
+  `Analyze a video file using Gemini AI. Returns a transcript with timestamps, visual scene descriptions, and a summary. Use when Olivia sends a video — analyze it, extract learning content, record interactions on the Learning Map, and discuss it with her.`,
+  {
+    video_path: z.string().describe('Path to the video file (e.g. "inbox/video-123.mp4")'),
+    mode: z.enum(['full', 'transcript', 'visual', 'summary', 'custom']).default('full')
+      .describe('Analysis mode: full (transcript + visual + summary), transcript, visual, summary, or custom'),
+    custom_prompt: z.string().optional()
+      .describe('Custom analysis prompt (only used when mode is "custom")'),
+  },
+  async (args) => {
+    const prompts: Record<string, string> = {
+      full: `Analyze this video for a homeschooling context. An 11-year-old named Olivia shared this. Provide:
+
+## Summary
+2-3 sentences about what this video covers.
+
+## Transcript
+Transcribe all spoken audio with timestamps [MM:SS]. Identify speakers when possible.
+
+## Visual Outline
+Scene-by-scene visual descriptions with timestamps.
+
+## Learning Topics
+What subjects or skills does this video relate to? List specific topics that could map to learning objectives.
+
+## Key Moments
+The most interesting or educational moments with timestamps.`,
+      transcript: 'Transcribe all spoken audio with timestamps [MM:SS]. Identify speakers when possible.',
+      visual: 'Describe the visual content scene by scene with timestamps [MM:SS - MM:SS].',
+      summary: 'Provide a concise summary: overview (2-3 sentences), key topics (bullets), key takeaways (bullets).',
+    };
+
+    const prompt = args.mode === 'custom' && args.custom_prompt
+      ? args.custom_prompt
+      : prompts[args.mode] || prompts.full;
+
+    // Resolve path relative to workspace
+    const wsRoot = process.env.NANOCLAW_WORKSPACE || '/workspace';
+    let fullPath = args.video_path;
+    if (!path.isAbsolute(fullPath)) {
+      fullPath = path.join(wsRoot, 'group', fullPath);
+    }
+
+    if (!fs.existsSync(fullPath)) {
+      return {
+        content: [{ type: 'text' as const, text: `Video file not found: ${fullPath}` }],
+        isError: true,
+      };
+    }
+
+    try {
+      const sizeMB = (fs.statSync(fullPath).size / 1024 / 1024).toFixed(1);
+      const result = await analyzeVideoWithGemini(fullPath, prompt);
+
+      return {
+        content: [{ type: 'text' as const, text: `Video analyzed (${sizeMB} MB):\n\n${result}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error analyzing video: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

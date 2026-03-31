@@ -5,6 +5,10 @@ import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+
+const whisperEnv = readEnvFile(['OPENAI_API_KEY']);
+const OPENAI_API_KEY =
+  process.env.OPENAI_API_KEY || whisperEnv.OPENAI_API_KEY || '';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -272,8 +276,160 @@ export class TelegramChannel implements Channel {
       // Fallback if download fails
       storeNonText(ctx, '[Photo]');
     });
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
+    this.bot.on('message:video', async (ctx) => {
+      try {
+        const video = ctx.message.video;
+        const file = await ctx.api.getFile(video.file_id);
+        if (file.file_path) {
+          const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+          const ext = path.extname(file.file_path) || '.mp4';
+          const filename = `video-${Date.now()}${ext}`;
+
+          const groups = this.opts.registeredGroups();
+          const chatJid = `tg:${ctx.chat.id}`;
+          const group = groups[chatJid];
+          const saveDir = group
+            ? path.join(GROUPS_DIR, group.folder, 'inbox')
+            : path.join(GROUPS_DIR, 'telegram_learning', 'inbox');
+          fs.mkdirSync(saveDir, { recursive: true });
+          const savePath = path.join(saveDir, filename);
+
+          const res = await fetch(url);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            fs.writeFileSync(savePath, buffer);
+            logger.info(
+              { chatJid, savePath, size: buffer.length },
+              'Video downloaded',
+            );
+
+            const caption = ctx.message.caption
+              ? ` ${ctx.message.caption}`
+              : '';
+            const timestamp = new Date(
+              ctx.message.date * 1000,
+            ).toISOString();
+            const senderName =
+              ctx.from?.first_name || ctx.from?.username || 'Unknown';
+            const isGroup =
+              ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+
+            this.opts.onChatMetadata(
+              chatJid,
+              timestamp,
+              undefined,
+              'telegram',
+              isGroup,
+            );
+            this.opts.onMessage(chatJid, {
+              id: ctx.message.message_id.toString(),
+              chat_jid: chatJid,
+              sender: ctx.from?.id?.toString() || '',
+              sender_name: senderName,
+              content: `[Video: inbox/${filename}]${caption}`,
+              timestamp,
+              is_from_me: false,
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          { err },
+          'Failed to download Telegram video, falling back to placeholder',
+        );
+      }
+      storeNonText(ctx, '[Video]');
+    });
+    this.bot.on('message:voice', async (ctx) => {
+      if (!OPENAI_API_KEY) {
+        storeNonText(
+          ctx,
+          '[Voice message - no OPENAI_API_KEY for transcription]',
+        );
+        return;
+      }
+      try {
+        const file = await ctx.api.getFile(ctx.message.voice.file_id);
+        if (!file.file_path) throw new Error('No file_path');
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const audioRes = await fetch(url);
+        if (!audioRes.ok)
+          throw new Error(`Download failed: ${audioRes.status}`);
+        const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+        // Call OpenAI Whisper API
+        const boundary = `----formdata${Date.now()}`;
+        const filename = `voice${path.extname(file.file_path) || '.ogg'}`;
+        const formParts = [
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: audio/ogg\r\n\r\n`,
+          `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`,
+          `--${boundary}--\r\n`,
+        ];
+        const body = Buffer.concat([
+          Buffer.from(formParts[0]),
+          audioBuffer,
+          Buffer.from(formParts[1]),
+          Buffer.from(formParts[2]),
+        ]);
+
+        const whisperRes = await fetch(
+          'https://api.openai.com/v1/audio/transcriptions',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${OPENAI_API_KEY}`,
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            },
+            body,
+          },
+        );
+
+        if (!whisperRes.ok) {
+          const errText = await whisperRes.text();
+          throw new Error(
+            `Whisper API ${whisperRes.status}: ${errText.slice(0, 200)}`,
+          );
+        }
+
+        const result = (await whisperRes.json()) as { text?: string };
+        const transcript =
+          result.text?.trim() || '[Voice message - empty transcription]';
+
+        logger.info(
+          { chatJid: `tg:${ctx.chat.id}`, length: transcript.length },
+          'Voice message transcribed',
+        );
+
+        const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+        const chatJid = `tg:${ctx.chat.id}`;
+        const timestamp = new Date(ctx.message.date * 1000).toISOString();
+        const senderName =
+          ctx.from?.first_name || ctx.from?.username || 'Unknown';
+        const isGroup =
+          ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'telegram',
+          isGroup,
+        );
+        this.opts.onMessage(chatJid, {
+          id: ctx.message.message_id.toString(),
+          chat_jid: chatJid,
+          sender: ctx.from?.id?.toString() || '',
+          sender_name: senderName,
+          content: `[Voice message] ${transcript}${caption}`,
+          timestamp,
+          is_from_me: false,
+        });
+      } catch (err) {
+        logger.warn({ err }, 'Voice transcription failed, storing placeholder');
+        storeNonText(ctx, '[Voice message - transcription failed]');
+      }
+    });
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
