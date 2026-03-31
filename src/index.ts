@@ -98,21 +98,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
-  const dailySpend = getDailySpendUsd();
-  if (dailySpend >= MAX_DAILY_SPEND_USD) {
-    logger.warn(
-      { dailySpend: dailySpend.toFixed(2), limit: MAX_DAILY_SPEND_USD, group: group.name },
-      'Daily spend limit reached — skipping container spawn',
-    );
-    // Send a friendly message so the customer isn't left hanging in silence
-    const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-    if (!isMainGroup) {
-      await routeOutbound(
-        chatJid,
-        "Hey! I'm a little tied up right now — I'll get back to you shortly. Thanks for your patience!",
+  // Daily spend cap only applies to container (API credit) path.
+  // Skip this check when CLI is enabled — CLI uses Max subscription (free).
+  if (!CLI_ENABLED) {
+    const dailySpend = getDailySpendUsd();
+    if (dailySpend >= MAX_DAILY_SPEND_USD) {
+      logger.warn(
+        { dailySpend: dailySpend.toFixed(2), limit: MAX_DAILY_SPEND_USD, group: group.name },
+        'Daily spend limit reached — skipping container spawn',
       );
+      const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+      if (!isMainGroup) {
+        await routeOutbound(
+          chatJid,
+          "Hey! I'm a little tied up right now — I'll get back to you shortly. Thanks for your patience!",
+        );
+      }
+      return true;
     }
-    return true;
   }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
@@ -481,6 +484,12 @@ async function main(): Promise<void> {
   startServices(queue, whatsapp);
 
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.setOnMessageQueued((groupJid, activeCount) => {
+    routeOutbound(
+      groupJid,
+      `Hey! I'm currently working on ${activeCount} other tasks. I'll get to your message as soon as one finishes — shouldn't be long!`,
+    ).catch(() => {});
+  });
   recoverPendingMessages();
   startMessageLoop();
 }

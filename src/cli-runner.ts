@@ -2,6 +2,11 @@
  * CLI Runner for NanoClaw
  * Spawns Claude Code CLI on the host (using Max subscription) instead of a container.
  * Used for scheduled tasks to avoid API credit costs.
+ *
+ * CRITICAL: All CLI spawns go through ensureFreshToken() which uses a file lock
+ * to prevent concurrent OAuth token refresh. Without this, two simultaneous
+ * `claude` processes can race on ~/.claude/.credentials.json and kill the
+ * refresh token via OAuth2 rotation — causing daily auth death.
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
@@ -17,6 +22,113 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { audit, logger } from './logger.js';
+
+// ── Token freshness gate ─────────────────────────────────────────
+// Ensures the OAuth access token is fresh BEFORE spawning a CLI process.
+// If the token is expired, acquires a lock and refreshes it so that only
+// ONE process hits the OAuth server. All other callers wait for the lock.
+
+const TOKEN_LOCK_PATH = path.join(DATA_DIR, '.cli-token-refresh.lock');
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000; // Refresh 5 min before expiry
+
+function getCredentialsPath(): string {
+  const home = process.env.HOME || require('os').homedir();
+  return path.join(home, '.claude', '.credentials.json');
+}
+
+function isTokenFresh(): boolean {
+  try {
+    const creds = JSON.parse(fs.readFileSync(getCredentialsPath(), 'utf-8'));
+    const oauth = creds.claudeAiOauth;
+    if (!oauth?.accessToken) return false;
+    if (!oauth.expiresAt) return true; // No expiry info, assume fresh
+    return oauth.expiresAt > Date.now() + TOKEN_REFRESH_MARGIN_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Acquire an exclusive file lock for token refresh.
+ * Returns true if we acquired the lock, false if another process holds it.
+ */
+function acquireRefreshLock(): boolean {
+  try {
+    // Use exclusive file creation — fails if file already exists
+    fs.writeFileSync(TOKEN_LOCK_PATH, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch {
+    // Lock file exists — check if the holding process is still alive
+    try {
+      const lockPid = parseInt(fs.readFileSync(TOKEN_LOCK_PATH, 'utf-8').trim());
+      if (lockPid === process.pid) return true; // We hold it
+      // Check if lock is stale (>2 min old) — holder might have crashed
+      const stat = fs.statSync(TOKEN_LOCK_PATH);
+      if (Date.now() - stat.mtimeMs > 120_000) {
+        fs.unlinkSync(TOKEN_LOCK_PATH);
+        fs.writeFileSync(TOKEN_LOCK_PATH, String(process.pid), { flag: 'wx' });
+        return true;
+      }
+    } catch { /* lock race — another process grabbed it */ }
+    return false;
+  }
+}
+
+function releaseRefreshLock(): void {
+  try { fs.unlinkSync(TOKEN_LOCK_PATH); } catch { /* already gone */ }
+}
+
+/**
+ * Ensure the OAuth access token is fresh before spawning a CLI process.
+ * If expired, acquires a lock and runs `claude -p ping` to trigger refresh.
+ * Other callers wait (polling) until the refresh completes.
+ */
+async function ensureFreshToken(): Promise<void> {
+  if (isTokenFresh()) return;
+
+  if (acquireRefreshLock()) {
+    // We hold the lock — do the refresh
+    try {
+      logger.info('CLI token expired — refreshing (lock acquired)');
+      await new Promise<void>((resolve) => {
+        const proc = spawn('claude', ['-p', 'ping', '--max-turns', '1', '--output-format', 'json'], {
+          timeout: 60000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        proc.stdin?.end();
+        proc.on('close', (code) => {
+          if (code === 0 && isTokenFresh()) {
+            logger.info('CLI token refresh succeeded');
+          } else {
+            logger.warn({ code }, 'CLI token refresh failed');
+          }
+          resolve();
+        });
+        proc.on('error', () => {
+          logger.warn('CLI token refresh spawn error');
+          resolve();
+        });
+      });
+    } finally {
+      releaseRefreshLock();
+    }
+  } else {
+    // Another process is refreshing — wait for it (up to 90s)
+    logger.debug('Waiting for another process to refresh CLI token...');
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000));
+      if (isTokenFresh()) {
+        logger.debug('CLI token refreshed by another process');
+        return;
+      }
+      // Check if lock is gone (refresh finished but token still bad)
+      try { fs.statSync(TOKEN_LOCK_PATH); } catch {
+        break; // Lock released, token might still be bad but we tried
+      }
+    }
+  }
+}
 
 const PROJECT_ROOT = process.cwd();
 
@@ -292,6 +404,9 @@ export async function runCliAgent(
   onProcess?: (proc: ChildProcess) => void,
 ): Promise<CliOutput> {
   const startTime = Date.now();
+
+  // Ensure OAuth token is fresh BEFORE spawning — prevents concurrent refresh race
+  await ensureFreshToken();
 
   // Validate group folder to prevent path traversal
   validateGroupFolder(input.groupFolder);
@@ -608,6 +723,9 @@ export async function runCliInteractive(
   onProcess?: (proc: ChildProcess) => void,
 ): Promise<CliInteractiveOutput> {
   const startTime = Date.now();
+
+  // Ensure OAuth token is fresh BEFORE spawning — prevents concurrent refresh race
+  await ensureFreshToken();
 
   validateGroupFolder(input.groupFolder);
 

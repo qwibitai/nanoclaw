@@ -33,6 +33,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
+  private onMessageQueued: ((groupJid: string, activeCount: number) => void) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -58,6 +59,10 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  setOnMessageQueued(fn: (groupJid: string, activeCount: number) => void): void {
+    this.onMessageQueued = fn;
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
@@ -76,10 +81,14 @@ export class GroupQueue {
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
-      logger.debug(
+      logger.info(
         { groupJid, activeCount: this.activeCount },
-        'At concurrency limit, message queued',
+        'At concurrency limit, message queued — will process when a slot opens',
       );
+      // Notify caller so they can send a "busy" acknowledgment to the user
+      if (this.onMessageQueued) {
+        this.onMessageQueued(groupJid, this.activeCount);
+      }
       return;
     }
 
@@ -308,6 +317,18 @@ export class GroupQueue {
       }
       // If neither pending, skip this group
     }
+  }
+
+  /** Get summary of currently active groups for system context. */
+  getActiveStatus(): { activeCount: number; activeGroups: string[] } {
+    const activeGroups: string[] = [];
+    for (const [jid, state] of this.groups) {
+      if (state.active) {
+        const label = state.activeIsScheduledTask ? `scheduled-task(${state.groupFolder})` : `interactive(${state.groupFolder})`;
+        activeGroups.push(label);
+      }
+    }
+    return { activeCount: this.activeCount, activeGroups };
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {

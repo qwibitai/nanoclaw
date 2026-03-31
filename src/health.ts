@@ -88,11 +88,13 @@ export function resetInteractiveCliFailures(): void {
   interactiveCliFailures = 0;
 }
 
+type CliProbeResult = 'ok' | 'binary_broken' | 'token_expired' | 'token_missing';
+
 /**
  * Probe CLI health: (1) binary exists via `claude --version`, (2) OAuth credentials
  * file exists and token hasn't expired. This is free and instant — no API calls.
  */
-function probeCli(): Promise<boolean> {
+function probeCli(): Promise<CliProbeResult> {
   return new Promise((resolve) => {
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
@@ -105,7 +107,7 @@ function probeCli(): Promise<boolean> {
     proc.on('close', (code) => {
       if (code !== 0 || !stdout.trim()) {
         logger.warn('CLI probe: binary check failed');
-        resolve(false);
+        resolve('binary_broken');
         return;
       }
 
@@ -117,21 +119,100 @@ function probeCli(): Promise<boolean> {
         const oauth = creds.claudeAiOauth;
         if (!oauth?.accessToken) {
           logger.warn('CLI probe: no accessToken in credentials');
-          resolve(false);
+          resolve('token_missing');
           return;
         }
         if (oauth.expiresAt && oauth.expiresAt < Date.now()) {
           logger.warn({ expiresAt: new Date(oauth.expiresAt).toISOString() }, 'CLI probe: OAuth token expired');
-          resolve(false);
+          resolve('token_expired');
           return;
         }
-        resolve(true);
+        resolve('ok');
       } catch (err) {
         logger.warn({ err }, 'CLI probe: failed to read credentials file');
-        resolve(false);
+        resolve('token_missing');
       }
     });
-    proc.on('error', () => resolve(false));
+    proc.on('error', () => resolve('binary_broken'));
+  });
+}
+
+/**
+ * Attempt to refresh the CLI OAuth token.
+ * Uses a file lock (same as cli-runner.ts) to prevent concurrent refresh races.
+ * The CLI auto-refreshes expired access tokens if the refresh token is still valid.
+ */
+const TOKEN_LOCK_PATH = path.join(DATA_DIR, '.cli-token-refresh.lock');
+
+function refreshCliToken(): Promise<boolean> {
+  // Check if another process is already refreshing
+  try {
+    const stat = fs.statSync(TOKEN_LOCK_PATH);
+    if (Date.now() - stat.mtimeMs < 120_000) {
+      logger.info('Token refresh lock held by CLI runner — skipping health probe refresh');
+      return Promise.resolve(false);
+    }
+  } catch { /* no lock file — proceed */ }
+
+  // Acquire lock
+  try {
+    fs.writeFileSync(TOKEN_LOCK_PATH, `health-${process.pid}`, { flag: 'wx' });
+  } catch {
+    logger.info('Could not acquire token refresh lock — another process is refreshing');
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    logger.info('Attempting CLI OAuth token refresh (lock acquired)...');
+    const proc = spawn('claude', ['-p', 'ping', '--max-turns', '1', '--output-format', 'json'], {
+      timeout: 60000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    proc.stdin?.end();
+    proc.on('close', (code) => {
+      // Release lock
+      try { fs.unlinkSync(TOKEN_LOCK_PATH); } catch { /* already gone */ }
+
+      // Re-check the credentials file to see if it was actually refreshed
+      const home = process.env.HOME || require('os').homedir();
+      const credsPath = path.join(home, '.claude', '.credentials.json');
+      try {
+        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+        const oauth = creds.claudeAiOauth;
+        if (oauth?.expiresAt && oauth.expiresAt > Date.now()) {
+          logger.info({ newExpiresAt: new Date(oauth.expiresAt).toISOString() }, 'CLI OAuth token refresh succeeded');
+          resolve(true);
+          return;
+        }
+      } catch { /* fall through */ }
+
+      logger.warn({ code }, 'CLI OAuth token refresh failed — manual re-auth needed');
+      resolve(false);
+    });
+    proc.on('error', () => {
+      try { fs.unlinkSync(TOKEN_LOCK_PATH); } catch { /* already gone */ }
+      logger.warn('CLI OAuth token refresh spawn failed');
+      resolve(false);
+    });
+  });
+}
+
+let lastTokenAlertAt = 0;
+
+/**
+ * Send a push notification via ntfy.sh as a backup alert channel.
+ * Works even when WhatsApp is disconnected or the process is degraded.
+ * Configure topic via NANOCLAW_ALERT_TOPIC env var (default: nanoclaw-alerts).
+ */
+function sendPushAlert(message: string): void {
+  const topic = process.env.NANOCLAW_ALERT_TOPIC || 'nanoclaw-alerts';
+  const url = `https://ntfy.sh/${topic}`;
+  fetch(url, {
+    method: 'POST',
+    body: message,
+    headers: { Title: 'NanoClaw Alert', Priority: '4' },
+  }).catch((err) => {
+    logger.warn({ err }, 'Failed to send push alert via ntfy.sh');
   });
 }
 
@@ -337,39 +418,77 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
     }
   } catch { /* non-critical */ }
 
-  // Check 10: CLI health probe (can Claude CLI execute at all?)
+  // Check 10a: Proactive OAuth credential age warning
+  // Refresh tokens typically last 30-90 days. Warn at 25 days so you can
+  // re-auth before it expires and Andy goes down.
   if (CLI_ENABLED) {
     try {
-      const cliOk = await probeCli();
-      if (cliOk) {
+      const home = process.env.HOME || require('os').homedir();
+      const credsPath = path.join(home, '.claude', '.credentials.json');
+      const credsStat = fs.statSync(credsPath);
+      const credAgeDays = (Date.now() - credsStat.mtimeMs) / (1000 * 60 * 60 * 24);
+      if (credAgeDays >= 25) {
+        if (status === 'ok') status = 'warning';
+        issues.push(
+          `CLI credentials are ${Math.round(credAgeDays)} days old — refresh token may expire soon. SSH to VPS and run: claude`,
+        );
+      }
+    } catch { /* non-critical */ }
+  }
+
+  // Check 10b: CLI health probe (can Claude CLI execute at all?)
+  if (CLI_ENABLED) {
+    try {
+      let probeResult = await probeCli();
+
+      // If token expired, attempt auto-refresh before declaring failure
+      if (probeResult === 'token_expired') {
+        const refreshed = await refreshCliToken();
+        if (refreshed) {
+          probeResult = await probeCli();
+        }
+      }
+
+      if (probeResult === 'ok') {
         cliProbeFailures = 0;
       } else {
         cliProbeFailures++;
-        logger.warn({ consecutiveFailures: cliProbeFailures }, 'CLI health probe failed');
+        logger.warn({ consecutiveFailures: cliProbeFailures, reason: probeResult }, 'CLI health probe failed');
       }
 
       // Also factor in interactive failures (real customer messages that failed)
       const totalCliIssues = cliProbeFailures + interactiveCliFailures;
+      const isTokenIssue = probeResult === 'token_expired' || probeResult === 'token_missing';
 
       if (totalCliIssues >= 3) {
         status = 'critical';
         issues.push(`CLI broken: ${cliProbeFailures} probe failures, ${interactiveCliFailures} interactive failures — customers are getting error messages`);
 
-        // Auto-restart once per 30 minutes if CLI is persistently broken
-        const now = Date.now();
-        if (now - lastAutoRestartAt > 30 * 60 * 1000) {
-          lastAutoRestartAt = now;
-          issues.push('Auto-restart triggered — restarting service to recover CLI');
-          logger.warn('CLI persistently broken — triggering auto-restart');
+        if (isTokenIssue) {
+          // Token issues: alert but do NOT restart — restart can't fix expired OAuth
+          const now = Date.now();
+          if (now - lastTokenAlertAt > 30 * 60 * 1000) {
+            lastTokenAlertAt = now;
+            issues.push(`OAuth ${probeResult} — manual re-auth needed. SSH to VPS and run: claude`);
+            logger.error({ reason: probeResult }, 'CLI OAuth issue — restart will NOT help, manual re-auth required');
+          }
+        } else {
+          // Binary/transient issues: auto-restart may help
+          const now = Date.now();
+          if (now - lastAutoRestartAt > 30 * 60 * 1000) {
+            lastAutoRestartAt = now;
+            issues.push('Auto-restart triggered — restarting service to recover CLI');
+            logger.warn('CLI binary broken — triggering auto-restart');
 
-          // Schedule restart after health check completes (give time for alert to send)
-          setTimeout(() => {
-            spawn('sudo', ['systemctl', 'restart', 'nanoclaw'], { detached: true, stdio: 'ignore' }).unref();
-          }, 5000);
+            // Schedule restart after health check completes (give time for alert to send)
+            setTimeout(() => {
+              spawn('sudo', ['systemctl', 'restart', 'nanoclaw'], { detached: true, stdio: 'ignore' }).unref();
+            }, 5000);
+          }
         }
       } else if (totalCliIssues >= 1) {
         if (status === 'ok') status = 'warning';
-        issues.push(`CLI probe: ${cliProbeFailures} failures, ${interactiveCliFailures} interactive failures`);
+        issues.push(`CLI probe: ${cliProbeFailures} failures (${probeResult}), ${interactiveCliFailures} interactive failures`);
       }
     } catch { /* non-critical */ }
   }
@@ -431,20 +550,23 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
   if (status === 'critical') {
     const shouldAlert = !alertedCriticalAt || Date.now() - alertedCriticalAt > 30 * 60 * 1000;
     if (shouldAlert) {
+      alertedCriticalAt = Date.now();
       const mainJid = deps.getMainGroupJid();
+      const prefix = alertedCriticalAt ? '⚠️ Health still critical' : '🚨 Health Alert';
+      const alertText = `${prefix}:\n${issues.join('\n')}`;
+
+      // Try WhatsApp first
       if (mainJid) {
-        const prefix = alertedCriticalAt ? '⚠️ Health still critical' : '🚨 Health Alert';
-        const alertText = `${prefix}:\n${issues.join('\n')}`;
         try {
           await deps.sendAlert(mainJid, alertText);
           logger.info('Critical health alert sent to main group');
-          alertedCriticalAt = Date.now();
         } catch (err) {
-          logger.error({ err }, 'Failed to send health alert');
+          logger.error({ err }, 'Failed to send WhatsApp health alert');
         }
-      } else {
-        alertedCriticalAt = Date.now();
       }
+
+      // Also send push notification via ntfy.sh (works even when WhatsApp is down)
+      sendPushAlert(alertText);
     }
   } else {
     alertedCriticalAt = null;
@@ -565,9 +687,52 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
     } catch (err) {
       logger.error({ err }, 'Failed to clean IPC error files');
     }
+
+    // Clean up stale IPC input files (>1 hour old — definitely from previous runs)
+    try {
+      const ipcDir = path.join(DATA_DIR, 'ipc');
+      if (fs.existsSync(ipcDir)) {
+        const cutoff = Date.now() - 3600000;
+        let cleaned = 0;
+        for (const folder of fs.readdirSync(ipcDir)) {
+          if (folder === 'errors') continue;
+          const inputDir = path.join(ipcDir, folder, 'input');
+          if (!fs.existsSync(inputDir)) continue;
+          for (const file of fs.readdirSync(inputDir)) {
+            const filePath = path.join(inputDir, file);
+            try {
+              const stat = fs.statSync(filePath);
+              if (stat.mtimeMs < cutoff) { fs.unlinkSync(filePath); cleaned++; }
+            } catch { /* skip */ }
+          }
+        }
+        if (cleaned > 0) logger.info({ cleaned }, 'Cleaned stale IPC input files');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to clean IPC input files');
+    }
   };
 
-  // Run maintenance 5 minutes after startup, then every 24h
+  // Schedule maintenance at 3 AM CST to avoid DB locks during business hours
+  const msUntilMaintenance = (): number => {
+    const now = new Date();
+    const chicagoNow = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
+    const target = new Date(chicagoNow);
+    target.setHours(3, 0, 0, 0);
+    if (target <= chicagoNow) target.setDate(target.getDate() + 1);
+    return target.getTime() - chicagoNow.getTime();
+  };
+
+  const scheduleNextMaintenance = () => {
+    const delay = msUntilMaintenance();
+    logger.info({ nextRunIn: `${(delay / 3600000).toFixed(1)}h` }, 'Scheduled next maintenance at 3 AM CST');
+    setTimeout(() => {
+      runMaintenance();
+      scheduleNextMaintenance();
+    }, delay);
+  };
+
+  // Run once shortly after startup to catch stale state, then at 3 AM daily
   setTimeout(runMaintenance, 5 * 60 * 1000);
-  setInterval(runMaintenance, MAINTENANCE_INTERVAL);
+  scheduleNextMaintenance();
 }

@@ -89,10 +89,15 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
+        // On macOS, show a notification. On Linux (VPS), this is a no-op.
         exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"' 2>/dev/null`,
         );
-        setTimeout(() => process.exit(1), 1000);
+        // Do NOT exit — exiting triggers systemd restart loop that kills the service
+        // after 5 cycles. Instead, stay running in degraded state so other channels
+        // (email, web, SMS) keep working and health monitor can alert.
+        this.connected = false;
+        logger.fatal('WhatsApp requires QR re-auth — SSH to VPS and run /setup. Service will stay running in degraded state.');
       }
 
       if (connection === 'close') {
@@ -372,6 +377,17 @@ export class WhatsAppChannel implements Channel {
   }
 
   /**
+   * Clear all timers so they can be re-created on reconnect.
+   * Without nulling, the truthy stale reference blocks startPresencePings().
+   */
+  private clearTimers(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = null;
+  }
+
+  /**
    * Start periodic presence pings to reduce 428 keepalive disconnects.
    */
   private startPresencePings(): void {
@@ -385,8 +401,7 @@ export class WhatsAppChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.clearTimers();
     this.sock?.end(undefined);
   }
 
@@ -420,16 +435,20 @@ export class WhatsAppChannel implements Channel {
 
   /**
    * Force a full reconnect — re-fetches WA version to heal protocol mismatches.
+   * Resets backoff and lets the connection.close handler reconnect (avoids
+   * two competing reconnection attempts from both the handler and this method).
    */
   async forceReconnect(): Promise<void> {
     logger.info('Force reconnect requested by health monitor');
-    try {
-      this.sock?.end(undefined);
-    } catch {
-      /* ignore */
-    }
     this.connected = false;
-    await this.connectInternal();
+    this.clearTimers();
+    this.reconnectAttempt = 0; // Reset backoff so reconnect fires in ~1s, not 5 min
+    try {
+      this.sock?.end(undefined); // Triggers connection.close → reconnectWithBackoff()
+    } catch {
+      // Socket already dead — reconnect manually since close event won't fire
+      this.reconnectWithBackoff();
+    }
   }
 
   /**

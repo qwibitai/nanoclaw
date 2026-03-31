@@ -1,0 +1,22 @@
+[Unit]
+Description=NanoClaw failure alert for %i
+
+[Service]
+Type=oneshot
+# Send alert when NanoClaw enters failed state.
+# Uses curl to hit a simple webhook. Replace WEBHOOK_URL with your actual endpoint
+# (e.g., a Slack webhook, ntfy.sh topic, or custom endpoint that forwards to WhatsApp).
+#
+# To use ntfy.sh (free, no setup):
+#   1. Pick a unique topic name (e.g., nanoclaw-alerts-xyz)
+#   2. Subscribe on your phone: https://ntfy.sh/nanoclaw-alerts-xyz
+#   3. Update the URL below
+#
+ExecStart=/bin/bash -c '\
+  TOPIC="${NANOCLAW_ALERT_TOPIC:-nanoclaw-alerts}"; \
+  MSG="NanoClaw service (%i) has FAILED on $(hostname) at $(date). SSH in to investigate: ssh nanoclaw@212.28.179.31"; \
+  curl -sf -d "$MSG" "https://ntfy.sh/$TOPIC" 2>/dev/null || \
+  logger -t nanoclaw-alert "Failed to send alert: $MSG"'
+
+# Don't let alert failure cascade
+SuccessExitStatus=0 1

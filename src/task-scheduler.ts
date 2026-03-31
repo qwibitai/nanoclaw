@@ -356,6 +356,11 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   schedulerRunning = true;
   logger.info('Scheduler loop started');
 
+  // Stagger delay between tasks to avoid concurrent CLI spawns overwhelming
+  // the system and racing on OAuth token refresh. 90s gives each task time
+  // to start and refresh the token before the next one fires.
+  const TASK_STAGGER_MS = 90_000;
+
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
@@ -363,6 +368,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
 
+      let staggerIndex = 0;
       for (const task of dueTasks) {
         // Re-check task status in case it was paused/cancelled
         const currentTask = getTaskById(task.id);
@@ -430,9 +436,22 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           updateTask(currentTask.id, { status: 'paused' });
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
-        );
+        // Stagger task execution so they don't all spawn CLI processes simultaneously
+        const delay = staggerIndex * TASK_STAGGER_MS;
+        staggerIndex++;
+        if (delay > 0) {
+          const taskRef = currentTask;
+          setTimeout(() => {
+            deps.queue.enqueueTask(taskRef.chat_jid, taskRef.id, () =>
+              runTask(taskRef, deps),
+            );
+          }, delay);
+          logger.debug({ taskId: currentTask.id, delayMs: delay }, 'Staggered task enqueue');
+        } else {
+          deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
+            runTask(currentTask, deps),
+          );
+        }
       }
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');

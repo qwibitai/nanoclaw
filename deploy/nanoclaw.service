@@ -2,9 +2,10 @@
 Description=NanoClaw AI Assistant
 After=network.target docker.service
 Requires=docker.service
-# Prevent infinite restart loops (max 5 restarts in 5 min, then stop)
+# Prevent infinite restart loops (max 5 restarts in 15 min, then stop)
 StartLimitBurst=5
-StartLimitIntervalSec=300
+StartLimitIntervalSec=900
+OnFailure=nanoclaw-alert@%n.service
 
 [Service]
 Type=notify
