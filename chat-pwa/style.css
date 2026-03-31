@@ -335,9 +335,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bot-create-messages .create-msg.system { align-self: center; color: var(--text-dim); font-size: 11px; font-style: italic; }
 .bot-create-messages .create-msg.thinking { align-self: flex-start; background: var(--surface2); color: var(--text-dim); }
 /* Suggestion chips */
-.create-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
-.create-chip { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 16px; font-size: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s; text-align: left; }
+.create-tag-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.create-tag-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); padding: 3px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.create-tag-btn:hover { border-color: var(--accent); }
+.create-tag-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.create-chips { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; max-height: 300px; overflow-y: auto; }
+.create-chip { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s; text-align: left; display: flex; flex-direction: column; gap: 2px; }
 .create-chip:hover { background: var(--border); border-color: var(--accent); }
+.create-chip .chip-label { font-weight: 600; }
+.create-chip .chip-desc { font-size: 11px; color: var(--text-dim); }
+.pipeline-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.pipeline-step { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 11px; white-space: nowrap; }
+.pipeline-arrow { color: var(--accent); font-size: 12px; margin: 0 2px; }
+.pipeline-preview { background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.pipeline-preview-label { font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600; }
+.pipeline-preview-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 .bot-create-input { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--border); }
 .bot-create-input input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }

@@ -1272,6 +1272,165 @@ You are a writing assistant. You help draft, edit, and improve written content.
 - Show changes clearly
 - Explain your reasoning for edits
 - Preserve the author's voice`,
+  tester: `# Test Writer
+
+You are a test engineering specialist. You write unit tests, integration tests, and end-to-end tests.
+
+## Focus Areas
+- Edge cases and boundary conditions
+- Mocking external dependencies
+- Test readability and maintainability
+- Coverage of happy paths and error paths
+
+## Communication
+- Use code blocks with proper test framework syntax
+- Explain what each test validates
+- Group tests logically by feature or function`,
+  security: `# Security Reviewer
+
+You are a security review specialist. You analyze code and configurations for vulnerabilities.
+
+## Focus Areas
+- OWASP Top 10 vulnerabilities
+- Authentication and authorization flaws
+- Input validation and sanitization
+- Dependency vulnerabilities
+- Secrets and credential exposure
+
+## Communication
+- Rate findings by severity (Critical/High/Medium/Low)
+- Provide specific remediation steps
+- Reference CWE IDs when applicable`,
+  architect: `# Software Architect
+
+You are a software architecture advisor. You evaluate designs and suggest improvements.
+
+## Focus Areas
+- System design and component boundaries
+- Scalability and performance trade-offs
+- Data modeling and storage choices
+- API design and integration patterns
+- Technical debt assessment
+
+## Communication
+- Use diagrams when helpful (mermaid/ASCII)
+- Present trade-offs, not just recommendations
+- Consider operational complexity`,
+  refactor: `# Refactoring Helper
+
+You are a code refactoring specialist. You identify improvement opportunities and guide transformations.
+
+## Focus Areas
+- Code duplication and DRY violations
+- Long methods and god classes
+- Tight coupling and poor abstractions
+- Naming and clarity improvements
+
+## Communication
+- Show before/after comparisons
+- Explain the pattern or principle behind each suggestion
+- Prioritize changes by impact`,
+  cicd: `# CI/CD Helper
+
+You are a DevOps and CI/CD specialist. You help with build pipelines, deployment, and infrastructure.
+
+## Focus Areas
+- GitHub Actions and CI workflows
+- Docker and container optimization
+- Deployment strategies (blue-green, canary)
+- Environment configuration and secrets management
+
+## Communication
+- Provide working YAML/config snippets
+- Explain each step's purpose
+- Flag security concerns in pipelines`,
+  docgen: `# Documentation Generator
+
+You are a technical documentation specialist. You generate clear, accurate docs from code.
+
+## Focus Areas
+- API documentation with examples
+- README files and getting-started guides
+- Inline code comments for complex logic
+- Architecture decision records (ADRs)
+
+## Communication
+- Use consistent formatting
+- Include code examples for every endpoint/function
+- Keep language concise and scannable`,
+  ux: `# UX Reviewer
+
+You are a UX review specialist. You evaluate interfaces for usability and accessibility.
+
+## Focus Areas
+- Accessibility (WCAG 2.1 compliance)
+- User flow and interaction design
+- Visual hierarchy and consistency
+- Mobile responsiveness
+- Error states and edge cases
+
+## Communication
+- Reference specific UI elements
+- Suggest concrete improvements
+- Prioritize by user impact`,
+  prd: `# PRD Writer
+
+You are a product requirements specialist. You help write clear, actionable product documents.
+
+## Focus Areas
+- User stories and acceptance criteria
+- Feature specifications
+- Success metrics and KPIs
+- Edge cases and constraints
+
+## Communication
+- Use structured templates
+- Be specific about scope (in/out)
+- Include examples and wireframe descriptions`,
+  servermon: `# Server Monitor
+
+You are a server monitoring assistant. You help track system health and diagnose issues.
+
+## Focus Areas
+- CPU, memory, and disk utilization
+- Process monitoring and alerting
+- Log analysis and pattern detection
+- Performance baselines and anomalies
+
+## Communication
+- Present data clearly with units
+- Highlight anomalies and thresholds
+- Suggest actionable next steps`,
+  docker: `# Docker Manager
+
+You are a Docker and container management specialist.
+
+## Focus Areas
+- Container lifecycle management
+- Docker Compose configuration
+- Image optimization and layer caching
+- Volume and network management
+- Security best practices (non-root, minimal images)
+
+## Communication
+- Provide working docker commands and compose snippets
+- Explain resource implications
+- Flag deprecated or insecure practices`,
+  network: `# Network Admin
+
+You are a network administration specialist for homelab and small-scale environments.
+
+## Focus Areas
+- DNS configuration and troubleshooting
+- Firewall rules (iptables, UFW, nftables)
+- VPN setup (WireGuard, Tailscale)
+- Reverse proxy configuration (nginx, Caddy)
+- Network diagnostics
+
+## Communication
+- Provide working config snippets
+- Explain security implications
+- Test commands to verify changes`,
 };
 
 async function openBotDetail(jid) {
@@ -1376,13 +1535,172 @@ $('#bot-delete').addEventListener('click', async () => {
 let createChatMessages = [];
 
 const BOT_SUGGESTIONS = [
-  { label: '🔍 Code Reviewer', desc: 'A bot that reviews code for bugs, security issues, and best practices' },
-  { label: '🔬 Researcher', desc: 'A bot that searches the web, gathers information, and writes research summaries' },
-  { label: '✍️ Writer', desc: 'A bot that helps draft, edit, and improve written content like emails and docs' },
-  { label: '🧪 Test Writer', desc: 'A bot that writes unit and integration tests for TypeScript/JavaScript projects' },
-  { label: '📋 Task Runner', desc: 'A bot that runs scheduled tasks, monitors systems, and sends reports' },
-  { label: '🏠 Home Assistant', desc: 'A bot that helps manage smart home devices, schedules, and automations' },
+  // Coding
+  { label: '🔍 Code Reviewer', desc: 'A bot that reviews code for bugs, security issues, and best practices', tag: 'coding' },
+  { label: '🧪 Test Writer', desc: 'A bot that writes unit and integration tests for TypeScript/JavaScript projects', tag: 'coding' },
+  { label: '🐛 Bug Triager', desc: 'A bot that analyzes bug reports, reproduces issues, and suggests fixes', tag: 'coding' },
+  { label: '📐 Architect', desc: 'A bot that reviews architecture decisions, suggests patterns, and evaluates trade-offs', tag: 'coding' },
+  { label: '🔒 Security Reviewer', desc: 'A bot that scans code for security vulnerabilities, OWASP top 10, and dependency risks', tag: 'coding' },
+  { label: '📝 Doc Generator', desc: 'A bot that generates API docs, README files, and inline documentation from code', tag: 'coding' },
+  { label: '♻️ Refactor Helper', desc: 'A bot that identifies code smells, duplication, and suggests refactoring strategies', tag: 'coding' },
+  { label: '🚀 CI/CD Helper', desc: 'A bot that helps write and debug GitHub Actions, Docker configs, and deployment scripts', tag: 'coding' },
+  // Product Development
+  { label: '🎨 UX Reviewer', desc: 'A bot that reviews UI/UX for accessibility, usability, and consistency', tag: 'product' },
+  { label: '📋 PRD Writer', desc: 'A bot that helps write product requirements documents and user stories', tag: 'product' },
+  { label: '🗺️ Roadmap Planner', desc: 'A bot that helps prioritize features, plan sprints, and manage backlogs', tag: 'product' },
+  { label: '📊 Analytics Helper', desc: 'A bot that helps define metrics, write tracking specs, and analyze data', tag: 'product' },
+  { label: '🧑‍🎨 Design System', desc: 'A bot that maintains design tokens, component specs, and style guidelines', tag: 'product' },
+  // Homelab
+  { label: '🏠 Home Assistant', desc: 'A bot that helps manage smart home devices, automations, and schedules', tag: 'homelab' },
+  { label: '🖥️ Server Monitor', desc: 'A bot that monitors server health, disk usage, CPU/memory, and alerts on issues', tag: 'homelab' },
+  { label: '🐳 Docker Manager', desc: 'A bot that helps manage Docker containers, compose files, and image updates', tag: 'homelab' },
+  { label: '🌐 Network Admin', desc: 'A bot that helps with DNS, firewall rules, VPN configs, and network troubleshooting', tag: 'homelab' },
+  { label: '💾 Backup Manager', desc: 'A bot that helps schedule and verify backups, check retention policies', tag: 'homelab' },
+  { label: '📡 IoT Hub', desc: 'A bot that manages IoT sensors, MQTT topics, and device telemetry', tag: 'homelab' },
+  // Research & Writing
+  { label: '🔬 Researcher', desc: 'A bot that searches the web, gathers information, and writes research summaries', tag: 'research' },
+  { label: '✍️ Writer', desc: 'A bot that helps draft, edit, and improve written content like emails and docs', tag: 'research' },
+  { label: '📰 News Digest', desc: 'A bot that monitors topics and delivers daily news summaries', tag: 'research' },
+  { label: '📚 Paper Reviewer', desc: 'A bot that reads academic papers, extracts key findings, and writes summaries', tag: 'research' },
+  { label: '🌍 Translator', desc: 'A bot that translates text between languages with context awareness', tag: 'research' },
+  // Operations & Automation
+  { label: '📋 Task Runner', desc: 'A bot that runs scheduled tasks, monitors systems, and sends reports', tag: 'ops' },
+  { label: '🔔 Alert Bot', desc: 'A bot that monitors conditions and sends notifications when thresholds are crossed', tag: 'ops' },
+  { label: '📈 Report Generator', desc: 'A bot that generates daily/weekly reports from data sources and APIs', tag: 'ops' },
+  { label: '🤝 Meeting Notes', desc: 'A bot that summarizes meeting transcripts, extracts action items, and tracks follow-ups', tag: 'ops' },
+  { label: '📬 Email Drafter', desc: 'A bot that drafts professional emails based on bullet points or context', tag: 'ops' },
+  // General
+  { label: '💡 General Assistant', desc: 'A general-purpose bot that answers questions and helps with any task', tag: 'general' },
+  { label: '🧮 Math/Data Helper', desc: 'A bot that helps with calculations, data analysis, and spreadsheet formulas', tag: 'general' },
+  { label: '🎓 Tutor', desc: 'A bot that explains concepts, creates quizzes, and helps with learning any topic', tag: 'general' },
 ];
+
+const BOT_TAG_LABELS = {
+  all: 'All',
+  coding: 'Coding',
+  product: 'Product',
+  homelab: 'Homelab',
+  research: 'Research',
+  ops: 'Ops',
+  general: 'General',
+};
+let activeBotTag = 'all';
+
+let pipelineQueue = []; // bots queued for sequential creation
+let pendingRouteSync = null; // room names to sync to server after bot creation
+
+function renderBotChips(container) {
+  container.innerHTML = '';
+  const filtered = activeBotTag === 'all'
+    ? BOT_SUGGESTIONS
+    : BOT_SUGGESTIONS.filter(s => s.tag === activeBotTag);
+  for (const s of filtered) {
+    const chip = document.createElement('button');
+    chip.className = 'create-chip';
+    chip.innerHTML = `<span class="chip-label">${esc(s.label)}</span><span class="chip-desc">${esc(s.desc)}</span>`;
+    chip.addEventListener('click', () => {
+      addBotToPipeline(s, container);
+    });
+    container.appendChild(chip);
+  }
+}
+
+function addBotToPipeline(suggestion, chipsContainer) {
+  pipelineQueue.push(suggestion);
+  renderPipelinePreview();
+
+  // Reset tag filter to show all options for next bot
+  activeBotTag = 'all';
+  const filterWrap = $('#bot-create-messages .create-tag-filters');
+  if (filterWrap) {
+    filterWrap.querySelectorAll('.create-tag-btn').forEach(b => b.classList.toggle('active', b.dataset.tag === 'all'));
+  }
+  renderBotChips(chipsContainer);
+}
+
+function renderPipelinePreview() {
+  let preview = $('#pipeline-preview');
+  if (!preview) {
+    preview = document.createElement('div');
+    preview.id = 'pipeline-preview';
+    preview.className = 'pipeline-preview';
+    // Insert before the tag filters
+    const filters = $('#bot-create-messages .create-tag-filters');
+    if (filters) {
+      filters.before(preview);
+    } else {
+      $('#bot-create-messages').prepend(preview);
+    }
+  }
+
+  const steps = pipelineQueue.map((s, i) => `<span class="pipeline-step">${esc(s.label)}</span>`).join('<span class="pipeline-arrow">→</span>');
+  preview.innerHTML = `
+    <div class="pipeline-preview-label">Pipeline (${pipelineQueue.length} bot${pipelineQueue.length > 1 ? 's' : ''}):</div>
+    <div class="pipeline-flow">${steps}</div>
+    <div class="pipeline-preview-actions">
+      <button id="pipeline-create-btn" class="btn-save">Create${pipelineQueue.length > 1 ? ' Pipeline' : ''}</button>
+      <button id="pipeline-undo-btn" class="btn-delete" style="font-size:11px;padding:4px 10px">Undo</button>
+    </div>
+  `;
+
+  preview.querySelector('#pipeline-create-btn').addEventListener('click', submitPipeline);
+  preview.querySelector('#pipeline-undo-btn').addEventListener('click', () => {
+    pipelineQueue.pop();
+    if (pipelineQueue.length === 0) {
+      preview.remove();
+    } else {
+      renderPipelinePreview();
+    }
+  });
+}
+
+function submitPipeline() {
+  // Remove UI elements
+  $('#bot-create-messages .create-tag-filters')?.remove();
+  $('#bot-create-messages .create-chips')?.remove();
+  $('#pipeline-preview')?.remove();
+
+  const queue = [...pipelineQueue];
+  const labels = queue.map(s => s.label);
+
+  let prompt;
+  if (queue.length === 1) {
+    prompt = queue[0].desc;
+  } else {
+    // Generate kebab-case room names for the prompt
+    const roomNames = queue.map(s => {
+      const name = s.label.replace(/^[^\w]+/, '').trim().toLowerCase().replace(/\s+/g, '-');
+      return name;
+    });
+
+    prompt = `Create a pipeline of ${queue.length} bots that work in sequence:\n\n` +
+      queue.map((s, i) =>
+        `${i + 1}. ${s.label} (room: "${roomNames[i]}"): ${s.desc}`
+      ).join('\n') +
+      `\n\nEach bot should forward its output to the next bot in the sequence. ` +
+      `Create them as separate bots with rooms named exactly as specified above. ` +
+      `The last bot outputs the final result to the user.`;
+
+    // Save pipeline routes locally first (rooms don't exist yet on server)
+    if (roomNames.length > 1) {
+      const localRoutes = getLocalRoutes();
+      for (let i = 0; i < roomNames.length - 1; i++) {
+        if (!localRoutes[roomNames[i]]) localRoutes[roomNames[i]] = [];
+        if (!localRoutes[roomNames[i]].includes(roomNames[i + 1])) {
+          localRoutes[roomNames[i]].push(roomNames[i + 1]);
+        }
+      }
+      savePipelineRoutes(localRoutes);
+      // Deferred: sync to server after bots are created
+      pendingRouteSync = roomNames;
+    }
+  }
+
+  appendCreateMsg('user', queue.length > 1 ? `Create pipeline: ${labels.join(' → ')}` : queue[0].desc);
+  pipelineQueue = [];
+  $('#bot-create-input').value = prompt;
+  $('#bot-create-form').requestSubmit();
+}
 
 $('#create-bot-btn').addEventListener('click', () => {
   selectedBotJid = null;
@@ -1396,22 +1714,27 @@ $('#create-bot-btn').addEventListener('click', () => {
 
   appendCreateMsg('system', 'What kind of bot would you like to create?');
 
-  // Render suggestion chips
+  // Render tag filters + suggestion chips
+  activeBotTag = 'all';
+  const filterWrap = document.createElement('div');
+  filterWrap.className = 'create-tag-filters';
+  for (const [tag, label] of Object.entries(BOT_TAG_LABELS)) {
+    const btn = document.createElement('button');
+    btn.className = 'create-tag-btn' + (tag === 'all' ? ' active' : '');
+    btn.dataset.tag = tag;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      activeBotTag = tag;
+      filterWrap.querySelectorAll('.create-tag-btn').forEach(b => b.classList.toggle('active', b.dataset.tag === tag));
+      renderBotChips(chipsWrap);
+    });
+    filterWrap.appendChild(btn);
+  }
+  $('#bot-create-messages').appendChild(filterWrap);
+
   const chipsWrap = document.createElement('div');
   chipsWrap.className = 'create-chips';
-  for (const s of BOT_SUGGESTIONS) {
-    const chip = document.createElement('button');
-    chip.className = 'create-chip';
-    chip.textContent = s.label;
-    chip.addEventListener('click', () => {
-      // Remove chips
-      chipsWrap.remove();
-      // Submit the description
-      $('#bot-create-input').value = s.desc;
-      $('#bot-create-form').requestSubmit();
-    });
-    chipsWrap.appendChild(chip);
-  }
+  renderBotChips(chipsWrap);
   $('#bot-create-messages').appendChild(chipsWrap);
 
   $('#bot-detail').hidden = false;
@@ -1470,8 +1793,20 @@ $('#bot-create-form').addEventListener('submit', async (e) => {
       await fetchBots();
       if (allBots.length > oldCount) {
         clearInterval(pollInterval);
+        // Sync pending pipeline routes to server now that bots exist
+        if (pendingRouteSync && pendingRouteSync.length > 1) {
+          for (let i = 0; i < pendingRouteSync.length - 1; i++) {
+            authFetch('/api/routes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ source: pendingRouteSync[i], targets: [pendingRouteSync[i + 1]] }),
+            }).catch(() => {});
+          }
+          pendingRouteSync = null;
+        }
         // Refresh rooms
         try {
+          await fetchRoutes();
           const roomsRes = await authFetch('/api/rooms');
           if (roomsRes.ok) {
             lastRoomsList = await roomsRes.json();

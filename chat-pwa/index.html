@@ -101,10 +101,31 @@
                   <span class="form-label">Instructions</span>
                   <select id="bot-template" class="template-select" aria-label="Choose instruction template">
                     <option value="">Template...</option>
-                    <option value="general">General Assistant</option>
-                    <option value="coder">Code Reviewer</option>
-                    <option value="researcher">Researcher</option>
-                    <option value="writer">Writer</option>
+                    <optgroup label="Coding">
+                      <option value="coder">Code Reviewer</option>
+                      <option value="tester">Test Writer</option>
+                      <option value="security">Security Reviewer</option>
+                      <option value="architect">Architect</option>
+                      <option value="refactor">Refactor Helper</option>
+                      <option value="cicd">CI/CD Helper</option>
+                      <option value="docgen">Doc Generator</option>
+                    </optgroup>
+                    <optgroup label="Product">
+                      <option value="ux">UX Reviewer</option>
+                      <option value="prd">PRD Writer</option>
+                    </optgroup>
+                    <optgroup label="Homelab">
+                      <option value="servermon">Server Monitor</option>
+                      <option value="docker">Docker Manager</option>
+                      <option value="network">Network Admin</option>
+                    </optgroup>
+                    <optgroup label="Research">
+                      <option value="researcher">Researcher</option>
+                      <option value="writer">Writer</option>
+                    </optgroup>
+                    <optgroup label="General">
+                      <option value="general">General Assistant</option>
+                    </optgroup>
                   </select>
                 </div>
                 <textarea id="bot-instructions" rows="12" placeholder="CLAUDE.md instructions..."></textarea>
