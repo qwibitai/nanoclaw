@@ -28,7 +28,9 @@ import { ChannelOpts, registerChannel } from './registry.js';
 const MAX_COMMENT_LENGTH = 4000;
 
 // Parse a GitHub JID into its components
-function parseGithubJid(jid: string): { owner: string; repo: string; number: number } | null {
+function parseGithubJid(
+  jid: string,
+): { owner: string; repo: string; number: number } | null {
   const match = jid.match(/^github:([^/]+)\/([^#]+)#(\d+)$/);
   if (!match) return null;
   return { owner: match[1], repo: match[2], number: parseInt(match[3], 10) };
@@ -53,14 +55,14 @@ function chunkText(text: string, maxLen: number): string[] {
   return chunks;
 }
 
-interface GitHubChannelOpts extends ChannelOpts {
+export interface GitHubChannelOpts extends ChannelOpts {
   token: string;
   webhookSecret: string;
   botUsername: string;
   port: number;
 }
 
-class GitHubChannel implements Channel {
+export class GitHubChannel implements Channel {
   name = 'github';
   private connected = false;
   private server: http.Server | null = null;
@@ -128,12 +130,17 @@ class GitHubChannel implements Channel {
 
   // ---- Webhook handling ----
 
-  private handleWebhookRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleWebhookRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
-      const signature = req.headers['x-hub-signature-256'] as string | undefined;
+      const signature = req.headers['x-hub-signature-256'] as
+        | string
+        | undefined;
       const event = req.headers['x-github-event'] as string | undefined;
 
       if (!this.verifySignature(body, signature)) {
@@ -155,13 +162,19 @@ class GitHubChannel implements Channel {
     });
   }
 
-  private verifySignature(body: Buffer, signature: string | undefined): boolean {
+  private verifySignature(
+    body: Buffer,
+    signature: string | undefined,
+  ): boolean {
     if (!signature) return false;
     const hmac = crypto.createHmac('sha256', this.opts.webhookSecret);
     hmac.update(body);
     const expected = `sha256=${hmac.digest('hex')}`;
     try {
-      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+      return crypto.timingSafeEqual(
+        Buffer.from(expected),
+        Buffer.from(signature),
+      );
     } catch {
       return false;
     }
@@ -176,15 +189,17 @@ class GitHubChannel implements Channel {
       this.handlePrReviewRequested(payload);
     } else if (event === 'issue_comment' && action === 'created') {
       this.handleIssueComment(payload);
-    } else if (event === 'pull_request_review_comment' && action === 'created') {
+    } else if (
+      event === 'pull_request_review_comment' &&
+      action === 'created'
+    ) {
       this.handlePrReviewComment(payload);
     }
   }
 
   private handleIssueAssigned(payload: Record<string, unknown>): void {
-    const assignee = (payload.assignee as Record<string, unknown> | undefined)?.login as
-      | string
-      | undefined;
+    const assignee = (payload.assignee as Record<string, unknown> | undefined)
+      ?.login as string | undefined;
     if (assignee !== this.opts.botUsername) return;
 
     const issue = payload.issue as Record<string, unknown>;
@@ -193,12 +208,24 @@ class GitHubChannel implements Channel {
     const jid = buildJid(repo.full_name as string, number);
     const content = `[issue assigned] ${issue.title as string}\n\n${(issue.body as string) ?? ''}`;
 
-    this.deliver(jid, `github-issue-assigned-${issue.id as number}`, assignee, content, repo);
+    this.deliver(
+      jid,
+      `github-issue-assigned-${issue.id as number}`,
+      assignee,
+      content,
+      repo,
+    );
   }
 
   private handlePrReviewRequested(payload: Record<string, unknown>): void {
-    const requestedReviewer = payload.requested_reviewer as Record<string, unknown> | undefined;
-    if (!requestedReviewer || (requestedReviewer.login as string) !== this.opts.botUsername) return;
+    const requestedReviewer = payload.requested_reviewer as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      !requestedReviewer ||
+      (requestedReviewer.login as string) !== this.opts.botUsername
+    )
+      return;
 
     const pr = payload.pull_request as Record<string, unknown>;
     const repo = payload.repository as Record<string, unknown>;
