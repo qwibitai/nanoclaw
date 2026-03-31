@@ -110,6 +110,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #room-list li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 #room-list li.main-divider { margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 #room-list li .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; margin-left: 6px; flex-shrink: 0; vertical-align: middle; }
+#room-list li.dragging { opacity: 0.4; }
+#room-list li.drag-over { border-top: 2px solid var(--accent); }
+#room-list li.pipeline-child { font-size: 12px; }
+.room-pipe-arrow { color: var(--accent); margin-right: 4px; font-size: 11px; flex-shrink: 0; }
+.fan-in-badge { font-size: 10px; color: var(--accent); background: var(--surface2); border-radius: 3px; padding: 1px 5px; margin-left: 4px; flex-shrink: 0; }
 
 /* Bot list */
 #bot-list { list-style: none; padding: 8px 0; flex: 1; overflow-y: auto; }

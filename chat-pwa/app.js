@@ -229,11 +229,15 @@ function connect() {
         return;
       case 'rooms':
         lastRoomsList = msg.rooms;
-        // Ensure bots are loaded so we can sort rooms by main status
+        // Load bots and routes, then render
         if (allBots.length === 0) {
-          authFetch('/api/bots').then(r => r.json()).then(b => { allBots = b; renderRooms(msg.rooms); }).catch(() => {});
+          Promise.all([
+            authFetch('/api/bots').then(r => r.json()).then(b => { allBots = b; }),
+            fetchRoutes(),
+          ]).then(() => renderRooms(msg.rooms)).catch(() => renderRooms(msg.rooms));
+        } else {
+          fetchRoutes().then(() => renderRooms(msg.rooms)).catch(() => renderRooms(msg.rooms));
         }
-        renderRooms(msg.rooms);
         if (currentRoom) {
           // Rejoin after reconnect
           ws.send(JSON.stringify({ type: 'join', room_id: currentRoom }));
@@ -309,30 +313,148 @@ function connect() {
 }
 
 // ── Rooms ─────────────────────────────────────────────────────────────────
+// ── Room ordering ─────────────────────────────────────────────────────────
+function getSavedRoomOrder() {
+  try { return JSON.parse(localStorage.getItem('room-order') || '[]'); } catch { return []; }
+}
+function saveRoomOrder(ids) {
+  localStorage.setItem('room-order', JSON.stringify(ids));
+}
+
+let dragSrcLi = null;
+
+// ── Pipeline data ─────────────────────────────────────────────────────────
+// Format: { "room-id": ["target-room-1", "target-room-2"] }
+let serverRoutes = {}; // fetched from /api/routes
+
+function getLocalRoutes() {
+  try { return JSON.parse(localStorage.getItem('nanoclaw-routes') || '{}'); } catch { return {}; }
+}
+function savePipelineRoutes(routes) {
+  localStorage.setItem('nanoclaw-routes', JSON.stringify(routes));
+}
+function getPipelineRoutes() {
+  // Merge server routes with local overrides
+  const local = getLocalRoutes();
+  const merged = { ...serverRoutes };
+  for (const [src, dests] of Object.entries(local)) {
+    if (!merged[src]) merged[src] = [];
+    for (const d of dests) {
+      if (!merged[src].includes(d)) merged[src].push(d);
+    }
+  }
+  return merged;
+}
+
+async function fetchRoutes() {
+  try {
+    const res = await authFetch('/api/routes');
+    if (res.ok) serverRoutes = await res.json();
+  } catch { /* ignore */ }
+}
+
+// Build pipeline tree: find root bots (no one routes TO them) and their children
+function buildPipelineTree(rooms) {
+  const routes = getPipelineRoutes();
+  const targets = new Set(); // rooms that are targets of other rooms
+  for (const dests of Object.values(routes)) {
+    for (const d of dests) targets.add(d);
+  }
+  // Count incoming connections per room
+  const incomingCount = {};
+  for (const dests of Object.values(routes)) {
+    for (const d of dests) incomingCount[d] = (incomingCount[d] || 0) + 1;
+  }
+  return { routes, targets, incomingCount };
+}
+
 function renderRooms(rooms) {
   const list = $('#room-list');
   list.innerHTML = '';
-  // Sort: main rooms first (cross-reference with bots), then alphabetical
-  const mainRoomIds = new Set(allBots.filter(b => b.isMain && b.jid.startsWith('chat:')).map(b => b.jid.replace(/^chat:/, '')));
-  const sorted = [...rooms].sort((a, b) => {
-    const aMain = mainRoomIds.has(a.id);
-    const bMain = mainRoomIds.has(b.id);
-    if (aMain !== bMain) return aMain ? -1 : 1;
-    return a.name.localeCompare(b.name);
+  // Build lookup maps from bots
+  const botByRoomId = new Map();
+  for (const b of allBots) {
+    if (b.jid.startsWith('chat:')) {
+      botByRoomId.set(b.jid.replace(/^chat:/, ''), b);
+    }
+  }
+
+  const { routes, targets, incomingCount } = buildPipelineTree(rooms);
+
+  // Apply saved order, falling back to default sort for new rooms
+  const savedOrder = getSavedRoomOrder();
+  const orderMap = new Map(savedOrder.map((id, i) => [id, i]));
+
+  // Main rooms always pinned at top
+  const mainRooms = rooms.filter(r => botByRoomId.get(r.id)?.isMain);
+  // Non-main rooms, excluding pipeline targets (they render indented under their parent)
+  const nonMain = rooms.filter(r => !botByRoomId.get(r.id)?.isMain && !targets.has(r.id));
+
+  nonMain.sort((a, b) => {
+    const aIdx = orderMap.get(a.id);
+    const bIdx = orderMap.get(b.id);
+    if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
+    if (aIdx !== undefined) return -1;
+    if (bIdx !== undefined) return 1;
+    // Pipeline roots (not a target) before targets
+    const aIsTarget = targets.has(a.id) ? 1 : 0;
+    const bIsTarget = targets.has(b.id) ? 1 : 0;
+    if (aIsTarget !== bIsTarget) return aIsTarget - bIsTarget;
+    const ab = botByRoomId.get(a.id);
+    const bb = botByRoomId.get(b.id);
+    const aRespondsAll = ab && !ab.requiresTrigger ? 1 : 0;
+    const bRespondsAll = bb && !bb.requiresTrigger ? 1 : 0;
+    if (aRespondsAll !== bRespondsAll) return bRespondsAll - aRespondsAll;
+    const aHasBot = ab ? 1 : 0;
+    const bHasBot = bb ? 1 : 0;
+    if (aHasBot !== bHasBot) return bHasBot - aHasBot;
+    return a.id.localeCompare(b.id);
   });
+
+  const sorted = [...mainRooms, ...nonMain];
+  const mainRoomIds = new Set(allBots.filter(b => b.isMain && b.jid.startsWith('chat:')).map(b => b.jid.replace(/^chat:/, '')));
   const lastMainIdx = sorted.reduce((acc, r, i) => mainRoomIds.has(r.id) ? i : acc, -1);
-  sorted.forEach((room, i) => {
+
+  // Track which rooms have been rendered (to avoid duplicates for pipeline children)
+  const rendered = new Set();
+
+  function addRoomLi(room, indent, i) {
+    if (rendered.has(room.id)) return;
+    rendered.add(room.id);
+
     const li = document.createElement('li');
     const color = roomColor(room.id);
     li.dataset.roomId = room.id;
     li.style.borderLeftColor = color;
     li.style.display = 'flex';
     li.style.alignItems = 'center';
+    if (indent > 0) li.classList.add('pipeline-child');
     if (i === lastMainIdx && lastMainIdx < sorted.length - 1) li.classList.add('main-divider');
+
+    // Pipeline arrow for indented items
+    if (indent > 0) {
+      const arrow = document.createElement('span');
+      arrow.className = 'room-pipe-arrow';
+      arrow.textContent = '→';
+      arrow.style.color = color;
+      li.appendChild(arrow);
+    }
+
     const text = document.createElement('span');
     text.textContent = `#${room.id}`;
     text.style.flex = '1';
     li.appendChild(text);
+
+    // Fan-in badge
+    const inc = incomingCount[room.id] || 0;
+    if (inc > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'fan-in-badge';
+      badge.textContent = `←${inc}`;
+      badge.title = 'Receives from multiple bots';
+      li.appendChild(badge);
+    }
+
     if (unreadRooms.has(room.id)) {
       const dot = document.createElement('span');
       dot.className = 'unread-dot';
@@ -342,12 +464,65 @@ function renderRooms(rooms) {
     if (room.id === currentRoom) li.classList.add('active');
     li.setAttribute('role', 'button');
     li.setAttribute('tabindex', '0');
-    li.addEventListener('click', () => joinRoom(room.id, room.name));
+
+    const isMainRoom = mainRoomIds.has(room.id);
+    const isPipelineChild = indent > 0;
+    if (!isMainRoom && !isPipelineChild) li.setAttribute('draggable', 'true');
+
+    // Drag events (non-main, non-pipeline-child rooms only)
+    li.addEventListener('dragstart', (e) => {
+      if (isMainRoom || isPipelineChild) { e.preventDefault(); return; }
+      dragSrcLi = li;
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', room.id);
+    });
+    li.addEventListener('dragend', () => {
+      li.classList.remove('dragging');
+      dragSrcLi = null;
+      list.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+    li.addEventListener('dragover', (e) => {
+      if (isMainRoom || isPipelineChild) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragSrcLi && dragSrcLi !== li) li.classList.add('drag-over');
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drag-over'));
+    li.addEventListener('drop', (e) => {
+      e.preventDefault();
+      li.classList.remove('drag-over');
+      if (!dragSrcLi || dragSrcLi === li) return;
+      // Calculate new order from current DOM, then swap
+      const items = [...list.children].map(el => el.dataset.roomId);
+      const fromId = dragSrcLi.dataset.roomId;
+      const toId = li.dataset.roomId;
+      const fromIdx = items.indexOf(fromId);
+      const toIdx = items.indexOf(toId);
+      items.splice(fromIdx, 1);
+      items.splice(toIdx, 0, fromId);
+      saveRoomOrder(items.filter(Boolean));
+      // Re-render to keep pipeline children with parents
+      renderRooms(lastRoomsList);
+    });
+
+    li.addEventListener('click', () => {
+      joinRoom(room.id, room.name);
+    });
     li.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); joinRoom(room.id, room.name); }
     });
     list.appendChild(li);
-  });
+
+    // Render pipeline children (rooms this bot routes to)
+    const children = routes[room.id] || [];
+    for (const childId of children) {
+      const childRoom = rooms.find(r => r.id === childId);
+      if (childRoom) addRoomLi(childRoom, indent + 1, -1);
+    }
+  }
+
+  sorted.forEach((room, i) => addRoomLi(room, 0, i));
 }
 
 let lastRoomsList = [];
