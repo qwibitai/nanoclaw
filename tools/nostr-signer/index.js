@@ -16,6 +16,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { decode as decodeNsec } from 'nostr-tools/nip19';
 import { unwrapEvent as nip17Unwrap, wrapManyEvents as nip17WrapMany } from 'nostr-tools/nip17';
 import * as nip44 from 'nostr-tools/nip44';
+import * as nip04 from 'nostr-tools/nip04';
 
 // --- Load key from kernel keyring ---
 let secretKeyHex;
@@ -43,7 +44,7 @@ const SOCKET_PATH = process.env.NOSTR_SIGNER_SOCKET
 if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
 
 // --- Handle requests ---
-function handleRequest(data) {
+async function handleRequest(data) {
   try {
     const req = JSON.parse(data);
 
@@ -117,6 +118,34 @@ function handleRequest(data) {
       }
     }
 
+    if (req.method === 'nip04_encrypt') {
+      const p = req.params || {};
+      if (!p.plaintext && !p.message) return JSON.stringify({ error: 'Missing required field: plaintext' });
+      if (!p.recipientPubkey && !p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: recipientPubkey' });
+      try {
+        const text = p.plaintext || p.message;
+        const peer = p.recipientPubkey || p.peer_pubkey;
+        const ciphertext = await nip04.encrypt(secretKeyHex, peer, text);
+        return JSON.stringify({ ciphertext, error: null });
+      } catch (err) {
+        return JSON.stringify({ error: `nip04_encrypt failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip04_decrypt') {
+      const p = req.params || {};
+      if (!p.ciphertext && !p.content) return JSON.stringify({ error: 'Missing required field: ciphertext' });
+      if (!p.senderPubkey && !p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: senderPubkey' });
+      try {
+        const cipher = p.ciphertext || p.content;
+        const peer = p.senderPubkey || p.peer_pubkey;
+        const plaintext = await nip04.decrypt(secretKeyHex, peer, cipher);
+        return JSON.stringify({ plaintext, error: null });
+      } catch (err) {
+        return JSON.stringify({ error: `nip04_decrypt failed: ${err.message}` });
+      }
+    }
+
     return JSON.stringify({ error: `Unknown method: ${req.method}` });
   } catch (err) {
     return JSON.stringify({ error: `Parse error: ${err.message}` });
@@ -126,10 +155,20 @@ function handleRequest(data) {
 // --- Start server ---
 const server = createServer((conn) => {
   let buf = '';
-  conn.on('data', (chunk) => { buf += chunk; });
-  conn.on('end', () => {
-    const response = handleRequest(buf);
-    conn.end(response + '\n');
+  conn.setEncoding('utf8');
+  conn.on('data', async (chunk) => {
+    buf += chunk;
+    // Process when we get a complete JSON object (ends with } or newline)
+    if (buf.trimEnd().endsWith('}')) {
+      const input = buf;
+      buf = '';
+      try {
+        const response = await handleRequest(input);
+        conn.end(response + '\n');
+      } catch (err) {
+        conn.end(JSON.stringify({ error: err.message }) + '\n');
+      }
+    }
   });
 });
 

@@ -5,6 +5,8 @@
  * External MCP clients pay a Lightning invoice before each tool call.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { connect } from 'net';
 import { execSync } from 'child_process';
@@ -16,6 +18,118 @@ import { z } from 'zod';
 import { logger } from './logger.js';
 import { NOSTR_SIGNER_SOCKET } from './config.js';
 import { readEnvFile } from './env.js';
+
+// --- Free Tier (200 calls/month for NIP-05 registrants) ---
+
+const FREE_TIER_LIMIT = 200;
+
+// Load Cloudflare KV config for NIP-05 verification and usage tracking
+function loadCfConfig(): {
+  accountId: string;
+  kvNamespaceId: string;
+  apiToken: string;
+} | null {
+  try {
+    const cfPath = path.join(
+      process.env.HOME || '/home/node',
+      'NanoClaw',
+      'groups',
+      'main',
+      'config',
+      'cloudflare.json',
+    );
+    if (!fs.existsSync(cfPath)) return null;
+    const cfg = JSON.parse(fs.readFileSync(cfPath, 'utf-8'));
+    if (cfg.account_id && cfg.kv_namespace_id && cfg.api_token) {
+      return {
+        accountId: cfg.account_id,
+        kvNamespaceId: cfg.kv_namespace_id,
+        apiToken: cfg.api_token,
+      };
+    }
+  } catch {
+    /* config not available */
+  }
+  return null;
+}
+
+const cfConfig = loadCfConfig();
+
+async function isNip05Registrant(name: string): Promise<boolean> {
+  if (!cfConfig) return false;
+  const cleanName = name.split('@')[0].toLowerCase();
+  const url = `https://api.cloudflare.com/client/v4/accounts/${cfConfig.accountId}/storage/kv/namespaces/${cfConfig.kvNamespaceId}/values/${cleanName}`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${cfConfig.apiToken}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function usageKey(name: string): string {
+  const cleanName = name.split('@')[0].toLowerCase();
+  const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+  return `usage:${cleanName}:${month}`;
+}
+
+async function getUsageCount(name: string): Promise<number> {
+  if (!cfConfig) return FREE_TIER_LIMIT; // fail closed
+  const key = usageKey(name);
+  const url = `https://api.cloudflare.com/client/v4/accounts/${cfConfig.accountId}/storage/kv/namespaces/${cfConfig.kvNamespaceId}/values/${key}`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${cfConfig.apiToken}` },
+    });
+    if (!res.ok) return 0; // no usage record yet
+    const data = JSON.parse(await res.text());
+    return data.count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function incrementUsage(name: string): Promise<void> {
+  if (!cfConfig) return;
+  const key = usageKey(name);
+  const current = await getUsageCount(name);
+  const url = `https://api.cloudflare.com/client/v4/accounts/${cfConfig.accountId}/storage/kv/namespaces/${cfConfig.kvNamespaceId}/values/${key}`;
+  try {
+    await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${cfConfig.apiToken}`,
+        'Content-Type': 'text/plain',
+      },
+      body: JSON.stringify({
+        count: current + 1,
+        last_call: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    /* best effort */
+  }
+}
+
+/**
+ * Check if a tool call is covered by the free tier.
+ * Returns true if the caller is a verified NIP-05 registrant with calls remaining.
+ */
+async function isFreeTierCall(nip05?: string): Promise<boolean> {
+  if (!nip05 || !cfConfig) return false;
+  const isRegistrant = await isNip05Registrant(nip05);
+  if (!isRegistrant) return false;
+  const count = await getUsageCount(nip05);
+  if (count >= FREE_TIER_LIMIT) return false;
+  await incrementUsage(nip05);
+  logger.info(
+    { nip05, count: count + 1, limit: FREE_TIER_LIMIT },
+    'Free tier call',
+  );
+  return true;
+}
 
 // --- Config ---
 
@@ -87,7 +201,6 @@ const TOOL_PRICE_VERIFY_RECEIPT = parseInt(
   10,
 );
 
-import path from 'path';
 import { fileURLToPath } from 'url';
 // Resolve project root from compiled dist/ location
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -337,6 +450,12 @@ function registerTools(server: McpServer): void {
       content: z.string().describe('Event content'),
       tags: z.array(z.array(z.string())).optional().describe('Event tags'),
       created_at: z.number().optional().describe('Unix timestamp'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
@@ -345,12 +464,13 @@ function registerTools(server: McpServer): void {
         ),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(TOOL_PRICE_SIGN, 'nostr_sign_event');
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_SIGN);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -395,6 +515,12 @@ function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe('Relay URLs (defaults to popular relays)'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
@@ -403,7 +529,8 @@ function registerTools(server: McpServer): void {
         ),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(
           TOOL_PRICE_PUBLISH,
           'nostr_publish_event',
@@ -411,7 +538,7 @@ function registerTools(server: McpServer): void {
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_PUBLISH);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -465,18 +592,25 @@ function registerTools(server: McpServer): void {
     {
       content: z.string().describe('Note content'),
       tags: z.array(z.array(z.string())).optional().describe('Event tags'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(TOOL_PRICE_POST_NOTE, 'nostr_post_note');
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_POST_NOTE);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -518,13 +652,20 @@ function registerTools(server: McpServer): void {
     `Fetch a Nostr profile (kind 0) by npub or hex pubkey. Price: ${TOOL_PRICE_FETCH_PROFILE} sat.`,
     {
       pubkey: z.string().describe('Nostr pubkey (npub1... or 64-char hex)'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(
           TOOL_PRICE_FETCH_PROFILE,
           'nostr_fetch_profile',
@@ -532,7 +673,7 @@ function registerTools(server: McpServer): void {
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_FETCH_PROFILE);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -579,18 +720,25 @@ function registerTools(server: McpServer): void {
         .max(5000)
         .describe('Zap amount in sats (max 5000)'),
       comment: z.string().optional().describe('Zap comment'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(TOOL_PRICE_ZAP, 'nostr_zap');
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_ZAP);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -637,18 +785,25 @@ function registerTools(server: McpServer): void {
         .max(20)
         .optional()
         .describe('Max results (default 10, max 20)'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(TOOL_PRICE_GET_NOTES, 'nostr_get_notes');
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_GET_NOTES);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
       if (!args.author && !args.hashtag)
         return errorResponse('Provide author or hashtag (or both)');
@@ -689,13 +844,20 @@ function registerTools(server: McpServer): void {
     {
       amount_sats: z.number().min(1).describe('Invoice amount in sats'),
       description: z.string().optional().describe('Invoice description'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(
           TOOL_PRICE_CREATE_INVOICE,
           'lightning_create_invoice',
@@ -703,7 +865,7 @@ function registerTools(server: McpServer): void {
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_CREATE_INVOICE);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -754,13 +916,20 @@ function registerTools(server: McpServer): void {
         .record(z.string(), z.string())
         .optional()
         .describe('Optional key-value pairs for additional context'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(
           TOOL_PRICE_ACTION_RECEIPT,
           'create_action_receipt',
@@ -768,7 +937,7 @@ function registerTools(server: McpServer): void {
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_ACTION_RECEIPT);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
@@ -839,13 +1008,20 @@ function registerTools(server: McpServer): void {
       event_id: z
         .string()
         .describe('Nostr event ID of the action receipt to verify'),
+      nip05: z
+        .string()
+        .optional()
+        .describe(
+          'Your name@jorgenclaw.ai NIP-05 identity — if registered, first 200 calls/month are free',
+        ),
       payment_preimage: z
         .string()
         .optional()
         .describe('Lightning payment preimage (64 hex chars)'),
     },
     async (args) => {
-      if (!args.payment_preimage) {
+      const free = await isFreeTierCall(args.nip05);
+      if (!free && !args.payment_preimage) {
         const bolt11 = generateInvoice(
           TOOL_PRICE_VERIFY_RECEIPT,
           'verify_receipt',
@@ -853,7 +1029,7 @@ function registerTools(server: McpServer): void {
         if (!bolt11) return errorResponse('Failed to generate invoice');
         return paymentRequiredResponse(bolt11, TOOL_PRICE_VERIFY_RECEIPT);
       }
-      if (!verifyPreimage(args.payment_preimage))
+      if (!free && !verifyPreimage(args.payment_preimage!))
         return errorResponse('Invalid payment preimage');
 
       try {
