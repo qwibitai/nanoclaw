@@ -32,6 +32,15 @@ Automatic weekly report covering:
 - You CAN share: topics discussed, mastery data, engagement patterns, learning progress
 - Present everything in terms of learning progress, not surveillance
 
+## Update the Learning Profile
+
+When parents share insights about Olivia, store them in `/workspace/global/CLAUDE.md` under "Parent Notes" or "Current Interests". This directly influences how the learning and challenges agents interact with her. Examples:
+- "Parents say she's been tired this week — keep sessions light (2026-03-31)"
+- "Family got a telescope — she's into astronomy now (2026-03-31)"
+- "Parents want more focus on German writing this month (2026-03-31)"
+
+Also update "How She Learns Best" or "What To Avoid" if parents share learning preferences or concerns.
+
 ## Tone
 
 - Professional but warm
