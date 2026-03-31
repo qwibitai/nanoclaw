@@ -62,6 +62,44 @@ export function computeNextRun(task: ScheduledTask): string | null {
   return null;
 }
 
+/**
+ * Compute the initial next_run for a newly created or updated task.
+ * Returns { nextRun } on success or { error } on validation failure.
+ */
+export function computeInitialNextRun(
+  scheduleType: string,
+  scheduleValue: string,
+): { nextRun: string } | { error: string } {
+  if (scheduleType === 'cron') {
+    try {
+      const interval = CronExpressionParser.parse(scheduleValue, {
+        tz: TIMEZONE,
+      });
+      return { nextRun: interval.next().toISOString()! };
+    } catch {
+      return { error: `Invalid cron expression: ${scheduleValue}` };
+    }
+  }
+
+  if (scheduleType === 'interval') {
+    const ms = parseInt(scheduleValue, 10);
+    if (isNaN(ms) || ms <= 0) {
+      return { error: `Invalid interval: ${scheduleValue}` };
+    }
+    return { nextRun: new Date(Date.now() + ms).toISOString() };
+  }
+
+  if (scheduleType === 'once') {
+    const date = new Date(scheduleValue);
+    if (isNaN(date.getTime())) {
+      return { error: `Invalid timestamp: ${scheduleValue}` };
+    }
+    return { nextRun: date.toISOString() };
+  }
+
+  return { error: `Unknown schedule type: ${scheduleType}` };
+}
+
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;

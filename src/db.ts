@@ -290,6 +290,44 @@ export function storeMessage(msg: {
  */
 export const storeMessageDirect = storeMessage;
 
+/**
+ * Shared query builder for fetching non-bot messages.
+ * Both getNewMessages and getMessagesSince use this core query with
+ * different WHERE clauses — extracted to avoid duplicating the SQL
+ * and the bot-message filtering logic.
+ */
+function queryMessages(
+  chatFilter: { jids: string[] } | { chatJid: string },
+  sinceTimestamp: string,
+  botPrefix: string,
+  limit: number,
+): NewMessage[] {
+  const isMulti = 'jids' in chatFilter;
+  const chatClause = isMulti
+    ? `chat_jid IN (${chatFilter.jids.map(() => '?').join(',')})`
+    : `chat_jid = ?`;
+  const chatParams = isMulti ? chatFilter.jids : [chatFilter.chatJid];
+
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE timestamp > ? AND ${chatClause}
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+
+  return db
+    .prepare(sql)
+    .all(sinceTimestamp, ...chatParams, `${botPrefix}:%`, limit) as NewMessage[];
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
@@ -298,25 +336,7 @@ export function getNewMessages(
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
-  const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-
-  const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+  const rows = queryMessages({ jids }, lastTimestamp, botPrefix, limit);
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -332,23 +352,7 @@ export function getMessagesSince(
   botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  return queryMessages({ chatJid }, sinceTimestamp, botPrefix, limit);
 }
 
 export function getLastBotMessageTimestamp(
