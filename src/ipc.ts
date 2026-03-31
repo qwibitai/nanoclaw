@@ -105,11 +105,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
         async (data) => {
           if (data.type === 'message' && data.chatJid && data.text) {
             const targetGroup = registeredGroups[data.chatJid as string];
-            if (
-              isMain ||
-              (targetGroup && targetGroup.folder === sourceGroup)
-            ) {
-              await deps.sendMessage(data.chatJid as string, data.text as string);
+            if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+              await deps.sendMessage(
+                data.chatJid as string,
+                data.text as string,
+              );
               logger.info(
                 { chatJid: data.chatJid, sourceGroup },
                 'IPC message sent',
@@ -201,7 +201,10 @@ export async function processTaskIpc(
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
-        const nextRunResult = computeInitialNextRun(scheduleType, data.schedule_value);
+        const nextRunResult = computeInitialNextRun(
+          scheduleType,
+          data.schedule_value,
+        );
         if ('error' in nextRunResult) {
           logger.warn(
             { scheduleValue: data.schedule_value },

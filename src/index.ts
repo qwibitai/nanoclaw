@@ -206,6 +206,25 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
     }));
 }
 
+/**
+ * Check whether any message in the batch contains a valid trigger from
+ * an allowed sender.  Shared between processGroupMessages and the
+ * message-loop hot path.
+ */
+function hasTriggerMessage(
+  chatJid: string,
+  messages: NewMessage[],
+  trigger?: string,
+): boolean {
+  const pattern = getTriggerPattern(trigger);
+  const cfg = loadSenderAllowlist();
+  return messages.some(
+    (m) =>
+      pattern.test(m.content.trim()) &&
+      (m.is_from_me || isTriggerAllowed(chatJid, m.sender, cfg)),
+  );
+}
+
 /** @internal - exported for testing */
 export function _setRegisteredGroups(
   groups: Record<string, RegisteredGroup>,
@@ -240,14 +259,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const triggerPattern = getTriggerPattern(group.trigger);
-    const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        triggerPattern.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-    );
-    if (!hasTrigger) return true;
+    if (!hasTriggerMessage(chatJid, missedMessages, group.trigger)) return true;
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -357,13 +369,16 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  /** Persist a new session ID both in memory and in the DB. */
+  const saveSession = (newId: string) => {
+    sessions[group.folder] = newId;
+    setSession(group.folder, newId);
+  };
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
+        if (output.newSessionId) saveSession(output.newSessionId);
         await onOutput(output);
       }
     : undefined;
@@ -384,10 +399,7 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-    }
+    if (output.newSessionId) saveSession(output.newSessionId);
 
     if (output.status === 'error') {
       // Detect stale/corrupt session — clear it so the next retry starts fresh.
@@ -477,15 +489,8 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const triggerPattern = getTriggerPattern(group.trigger);
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                triggerPattern.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-            );
-            if (!hasTrigger) continue;
+            if (!hasTriggerMessage(chatJid, groupMessages, group.trigger))
+              continue;
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger

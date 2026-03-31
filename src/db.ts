@@ -325,7 +325,12 @@ function queryMessages(
 
   return db
     .prepare(sql)
-    .all(sinceTimestamp, ...chatParams, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(
+      sinceTimestamp,
+      ...chatParams,
+      `${botPrefix}:%`,
+      limit,
+    ) as NewMessage[];
 }
 
 export function getNewMessages(
@@ -411,46 +416,30 @@ export function getAllTasks(): ScheduledTask[] {
     .all() as ScheduledTask[];
 }
 
+/** Columns that can be updated via updateTask(). */
+const UPDATABLE_TASK_COLUMNS = [
+  'prompt',
+  'script',
+  'schedule_type',
+  'schedule_value',
+  'next_run',
+  'status',
+] as const;
+
 export function updateTask(
   id: string,
   updates: Partial<
-    Pick<
-      ScheduledTask,
-      | 'prompt'
-      | 'script'
-      | 'schedule_type'
-      | 'schedule_value'
-      | 'next_run'
-      | 'status'
-    >
+    Pick<ScheduledTask, (typeof UPDATABLE_TASK_COLUMNS)[number]>
   >,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  if (updates.prompt !== undefined) {
-    fields.push('prompt = ?');
-    values.push(updates.prompt);
-  }
-  if (updates.script !== undefined) {
-    fields.push('script = ?');
-    values.push(updates.script || null);
-  }
-  if (updates.schedule_type !== undefined) {
-    fields.push('schedule_type = ?');
-    values.push(updates.schedule_type);
-  }
-  if (updates.schedule_value !== undefined) {
-    fields.push('schedule_value = ?');
-    values.push(updates.schedule_value);
-  }
-  if (updates.next_run !== undefined) {
-    fields.push('next_run = ?');
-    values.push(updates.next_run);
-  }
-  if (updates.status !== undefined) {
-    fields.push('status = ?');
-    values.push(updates.status);
+  for (const col of UPDATABLE_TASK_COLUMNS) {
+    if (updates[col] !== undefined) {
+      fields.push(`${col} = ?`);
+      values.push(col === 'script' ? updates[col] || null : updates[col]);
+    }
   }
 
   if (fields.length === 0) return;
