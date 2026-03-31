@@ -18,7 +18,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
-  PLUGIN_DIR,
+  PLUGINS_DIR,
   RESIDENTIAL_PROXY_URL,
   TIMEZONE,
   WORKTREES_DIR,
@@ -1911,15 +1911,22 @@ function buildVolumeMounts(
     }
   }
 
-  // Mount external plugin directory (e.g. davekim917/bootstrap) read-only.
-  // The SDK loads skills, agents, and hooks via the `plugins` option in agent-runner
-  // so no manual file sync is needed — just the mount for hook script execution.
-  if (fs.existsSync(PLUGIN_DIR)) {
-    mounts.push({
-      hostPath: PLUGIN_DIR,
-      containerPath: '/workspace/plugin',
-      readonly: true,
-    });
+  // Mount external plugin repos from ~/plugins/ read-only.
+  // Each subdirectory is a separate plugin repo (e.g. bootstrap, impeccable, omni-claude-skills).
+  // The SDK loads skills, agents, and hooks via the `plugins` option in agent-runner.
+  // Per-group scoping: if containerConfig.plugins is set, only those repos are mounted.
+  if (fs.existsSync(PLUGINS_DIR)) {
+    const allowedPlugins = group.containerConfig?.plugins;
+    for (const entry of fs.readdirSync(PLUGINS_DIR)) {
+      const pluginPath = path.join(PLUGINS_DIR, entry);
+      if (!fs.statSync(pluginPath).isDirectory()) continue;
+      if (allowedPlugins && !allowedPlugins.includes(entry)) continue;
+      mounts.push({
+        hostPath: pluginPath,
+        containerPath: `/workspace/plugins/${entry}`,
+        readonly: true,
+      });
+    }
   }
   mounts.push({
     hostPath: groupSessionsDir,
@@ -2518,18 +2525,21 @@ function readSecrets(
     ? `GITHUB_TOKEN_${githubScopes[0].toUpperCase()}`
     : 'GITHUB_TOKEN';
 
-  // dbt Cloud CLI login credentials (email/password — not HTTP API calls)
+  // dbt Cloud CLI login credentials + API key for run-log queries
   const dbtScopedEmail = `DBT_CLOUD_EMAIL_${scope}`;
   const dbtScopedPassword = `DBT_CLOUD_PASSWORD_${scope}`;
   const dbtScopedApiUrl = `DBT_CLOUD_API_URL_${scope}`;
+  const dbtScopedApiKey = `DBT_CLOUD_API_KEY_${scope}`;
 
   const envKeys = [
     githubTokenKey,
     'DBT_CLOUD_EMAIL',
     'DBT_CLOUD_PASSWORD',
+    'DBT_CLOUD_API_KEY',
     dbtScopedEmail,
     dbtScopedPassword,
     dbtScopedApiUrl,
+    dbtScopedApiKey,
     ...(isToolEnabled(tools, 'google-workspace')
       ? ['GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET']
       : []),
@@ -2564,6 +2574,7 @@ function readSecrets(
     [dbtScopedEmail, 'DBT_CLOUD_EMAIL'],
     [dbtScopedPassword, 'DBT_CLOUD_PASSWORD'],
     [dbtScopedApiUrl, 'DBT_CLOUD_API_URL'],
+    [dbtScopedApiKey, 'DBT_CLOUD_API_KEY'],
   ] as const) {
     if (secrets[scoped]) {
       secrets[generic] = secrets[scoped];
@@ -2583,10 +2594,22 @@ function readSecrets(
     isToolEnabled(tools, 'calendar') ||
     isToolEnabled(tools, 'google-workspace')
   ) {
-    const { scopes: gmailScopes, isScoped: gmailScoped } = extractToolScopes(tools, 'gmail');
-    const { scopes: roScopes, isScoped: roScoped } = extractToolScopes(tools, 'gmail-readonly');
-    const { scopes: calScopes, isScoped: calScoped } = extractToolScopes(tools, 'calendar');
-    const { scopes: gwScopes, isScoped: gwScoped } = extractToolScopes(tools, 'google-workspace');
+    const { scopes: gmailScopes, isScoped: gmailScoped } = extractToolScopes(
+      tools,
+      'gmail',
+    );
+    const { scopes: roScopes, isScoped: roScoped } = extractToolScopes(
+      tools,
+      'gmail-readonly',
+    );
+    const { scopes: calScopes, isScoped: calScoped } = extractToolScopes(
+      tools,
+      'calendar',
+    );
+    const { scopes: gwScopes, isScoped: gwScoped } = extractToolScopes(
+      tools,
+      'google-workspace',
+    );
 
     const gwsAccount =
       (gmailScoped && gmailScopes[0]) ||
@@ -2604,8 +2627,7 @@ function readSecrets(
         `${gwsAccount}.json`,
       );
       if (fs.existsSync(gwsCredPath)) {
-        secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE =
-          `/home/node/.config/gws/accounts/${gwsAccount}.json`;
+        secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = `/home/node/.config/gws/accounts/${gwsAccount}.json`;
       } else {
         logger.warn(
           { gwsAccount, gwsCredPath },
@@ -2686,9 +2708,9 @@ async function buildContainerArgs(
     args.push('-e', `RESIDENTIAL_PROXY_URL=${RESIDENTIAL_PROXY_URL}`);
   }
 
-  // Set plugin root so hook shell commands can resolve ${CLAUDE_PLUGIN_ROOT}
-  if (fs.existsSync(PLUGIN_DIR)) {
-    args.push('-e', 'CLAUDE_PLUGIN_ROOT=/workspace/plugin');
+  // Set plugin root so agent-runner can discover mounted plugin repos
+  if (fs.existsSync(PLUGINS_DIR)) {
+    args.push('-e', 'CLAUDE_PLUGINS_ROOT=/workspace/plugins');
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
