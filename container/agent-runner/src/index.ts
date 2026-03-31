@@ -29,18 +29,22 @@ interface ContainerInput {
   assistantName?: string;
   mcpServers?: string[];
   reportToJid?: string;
-  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string; publicUrl?: string }>;
 }
 
-interface ImageContentBlock {
+interface ImageBase64Block {
   type: 'image';
   source: { type: 'base64'; media_type: string; data: string };
+}
+interface ImageUrlBlock {
+  type: 'image';
+  source: { type: 'url'; url: string };
 }
 interface TextContentBlock {
   type: 'text';
   text: string;
 }
-type ContentBlock = ImageContentBlock | TextContentBlock;
+type ContentBlock = ImageBase64Block | ImageUrlBlock | TextContentBlock;
 
 interface ContainerOutput {
   status: 'success' | 'error';
@@ -449,10 +453,16 @@ async function runQuery(
   if (containerInput.imageAttachments?.length) {
     const blocks: ContentBlock[] = [];
     for (const img of containerInput.imageAttachments) {
+      // Prefer URL (lightweight) over base64 (heavy)
+      if (img.publicUrl) {
+        log(`Using URL for image: ${img.publicUrl}`);
+        blocks.push({ type: 'image', source: { type: 'url', url: img.publicUrl } });
+        continue;
+      }
+      // Fallback to base64 if no URL available
       const imgPath = path.join('/workspace/group', img.relativePath);
       try {
         const raw = fs.readFileSync(imgPath);
-        // Validate image before sending to API
         const isValidJpeg = raw.length >= 3 && raw[0] === 0xFF && raw[1] === 0xD8 && raw[2] === 0xFF;
         const isValidPng = raw.length >= 4 && raw[0] === 0x89 && raw[1] === 0x50 && raw[2] === 0x4E && raw[3] === 0x47;
         if (!isValidJpeg && !isValidPng) {
@@ -464,6 +474,7 @@ async function runQuery(
           continue;
         }
         const data = raw.toString('base64');
+        log(`Fallback to base64 for image: ${imgPath} (${raw.length} bytes)`);
         blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data } });
       } catch (err) {
         log(`Failed to load image: ${imgPath}`);
@@ -565,12 +576,34 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const r = message as {
+        result?: string;
+        subtype?: string;
+        total_cost_usd?: number;
+        usage?: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
+        num_turns?: number;
+        duration_ms?: number;
+      };
+      const textResult = r.result || null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      if (r.total_cost_usd != null) {
+        log(`Usage: cost=$${r.total_cost_usd.toFixed(4)} input=${r.usage?.inputTokens || 0} output=${r.usage?.outputTokens || 0} cache_read=${r.usage?.cacheReadInputTokens || 0} turns=${r.num_turns || 0} duration=${r.duration_ms || 0}ms`);
+      }
       writeOutput({
         status: 'success',
-        result: textResult || null,
-        newSessionId
+        result: textResult,
+        newSessionId,
+        ...(r.total_cost_usd != null && {
+          usage: {
+            total_cost_usd: r.total_cost_usd,
+            input_tokens: r.usage?.inputTokens || 0,
+            output_tokens: r.usage?.outputTokens || 0,
+            cache_read_input_tokens: r.usage?.cacheReadInputTokens || 0,
+            cache_creation_input_tokens: r.usage?.cacheCreationInputTokens || 0,
+            num_turns: r.num_turns || 0,
+            duration_ms: r.duration_ms || 0,
+          },
+        }),
       });
     }
   }

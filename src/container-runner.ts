@@ -44,7 +44,7 @@ export interface ContainerInput {
   assistantName?: string;
   mcpServers?: string[];
   reportToJid?: string;
-  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string; publicUrl?: string }>;
 }
 
 export interface ContainerOutput {
@@ -52,6 +52,15 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+    num_turns: number;
+    duration_ms: number;
+  };
 }
 
 interface VolumeMount {

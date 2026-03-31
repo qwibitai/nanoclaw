@@ -104,6 +104,26 @@ describe('image processing', () => {
       ]);
     });
 
+    it('extracts publicUrl when present in image reference', () => {
+      const messages = [
+        {
+          content:
+            '[Image: attachments/img-123.jpg | https://cdn.easybits.cloud/abc.jpg] hello',
+        },
+        { content: '[Image: attachments/img-456.jpg]' },
+      ];
+      const refs = parseImageReferences(messages as any);
+
+      expect(refs).toEqual([
+        {
+          relativePath: 'attachments/img-123.jpg',
+          mediaType: 'image/jpeg',
+          publicUrl: 'https://cdn.easybits.cloud/abc.jpg',
+        },
+        { relativePath: 'attachments/img-456.jpg', mediaType: 'image/jpeg' },
+      ]);
+    });
+
     it('returns empty array when no images', () => {
       const messages = [{ content: 'just text' }];
       expect(parseImageReferences(messages as any)).toEqual([]);
