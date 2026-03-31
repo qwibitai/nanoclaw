@@ -278,61 +278,31 @@ export async function processTaskIpc(
       break;
 
     case 'pause_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task paused via IPC',
-          );
-          deps.onTasksChanged();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task pause attempt',
-          );
-        }
-      }
-      break;
-
     case 'resume_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task resumed via IPC',
-          );
-          deps.onTasksChanged();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task resume attempt',
-          );
-        }
+    case 'cancel_task': {
+      if (!data.taskId) break;
+      const task = getTaskById(data.taskId);
+      if (!task || (!isMain && task.group_folder !== sourceGroup)) {
+        logger.warn(
+          { taskId: data.taskId, sourceGroup },
+          `Unauthorized task ${data.type.replace('_task', '')} attempt`,
+        );
+        break;
       }
-      break;
-
-    case 'cancel_task':
-      if (data.taskId) {
-        const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
-          logger.info(
-            { taskId: data.taskId, sourceGroup },
-            'Task cancelled via IPC',
-          );
-          deps.onTasksChanged();
-        } else {
-          logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task cancel attempt',
-          );
-        }
+      if (data.type === 'cancel_task') {
+        deleteTask(data.taskId);
+      } else {
+        updateTask(data.taskId, {
+          status: data.type === 'pause_task' ? 'paused' : 'active',
+        });
       }
+      logger.info(
+        { taskId: data.taskId, sourceGroup },
+        `Task ${data.type === 'cancel_task' ? 'cancelled' : data.type.replace('_task', '') + 'd'} via IPC`,
+      );
+      deps.onTasksChanged();
       break;
+    }
 
     case 'update_task':
       if (data.taskId) {

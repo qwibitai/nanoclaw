@@ -183,31 +183,19 @@ export function storeChatMetadata(
 ): void {
   const ch = channel ?? null;
   const group = isGroup === undefined ? null : isGroup ? 1 : 0;
+  const displayName = name || chatJid;
+  const nameUpdate = name ? 'name = excluded.name,' : '';
 
-  if (name) {
-    // Update with name, preserving existing timestamp if newer
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, name, timestamp, ch, group);
-  } else {
-    // Update timestamp only, preserve existing name if any
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, chatJid, timestamp, ch, group);
-  }
+  db.prepare(
+    `
+    INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(jid) DO UPDATE SET
+      ${nameUpdate}
+      last_message_time = MAX(last_message_time, excluded.last_message_time),
+      channel = COALESCE(excluded.channel, channel),
+      is_group = COALESCE(excluded.is_group, is_group)
+  `,
+  ).run(chatJid, displayName, timestamp, ch, group);
 }
 
 /**
@@ -271,8 +259,18 @@ export function setLastGroupSync(): void {
 /**
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
+ * Accepts both the NewMessage interface and inline objects.
  */
-export function storeMessage(msg: NewMessage): void {
+export function storeMessage(msg: {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me?: boolean | number;
+  is_bot_message?: boolean | number;
+}): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -288,31 +286,9 @@ export function storeMessage(msg: NewMessage): void {
 }
 
 /**
- * Store a message directly.
+ * @deprecated Use storeMessage() instead — kept for backwards compatibility.
  */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-  is_bot_message?: boolean;
-}): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
-  );
-}
+export const storeMessageDirect = storeMessage;
 
 export function getNewMessages(
   jids: string[],
@@ -578,33 +554,27 @@ export function getAllSessions(): Record<string, string> {
 
 // --- Registered group accessors ---
 
-export function getRegisteredGroup(
-  jid: string,
-): (RegisteredGroup & { jid: string }) | undefined {
-  const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-        is_main: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
+interface RegisteredGroupRow {
+  jid: string;
+  name: string;
+  folder: string;
+  trigger_pattern: string;
+  added_at: string;
+  container_config: string | null;
+  requires_trigger: number | null;
+  is_main: number | null;
+}
+
+/** Convert a DB row to a RegisteredGroup, or null if the folder is invalid. */
+function rowToRegisteredGroup(row: RegisteredGroupRow): RegisteredGroup | null {
   if (!isValidGroupFolder(row.folder)) {
     logger.warn(
       { jid: row.jid, folder: row.folder },
       'Skipping registered group with invalid folder',
     );
-    return undefined;
+    return null;
   }
   return {
-    jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
@@ -616,6 +586,18 @@ export function getRegisteredGroup(
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
   };
+}
+
+export function getRegisteredGroup(
+  jid: string,
+): (RegisteredGroup & { jid: string }) | undefined {
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .get(jid) as RegisteredGroupRow | undefined;
+  if (!row) return undefined;
+  const group = rowToRegisteredGroup(row);
+  if (!group) return undefined;
+  return { jid: row.jid, ...group };
 }
 
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
@@ -638,37 +620,13 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    is_main: number | null;
-  }>;
+  const rows = db
+    .prepare('SELECT * FROM registered_groups')
+    .all() as RegisteredGroupRow[];
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
-    if (!isValidGroupFolder(row.folder)) {
-      logger.warn(
-        { jid: row.jid, folder: row.folder },
-        'Skipping registered group with invalid folder',
-      );
-      continue;
-    }
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger:
-        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      isMain: row.is_main === 1 ? true : undefined,
-    };
+    const group = rowToRegisteredGroup(row);
+    if (group) result[row.jid] = group;
   }
   return result;
 }
