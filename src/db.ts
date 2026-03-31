@@ -375,6 +375,19 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function getLastBotMessageTimestamp(
+  chatJid: string,
+  botPrefix: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      `SELECT MAX(timestamp) as ts FROM messages
+       WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)`,
+    )
+    .get(chatJid, `${botPrefix}:%`) as { ts: string | null } | undefined;
+  return row?.ts ?? undefined;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
@@ -546,6 +559,10 @@ export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
+}
+
+export function deleteSession(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 
 export function getAllSessions(): Record<string, string> {
