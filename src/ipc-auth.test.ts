@@ -758,3 +758,88 @@ describe('create_project_channel', () => {
     expect(createChannel).not.toHaveBeenCalled();
   });
 });
+
+// --- scaffold_project authorization ---
+
+describe('scaffold_project authorization', () => {
+  it('non-main group cannot scaffold projects', async () => {
+    const scaffoldFn = vi.fn();
+    const depsWithScaffold = {
+      ...deps,
+      scaffoldProject: scaffoldFn,
+    };
+
+    await processTaskIpc(
+      {
+        type: 'scaffold_project',
+        projectName: 'test-project',
+        requestedBy: 'dc:123',
+      },
+      'other-group',
+      false,
+      depsWithScaffold,
+    );
+
+    expect(scaffoldFn).not.toHaveBeenCalled();
+  });
+
+  it('main group can scaffold a project', async () => {
+    const scaffoldFn = vi.fn().mockResolvedValue({
+      success: true,
+      github: {
+        repoUrl: 'https://github.com/cmhenry/test-project',
+        clonedTo: '/home/square/projects/test-project',
+        alreadyExisted: false,
+      },
+      discord: {
+        channelId: 'dc:999',
+        channelName: 'test-project',
+        folder: 'project_test-project',
+        alreadyExisted: false,
+      },
+    });
+    const depsWithScaffold = {
+      ...deps,
+      scaffoldProject: scaffoldFn,
+    };
+
+    await processTaskIpc(
+      {
+        type: 'scaffold_project',
+        projectName: 'test-project',
+        requestedBy: 'dc:123',
+      },
+      'whatsapp_main',
+      true,
+      depsWithScaffold,
+    );
+
+    expect(scaffoldFn).toHaveBeenCalledWith({
+      projectName: 'test-project',
+      requestedBy: 'dc:123',
+      templateRepo: undefined,
+      skipGithub: undefined,
+      skipDiscord: undefined,
+    });
+  });
+
+  it('rejects scaffold_project with missing projectName', async () => {
+    const scaffoldFn = vi.fn();
+    const depsWithScaffold = {
+      ...deps,
+      scaffoldProject: scaffoldFn,
+    };
+
+    await processTaskIpc(
+      {
+        type: 'scaffold_project',
+        requestedBy: 'dc:123',
+      },
+      'whatsapp_main',
+      true,
+      depsWithScaffold,
+    );
+
+    expect(scaffoldFn).not.toHaveBeenCalled();
+  });
+});

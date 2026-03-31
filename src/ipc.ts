@@ -41,6 +41,9 @@ export interface IpcDeps {
   createProjectChannel?: (
     req: CreateProjectChannelRequest,
   ) => Promise<CreateProjectChannelResult>;
+  scaffoldProject?: (
+    req: import('./scaffold-project.js').ScaffoldProjectRequest,
+  ) => Promise<import('./scaffold-project.js').ScaffoldProjectResult>;
 }
 
 let ipcWatcherRunning = false;
@@ -197,6 +200,10 @@ export async function processTaskIpc(
     projectPath?: string;
     channelName?: string;
     requestedBy?: string;
+    // For scaffold_project
+    templateRepo?: string;
+    skipGithub?: boolean;
+    skipDiscord?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -532,6 +539,53 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'scaffold_project': {
+      // Only main group can scaffold projects
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized scaffold_project attempt blocked',
+        );
+        break;
+      }
+      if (data.projectName && data.requestedBy && deps.scaffoldProject) {
+        const result = await deps.scaffoldProject({
+          projectName: data.projectName,
+          requestedBy: data.requestedBy,
+          templateRepo: data.templateRepo,
+          skipGithub: data.skipGithub,
+          skipDiscord: data.skipDiscord,
+        });
+
+        // Write result back to IPC for the agent to read
+        const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+        const responseDir = path.join(ipcBaseDir, sourceGroup, 'input');
+        fs.mkdirSync(responseDir, { recursive: true });
+        const responseFile = path.join(
+          responseDir,
+          `scaffold_project_result_${Date.now()}.json`,
+        );
+        fs.writeFileSync(
+          responseFile,
+          JSON.stringify(
+            { action: 'scaffold_project_result', ...result },
+            null,
+            2,
+          ),
+        );
+        logger.info(
+          { sourceGroup, result },
+          'Project scaffold result written',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid scaffold_project request - missing required fields',
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
