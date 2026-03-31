@@ -97,6 +97,15 @@ function openInbox(imap, readOnly = true) {
   });
 }
 
+function openFolder(imap, folder, readOnly = true) {
+  return new Promise((resolve, reject) => {
+    imap.openBox(folder, readOnly, (err, box) => {
+      if (err) reject(err);
+      else resolve(box);
+    });
+  });
+}
+
 /**
  * IMAP SEARCH wrapper.
  */
@@ -161,13 +170,26 @@ export async function getMessage(config, messageId) {
 
 export async function searchMessages(config, query) {
   return withImap(config, async (imap) => {
-    await openInbox(imap, true);
-    const uids = await imapSearch(imap, [['TEXT', query]]);
-    if (uids.length === 0) return [];
+    const allMessages = [];
+    const folders = ['INBOX', 'Sent', 'Drafts', 'Archive'];
 
-    const recent = uids.slice(-10);
-    const messages = await fetchMessages(imap, recent, 'HEADER');
-    return messages.map((m) => ({ ...m, body: undefined }));
+    for (const folder of folders) {
+      try {
+        await openFolder(imap, folder, true);
+        const uids = await imapSearch(imap, [['TEXT', query]]);
+        if (uids.length > 0) {
+          const recent = uids.slice(-10);
+          const messages = await fetchMessages(imap, recent, 'HEADER');
+          allMessages.push(...messages.map((m) => ({ ...m, body: undefined, folder })));
+        }
+      } catch {
+        // Folder may not exist — skip silently
+      }
+    }
+
+    // Sort by date descending, return up to 20 results
+    allMessages.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return allMessages.slice(0, 20);
   });
 }
 
@@ -223,8 +245,8 @@ export async function markMessage(config, messageId, read) {
   return withImap(config, async (imap) => {
     await openInbox(imap, false);
     await new Promise((resolve, reject) => {
-      const action = read ? '+FLAGS' : '-FLAGS';
-      imap.store(messageId, action, ['\\Seen'], (err) => {
+      const fn = read ? imap.addFlags.bind(imap) : imap.delFlags.bind(imap);
+      fn(messageId, ['\\Seen'], (err) => {
         if (err) reject(err); else resolve();
       });
     });
@@ -236,8 +258,8 @@ export async function starMessage(config, messageId, star) {
   return withImap(config, async (imap) => {
     await openInbox(imap, false);
     await new Promise((resolve, reject) => {
-      const action = star ? '+FLAGS' : '-FLAGS';
-      imap.store(messageId, action, ['\\Flagged'], (err) => {
+      const fn = star ? imap.addFlags.bind(imap) : imap.delFlags.bind(imap);
+      fn(messageId, ['\\Flagged'], (err) => {
         if (err) reject(err); else resolve();
       });
     });

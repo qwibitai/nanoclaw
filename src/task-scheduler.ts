@@ -146,6 +146,7 @@ async function runTask(
       id: t.id,
       groupFolder: t.group_folder,
       prompt: t.prompt,
+      script: t.script,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
@@ -192,6 +193,7 @@ async function runTask(
         senderTrusted: false,
         securityRules: buildContainerSecurityRules(policy),
         allowedTools: buildAllowedTools(policy),
+        script: task.script || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
