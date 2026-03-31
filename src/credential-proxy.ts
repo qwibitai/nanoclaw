@@ -60,6 +60,8 @@ export function readCredentials(credentialsPath: string): OAuthCredentials {
   };
 }
 
+const REFRESH_TIMEOUT_MS = 30_000; // 30 seconds
+
 export async function refreshOAuthToken(
   refreshToken: string,
   tokenUrl = REFRESH_URL,
@@ -81,6 +83,7 @@ export async function refreshOAuthToken(
         port: url.port || (isHttps ? 443 : 80),
         path: url.pathname,
         method: 'POST',
+        timeout: REFRESH_TIMEOUT_MS,
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
           'content-length': Buffer.byteLength(body),
@@ -90,31 +93,48 @@ export async function refreshOAuthToken(
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
-          if (res.statusCode !== 200) {
+          try {
+            const responseBody = Buffer.concat(chunks).toString();
+            if (res.statusCode !== 200) {
+              reject(
+                new Error(
+                  `OAuth refresh failed (${res.statusCode}): ${responseBody}`,
+                ),
+              );
+              return;
+            }
+            const json = JSON.parse(responseBody);
+            if (
+              !json.access_token ||
+              !json.refresh_token ||
+              typeof json.expires_in !== 'number'
+            ) {
+              reject(
+                new Error(
+                  `OAuth refresh response missing required fields: ${responseBody}`,
+                ),
+              );
+              return;
+            }
+            resolve({
+              accessToken: json.access_token,
+              refreshToken: json.refresh_token,
+              expiresAt: Date.now() + json.expires_in * 1000,
+            });
+          } catch (err) {
             reject(
               new Error(
-                `OAuth refresh failed with ${res.statusCode}: ${Buffer.concat(chunks).toString()}`,
+                `OAuth refresh response parse error: ${(err as Error).message}`,
               ),
             );
-            return;
           }
-          const json = JSON.parse(Buffer.concat(chunks).toString());
-          if (
-            !json.access_token ||
-            !json.refresh_token ||
-            typeof json.expires_in !== 'number'
-          ) {
-            reject(new Error('OAuth refresh response missing required fields'));
-            return;
-          }
-          resolve({
-            accessToken: json.access_token,
-            refreshToken: json.refresh_token,
-            expiresAt: Date.now() + json.expires_in * 1000,
-          });
         });
       },
     );
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`OAuth refresh timed out after ${REFRESH_TIMEOUT_MS}ms`));
+    });
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -149,20 +169,20 @@ export async function ensureValidToken(
   refreshInProgress = (async () => {
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      // Re-read credentials from disk before each attempt — an external
-      // process (e.g. `claude` CLI login) may have refreshed the token.
-      const freshCreds = readCredentials(credentialsPath);
-      const now = Date.now();
-      if (freshCreds.expiresAt - now > REFRESH_BUFFER_MS) {
-        const freshMinutes = Math.round((freshCreds.expiresAt - now) / 60000);
-        logger.info(
-          { minutesRemaining: freshMinutes },
-          'OAuth token refreshed externally, using disk credentials',
-        );
-        return freshCreds;
-      }
-
       try {
+        // Re-read credentials from disk before each attempt — an external
+        // process (e.g. `claude` CLI login) may have refreshed the token.
+        const freshCreds = readCredentials(credentialsPath);
+        const now = Date.now();
+        if (freshCreds.expiresAt - now > REFRESH_BUFFER_MS) {
+          const freshMinutes = Math.round((freshCreds.expiresAt - now) / 60000);
+          logger.info(
+            { minutesRemaining: freshMinutes },
+            'OAuth token refreshed externally, using disk credentials',
+          );
+          return freshCreds;
+        }
+
         const refreshed = await refreshOAuthToken(
           freshCreds.refreshToken,
           tokenUrl,
@@ -185,7 +205,7 @@ export async function ensureValidToken(
       } catch (err) {
         lastError = err as Error;
         logger.warn(
-          { err, attempt, maxRetries },
+          { err: lastError.message, attempt, maxRetries },
           'OAuth refresh attempt failed',
         );
         if (attempt < maxRetries) {
@@ -195,10 +215,14 @@ export async function ensureValidToken(
     }
 
     // Final check: maybe an external process refreshed while we were retrying
-    const finalCreds = readCredentials(credentialsPath);
-    if (finalCreds.expiresAt - Date.now() > REFRESH_BUFFER_MS) {
-      logger.info('OAuth token refreshed externally after retries exhausted');
-      return finalCreds;
+    try {
+      const finalCreds = readCredentials(credentialsPath);
+      if (finalCreds.expiresAt - Date.now() > REFRESH_BUFFER_MS) {
+        logger.info('OAuth token refreshed externally after retries exhausted');
+        return finalCreds;
+      }
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'Final credential read failed');
     }
 
     throw new Error(
@@ -248,7 +272,11 @@ export async function startCredentialProxy(
         const refreshed = await ensureValidToken(credentialsPath);
         currentToken = refreshed.accessToken;
       } catch (err) {
-        logger.error({ err }, 'Periodic OAuth refresh failed');
+        logger.error(
+          { err: (err as Error).message },
+          'Periodic OAuth refresh failed — clearing token to prevent stale 401s',
+        );
+        currentToken = undefined;
       }
     };
     refreshTimer = setInterval(refreshInterval, 4 * 60 * 1000);
