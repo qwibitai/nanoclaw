@@ -46,9 +46,10 @@ export interface ContainerInput {
 }
 
 export interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'interrupted';
   result: string | null;
   newSessionId?: string;
+  lastAssistantUuid?: string;
   error?: string;
 }
 
