@@ -77,6 +77,22 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+function chownRecursive(dir: string, uid: number, gid: number): void {
+  try {
+    fs.chownSync(dir, uid, gid);
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      const stat = fs.lstatSync(full);
+      fs.chownSync(full, uid, gid);
+      if (stat.isDirectory()) {
+        chownRecursive(full, uid, gid);
+      }
+    }
+  } catch {
+    // Best-effort — don't fail container launch
+  }
+}
+
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let messageLoopRunning = false;
@@ -996,15 +1012,8 @@ async function main(): Promise<void> {
             try {
               if (fs.existsSync(taskSessionDir)) {
                 fs.cpSync(taskSessionDir, ctxSessionDir, { recursive: true });
-                // Ensure container user can write to copied session data
-                const claudeDir = path.join(ctxSessionDir, '.claude');
-                if (fs.existsSync(claudeDir)) {
-                  try {
-                    fs.chownSync(claudeDir, 1000, 1000);
-                  } catch {
-                    /* best-effort */
-                  }
-                }
+                // Ensure container user can write to all copied session data
+                chownRecursive(ctxSessionDir, 1000, 1000);
               }
             } catch (err) {
               logger.warn(

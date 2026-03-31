@@ -43,7 +43,12 @@ server.tool(
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {
     text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
+      ),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -53,7 +58,8 @@ server.tool(
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
-      isScheduled: process.env.NANOCLAW_SCHEDULED_TASK === '1' ? 'true' : undefined,
+      isScheduled:
+        process.env.NANOCLAW_SCHEDULED_TASK === '1' ? 'true' : undefined,
     };
 
     writeIpcFile(QUEUE_DIR, data);
@@ -86,11 +92,33 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
 \u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   {
-    prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    prompt: z
+      .string()
+      .describe(
+        'What the agent should do when the task runs. For isolated mode, include all necessary context here.',
+      ),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .describe(
+        'cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time',
+      ),
+    schedule_value: z
+      .string()
+      .describe(
+        'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
+      ),
+    context_mode: z
+      .enum(['group', 'isolated'])
+      .default('group')
+      .describe(
+        'group=runs with chat history and memory, isolated=fresh session (include context in prompt)',
+      ),
+    target_group_jid: z
+      .string()
+      .optional()
+      .describe(
+        '(Main group only) JID of the group to schedule the task for. Defaults to the current group.',
+      ),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -99,7 +127,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
@@ -107,34 +140,55 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+      if (
+        /[Zz]$/.test(args.schedule_value) ||
+        /[+-]\d{2}:\d{2}$/.test(args.schedule_value)
+      ) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
     }
 
     // Non-main groups can only schedule for themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid =
+      isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const data = {
       type: 'schedule_task',
       taskId,
+      requestId,
       prompt: args.prompt,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
@@ -146,8 +200,54 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
     writeIpcFile(QUEUE_DIR, data);
 
+    // Poll for response from host
+    const inputDir = path.join(IPC_DIR, 'input');
+    const responseFile = path.join(inputDir, `schedule_task-${requestId}.json`);
+    const timeout = 5000;
+    const pollInterval = 100;
+    const start = Date.now();
+
+    while (Date.now() - start < timeout) {
+      if (fs.existsSync(responseFile)) {
+        const response = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+        try {
+          fs.unlinkSync(responseFile);
+        } catch {
+          /* ignore */
+        }
+
+        if (response.error) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Failed to schedule task: ${response.error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}`,
+            },
+          ],
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+
+    // Timeout — task may still have been created, return optimistic response
     return {
-      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value} (response timed out, task may still be pending)`,
+        },
+      ],
     };
   },
 );
@@ -179,33 +279,62 @@ server.tool(
         if (fs.existsSync(responseFile)) {
           const tasks = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
           // Clean up response file
-          try { fs.unlinkSync(responseFile); } catch { /* ignore */ }
+          try {
+            fs.unlinkSync(responseFile);
+          } catch {
+            /* ignore */
+          }
 
           // Host already filtered by group — no need to re-filter here
 
           if (tasks.length === 0) {
-            return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+            return {
+              content: [
+                { type: 'text' as const, text: 'No scheduled tasks found.' },
+              ],
+            };
           }
 
           const formatted = tasks
             .map(
-              (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
+              (t: {
+                id: string;
+                prompt: string;
+                schedule_type: string;
+                schedule_value: string;
+                status: string;
+                next_run: string;
+              }) =>
                 `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
             )
             .join('\n');
 
-          return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+          return {
+            content: [
+              { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
+            ],
+          };
         }
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
       }
 
       return {
-        content: [{ type: 'text' as const, text: 'Timed out waiting for task list from host. Try again.' }],
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Timed out waiting for task list from host. Try again.',
+          },
+        ],
         isError: true,
       };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error listing tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error listing tasks: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   },
@@ -226,7 +355,14 @@ server.tool(
 
     writeIpcFile(QUEUE_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} pause requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -245,7 +381,14 @@ server.tool(
 
     writeIpcFile(QUEUE_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} resume requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -264,7 +407,14 @@ server.tool(
 
     writeIpcFile(QUEUE_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} cancellation requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -274,18 +424,32 @@ server.tool(
   {
     task_id: z.string().describe('The task ID to update'),
     prompt: z.string().optional().describe('New prompt for the task'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
-    schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .optional()
+      .describe('New schedule type'),
+    schedule_value: z
+      .string()
+      .optional()
+      .describe('New schedule value (see schedule_task for format)'),
   },
   async (args) => {
     // Validate schedule_value if provided
-    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+    if (
+      args.schedule_type === 'cron' ||
+      (!args.schedule_type && args.schedule_value)
+    ) {
       if (args.schedule_value) {
         try {
           CronExpressionParser.parse(args.schedule_value);
         } catch {
           return {
-            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            content: [
+              {
+                type: 'text' as const,
+                text: `Invalid cron: "${args.schedule_value}".`,
+              },
+            ],
             isError: true,
           };
         }
@@ -295,7 +459,12 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}".`,
+            },
+          ],
           isError: true,
         };
       }
@@ -309,12 +478,21 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
-    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.schedule_type !== undefined)
+      data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined)
+      data.schedule_value = args.schedule_value;
 
     writeIpcFile(QUEUE_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} update requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -324,15 +502,28 @@ server.tool(
 
 Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
   {
-    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
+    jid: z
+      .string()
+      .describe(
+        'The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")',
+      ),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
+    folder: z
+      .string()
+      .describe(
+        'Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")',
+      ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
     if (!isMain) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can register new groups.',
+          },
+        ],
         isError: true,
       };
     }
@@ -349,7 +540,12 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     writeIpcFile(QUEUE_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Group "${args.name}" registered. It will start receiving messages immediately.`,
+        },
+      ],
     };
   },
 );
@@ -363,8 +559,14 @@ Use this after generating output files (renders, documents, archives) to share t
     files: z
       .array(
         z.object({
-          path: z.string().describe('Absolute path to the file in the container (e.g., /workspace/group/render.png)'),
-          name: z.string().describe('Filename shown to the recipient (e.g., model.png)'),
+          path: z
+            .string()
+            .describe(
+              'Absolute path to the file in the container (e.g., /workspace/group/render.png)',
+            ),
+          name: z
+            .string()
+            .describe('Filename shown to the recipient (e.g., model.png)'),
         }),
       )
       .min(1)
@@ -393,7 +595,8 @@ Use this after generating output files (renders, documents, archives) to share t
     // container-internal files (e.g., /proc/self/environ, /home/node/.claude/)
     const ALLOWED_PREFIXES = ['/workspace/', '/tmp/'];
     const blocked = args.files.filter(
-      (f) => !ALLOWED_PREFIXES.some((p) => path.normalize(f.path).startsWith(p)),
+      (f) =>
+        !ALLOWED_PREFIXES.some((p) => path.normalize(f.path).startsWith(p)),
     );
     if (blocked.length > 0) {
       return {
@@ -411,7 +614,10 @@ Use this after generating output files (renders, documents, archives) to share t
     // so the host can access them. Only /workspace/* paths are mounted.
     const resolvedFiles = args.files.map((f) => {
       if (f.path.startsWith('/workspace/')) return f;
-      const dest = path.join(QUEUE_DIR, `${Date.now()}-${path.basename(f.path)}`);
+      const dest = path.join(
+        QUEUE_DIR,
+        `${Date.now()}-${path.basename(f.path)}`,
+      );
       fs.mkdirSync(QUEUE_DIR, { recursive: true });
       fs.copyFileSync(f.path, dest);
       return { ...f, path: dest };
@@ -445,7 +651,10 @@ server.tool(
   {
     id: z.string().describe('The query ID from the debug query prompt'),
     answer: z.string().describe('Your concise answer to the debug question'),
-    status: z.enum(['success', 'error']).default('success').describe('Whether you could answer the question'),
+    status: z
+      .enum(['success', 'error'])
+      .default('success')
+      .describe('Whether you could answer the question'),
   },
   async (args) => {
     const debugDir = path.join(IPC_DIR, 'debug');
@@ -492,7 +701,12 @@ Only call this once per conversation. Do not call for quick tasks.`,
     });
 
     return {
-      content: [{ type: 'text' as const, text: 'Escalated to autonomous goal mode. Idle timeout removed, priority lowered.' }],
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Escalated to autonomous goal mode. Idle timeout removed, priority lowered.',
+        },
+      ],
     };
   },
 );

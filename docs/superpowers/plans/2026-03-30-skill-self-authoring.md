@@ -286,7 +286,7 @@ cd /workspace/project
 git checkout -b feat/skill-my-skill
 git add container/skills-catalog/local/my-skill/ container/skills-catalog/catalog.json
 git commit -m "feat: add my-skill skill — one-line description"
-gh pr create \
+gh pr create --repo Zxela/nanoclaw \
   --title "feat: add my-skill skill — one-line description" \
   --body "## New Skill: my-skill
 
