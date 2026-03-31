@@ -42,8 +42,8 @@ export async function getBookedSlots(
   const cal = getCal();
   const res = await cal.freebusy.query({
     requestBody: {
-      timeMin: `${startDate}T00:00:00`,
-      timeMax: `${endDate}T23:59:59`,
+      timeMin: `${startDate}T00:00:00Z`,
+      timeMax: `${endDate}T23:59:59Z`,
       timeZone: 'America/Chicago',
       items: [{ id: equipment.calendarId }],
     },
