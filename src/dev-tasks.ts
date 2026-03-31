@@ -147,6 +147,23 @@ function taskFilePath(id: number): string {
   return path.join(tasksDir, `${id}.md`);
 }
 
+// --- Git sync ---
+
+/**
+ * Stage files, commit, and push to remote. Best-effort — failures are logged
+ * as warnings but never block the caller.
+ */
+function commitAndPush(message: string, files: string[]): void {
+  try {
+    git(`add ${files.map((f) => `"${f}"`).join(' ')}`);
+    git(`commit -m "${message}"`);
+    git('push');
+    logger.info({ message }, 'Git commit and push succeeded');
+  } catch (err) {
+    logger.warn({ message, err }, 'Failed to commit/push to git');
+  }
+}
+
 // --- CRUD operations ---
 
 /**
@@ -172,15 +189,7 @@ export function createTask(opts: {
   fs.writeFileSync(taskFilePath(id), serializeTask(task));
   logger.info({ taskId: id, title: opts.title }, 'DevTask created');
 
-  // Commit and push so the task file is immediately available on other machines
-  try {
-    git(`add "${taskFilePath(id)}" "${counterPath()}"`);
-    git(`commit -m "task(${id}): ${opts.title}"`);
-    git('push');
-    logger.info({ taskId: id }, 'DevTask committed and pushed');
-  } catch (err) {
-    logger.warn({ taskId: id, err }, 'Failed to push DevTask to git');
-  }
+  commitAndPush(`task(${id}): ${opts.title}`, [taskFilePath(id), counterPath()]);
 
   return task;
 }
@@ -239,6 +248,11 @@ export function updateTask(
   const body = readTaskBody(id) || undefined;
   fs.writeFileSync(taskFilePath(id), serializeTask(updated, body));
   logger.info({ taskId: id, updates }, 'DevTask updated');
+
+  commitAndPush(`task(${id}): update ${Object.keys(updates).join(', ')}`, [
+    taskFilePath(id),
+  ]);
+
   return updated;
 }
 
@@ -278,6 +292,9 @@ export function deleteTask(id: number): boolean {
   if (!fs.existsSync(file)) return false;
   fs.unlinkSync(file);
   logger.info({ taskId: id }, 'DevTask deleted');
+
+  commitAndPush(`task(${id}): delete`, [file]);
+
   return true;
 }
 
