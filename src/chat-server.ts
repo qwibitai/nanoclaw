@@ -202,9 +202,15 @@ const CHAT_SERVER_TOKEN = process.env.CHAT_SERVER_TOKEN || '';
 const TRUSTED_PROXY_RAW = (process.env.TRUSTED_PROXY_IPS || '').trim();
 
 // Trusted proxy modes:
-//   "auto" — accept identity from any platform-managed proxy, detected per-request
-//   "*"    — trust the configured header from any source IP
-//   IPs    — explicit IP/CIDR allowlist
+//   "auto" — accept identity from any platform-managed proxy, detected per-request.
+//            SECURITY: "auto" checks for platform companion headers (Azure EasyAuth,
+//            Cloudflare Access) but does NOT cryptographically verify them. This is
+//            safe ONLY when the server is exclusively reachable through the proxy.
+//            If the server is also directly accessible (e.g. during development),
+//            an attacker on the network can forge these headers. Use explicit IPs
+//            or CIDR notation instead for defense-in-depth.
+//   "*"    — trust the configured header from any source IP (most permissive)
+//   IPs    — explicit IP/CIDR allowlist (recommended)
 const TRUST_ANY_PLATFORM =
   TRUSTED_PROXY_RAW === 'auto' || TRUSTED_PROXY_RAW === '*';
 
@@ -1081,6 +1087,11 @@ async function handleHttp(
       return json(400, { error: 'Missing required fields' });
     }
 
+    // Validate uploadId as UUID to prevent path traversal
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+      return json(400, { error: 'Invalid uploadId format' });
+    }
+
     const groupFolder = resolveGroupFolder(roomId);
     if (!groupFolder)
       return json(404, { error: 'Room not registered as a group' });
@@ -1120,6 +1131,27 @@ async function handleHttp(
 
     // All chunks received — reassemble
     clearTimeout(upload.timer);
+
+    // Check total size BEFORE writing to prevent disk DoS
+    let totalSize = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkPath = path.join(upload.tempDir, String(i));
+      try {
+        totalSize += fs.statSync(chunkPath).size;
+      } catch {
+        // Missing chunk
+      }
+    }
+
+    if (totalSize > MAX_UPLOAD_SIZE) {
+      fs.rmSync(upload.tempDir, { recursive: true, force: true });
+      pendingChunkedUploads.delete(uploadId);
+      return json(413, {
+        error: `File exceeds ${MAX_UPLOAD_SIZE / 1024 / 1024}MB limit`,
+      });
+    }
+
+    // Write reassembled file and await completion
     const uploadsDir = getUploadsDir(groupFolder);
     fs.mkdirSync(uploadsDir, { recursive: true });
     const id = randomUUID();
@@ -1128,27 +1160,19 @@ async function handleHttp(
     const finalPath = path.join(uploadsDir, safeFilename);
 
     const writeStream = fs.createWriteStream(finalPath);
-    let totalSize = 0;
     for (let i = 0; i < totalChunks; i++) {
       const chunkPath = path.join(upload.tempDir, String(i));
-      const chunk = fs.readFileSync(chunkPath);
-      totalSize += chunk.length;
-      writeStream.write(chunk);
+      writeStream.write(fs.readFileSync(chunkPath));
     }
-    writeStream.end();
+    await new Promise<void>((resolve, reject) => {
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+      writeStream.end();
+    });
 
     // Cleanup temp
     fs.rmSync(upload.tempDir, { recursive: true, force: true });
     pendingChunkedUploads.delete(uploadId);
-
-    if (totalSize > MAX_UPLOAD_SIZE) {
-      try {
-        fs.unlinkSync(finalPath);
-      } catch {}
-      return json(413, {
-        error: `File exceeds ${MAX_UPLOAD_SIZE / 1024 / 1024}MB limit`,
-      });
-    }
 
     const fileMeta = {
       url: `/api/files/${encodeURIComponent(groupFolder)}/${safeFilename}`,
@@ -1425,6 +1449,12 @@ export async function startChatServer(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server!.listen(port, host, () => {
       logger.info({ port, host }, 'Chat server started');
+      if (TRUSTED_PROXY_RAW === 'auto' && host === '0.0.0.0') {
+        logger.warn(
+          'Trusted proxy "auto" mode with 0.0.0.0 binding — ensure this server is ONLY ' +
+          'reachable through your proxy (Azure/Cloudflare). Direct access allows header forgery.',
+        );
+      }
       resolve();
     });
     server!.once('error', reject);
