@@ -45,6 +45,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   updateProfilePicture: (jid: string, filePath: string) => Promise<void>;
+  updateGroupName: (jid: string, name: string) => Promise<void>;
   onTasksChanged: () => void;
 }
 
@@ -337,6 +338,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Profile picture updated via IPC',
                   );
                 }
+              } else if (
+                data.type === 'update_group_name' &&
+                data.chatJid &&
+                data.name
+              ) {
+                await deps.updateGroupName(data.chatJid, data.name);
+                logger.info(
+                  { sourceGroup, chatJid: data.chatJid, name: data.name },
+                  'Group name updated via IPC',
+                );
               } else if (data.type === 'track_video_gen') {
                 trackImageGeneration({
                   group_folder: sourceGroup,

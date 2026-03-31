@@ -69,6 +69,7 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     updateProfilePicture: async () => {},
+    updateGroupName: async () => {},
     onTasksChanged: () => {},
   };
 });

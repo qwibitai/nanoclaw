@@ -210,6 +210,25 @@ server.tool(
 );
 
 server.tool(
+  'update_group_name',
+  'Rename the WhatsApp group. Changes the group subject/title visible to all members.',
+  {
+    name: z.string().describe('The new group name'),
+  },
+  async (args) => {
+    const data = {
+      type: 'update_group_name',
+      chatJid,
+      name: args.name,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Group rename to "${args.name}" requested.` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

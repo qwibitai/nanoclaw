@@ -975,6 +975,14 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel supports updateProfilePicture');
       }
     },
+    updateGroupName: async (jid, name) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.updateGroupName) {
+        await channel.updateGroupName(jid, name);
+      } else {
+        logger.warn({ jid }, 'No channel supports updateGroupName');
+      }
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

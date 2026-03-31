@@ -118,6 +118,8 @@ export interface Channel {
   getInviteLink?(jid: string): Promise<string | null>;
   // Optional: update the bot's profile picture.
   updateProfilePicture?(jid: string, filePath: string): Promise<void>;
+  // Optional: rename a group/chat.
+  updateGroupName?(jid: string, name: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -796,6 +796,15 @@ export class WhatsAppChannel implements Channel {
     logger.info({ jid }, 'Profile picture updated');
   }
 
+  async updateGroupName(jid: string, name: string): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ jid, name }, 'WA disconnected, group rename dropped');
+      return;
+    }
+    await this.sock.groupUpdateSubject(jid, name);
+    logger.info({ jid, name }, 'Group name updated');
+  }
+
   async syncGroups(force: boolean): Promise<void> {
     return this.syncGroupMetadata(force);
   }
