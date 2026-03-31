@@ -12,6 +12,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 4. [Configuration](#configuration)
 5. [Memory System](#memory-system)
 6. [Session Management](#session-management)
+   - [Lossless Context Management (LCM)](#lossless-context-management-lcm)
 7. [Message Flow](#message-flow)
 8. [Commands](#commands)
 9. [Scheduled Tasks](#scheduled-tasks)
@@ -464,6 +465,18 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 3. Claude continues the conversation with full context
 4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
 
+### Lossless Context Management (LCM)
+
+When conversations exceed the context window, the SDK normally discards older messages during compaction. LCM preserves this history by persisting every message to a per-group SQLite database (`data/sessions/{group}/.claude/lcm.db`) and building a hierarchical summary DAG.
+
+**Proactive compaction** (primary mechanism): After each query, LCM checks context usage (`inputTokens / contextWindow`). When it exceeds a configurable threshold (`LCM_PROACTIVE_COMPACTION_THRESHOLD`, default 75%), LCM summarizes the conversation, resets the SDK session, and injects summaries into the new session's system prompt. Set to `0` to disable.
+
+**PreCompact hook** (fallback): If proactive compaction is disabled, the SDK's built-in compaction still triggers, and the PreCompact hook persists messages and generates summaries before old context is discarded.
+
+**Context assembly**: On session resume or after compaction, LCM loads summaries from the DAG and injects them into the system prompt, fitting within a configurable token budget (`LCM_SUMMARY_BUDGET_PCT`, default 25% of detected context window).
+
+Conversations are keyed by a stable `conversationId` (`groupFolder:chatJid`) that survives SDK session resets. See [lcm-spec.md](lcm-spec.md) for the full specification.
+
 ---
 
 ## Message Flow
@@ -631,6 +644,9 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `resume_task` | Resume a paused task |
 | `cancel_task` | Delete a task |
 | `send_message` | Send a message to the group via its channel |
+| `lcm_grep` | Search compacted conversation history (FTS5) |
+| `lcm_describe` | Inspect a summary node's metadata and relationships |
+| `lcm_expand` | Drill into a summary to recover original messages |
 
 ---
 

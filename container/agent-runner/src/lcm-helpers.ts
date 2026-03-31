@@ -37,7 +37,7 @@ export function _resetDetectedContextWindow(): void {
   detectedContextWindow = null;
 }
 
-const LCM_COMPACTION_THRESHOLD_PCT = parseInt(process.env.LCM_COMPACTION_THRESHOLD_PCT || '75', 10);
+const LCM_PROACTIVE_COMPACTION_THRESHOLD = parseInt(process.env.LCM_PROACTIVE_COMPACTION_THRESHOLD || '75', 10);
 const LCM_SUMMARY_BUDGET_PCT = parseInt(process.env.LCM_SUMMARY_BUDGET_PCT || '25', 10);
 
 // --- Pure functions ---
@@ -48,10 +48,10 @@ export function getConversationId(input: { groupFolder: string; chatJid: string 
 
 export function shouldProactivelyCompact(lastInputTokens?: number): boolean {
   if (!lastInputTokens) return false;
-  if (LCM_COMPACTION_THRESHOLD_PCT <= 0 || LCM_COMPACTION_THRESHOLD_PCT >= 100) return false;
+  if (LCM_PROACTIVE_COMPACTION_THRESHOLD <= 0 || LCM_PROACTIVE_COMPACTION_THRESHOLD >= 100) return false;
   const contextWindow = getContextWindowTokens();
   const usagePct = (lastInputTokens / contextWindow) * 100;
-  return usagePct >= LCM_COMPACTION_THRESHOLD_PCT;
+  return usagePct >= LCM_PROACTIVE_COMPACTION_THRESHOLD;
 }
 
 export function parseTranscript(content: string): ParsedMessage[] {
