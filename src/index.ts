@@ -565,6 +565,38 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Retry connecting a channel with exponential backoff (5s -> 10s -> 20s ... cap 5min).
+ * Once connected, pushes into the live channels array so message routing picks it up.
+ */
+function retryChannelConnect(channel: Channel, liveChannels: Channel[]): void {
+  const MAX_DELAY_MS = 5 * 60 * 1000;
+  let delay = 5000;
+
+  const attempt = () => {
+    setTimeout(async () => {
+      try {
+        await channel.connect();
+        liveChannels.push(channel);
+        logger.info({ channel: channel.name }, 'Channel connected after retry');
+      } catch (err) {
+        logger.warn(
+          {
+            channel: channel.name,
+            err,
+            nextRetryMs: Math.min(delay * 2, MAX_DELAY_MS),
+          },
+          'Channel retry failed -- will try again',
+        );
+        delay = Math.min(delay * 2, MAX_DELAY_MS);
+        attempt();
+      }
+    }, delay);
+  };
+
+  attempt();
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
