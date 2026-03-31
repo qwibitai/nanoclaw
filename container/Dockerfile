@@ -43,7 +43,10 @@ RUN pip install --break-system-packages --no-cache-dir \
     "markitdown[pptx]" \
     Pillow \
     defusedxml \
-    pypdf
+    pypdf \
+    build123d \
+    pymeshlab \
+    trimesh
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \

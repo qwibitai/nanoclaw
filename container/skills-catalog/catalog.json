@@ -1238,6 +1238,26 @@
         "creative"
       ],
       "path": "/skills-catalog/local/xlsx"
+    },
+    {
+      "name": "build123d",
+      "source": "local",
+      "description": "Create parametric 3D models with Build123d (Python CAD on OpenCASCADE). Trigger on 'parametric model', 'Python CAD', 'complex geometry', 'STEP export', 'assembly model', 'build123d', or when the user needs advanced solid modeling beyond basic OpenSCAD primitives. Do NOT trigger for simple box/cylinder shapes where OpenSCAD suffices.",
+      "categories": [
+        "coding",
+        "engineering"
+      ],
+      "path": "/skills-catalog/local/build123d"
+    },
+    {
+      "name": "pymeshlab",
+      "source": "local",
+      "description": "Professional mesh cleanup and repair using PyMeshLab. Trigger on 'repair mesh', 'fix normals', 'decimate mesh', 'reduce polygons', 'smooth mesh', 'optimize for printing', 'fix manifold', 'fill holes', 'clean STL', or when the user has a mesh file that needs processing before printing or import.",
+      "categories": [
+        "coding",
+        "engineering"
+      ],
+      "path": "/skills-catalog/local/pymeshlab"
     }
   ]
 }
