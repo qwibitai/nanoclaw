@@ -21,6 +21,7 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { appendToolLog, buildToolDetail } from './tool-log.js';
 import { RegisteredGroup } from './types.js';
 
 /** Parse numeric thread context ID from "ctx-{id}" format, or undefined. */
@@ -409,108 +410,132 @@ async function processQueueFile(
   // Skip non-IPC files (e.g. current_tasks.json, available_groups.json)
   if (Array.isArray(data) || typeof data.type !== 'string') return;
 
-  switch (data.type) {
-    case 'message':
-      await handleIpcMessage(
-        data,
-        sourceGroup,
-        threadId,
-        isMain,
-        deps,
-        registeredGroups,
-      );
-      break;
-    case 'send_files':
-      await handleIpcFiles(
-        data,
-        sourceGroup,
-        threadId,
-        isMain,
-        ipcBaseDir,
-        basePath,
-        deps,
-        registeredGroups,
-      );
-      break;
-    case 'list_tasks': {
-      // Sanitize requestId to prevent path traversal (defense-in-depth)
-      const requestId = ((data.requestId as string) || '').replace(
-        /[^a-zA-Z0-9_-]/g,
-        '',
-      );
-      if (!requestId) break;
+  const _toolLogStart = Date.now();
+  let _toolLogOk = true;
+  let _toolLogError: string | undefined;
 
-      const allTasks = getAllTasks();
-      const filtered = isMain
-        ? allTasks
-        : allTasks.filter((t) => t.group_folder === sourceGroup);
-
-      const response = filtered.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      }));
-
-      const inputDir = path.join(basePath, 'input');
-      fs.mkdirSync(inputDir, { recursive: true });
-      const responseFile = path.join(inputDir, `list_tasks-${requestId}.json`);
-      const tempFile = `${responseFile}.tmp`;
-      fs.writeFileSync(tempFile, JSON.stringify(response));
-      fs.renameSync(tempFile, responseFile);
-      break;
-    }
-    case 'schedule_task':
-    case 'pause_task':
-    case 'resume_task':
-    case 'cancel_task':
-    case 'update_task':
-    case 'refresh_groups':
-    case 'register_group':
-    case 'debug_query':
-      if (!threadId)
-        await processTaskIpc(
-          data as Parameters<typeof processTaskIpc>[0],
+  try {
+    switch (data.type) {
+      case 'message':
+        await handleIpcMessage(
+          data,
           sourceGroup,
+          threadId,
           isMain,
           deps,
+          registeredGroups,
         );
-      break;
-    case 'escalate_to_goal':
-      if (deps.onEscalateToGoal && data.groupFolder) {
-        deps.onEscalateToGoal(sourceGroup, threadId || 'default');
-        logger.info({ sourceGroup, threadId }, 'goal.escalated via IPC');
+        break;
+      case 'send_files':
+        await handleIpcFiles(
+          data,
+          sourceGroup,
+          threadId,
+          isMain,
+          ipcBaseDir,
+          basePath,
+          deps,
+          registeredGroups,
+        );
+        break;
+      case 'list_tasks': {
+        // Sanitize requestId to prevent path traversal (defense-in-depth)
+        const requestId = ((data.requestId as string) || '').replace(
+          /[^a-zA-Z0-9_-]/g,
+          '',
+        );
+        if (!requestId) break;
+
+        const allTasks = getAllTasks();
+        const filtered = isMain
+          ? allTasks
+          : allTasks.filter((t) => t.group_folder === sourceGroup);
+
+        const response = filtered.map((t) => ({
+          id: t.id,
+          groupFolder: t.group_folder,
+          prompt: t.prompt,
+          schedule_type: t.schedule_type,
+          schedule_value: t.schedule_value,
+          status: t.status,
+          next_run: t.next_run,
+        }));
+
+        const inputDir = path.join(basePath, 'input');
+        fs.mkdirSync(inputDir, { recursive: true });
+        const responseFile = path.join(
+          inputDir,
+          `list_tasks-${requestId}.json`,
+        );
+        const tempFile = `${responseFile}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify(response));
+        fs.renameSync(tempFile, responseFile);
+        break;
       }
-      break;
-    case 'paused':
-      if (deps.onContainerPaused) {
-        deps.onContainerPaused(sourceGroup, threadId || 'default');
-      }
-      break;
-    case 'resumed':
-      if (deps.onContainerResumed) {
-        deps.onContainerResumed(sourceGroup, threadId || 'default');
-      }
-      break;
-    default: {
-      const externalHandler = externalIpcHandlers.get(data.type as string);
-      if (externalHandler) {
-        await externalHandler(data, sourceGroup, isMain, deps);
-      } else {
-        logger.warn(
-          {
-            type: data.type,
+      case 'schedule_task':
+      case 'pause_task':
+      case 'resume_task':
+      case 'cancel_task':
+      case 'update_task':
+      case 'refresh_groups':
+      case 'register_group':
+      case 'debug_query':
+        if (!threadId)
+          await processTaskIpc(
+            data as Parameters<typeof processTaskIpc>[0],
             sourceGroup,
-            threadId,
-            keys: Object.keys(data).join(','),
-          },
-          'Unknown IPC message type',
-        );
+            isMain,
+            deps,
+          );
+        break;
+      case 'escalate_to_goal':
+        if (deps.onEscalateToGoal && data.groupFolder) {
+          deps.onEscalateToGoal(sourceGroup, threadId || 'default');
+          logger.info({ sourceGroup, threadId }, 'goal.escalated via IPC');
+        }
+        break;
+      case 'paused':
+        if (deps.onContainerPaused) {
+          deps.onContainerPaused(sourceGroup, threadId || 'default');
+        }
+        break;
+      case 'resumed':
+        if (deps.onContainerResumed) {
+          deps.onContainerResumed(sourceGroup, threadId || 'default');
+        }
+        break;
+      default: {
+        const externalHandler = externalIpcHandlers.get(data.type as string);
+        if (externalHandler) {
+          await externalHandler(data, sourceGroup, isMain, deps);
+        } else {
+          logger.warn(
+            {
+              type: data.type,
+              sourceGroup,
+              threadId,
+              keys: Object.keys(data).join(','),
+            },
+            'Unknown IPC message type',
+          );
+        }
       }
     }
+  } catch (err) {
+    _toolLogOk = false;
+    _toolLogError = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    appendToolLog({
+      ts: new Date().toISOString(),
+      group: sourceGroup,
+      thread: threadId,
+      type: data.type as string,
+      durationMs: Date.now() - _toolLogStart,
+      ok: _toolLogOk,
+      detail: buildToolDetail(data.type as string, data),
+      error: _toolLogError,
+    });
   }
 }
 
