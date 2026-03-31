@@ -20,6 +20,7 @@ groups/global/*
 groups/discord_main/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/global/knowledge/
 !groups/discord_main/CLAUDE.md
 
 # Secrets
@@ -46,6 +47,8 @@ groups/discord_main/*
 container/skills-catalog/plugins/
 
 groups/*/knowledge/
+!groups/global/knowledge/
+!groups/global/knowledge/**
 
 agents-sdk-docs
 container/skills-catalog/catalog.json
