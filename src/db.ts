@@ -388,6 +388,16 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+export function getMessageContentById(
+  id: string,
+  chatJid: string,
+): string | undefined {
+  const row = db
+    .prepare(`SELECT content FROM messages WHERE id = ? AND chat_jid = ?`)
+    .get(id, chatJid) as { content: string } | undefined;
+  return row?.content;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
