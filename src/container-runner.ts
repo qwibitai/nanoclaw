@@ -702,6 +702,31 @@ export function writeTasksSnapshot(
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
 }
 
+/**
+ * Write dev tasks snapshot for the container to read.
+ * Only main group can see dev tasks.
+ */
+export function writeDevTasksSnapshot(
+  groupFolder: string,
+  isMain: boolean,
+  tasks: Array<{
+    id: number;
+    title: string;
+    status: string;
+    branch?: string;
+    pr_url?: string;
+    created_at: string;
+  }>,
+): void {
+  if (!isMain) return;
+
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const devTasksFile = path.join(groupIpcDir, 'current_dev_tasks.json');
+  fs.writeFileSync(devTasksFile, JSON.stringify(tasks, null, 2));
+}
+
 export interface AvailableGroup {
   jid: string;
   name: string;

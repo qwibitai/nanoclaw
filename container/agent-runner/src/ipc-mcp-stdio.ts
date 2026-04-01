@@ -334,6 +334,94 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 );
 
 server.tool(
+  'create_dev_task',
+  'Create a new dev task for tracking development work. Returns the created task ID.',
+  {
+    title: z.string().describe('Short title for the task'),
+    description: z.string().optional().describe('Detailed description of what needs to be done'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can create dev tasks.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'create_dev_task',
+      title: args.title,
+      description: args.description,
+      targetJid: chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Dev task creation requested: "${args.title}"` }],
+    };
+  },
+);
+
+server.tool(
+  'list_dev_tasks',
+  'List all dev tasks, optionally filtered by status. Shows task ID, title, status, and branch/PR info.',
+  {
+    status: z.enum(['open', 'working', 'pr_ready', 'done', 'needs_session', 'has_followups']).optional().describe('Filter by status (omit for all tasks)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can list dev tasks.' }],
+        isError: true,
+      };
+    }
+
+    const devTasksFile = path.join(IPC_DIR, 'current_dev_tasks.json');
+
+    try {
+      if (!fs.existsSync(devTasksFile)) {
+        return { content: [{ type: 'text' as const, text: 'No dev tasks found.' }] };
+      }
+
+      const allTasks: Array<{
+        id: number;
+        title: string;
+        status: string;
+        branch?: string;
+        pr_url?: string;
+        created_at: string;
+      }> = JSON.parse(fs.readFileSync(devTasksFile, 'utf-8'));
+
+      const tasks = args.status
+        ? allTasks.filter((t) => t.status === args.status)
+        : allTasks;
+
+      if (tasks.length === 0) {
+        return { content: [{ type: 'text' as const, text: args.status ? `No dev tasks with status "${args.status}".` : 'No dev tasks found.' }] };
+      }
+
+      const formatted = tasks
+        .map((t) => {
+          let line = `#${t.id} [${t.status}] ${t.title}`;
+          if (t.branch) line += ` (${t.branch})`;
+          if (t.pr_url) line += ` — ${t.pr_url}`;
+          return line;
+        })
+        .join('\n');
+
+      return { content: [{ type: 'text' as const, text: `Dev tasks:\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading dev tasks: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  },
+);
+
+server.tool(
   'update_dev_task',
   'Update an existing dev task. Only provided fields are changed; omitted fields stay the same.',
   {

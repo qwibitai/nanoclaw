@@ -18,6 +18,7 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
+  writeDevTasksSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -60,7 +61,7 @@ import {
 } from './sender-allowlist.js';
 import http from 'http';
 
-import { recoverTasksOnStartup } from './dev-tasks.js';
+import { listTasks as listDevTasks, recoverTasksOnStartup } from './dev-tasks.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { sendPushToOfflineDevices } from './apns.js';
 import { startDailyNudgeCron } from './daily-nudge.js';
@@ -322,6 +323,21 @@ async function runAgent(
       schedule_value: t.schedule_value,
       status: t.status,
       next_run: t.next_run,
+    })),
+  );
+
+  // Update dev tasks snapshot for container to read (main group only)
+  const devTasks = listDevTasks();
+  writeDevTasksSnapshot(
+    group.folder,
+    isMain,
+    devTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      branch: t.branch,
+      pr_url: t.pr_url,
+      created_at: t.created_at,
     })),
   );
 
