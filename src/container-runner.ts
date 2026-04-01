@@ -43,6 +43,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  ipcKey?: string; // Override the IPC namespace key; defaults to groupFolder
 }
 
 export interface ContainerOutput {
@@ -61,6 +62,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  ipcKey?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -165,9 +167,11 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-group IPC namespace: each group gets its own IPC directory
-  // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = resolveGroupIpcPath(group.folder);
+  // Per-group IPC namespace: each group gets its own IPC directory.
+  // ipcKey overrides group.folder when a group runs isolated sub-sessions
+  // (e.g. Slack threads, email threads) so concurrent containers don't share
+  // an IPC namespace even though they share the same group folder on disk.
+  const groupIpcDir = resolveGroupIpcPath(ipcKey ?? group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -285,7 +289,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.ipcKey);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
