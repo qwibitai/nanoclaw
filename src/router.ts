@@ -1,5 +1,6 @@
 import { Channel, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { parseTextStyles, ChannelType } from './text-styles.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -39,10 +40,10 @@ export function extractThreadTitle(raw: string): string | undefined {
   return m?.[1]?.trim().slice(0, 100) || undefined; // Discord 100-char limit
 }
 
-export function formatOutbound(rawText: string): string {
+export function formatOutbound(rawText: string, channel?: ChannelType): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return channel ? parseTextStyles(text, channel) : text;
 }
 
 export function routeOutbound(

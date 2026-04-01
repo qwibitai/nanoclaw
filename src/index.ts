@@ -119,8 +119,8 @@ import {
   findChannel,
   formatMessages,
   formatOutbound,
-  stripInternalTags,
 } from './router.js';
+import { ChannelType } from './text-styles.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -1105,8 +1105,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               channel as { setPendingThreadTitle(k: string, t: string): void }
             ).setPendingThreadTitle(threadTitleConvKey, threadTitle);
           }
-          // Strip <internal> and <thread-title> blocks
-          const text = stripInternalTags(raw);
+          // Strip <internal>/<thread-title> blocks and apply channel formatting
+          const text = formatOutbound(raw, channel.name as ChannelType);
           agentResponseText += text + '\n';
           logger.info(
             { group: group.name },
@@ -2273,7 +2273,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
-      const text = formatOutbound(rawText);
+      const text = formatOutbound(rawText, channel.name as ChannelType);
       // Pass null to explicitly skip thread creation — scheduled task output
       // is system-originated and should post to the channel directly.
       // suppressActions: scheduled output may list PRs the user didn't create.
@@ -2282,10 +2282,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text, sender?, threadId?) => {
+    sendMessage: (jid, rawText, sender?, threadId?) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      text = stripInternalTags(text);
+      const text = formatOutbound(rawText, channel.name as ChannelType);
       if (!text) return Promise.resolve();
       // Resolve parent JID → thread JID when the container only knows
       // the parent (NANOCLAW_CHAT_JID set before thread was created).
