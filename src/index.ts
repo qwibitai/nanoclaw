@@ -391,6 +391,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        llmProvider: group.containerConfig?.llmProvider,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -719,6 +720,16 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    getGroupByFolder: (folder: string) => {
+      return Object.values(registeredGroups).find(g => g.folder === folder);
+    },
+    updateGroupConfig: (folder: string, config) => {
+      const group = Object.values(registeredGroups).find(g => g.folder === folder);
+      if (group) {
+        group.containerConfig = config;
+        updateGroupConfig(group.folder, config);
+      }
+    },
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels

@@ -10,6 +10,17 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'DEFAULT_LLM_PROVIDER',
+  'LM_STUDIO_URL',
+  'LM_STUDIO_MODEL',
+  'LM_STUDIO_API_KEY',
+  'OLLAMA_URL',
+  'OLLAMA_MODEL',
+  'OPENAI_COMPATIBLE_URL',
+  'OPENAI_COMPATIBLE_MODEL',
+  'OPENAI_COMPATIBLE_API_KEY',
+  'DEFAULT_ROUTING_MODE',
+  'DEFAULT_MAX_TOKENS_FOR_LOCAL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -95,3 +106,39 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// LLM Provider Configuration
+export const DEFAULT_LLM_PROVIDER =
+  process.env.DEFAULT_LLM_PROVIDER || envConfig.DEFAULT_LLM_PROVIDER || 'claude';
+
+// LM Studio
+export const LM_STUDIO_URL =
+  process.env.LM_STUDIO_URL || envConfig.LM_STUDIO_URL || 'http://localhost:1234/v1';
+export const LM_STUDIO_MODEL =
+  process.env.LM_STUDIO_MODEL || envConfig.LM_STUDIO_MODEL || 'qwen3-coder:7b';
+export const LM_STUDIO_API_KEY =
+  process.env.LM_STUDIO_API_KEY || envConfig.LM_STUDIO_API_KEY;
+
+// Ollama
+export const OLLAMA_URL =
+  process.env.OLLAMA_URL || envConfig.OLLAMA_URL || 'http://localhost:11434/v1';
+export const OLLAMA_MODEL =
+  process.env.OLLAMA_MODEL || envConfig.OLLAMA_MODEL || 'gemma3:1b';
+
+// Generic OpenAI-compatible
+export const OPENAI_COMPATIBLE_URL =
+  process.env.OPENAI_COMPATIBLE_URL || envConfig.OPENAI_COMPATIBLE_URL;
+export const OPENAI_COMPATIBLE_MODEL =
+  process.env.OPENAI_COMPATIBLE_MODEL || envConfig.OPENAI_COMPATIBLE_MODEL;
+export const OPENAI_COMPATIBLE_API_KEY =
+  process.env.OPENAI_COMPATIBLE_API_KEY || envConfig.OPENAI_COMPATIBLE_API_KEY;
+
+// Routing defaults
+export const DEFAULT_ROUTING_MODE =
+  process.env.DEFAULT_ROUTING_MODE || envConfig.DEFAULT_ROUTING_MODE || 'simple';
+export const DEFAULT_MAX_TOKENS_FOR_LOCAL = parseInt(
+  process.env.DEFAULT_MAX_TOKENS_FOR_LOCAL ||
+    envConfig.DEFAULT_MAX_TOKENS_FOR_LOCAL ||
+    '500',
+  10,
+);

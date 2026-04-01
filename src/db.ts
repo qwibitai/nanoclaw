@@ -673,6 +673,12 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+export function updateGroupConfig(folder: string, config: ContainerConfig): void {
+  db.prepare(
+    `UPDATE registered_groups SET container_config = ? WHERE folder = ?`,
+  ).run(JSON.stringify(config), folder);
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

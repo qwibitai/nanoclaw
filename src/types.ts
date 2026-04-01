@@ -27,9 +27,24 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface LLMProviderConfig {
+  type: 'claude' | 'openai-compatible';
+
+  // OpenAI-compatible settings
+  baseUrl?: string;          // e.g., 'http://localhost:1234/v1'
+  model?: string;            // e.g., 'qwen3-coder:7b'
+  apiKey?: string;           // Optional
+
+  // Routing strategy
+  routingMode?: 'always' | 'simple' | 'manual' | 'hybrid';
+  maxTokensForLocal?: number;  // Default: 500
+  allowToolUse?: boolean;      // Default: false
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  llmProvider?: LLMProviderConfig;
 }
 
 export interface RegisteredGroup {

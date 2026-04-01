@@ -43,6 +43,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  llmProvider?: import('./types.js').LLMProviderConfig;
 }
 
 export interface ContainerOutput {

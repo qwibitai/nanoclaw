@@ -337,6 +337,87 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'configure_llm_provider',
+  'Configure the LLM provider for this group. Choose between Claude (default) or local LLMs (LM Studio, Ollama, OpenAI-compatible). Main group only.',
+  {
+    provider: z.enum(['claude', 'lm-studio', 'ollama', 'openai-compatible'])
+      .describe('LLM provider to use: claude=Anthropic Claude (default), lm-studio=local LM Studio, ollama=local Ollama, openai-compatible=custom OpenAI API'),
+    routing_mode: z.enum(['always', 'simple', 'manual', 'hybrid']).default('simple')
+      .describe('Routing strategy: always=always use this provider, simple=route simple queries to local (default), manual=use @local/@claude prefixes, hybrid=let Claude classify complexity'),
+    base_url: z.string().optional()
+      .describe('Base URL for OpenAI-compatible API (e.g., "http://localhost:1234/v1" for LM Studio, "http://localhost:11434/v1" for Ollama)'),
+    model: z.string().optional()
+      .describe('Model name (e.g., "qwen3-coder:7b" for LM Studio, "gemma3:1b" for Ollama)'),
+    api_key: z.string().optional()
+      .describe('API key if required (usually not needed for local LLMs)'),
+    max_tokens_for_local: z.number().default(500)
+      .describe('Maximum tokens for local routing in simple mode (default: 500)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can configure LLM providers.' }],
+        isError: true,
+      };
+    }
+
+    // Build provider config
+    const llmProvider: Record<string, unknown> = {
+      type: args.provider === 'claude' ? 'claude' : 'openai-compatible',
+      routingMode: args.routing_mode,
+      maxTokensForLocal: args.max_tokens_for_local,
+    };
+
+    // Set defaults based on provider
+    if (args.provider === 'lm-studio') {
+      llmProvider.baseUrl = args.base_url || 'http://localhost:1234/v1';
+      llmProvider.model = args.model || 'qwen3-coder:7b';
+      if (args.api_key) llmProvider.apiKey = args.api_key;
+    } else if (args.provider === 'ollama') {
+      llmProvider.baseUrl = args.base_url || 'http://localhost:11434/v1';
+      llmProvider.model = args.model || 'gemma3:1b';
+      if (args.api_key) llmProvider.apiKey = args.api_key;
+    } else if (args.provider === 'openai-compatible') {
+      if (!args.base_url || !args.model) {
+        return {
+          content: [{ type: 'text' as const, text: 'base_url and model are required for openai-compatible provider.' }],
+          isError: true,
+        };
+      }
+      llmProvider.baseUrl = args.base_url;
+      llmProvider.model = args.model;
+      if (args.api_key) llmProvider.apiKey = args.api_key;
+    }
+
+    const data = {
+      type: 'configure_llm',
+      groupFolder,
+      llmProvider: args.provider === 'claude' ? null : llmProvider,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    if (args.provider === 'claude') {
+      return {
+        content: [{ type: 'text' as const, text: `LLM provider set to Claude (default). All queries will use Claude API.` }],
+      };
+    }
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `LLM provider configured: ${args.provider}\n` +
+              `Base URL: ${llmProvider.baseUrl}\n` +
+              `Model: ${llmProvider.model}\n` +
+              `Routing mode: ${args.routing_mode}\n` +
+              `Max tokens for local: ${args.max_tokens_for_local}`
+      }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
