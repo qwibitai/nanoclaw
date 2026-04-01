@@ -281,9 +281,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const lastMsg = missedMessages[missedMessages.length - 1];
   channel
     .addReaction?.(chatJid, lastMsg.id, 'eyes')
-    ?.catch((err) =>
-      logger.warn({ chatJid, err }, 'Failed to add reaction'),
-    );
+    ?.catch((err) => logger.warn({ chatJid, err }, 'Failed to add reaction'));
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;

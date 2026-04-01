@@ -102,7 +102,9 @@ export const TIMEZONE = resolveConfigTimezone();
 // Use this for tokens that tools require as env vars: GH_TOKEN, NOTION_TOKEN, etc.
 // Example: CONTAINER_ENV_VARS=GH_TOKEN,NOTION_TOKEN
 export const CONTAINER_ENV_VARS: string[] = (
-  process.env.CONTAINER_ENV_VARS ?? envConfig.CONTAINER_ENV_VARS ?? ''
+  process.env.CONTAINER_ENV_VARS ??
+  envConfig.CONTAINER_ENV_VARS ??
+  ''
 )
   .split(',')
   .map((v: string) => v.trim())
