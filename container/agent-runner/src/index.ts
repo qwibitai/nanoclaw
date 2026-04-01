@@ -59,6 +59,7 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+const QUERY_IDLE_TIMEOUT_MS = parseInt(process.env.QUERY_IDLE_TIMEOUT || '300000', 10); // 5 min default
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -338,9 +339,19 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; aborted: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
+
+  // Abort query if no SDK messages for QUERY_IDLE_TIMEOUT_MS
+  const abortController = new AbortController();
+  let aborted = false;
+  const startIdleTimer = () => setTimeout(() => {
+    log(`No SDK messages for ${QUERY_IDLE_TIMEOUT_MS}ms, aborting query`);
+    aborted = true;
+    abortController.abort();
+  }, QUERY_IDLE_TIMEOUT_MS);
+  let idleTimer = startIdleTimer();
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -429,8 +440,11 @@ async function runQuery(
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
+      abortController,
     }
   })) {
+    clearTimeout(idleTimer);
+    idleTimer = startIdleTimer();
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
@@ -461,9 +475,10 @@ async function runQuery(
     }
   }
 
+  clearTimeout(idleTimer);
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}, aborted: ${aborted}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, aborted };
 }
 
 interface ScriptResult {
@@ -596,6 +611,12 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      // Query was aborted due to idle timeout — exit so host can retry
+      if (queryResult.aborted) {
+        writeOutput({ status: 'error', result: null, newSessionId: sessionId, error: 'Query idle timeout' });
+        process.exit(1);
       }
 
       // Emit session update so host can track it
