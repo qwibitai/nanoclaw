@@ -300,8 +300,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'success') {
+    // Only mark idle on session-update signals (result=null), not on text
+    // output during an active query. The agent-runner emits
+    // {status:'success', result:'...'} when the model produces text mid-query,
+    // but tool calls may still follow. Premature notifyIdle makes the host
+    // classify a busy container as idle-warm, causing piped messages to race
+    // with the idle close timer and get lost.
+    if (result.status === 'success' && !result.result) {
       queue.notifyIdle(chatJid);
+      // Reset idle timer when the query truly finishes (not on mid-query text
+      // output). Without this, the timer started on the last text output can
+      // fire immediately after the query ends, closing the container before it
+      // can accept input.
+      resetIdleTimer();
     }
 
     if (result.status === 'error') {
