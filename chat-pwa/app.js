@@ -537,6 +537,9 @@ function joinRoom(roomId, roomName) {
   currentRoom = roomId;
   unreadRooms.delete(roomId);
   updateUnreadDots();
+  // Set agent name for thinking bubble from the bot associated with this room
+  const roomBot = allBots.find(b => b.jid === `chat:${roomId}`);
+  if (roomBot) agentName = roomBot.trigger || roomBot.name;
   $('#app').classList.add('in-room');
   $('#app').classList.remove('in-dashboard');
   for (const t of typingUsers.values()) clearTimeout(t.timeout);
@@ -2130,6 +2133,9 @@ function handleStatusEvent(msg) {
     updateThinkingBubble(TOOL_LABELS[msg.detail] || `Using ${msg.detail}`);
   } else if (msg.event === 'thinking') {
     updateThinkingBubble('Thinking');
+  } else if (msg.event === 'done') {
+    const bubble = $('#messages .thinking-bubble');
+    if (bubble) bubble.remove();
   }
 }
 

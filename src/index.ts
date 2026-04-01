@@ -322,6 +322,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   await channel.setTyping?.(chatJid, false);
+  channel.sendStatus?.(chatJid, 'done');
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
