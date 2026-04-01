@@ -533,6 +533,16 @@ async function main(): Promise<void> {
   const proxyServer = await startCredentialProxy(
     CREDENTIAL_PROXY_PORT,
     PROXY_BIND_HOST,
+    undefined, // credentialsPath — use default
+    (message) => {
+      // Notify the main group (or first registered group) about auth failure
+      const jid =
+        Object.entries(registeredGroups).find(([, g]) => g.isMain)?.[0] ??
+        Object.keys(registeredGroups)[0];
+      if (!jid) return;
+      const channel = findChannel(channels, jid);
+      if (channel) channel.sendMessage(jid, message).catch(() => {});
+    },
   );
 
   // Graceful shutdown handlers

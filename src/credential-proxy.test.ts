@@ -19,6 +19,8 @@ import {
   readCredentials,
   refreshOAuthToken,
   ensureValidToken,
+  proactiveRefresh,
+  OAuthRefreshError,
 } from './credential-proxy.js';
 
 function makeRequest(
@@ -312,13 +314,17 @@ describe('refreshOAuthToken', () => {
     expect(result.expiresAt).toBeGreaterThan(Date.now());
   });
 
-  it('throws on 401 response', async () => {
-    await expect(
-      refreshOAuthToken(
+  it('throws OAuthRefreshError with parsed error code on failure', async () => {
+    try {
+      await refreshOAuthToken(
         'invalid-refresh',
         `http://127.0.0.1:${tokenPort}/v1/oauth/token`,
-      ),
-    ).rejects.toThrow(/401/);
+      );
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(OAuthRefreshError);
+      expect((err as OAuthRefreshError).code).toBe('invalid_grant');
+    }
   });
 
   it('throws on network error', async () => {
@@ -575,5 +581,88 @@ describe('ensureValidToken', () => {
     );
 
     expect(result.accessToken).toBe('fresh-from-login');
+  });
+});
+
+describe('proactiveRefresh', () => {
+  let tmpDir: string;
+  let refreshServer: http.Server;
+  let refreshPort: number;
+  let refreshCallCount: number;
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proactive-test-'));
+    refreshCallCount = 0;
+
+    refreshServer = http.createServer((req, res) => {
+      refreshCallCount++;
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            access_token: 'proactive-access-token',
+            refresh_token: 'proactive-refresh-token',
+            expires_in: 7200,
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) =>
+      refreshServer.listen(0, '127.0.0.1', resolve),
+    );
+    refreshPort = (refreshServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((r) => refreshServer?.close(() => r()));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refreshes when token has < 3 hours remaining', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'two-hours-left',
+          refreshToken: 'valid-refresh',
+          expiresAt: Date.now() + 2 * 60 * 60 * 1000, // 2 hours from now
+        },
+      }),
+    );
+
+    const result = await proactiveRefresh(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    // Should refresh — 2h remaining is within the 3h proactive buffer
+    expect(result.accessToken).toBe('proactive-access-token');
+    expect(refreshCallCount).toBe(1);
+  });
+
+  it('skips refresh when token has > 3 hours remaining', async () => {
+    const credsPath = path.join(tmpDir, '.credentials.json');
+    fs.writeFileSync(
+      credsPath,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'plenty-of-time',
+          refreshToken: 'valid-refresh',
+          expiresAt: Date.now() + 5 * 60 * 60 * 1000, // 5 hours from now
+        },
+      }),
+    );
+
+    const result = await proactiveRefresh(
+      credsPath,
+      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
+    );
+
+    // Should NOT refresh — 5h remaining is outside the 3h buffer
+    expect(result.accessToken).toBe('plenty-of-time');
+    expect(refreshCallCount).toBe(0);
   });
 });
