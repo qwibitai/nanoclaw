@@ -134,7 +134,7 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-import { buildMessageContent, ContentPart } from './handlers/index.js';
+import { buildMessageContent, cleanupMedia, ContentPart } from './handlers/index.js';
 
 function getSessionSummary(
   sessionId: string,
@@ -749,6 +749,7 @@ async function main(): Promise<void> {
         nextMessage.text,
         nextMessage.contentParts,
       );
+      cleanupMedia();
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

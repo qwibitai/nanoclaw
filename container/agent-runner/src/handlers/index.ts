@@ -100,7 +100,6 @@ export async function buildMessageContent(
   text: string,
   contentParts?: ContentPart[],
 ): Promise<MessageContent> {
-  cleanupMedia();
   if (!contentParts?.length) return text;
 
   const blocks: ContentBlock[] = [];
@@ -120,7 +119,7 @@ export async function buildMessageContent(
  * Prevent media files from accumulating indefinitely.
  * If total size exceeds the threshold, evict oldest files first.
  */
-function cleanupMedia(): void {
+export function cleanupMedia(): void {
   if (!fs.existsSync(MEDIA_DIR)) return;
 
   const files = fs.readdirSync(MEDIA_DIR).map((name) => {
@@ -132,10 +131,23 @@ function cleanupMedia(): void {
   let totalSize = files.reduce((sum, f) => sum + f.size, 0);
   if (totalSize <= MEDIA_MAX_BYTES) return;
 
-  files.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+  log(
+    `Media cleanup: ${files.length} files, ` +
+      `${(totalSize / 1024 / 1024).toFixed(1)}MB > ` +
+      `${MEDIA_MAX_MB}MB threshold`,
+  );
+
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  let evicted = 0;
   for (const f of files) {
     if (totalSize <= MEDIA_MAX_BYTES) break;
     fs.unlinkSync(f.filepath);
     totalSize -= f.size;
+    evicted++;
   }
+
+  log(
+    `Media cleanup: evicted ${evicted} files, ` +
+      `${(totalSize / 1024 / 1024).toFixed(1)}MB remaining`,
+  );
 }
