@@ -45,11 +45,28 @@ export interface ContainerInput {
   script?: string;
 }
 
+/**
+ * Structured output parsed from agent-runner's sentinel JSON.
+ * This is the host-side mirror of the interface defined in
+ * container/agent-runner/src/index.ts — keep them in sync.
+ *
+ * Token fields are cumulative across all turns in the agent run. They are
+ * persisted to the run_usage table by index.ts and surfaced via the
+ * GET /api/v1/usage endpoint.
+ */
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Cumulative non-cached input tokens consumed. */
+  inputTokens?: number;
+  /** Cumulative output tokens generated. */
+  outputTokens?: number;
+  /** Cumulative input tokens served from the Anthropic prompt cache. */
+  cacheReadInputTokens?: number;
+  /** Cumulative input tokens written to the Anthropic prompt cache. */
+  cacheCreationInputTokens?: number;
 }
 
 interface VolumeMount {
