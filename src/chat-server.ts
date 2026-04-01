@@ -380,6 +380,7 @@ const pendingChunkedUploads = new Map<
     tempDir: string;
     sender: string;
     timer: ReturnType<typeof setTimeout>;
+    cumulativeSize: number;
   }
 >();
 
@@ -589,14 +590,7 @@ async function handleHttp(
         messages24h += recent;
         if (recent > 0) {
           roomMessages.push({ id: room.id, name: room.name, count: recent });
-          const jid = `chat:${room.id}`;
-          const group = groups[jid];
-          const ch = group
-            ? jid.startsWith('chat:')
-              ? 'local-chat'
-              : 'unknown'
-            : 'local-chat';
-          messagesByChannel[ch] = (messagesByChannel[ch] || 0) + recent;
+          messagesByChannel['local-chat'] = (messagesByChannel['local-chat'] || 0) + recent;
         }
       }
     } catch {
@@ -1112,12 +1106,25 @@ async function handleHttp(
         tempDir,
         sender: senderIdentity,
         timer: setTimeout(() => cleanupChunkedUpload(uploadId), CHUNK_UPLOAD_TIMEOUT),
+        cumulativeSize: 0,
       };
       pendingChunkedUploads.set(uploadId, upload);
+    } else {
+      // Validate totalChunks matches initial value
+      if (totalChunks !== upload.totalChunks) {
+        return json(400, { error: 'totalChunks mismatch' });
+      }
     }
 
-    // Write chunk
+    // Write chunk and check incremental size
     const chunkBuf = Buffer.from(data, 'base64');
+    upload.cumulativeSize += chunkBuf.length;
+    if (upload.cumulativeSize > MAX_UPLOAD_SIZE) {
+      cleanupChunkedUpload(uploadId);
+      return json(413, {
+        error: `File exceeds ${MAX_UPLOAD_SIZE / 1024 / 1024}MB limit`,
+      });
+    }
     fs.writeFileSync(path.join(upload.tempDir, String(chunkIndex)), chunkBuf);
     upload.receivedChunks.add(chunkIndex);
 
@@ -1450,10 +1457,12 @@ export async function startChatServer(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server!.listen(port, host, () => {
       logger.info({ port, host }, 'Chat server started');
-      if (TRUSTED_PROXY_RAW === 'auto' && host === '0.0.0.0') {
+      if (TRUSTED_PROXY_RAW === 'auto') {
         logger.warn(
-          'Trusted proxy "auto" mode with 0.0.0.0 binding — ensure this server is ONLY ' +
-          'reachable through your proxy (Azure/Cloudflare). Direct access allows header forgery.',
+          'Trusted proxy "auto" mode — headers are NOT cryptographically verified. ' +
+            'Ensure this server is ONLY reachable through your proxy (Azure/Cloudflare). ' +
+            'Direct access allows header forgery. Without platform headers, falls back to ' +
+            'trusting any source IP with the configured header (equivalent to "*" mode).',
         );
       }
       resolve();

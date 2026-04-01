@@ -3,9 +3,11 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { createChatRoom } from './chat-db.js';
-import { isChatServerRunning } from './chat-server.js';
+import { randomUUID } from 'crypto';
+
+import { ASSISTANT_NAME, DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { createChatRoom, storeFileMessage } from './chat-db.js';
+import { broadcast, isChatServerRunning } from './chat-server.js';
 import { AvailableGroup } from './container-runner.js';
 import {
   createTask,
@@ -14,7 +16,7 @@ import {
   logMessageRoute,
   updateTask,
 } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -35,6 +37,75 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+const MIME_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown',
+  '.csv': 'text/csv', '.json': 'application/json', '.xml': 'application/xml',
+  '.zip': 'application/zip', '.gz': 'application/gzip',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
+  '.ts': 'text/plain', '.py': 'text/plain', '.cs': 'text/plain',
+  '.java': 'text/plain', '.go': 'text/plain', '.rs': 'text/plain',
+  '.c': 'text/plain', '.cpp': 'text/plain', '.h': 'text/plain',
+  '.sh': 'text/plain', '.yml': 'text/yaml', '.yaml': 'text/yaml',
+  '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+/**
+ * Copy a file from the container workspace into the group's uploads dir
+ * and broadcast as a file message to the local chat room.
+ */
+async function handleFileMessage(
+  data: { chatJid: string; text: string; file_path: string; file_name?: string; file_size?: number },
+  sourceGroup: string,
+): Promise<void> {
+  const roomId = data.chatJid.replace(/^chat:/, '');
+  const groupFolderPath = resolveGroupFolderPath(sourceGroup);
+  const uploadsDir = path.join(groupFolderPath, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  // The file_path is the container path; map to host mount path
+  // Container mounts group folder at /workspace/group → groups/{sourceGroup}
+  const containerPrefix = '/workspace/group/';
+  // Only allow files from the group's own workspace — never project root
+  let hostFilePath: string;
+  if (data.file_path.startsWith(containerPrefix)) {
+    hostFilePath = path.join(groupFolderPath, data.file_path.slice(containerPrefix.length));
+  } else {
+    logger.warn({ file_path: data.file_path, sourceGroup }, 'File path outside group workspace — blocked');
+    return;
+  }
+
+  if (!fs.existsSync(hostFilePath)) {
+    logger.warn({ hostFilePath, sourceGroup }, 'IPC file attachment not found on host');
+    return;
+  }
+
+  const stat = fs.statSync(hostFilePath);
+  const id = randomUUID();
+  // Strip path separators from file_name to prevent path traversal in extension
+  const safeName = (data.file_name || path.basename(data.file_path)).replace(/[/\\]/g, '');
+  const ext = path.extname(safeName);
+  const safeFilename = `${id}${ext}`;
+  const destPath = path.join(uploadsDir, safeFilename);
+
+  fs.copyFileSync(hostFilePath, destPath);
+
+  const filename = safeName;
+  const fileMeta = {
+    url: `/api/files/${encodeURIComponent(sourceGroup)}/${safeFilename}`,
+    filename,
+    mime: MIME_TYPES[ext.toLowerCase()] || 'application/octet-stream',
+    size: stat.size,
+  };
+
+  const stored = storeFileMessage(roomId, ASSISTANT_NAME, 'agent', fileMeta, data.text);
+  broadcast(roomId, { type: 'message', ...stored });
+  logger.info({ roomId, filename, size: stat.size }, 'IPC file message sent to local chat');
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -50,8 +121,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
     let groupFolders: string[];
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
-        const stat = fs.statSync(path.join(ipcBaseDir, f));
-        return stat.isDirectory() && f !== 'errors';
+        try {
+          const stat = fs.statSync(path.join(ipcBaseDir, f));
+          return stat.isDirectory() && f !== 'errors';
+        } catch {
+          return false; // TOCTOU: directory deleted between readdir and stat
+        }
       });
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
@@ -89,12 +164,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Handle file attachments for local-chat
+                  if (data.file_path && data.chatJid.startsWith('chat:')) {
+                    await handleFileMessage(data, sourceGroup);
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                  }
                   // Log cross-group message routes for topology
-                  if (
-                    !targetGroup ||
-                    targetGroup.folder !== sourceGroup
-                  ) {
+                  if (!targetGroup || targetGroup.folder !== sourceGroup) {
                     logMessageRoute(sourceGroup, data.chatJid);
                   }
                   logger.info(
@@ -108,7 +185,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 }
               }
-              fs.unlinkSync(filePath);
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                // TOCTOU: file already deleted by concurrent process
+              }
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -142,7 +223,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
-              fs.unlinkSync(filePath);
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                // TOCTOU: file already deleted by concurrent process
+              }
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
