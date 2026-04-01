@@ -14,6 +14,9 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   ONECLI_URL,
+  PEER_API_TOKEN,
+  PEER_NAME,
+  PEER_TARGETS,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -233,6 +236,11 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass peer config so containers can use peer MCP tools
+  if (PEER_NAME) args.push('-e', `PEER_NAME=${PEER_NAME}`);
+  if (PEER_API_TOKEN) args.push('-e', `PEER_API_TOKEN=${PEER_API_TOKEN}`);
+  if (PEER_TARGETS) args.push('-e', `PEER_TARGETS=${PEER_TARGETS}`);
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -400,7 +408,12 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (!line) continue;
+        if (line.includes('[PEER]')) {
+          logger.info({ container: group.folder }, line);
+        } else {
+          logger.debug({ container: group.folder }, line);
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

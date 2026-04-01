@@ -5,6 +5,9 @@
 
 // gmail
 
+// peer
+import './peer.js';
+
 // slack
 
 // telegram

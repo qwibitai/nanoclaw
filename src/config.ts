@@ -10,6 +10,10 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'PEER_NAME',
+  'PEER_API_PORT',
+  'PEER_API_TOKEN',
+  'PEER_TARGETS',
 ]);
 
 export const ASSISTANT_NAME =
@@ -95,3 +99,19 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Peer API — NanoClaw-to-NanoClaw structured data exchange
+// PEER_NAME:    human-readable name for this instance (e.g. "alice")
+// PEER_API_PORT: port for the inbound HTTP server (default: 7843)
+// PEER_API_TOKEN: shared Bearer token for authenticating peer requests
+// PEER_TARGETS: comma-separated "name=url" pairs, e.g. "bob=https://bob.example.com:7843"
+export const PEER_NAME =
+  process.env.PEER_NAME || envConfig.PEER_NAME || '';
+export const PEER_API_PORT = parseInt(
+  process.env.PEER_API_PORT || envConfig.PEER_API_PORT || '7843',
+  10,
+);
+export const PEER_API_TOKEN =
+  process.env.PEER_API_TOKEN || envConfig.PEER_API_TOKEN || '';
+export const PEER_TARGETS =
+  process.env.PEER_TARGETS || envConfig.PEER_TARGETS || '';

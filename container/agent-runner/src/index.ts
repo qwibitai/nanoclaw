@@ -409,7 +409,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        ...(process.env.PEER_TARGETS ? ['mcp__nanoclaw_peer__*'] : []),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -425,6 +426,19 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.PEER_TARGETS
+          ? {
+              nanoclaw_peer: {
+                command: 'node',
+                args: [path.join(__dirname, 'peer-mcp-stdio.js')],
+                env: {
+                  PEER_NAME: process.env.PEER_NAME || '',
+                  PEER_API_TOKEN: process.env.PEER_API_TOKEN || '',
+                  PEER_TARGETS: process.env.PEER_TARGETS || '',
+                },
+              },
+            }
+          : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
