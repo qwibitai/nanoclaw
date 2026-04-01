@@ -257,6 +257,9 @@ function connect() {
         }
         scrollToBottom(true);
         requestAnimationFrame(() => scrollToBottom(true));
+        // Extra scrolls for mobile layout settle
+        setTimeout(() => scrollToBottom(true), 100);
+        setTimeout(() => scrollToBottom(true), 300);
         break;
       case 'members':
         if (msg.room_id === currentRoom) renderMembers(msg.members);
@@ -285,7 +288,7 @@ function connect() {
           appendMessage(msg);
         }
         if (isNearBottom()) scrollToBottom();
-        else $('#scroll-bottom').hidden = false;
+        else incrementMissedMessages();
         break;
       case 'typing':
         handleTypingEvent(msg);
@@ -773,18 +776,49 @@ async function uploadFileChunked(file, caption) {
 function scrollToBottom(instant) {
   const el = $('#messages');
   el.scrollTo({ top: el.scrollHeight, behavior: instant ? 'instant' : 'smooth' });
+  // Also scroll window for mobile where body scrolls instead of #messages
+  window.scrollTo({ top: document.body.scrollHeight, behavior: instant ? 'instant' : 'smooth' });
 }
 
 function isNearBottom() {
   const el = $('#messages');
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const elNear = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const winNear = document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 80;
+  return elNear || winNear;
+}
+
+let missedMsgCount = 0;
+
+function updateScrollButton() {
+  if (isNearBottom()) {
+    $('#scroll-bottom').hidden = true;
+    missedMsgCount = 0;
+    $('#unread-badge').textContent = '';
+  } else {
+    $('#scroll-bottom').hidden = false;
+    $('#unread-badge').textContent = missedMsgCount > 0 ? String(missedMsgCount) : '';
+  }
+}
+
+function incrementMissedMessages() {
+  if (!isNearBottom()) {
+    missedMsgCount++;
+    updateScrollButton();
+  }
 }
 
 // Show/hide scroll-to-bottom button
 $('#messages').addEventListener('scroll', () => {
-  $('#scroll-bottom').hidden = isNearBottom();
+  updateScrollButton();
 });
-$('#scroll-bottom').addEventListener('click', () => scrollToBottom());
+window.addEventListener('scroll', () => {
+  updateScrollButton();
+});
+$('#scroll-bottom').addEventListener('click', () => {
+  missedMsgCount = 0;
+  $('#unread-badge').textContent = '';
+  scrollToBottom();
+});
 
 let clientMsgSeq = 0;
 
