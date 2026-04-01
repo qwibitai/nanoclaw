@@ -1,6 +1,6 @@
 {
   "name": "nanoclaw",
-  "version": "1.2.43",
+  "version": "1.2.42",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
@@ -22,11 +22,10 @@
   },
   "dependencies": {
     "@onecli-sh/sdk": "^0.2.0",
-    "@whiskeysockets/baileys": "^6.17.16",
+    "@slack/bolt": "^4.3.0",
+    "@slack/types": "^2.15.0",
     "better-sqlite3": "11.10.0",
-    "cron-parser": "5.5.0",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0"
+    "cron-parser": "5.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
