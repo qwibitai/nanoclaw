@@ -11,20 +11,29 @@ logs/
 
 # Groups - track CLAUDE.md for each group, ignore runtime data (logs, sessions)
 groups/*
+!groups/_archived/
 !groups/main/
 !groups/global/
-!groups/telegram_famsigma/
-!groups/telegram_solosigma/
+!groups/telegram_pip_admin/
+!groups/telegram_pip_family/
+!groups/telegram_pickle/
 !groups/ios_boris/
+groups/_archived/*
 groups/main/*
 groups/global/*
-groups/telegram_famsigma/*
-groups/telegram_solosigma/*
+groups/telegram_pip_admin/*
+groups/telegram_pip_family/*
+groups/telegram_pickle/*
 groups/ios_boris/*
+!groups/_archived/telegram_famsigma/
+!groups/_archived/telegram_solosigma/
+!groups/_archived/telegram_famsigma/CLAUDE.md
+!groups/_archived/telegram_solosigma/CLAUDE.md
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
-!groups/telegram_famsigma/CLAUDE.md
-!groups/telegram_solosigma/CLAUDE.md
+!groups/telegram_pip_admin/CLAUDE.md
+!groups/telegram_pip_family/CLAUDE.md
+!groups/telegram_pickle/CLAUDE.md
 !groups/ios_boris/CLAUDE.md
 
 # Secrets

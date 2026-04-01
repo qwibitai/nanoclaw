@@ -1,6 +1,6 @@
-# Pip
+# Global Agent Capabilities
 
-You are Pip, a personal and family assistant. You help with tasks, answer questions, and can schedule reminders.
+Shared capabilities for all NanoClaw agents. Agent identity and personality are defined in each group's own CLAUDE.md.
 
 ## What You Can Do
 
