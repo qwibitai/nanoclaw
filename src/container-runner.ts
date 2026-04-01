@@ -148,13 +148,28 @@ function buildVolumeMounts(
     );
   }
 
+  // Inject per-skill config as env vars into settings.json (always, so updates take effect)
+  const skillConfig = group.containerConfig?.skillConfig;
+  if (skillConfig) {
+    const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    for (const config of Object.values(skillConfig)) {
+      for (const [key, value] of Object.entries(config)) {
+        settings.env[key] = String(value);
+      }
+    }
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+  }
+
   // Sync skills from container/skills/ into each group's .claude/skills/
+  // skills absent = all, skills [] = none, skills [...] = allowlist
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
+  const skillsAllowlist = group.containerConfig?.skills;
+  if (fs.existsSync(skillsSrc) && skillsAllowlist?.length !== 0) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
+      if (skillsAllowlist && !skillsAllowlist.includes(skillDir)) continue;
       const dstDir = path.join(skillsDst, skillDir);
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
