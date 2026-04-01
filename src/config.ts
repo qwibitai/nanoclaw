@@ -81,6 +81,10 @@ export const MAX_CONTAINERS_PER_GROUP = Math.max(
   1,
   parseIntEnv(process.env.MAX_CONTAINERS_PER_GROUP, 3),
 );
+export const MAX_SCHEDULED_TASKS_PER_GROUP = Math.max(
+  1,
+  parseIntEnv(process.env.MAX_SCHEDULED_TASKS_PER_GROUP, 10),
+);
 export const THREAD_EXPIRY_HOURS = parseIntEnv(
   process.env.THREAD_EXPIRY_HOURS,
   24,

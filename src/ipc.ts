@@ -8,6 +8,7 @@ import {
   GROUPS_DIR,
   FILE_SEND_ALLOWLIST,
   IPC_POLL_INTERVAL,
+  MAX_SCHEDULED_TASKS_PER_GROUP,
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
@@ -15,6 +16,7 @@ import {
   createTask,
   createThreadContext,
   deleteTask,
+  getActiveTaskCountForGroup,
   getAllTasks,
   getTaskById,
   updateTask,
@@ -486,6 +488,7 @@ async function processQueueFile(
             sourceGroup,
             isMain,
             deps,
+            ipcBaseDir,
           );
         break;
       case 'escalate_to_goal':
@@ -699,7 +702,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 const filePath = path.join(tasksDir, file);
                 try {
                   const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-                  await processTaskIpc(data, sourceGroup, isMain, deps);
+                  await processTaskIpc(
+                    data,
+                    sourceGroup,
+                    isMain,
+                    deps,
+                    ipcBaseDir,
+                  );
                   fs.unlinkSync(filePath);
                 } catch (err) {
                   logger.error(
@@ -792,6 +801,7 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    requestId?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -806,7 +816,9 @@ export async function processTaskIpc(
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
+  ipcBaseDir?: string,
 ): Promise<void> {
+  const resolvedIpcBaseDir = ipcBaseDir || path.join(DATA_DIR, 'ipc');
   const registeredGroups = deps.registeredGroups();
 
   switch (data.type) {
@@ -878,6 +890,43 @@ export async function processTaskIpc(
           nextRun = date.toISOString();
         }
 
+        // Enforce task count cap per group
+        const activeCount = getActiveTaskCountForGroup(targetFolder);
+        if (activeCount >= MAX_SCHEDULED_TASKS_PER_GROUP) {
+          logger.warn(
+            {
+              sourceGroup,
+              targetFolder,
+              activeCount,
+              max: MAX_SCHEDULED_TASKS_PER_GROUP,
+            },
+            'Task count cap reached, rejecting schedule_task',
+          );
+          // Write error response so the agent knows the request was rejected
+          const reqId = ((data.requestId as string) || '').replace(
+            /[^a-zA-Z0-9_-]/g,
+            '',
+          );
+          if (reqId) {
+            const groupIpcDir = path.join(resolvedIpcBaseDir, sourceGroup);
+            const inputDir = path.join(groupIpcDir, 'input');
+            fs.mkdirSync(inputDir, { recursive: true });
+            const responseFile = path.join(
+              inputDir,
+              `schedule_task-${reqId}.json`,
+            );
+            const tempFile = `${responseFile}.tmp`;
+            fs.writeFileSync(
+              tempFile,
+              JSON.stringify({
+                error: `Task count cap reached (${activeCount}/${MAX_SCHEDULED_TASKS_PER_GROUP}). Pause or cancel existing tasks first.`,
+              }),
+            );
+            fs.renameSync(tempFile, responseFile);
+          }
+          break;
+        }
+
         const taskId =
           data.taskId ||
           `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -902,6 +951,27 @@ export async function processTaskIpc(
           'Task created via IPC',
         );
         deps.onTasksChanged();
+
+        // Write success response so the agent knows the task was created
+        const schedReqId = ((data.requestId as string) || '').replace(
+          /[^a-zA-Z0-9_-]/g,
+          '',
+        );
+        if (schedReqId) {
+          const groupIpcDir = path.join(resolvedIpcBaseDir, sourceGroup);
+          const inputDir = path.join(groupIpcDir, 'input');
+          fs.mkdirSync(inputDir, { recursive: true });
+          const responseFile = path.join(
+            inputDir,
+            `schedule_task-${schedReqId}.json`,
+          );
+          const tempFile = `${responseFile}.tmp`;
+          fs.writeFileSync(
+            tempFile,
+            JSON.stringify({ taskId, status: 'created' }),
+          );
+          fs.renameSync(tempFile, responseFile);
+        }
       }
       break;
 

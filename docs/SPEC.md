@@ -64,6 +64,19 @@ Container concurrency: `MAX_CONCURRENT_CONTAINERS` (default 5) global, `MAX_CONT
 
 SQLite `scheduled_tasks` table. Types: `cron`, `interval`, `once`. Each run spawns a container. `context_mode: 'group'` shares the group's session; `'isolated'` starts fresh.
 
+## Auto-Deploy
+
+A systemd timer polls GitHub every 2 minutes for new commits on `main`. When changes are detected:
+
+1. `git pull --ff-only` (aborts if not fast-forward)
+2. `npm install && npm run build`
+3. `./container/build.sh` (rebuild agent image)
+4. Notify active groups via IPC
+5. Wait up to 5 min for active containers to finish
+6. `systemctl restart nanoclaw`
+
+Files: `deploy/auto-deploy.sh`, `deploy/nanoclaw-deploy.timer`, `deploy/nanoclaw-deploy.service`. Lock file at `/tmp/nanoclaw-deploy.lock` prevents concurrent deploys. Logs to `logs/auto-deploy.log`.
+
 ## Key Files
 
 | File | Purpose |
@@ -81,6 +94,8 @@ SQLite `scheduled_tasks` table. Types: `cron`, `interval`, `once`. Each run spaw
 | `src/config.ts` | Constants and environment config |
 | `container/agent-runner/src/index.ts` | In-container agent entry point |
 | `container/agent-runner/src/ipc-mcp-stdio.ts` | MCP tool server for IPC |
+| `deploy/auto-deploy.sh` | Auto-deploy: pull, rebuild, restart |
+| `deploy/nanoclaw-deploy.timer` | Systemd timer (2-min poll) |
 
 ## Database Tables
 

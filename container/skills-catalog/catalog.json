@@ -1022,6 +1022,15 @@
       "path": "/skills-catalog/local/materials-simulation-skills/skills/simulation-workflow/simulation-validator"
     },
     {
+      "name": "skill-authoring",
+      "source": "local",
+      "description": "Create new skills for the NanoClaw agent. Use when asked to \"create a skill\", \"make a skill for X\", \"add a new capability\", or when you notice a workflow you keep repeating that should be codified. Main group only.",
+      "categories": [
+        "coding"
+      ],
+      "path": "/skills-catalog/local/skill-authoring"
+    },
+    {
       "name": "slurm-job-script-generator",
       "source": "local",
       "description": "Generate SLURM `sbatch` job scripts and sanity-check HPC resource requests (nodes, tasks, CPUs, memory, GPUs) for simulation runs. Use when preparing submission scripts, deciding MPI vs MPI+OpenMP layouts, standardizing `#SBATCH` directives, or debugging job launch configuration (`sbatch`/`srun`).",

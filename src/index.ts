@@ -77,6 +77,22 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+function chownRecursive(dir: string, uid: number, gid: number): void {
+  try {
+    fs.chownSync(dir, uid, gid);
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      const stat = fs.lstatSync(full);
+      fs.chownSync(full, uid, gid);
+      if (stat.isDirectory()) {
+        chownRecursive(full, uid, gid);
+      }
+    }
+  } catch {
+    // Best-effort — don't fail container launch
+  }
+}
+
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let messageLoopRunning = false;
@@ -969,7 +985,8 @@ async function main(): Promise<void> {
           await channel.sendMessage(jid, text);
         }
         if (messageId && taskId) {
-          createThreadContext({
+          const groupFolder = registeredGroups[jid]?.folder;
+          const ctx = createThreadContext({
             chatJid: jid,
             threadId: null,
             sessionId: sessionId || null,
@@ -977,6 +994,34 @@ async function main(): Promise<void> {
             source: 'scheduled_task',
             taskId: parseInt(taskId, 10),
           });
+          // Copy session files from the task's session directory to the new
+          // thread context directory so replies can resume the conversation.
+          if (sessionId && groupFolder) {
+            const taskSessionDir = path.join(
+              DATA_DIR,
+              'sessions',
+              groupFolder,
+              `task_${taskId}`,
+            );
+            const ctxSessionDir = path.join(
+              DATA_DIR,
+              'sessions',
+              groupFolder,
+              `ctx-${ctx.id}`,
+            );
+            try {
+              if (fs.existsSync(taskSessionDir)) {
+                fs.cpSync(taskSessionDir, ctxSessionDir, { recursive: true });
+                // Ensure container user can write to all copied session data
+                chownRecursive(ctxSessionDir, 1000, 1000);
+              }
+            } catch (err) {
+              logger.warn(
+                { taskId, ctxId: ctx.id, err },
+                'Failed to copy task session to thread context',
+              );
+            }
+          }
         }
       }
     },

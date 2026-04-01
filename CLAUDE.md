@@ -29,6 +29,10 @@ The canonical repo is **Zxela/nanoclaw** — always target this for PRs and push
 - `zxela-claude/nanoclaw` is a fork — do NOT open PRs there
 - Always run `gh pr create --repo zxela/nanoclaw` (or omit `--repo` only if `origin` is set correctly)
 
+## Auto-Deploy
+
+Systemd timer polls origin/main every 2 min. On new commits: pull → install → build → rebuild container → wait for active containers → restart. See `deploy/auto-deploy.sh`. Logs: `logs/auto-deploy.log`.
+
 ## Development
 
 Run commands directly — don't tell the user to run them.

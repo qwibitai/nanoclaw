@@ -594,6 +594,15 @@ export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
     .all(groupFolder) as ScheduledTask[];
 }
 
+export function getActiveTaskCountForGroup(groupFolder: string): number {
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) as count FROM scheduled_tasks WHERE group_folder = ? AND status = ?',
+    )
+    .get(groupFolder, 'active') as { count: number };
+  return row.count;
+}
+
 export function getAllTasks(): ScheduledTask[] {
   return db
     .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
