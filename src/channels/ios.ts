@@ -14,6 +14,7 @@ import {
 import {
   handleDataApi,
   watchDevTasks,
+  watchScheduledTasks,
   watchWorkFiles,
 } from './ios-data-api.js';
 
@@ -45,6 +46,7 @@ export class IosChannel implements Channel {
   private opts: IosChannelOpts;
   private stopTasksWatcher: (() => void) | null = null;
   private stopDevTasksWatcher: (() => void) | null = null;
+  private stopScheduledTasksWatcher: (() => void) | null = null;
 
   constructor(port: number, token: string, opts: IosChannelOpts) {
     this.port = port;
@@ -75,6 +77,11 @@ export class IosChannel implements Channel {
     // Watch dev-tasks directory, broadcast structured JSON
     this.stopDevTasksWatcher = watchDevTasks((tasks) => {
       this.broadcastToAll({ type: 'dev_tasks_updated', tasks });
+    });
+
+    // Register scheduled tasks broadcast (SQLite-based, no filesystem watcher)
+    this.stopScheduledTasksWatcher = watchScheduledTasks((tasks) => {
+      this.broadcastToAll({ type: 'scheduled_tasks_updated', tasks });
     });
 
     return new Promise<void>((resolve) => {
@@ -341,6 +348,10 @@ export class IosChannel implements Channel {
     if (this.stopDevTasksWatcher) {
       this.stopDevTasksWatcher();
       this.stopDevTasksWatcher = null;
+    }
+    if (this.stopScheduledTasksWatcher) {
+      this.stopScheduledTasksWatcher();
+      this.stopScheduledTasksWatcher = null;
     }
 
     for (const client of this.clients.values()) {

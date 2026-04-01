@@ -73,6 +73,7 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  onTaskChanged?: () => void;
 }
 
 async function runTask(
@@ -87,6 +88,7 @@ async function runTask(
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
     updateTask(task.id, { status: 'paused' });
+    deps.onTaskChanged?.();
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder, error },
       'Task has invalid group folder',
@@ -236,6 +238,9 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Notify connected FamBot clients of the updated task state
+  deps.onTaskChanged?.();
 }
 
 let schedulerRunning = false;

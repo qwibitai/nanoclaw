@@ -4,11 +4,12 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { AvailableGroup } from './container-runner.js';
+import { AvailableGroup, writeDevTasksSnapshot } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import {
   createTask as createDevTask,
   dispatchAndRun,
+  listTasks as listDevTasks,
   updateTask as updateDevTask,
 } from './dev-tasks.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -156,6 +157,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
+}
+
+function refreshDevTasksSnapshot(
+  groupFolder: string,
+  isMain: boolean,
+): void {
+  const tasks = listDevTasks();
+  writeDevTasksSnapshot(
+    groupFolder,
+    isMain,
+    tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      branch: t.branch,
+      pr_url: t.pr_url,
+      created_at: t.created_at,
+    })),
+  );
 }
 
 export async function processTaskIpc(
@@ -495,6 +515,9 @@ export async function processTaskIpc(
             }
           }
 
+          // Refresh dev tasks snapshot so agent sees the new task
+          refreshDevTasksSnapshot(sourceGroup, isMain);
+
           // Send confirmation back to the chat
           if (data.targetJid) {
             const msg = data.dispatch
@@ -535,6 +558,9 @@ export async function processTaskIpc(
             },
             'DevTask updated via IPC',
           );
+
+          // Refresh dev tasks snapshot so agent sees the update
+          refreshDevTasksSnapshot(sourceGroup, isMain);
 
           // Send confirmation back to the chat
           if (data.targetJid) {
