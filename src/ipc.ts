@@ -176,6 +176,7 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    bot?: string;
     // For create_dev_task / update_dev_task
     title?: string;
     description?: string;
@@ -450,6 +451,7 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          bot: data.bot,
         });
       } else {
         logger.warn(

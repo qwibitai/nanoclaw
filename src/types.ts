@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  bot?: string; // Named bot for channels with multiple bot identities (e.g., Telegram)
 }
 
 export interface NewMessage {
@@ -92,6 +93,8 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: returns device IDs of currently connected clients (for smart push delivery).
   getConnectedDeviceIds?(): string[];
+  // Optional: pin a message in the chat. Telegram-only for now.
+  pinMessage?(jid: string, messageId: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
