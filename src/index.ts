@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -74,6 +75,44 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+/**
+ * Maps a composite queue key back to its chatJid + sessionContext.
+ * Populated at message-dispatch time; entries are cheap and permanent
+ * (same key always maps to the same pair, memory use is bounded by
+ * the number of distinct session contexts seen since last restart).
+ */
+const subSessionRegistry = new Map<
+  string,
+  { chatJid: string; sessionContext: string }
+>();
+
+/**
+ * Derive a stable, folder-safe session key for an isolated sub-session.
+ * The key is used for session DB storage and IPC namespace isolation.
+ * It intentionally does NOT contain the raw sessionContext to avoid
+ * character-set issues; a short SHA-256 prefix is sufficient for uniqueness.
+ */
+function deriveSessionKey(
+  group: RegisteredGroup,
+  sessionContext: string,
+): string {
+  const hash = createHash('sha256')
+    .update(sessionContext)
+    .digest('hex')
+    .slice(0, 12);
+  // group.folder is at most 64 chars; leave room for underscore + 12-char hash
+  return `${group.folder.slice(0, 51)}_${hash}`;
+}
+
+/**
+ * Derive the queue key for a message arriving in an isolated-sessions group.
+ * The queue key is an opaque string used only as a Map key — no folder-name
+ * constraints apply here.
+ */
+function deriveQueueKey(chatJid: string, sessionContext: string): string {
+  return `${chatJid}::ctx::${sessionContext}`;
+}
+
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -116,20 +155,24 @@ function loadState(): void {
 }
 
 /**
- * Return the message cursor for a group, recovering from the last bot reply
- * if lastAgentTimestamp is missing (new group, corrupted state, restart).
+ * Return the message cursor for a queue slot, recovering from the last bot
+ * reply if lastAgentTimestamp is missing (new group, corrupted state, restart).
+ *
+ * queueKey  — the slot key in lastAgentTimestamp (equals chatJid for normal
+ *             groups; a composite key for isolated sub-sessions)
+ * chatJid   — the actual chat JID used for DB recovery lookups
  */
-function getOrRecoverCursor(chatJid: string): string {
-  const existing = lastAgentTimestamp[chatJid];
+function getOrRecoverCursor(queueKey: string, chatJid: string): string {
+  const existing = lastAgentTimestamp[queueKey];
   if (existing) return existing;
 
   const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
   if (botTs) {
     logger.info(
-      { chatJid, recoveredFrom: botTs },
+      { queueKey, chatJid, recoveredFrom: botTs },
       'Recovered message cursor from last bot reply',
     );
-    lastAgentTimestamp[chatJid] = botTs;
+    lastAgentTimestamp[queueKey] = botTs;
     saveState();
     return botTs;
   }
@@ -214,10 +257,18 @@ export function _setRegisteredGroups(
 }
 
 /**
- * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
+ * Process all pending messages for a group (or isolated sub-session).
+ * Called by the GroupQueue when it's this slot's turn.
+ *
+ * queueKey — the slot key; equals chatJid for normal groups, or a
+ *            composite derived by deriveQueueKey() for isolated sub-sessions.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
+async function processGroupMessages(queueKey: string): Promise<boolean> {
+  // Resolve the real chatJid and optional sessionContext from the queue key.
+  const sub = subSessionRegistry.get(queueKey);
+  const chatJid = sub?.chatJid ?? queueKey;
+  const sessionContext = sub?.sessionContext;
+
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
@@ -231,9 +282,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const missedMessages = getMessagesSince(
     chatJid,
-    getOrRecoverCursor(chatJid),
+    getOrRecoverCursor(queueKey, chatJid),
     ASSISTANT_NAME,
     MAX_MESSAGES_PER_PROMPT,
+    sessionContext,
   );
 
   if (missedMessages.length === 0) return true;
@@ -254,13 +306,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
+  const previousCursor = lastAgentTimestamp[queueKey] || '';
+  lastAgentTimestamp[queueKey] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: missedMessages.length, sessionContext },
     'Processing messages',
   );
 
@@ -274,7 +326,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Idle timeout, closing container stdin',
       );
-      queue.closeStdin(chatJid);
+      queue.closeStdin(queueKey);
     }, IDLE_TIMEOUT);
   };
 
@@ -282,32 +334,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    sessionContext,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(queueKey);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -323,7 +381,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
+    lastAgentTimestamp[queueKey] = previousCursor;
     saveState();
     logger.warn(
       { group: group.name },
@@ -339,15 +397,31 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  sessionContext?: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
 
-  // Update tasks snapshot for container to read (filtered by group)
+  // sk is the session key: unique per isolated sub-session, or group.folder
+  // for normal groups. Used for session DB storage, IPC namespace, and
+  // GroupQueue registration so concurrent sub-sessions don't collide.
+  const sk =
+    group.isolatedSessions && sessionContext
+      ? deriveSessionKey(group, sessionContext)
+      : group.folder;
+
+  // queueKey matches what was passed to enqueueMessageCheck / registerProcess
+  const queueKey =
+    group.isolatedSessions && sessionContext
+      ? deriveQueueKey(chatJid, sessionContext)
+      : chatJid;
+
+  const sessionId = sessions[sk];
+
+  // IPC snapshots are written to the sk path so this container finds them
   const tasks = getAllTasks();
   writeTasksSnapshot(
-    group.folder,
+    sk,
     isMain,
     tasks.map((t) => ({
       id: t.id,
@@ -364,7 +438,7 @@ async function runAgent(
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
-    group.folder,
+    sk,
     isMain,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
@@ -374,8 +448,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sk] = output.newSessionId;
+          setSession(sk, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -391,15 +465,16 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        ipcKey: sk !== group.folder ? sk : undefined,
       },
       (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+        queue.registerProcess(queueKey, proc, containerName, sk),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sk] = output.newSessionId;
+      setSession(sk, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -419,8 +494,8 @@ async function runAgent(
           { group: group.name, staleSessionId: sessionId, error: output.error },
           'Stale session detected — clearing for next retry',
         );
-        delete sessions[group.folder];
-        deleteSession(group.folder);
+        delete sessions[sk];
+        deleteSession(sk);
       }
 
       logger.error(
@@ -462,18 +537,34 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp = newTimestamp;
         saveState();
 
-        // Deduplicate by group
-        const messagesByGroup = new Map<string, NewMessage[]>();
+        // Group messages by queue key.
+        // For normal groups the queue key is chatJid.
+        // For groups with isolatedSessions, messages with a sessionContext
+        // get their own queue key so each context runs in an isolated container.
+        const messagesByQueue = new Map<string, NewMessage[]>();
         for (const msg of messages) {
-          const existing = messagesByGroup.get(msg.chat_jid);
+          const group = registeredGroups[msg.chat_jid];
+          let queueKey = msg.chat_jid;
+          if (group?.isolatedSessions && msg.sessionContext) {
+            queueKey = deriveQueueKey(msg.chat_jid, msg.sessionContext);
+            subSessionRegistry.set(queueKey, {
+              chatJid: msg.chat_jid,
+              sessionContext: msg.sessionContext,
+            });
+          }
+          const existing = messagesByQueue.get(queueKey);
           if (existing) {
             existing.push(msg);
           } else {
-            messagesByGroup.set(msg.chat_jid, [msg]);
+            messagesByQueue.set(queueKey, [msg]);
           }
         }
 
-        for (const [chatJid, groupMessages] of messagesByGroup) {
+        for (const [queueKey, groupMessages] of messagesByQueue) {
+          const sub = subSessionRegistry.get(queueKey);
+          const chatJid = sub?.chatJid ?? queueKey;
+          const sessionContext = sub?.sessionContext;
+
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
@@ -503,22 +594,25 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
+          // For isolated sub-sessions, filter by sessionContext so each
+          // context only sees its own message history.
           const allPending = getMessagesSince(
             chatJid,
-            getOrRecoverCursor(chatJid),
+            getOrRecoverCursor(queueKey, chatJid),
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
+            sessionContext,
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          if (queue.sendMessage(queueKey, formatted)) {
             logger.debug(
-              { chatJid, count: messagesToSend.length },
+              { chatJid, queueKey, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
+            lastAgentTimestamp[queueKey] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
@@ -529,7 +623,7 @@ async function startMessageLoop(): Promise<void> {
               );
           } else {
             // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+            queue.enqueueMessageCheck(queueKey);
           }
         }
       }
@@ -548,7 +642,7 @@ function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const pending = getMessagesSince(
       chatJid,
-      getOrRecoverCursor(chatJid),
+      getOrRecoverCursor(chatJid, chatJid),
       ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );

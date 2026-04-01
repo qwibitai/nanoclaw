@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  isolatedSessions?: boolean; // When true, channels supply sessionContext per message to get isolated sessions
 }
 
 export interface NewMessage {
@@ -51,6 +52,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  sessionContext?: string; // Opaque channel-supplied context for session isolation (thread ID, email ID, etc.)
 }
 
 export interface ScheduledTask {

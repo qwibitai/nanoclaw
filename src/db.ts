@@ -146,6 +146,26 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Add session_context column if it doesn't exist (migration for existing DBs)
+  // Enables per-context session isolation (thread, email, user, etc.)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN session_context TEXT`);
+    database.exec(
+      `CREATE INDEX IF NOT EXISTS idx_session_context ON messages(chat_jid, session_context)`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add isolated_sessions column to registered_groups if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN isolated_sessions INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -274,7 +294,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, session_context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -284,6 +304,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.sessionContext ?? null,
   );
 }
 
@@ -328,7 +349,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, session_context
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -340,14 +361,22 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as Array<
+    NewMessage & { session_context: string | null }
+  >;
+
+  // Map session_context column back to the sessionContext field
+  const messages: NewMessage[] = rows.map((row) => ({
+    ...row,
+    sessionContext: row.session_context ?? undefined,
+  }));
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
   }
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
 export function getMessagesSince(
@@ -355,24 +384,37 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  sessionContext?: string,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
+  // When sessionContext is provided, restrict to messages for that context only.
+  const contextFilter =
+    sessionContext !== undefined ? `AND session_context = ?` : '';
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, session_context
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
+        ${contextFilter}
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  const params: unknown[] = [chatJid, sinceTimestamp, `${botPrefix}:%`];
+  if (sessionContext !== undefined) params.push(sessionContext);
+  params.push(limit);
+
+  const rows = db.prepare(sql).all(...params) as Array<
+    NewMessage & { session_context: string | null }
+  >;
+  return rows.map((row) => ({
+    ...row,
+    sessionContext: row.session_context ?? undefined,
+  }));
 }
 
 export function getLastBotMessageTimestamp(
@@ -593,6 +635,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        isolated_sessions: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -615,6 +658,7 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    isolatedSessions: row.isolated_sessions === 1 ? true : undefined,
   };
 }
 
@@ -623,8 +667,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, isolated_sessions)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -634,6 +678,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.isolatedSessions ? 1 : 0,
   );
 }
 
@@ -647,6 +692,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    isolated_sessions: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -668,6 +714,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      isolatedSessions: row.isolated_sessions === 1 ? true : undefined,
     };
   }
   return result;
