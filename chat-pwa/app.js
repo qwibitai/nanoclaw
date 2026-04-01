@@ -1224,6 +1224,44 @@ const CHANNEL_COLORS = {
 
 let allBots = [];
 let selectedBotJid = null;
+let currentBotTags = [];
+
+function renderBotTags(tags) {
+  currentBotTags = [...tags];
+  const list = $('#bot-tags-list');
+  list.innerHTML = '';
+  for (const tag of currentBotTags) {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${esc(tag)}<span class="tag-remove">&times;</span>`;
+    chip.querySelector('.tag-remove').addEventListener('click', () => {
+      currentBotTags = currentBotTags.filter(t => t !== tag);
+      renderBotTags(currentBotTags);
+    });
+    list.appendChild(chip);
+  }
+}
+
+function getCurrentBotTags() {
+  return [...currentBotTags];
+}
+
+$('#bot-tag-input').addEventListener('keydown', (e) => {
+  const input = $('#bot-tag-input');
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = input.value.replace(/,/g, '').trim().toLowerCase();
+    if (val && !currentBotTags.includes(val)) {
+      currentBotTags.push(val);
+      renderBotTags(currentBotTags);
+    }
+    input.value = '';
+  }
+  if (e.key === 'Backspace' && input.value === '' && currentBotTags.length > 0) {
+    currentBotTags.pop();
+    renderBotTags(currentBotTags);
+  }
+});
 
 async function fetchBots() {
   try {
@@ -1306,6 +1344,17 @@ function renderBots() {
     channelSpan.className = 'bot-info-channel';
     channelSpan.textContent = `${bot.channel} · ${bot.trigger}`;
     info.appendChild(channelSpan);
+    if (bot.tags && bot.tags.length > 0) {
+      const tagsWrap = document.createElement('span');
+      tagsWrap.className = 'bot-tags';
+      for (const t of bot.tags) {
+        const tag = document.createElement('span');
+        tag.className = 'bot-tag';
+        tag.textContent = t;
+        tagsWrap.appendChild(tag);
+      }
+      info.appendChild(tagsWrap);
+    }
     li.appendChild(info);
 
     if (bot.isMain) {
@@ -1578,6 +1627,7 @@ async function openBotDetail(jid) {
   $('#bot-trigger').value = bot.trigger;
   $('#bot-requires-trigger').checked = bot.requiresTrigger;
   $('#bot-delete').style.display = bot.isMain ? 'none' : '';
+  renderBotTags(bot.tags || []);
 
   // Load instructions
   try {
@@ -1625,6 +1675,7 @@ $('#bot-detail-form').addEventListener('submit', async (e) => {
     name: $('#bot-name').value.trim(),
     trigger: $('#bot-trigger').value.trim(),
     requiresTrigger: $('#bot-requires-trigger').checked,
+    tags: getCurrentBotTags(),
   };
   try {
     // Update bot config

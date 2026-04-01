@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  tags?: string[]; // Arbitrary labels for organizing bots (e.g. "coding", "review")
 }
 
 export interface NewMessage {
