@@ -10,6 +10,10 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'OMLX_ENABLED',
+  'OMLX_HOST',
+  'OMLX_API_KEY',
+  'OMLX_ADMIN_TOOLS',
 ]);
 
 export const ASSISTANT_NAME =
@@ -63,6 +67,24 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+
+// oMLX local model server
+// OMLX_ENABLED is the primary switch. Also auto-enables when OMLX_HOST or OMLX_API_KEY is set.
+export const OMLX_HOST =
+  process.env.OMLX_HOST || envConfig.OMLX_HOST || '';
+export const OMLX_API_KEY =
+  process.env.OMLX_API_KEY || envConfig.OMLX_API_KEY || '';
+export const OMLX_ADMIN_TOOLS =
+  (process.env.OMLX_ADMIN_TOOLS || envConfig.OMLX_ADMIN_TOOLS) === 'true';
+export const OMLX_ENABLED =
+  (process.env.OMLX_ENABLED || envConfig.OMLX_ENABLED) === 'true' ||
+  !!OMLX_HOST ||
+  !!OMLX_API_KEY;
+
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
