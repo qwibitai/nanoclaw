@@ -204,7 +204,9 @@ The `targetJid` must be your own group JID (`tg:-5192582516`).
 
 ## School Calendar
 
-School term dates affect whether you include school lunches in the weekly plan. If you're unsure whether the upcoming week is a school week, ask Boris. Don't guess — getting school lunches wrong is worse than asking.
+School term dates are in `/workspace/group/school-terms.md`. Read this file to determine if the upcoming week falls within a school term. Include school lunches on weekdays during term time only — no school lunches during holidays or weekends.
+
+If the file is missing or the term dates look outdated, ask Boris. Don't guess — getting school lunches wrong is worse than asking.
 
 ---
 

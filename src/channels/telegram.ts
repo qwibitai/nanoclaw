@@ -1,8 +1,11 @@
+import fs from 'fs';
 import https from 'https';
+import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -116,10 +119,16 @@ export class TelegramChannel implements Channel {
         bot.start({
           onStart: (botInfo) => {
             logger.info(
-              { botName: config.name, username: botInfo.username, id: botInfo.id },
+              {
+                botName: config.name,
+                username: botInfo.username,
+                id: botInfo.id,
+              },
               'Telegram bot connected',
             );
-            console.log(`\n  Telegram bot "${config.name}": @${botInfo.username}`);
+            console.log(
+              `\n  Telegram bot "${config.name}": @${botInfo.username}`,
+            );
             resolve();
           },
         });
@@ -277,8 +286,47 @@ export class TelegramChannel implements Channel {
     bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
+    bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document;
+      const name = doc?.file_name || 'file';
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      // Try to download the file into the group's uploads folder
+      if (group && doc?.file_id) {
+        try {
+          const file = await bot.api.getFile(doc.file_id);
+          if (file.file_path) {
+            const groupDir = resolveGroupFolderPath(group.folder);
+            const uploadsDir = path.join(groupDir, 'uploads');
+            fs.mkdirSync(uploadsDir, { recursive: true });
+            const savePath = path.join(uploadsDir, name);
+
+            const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
+            const response = await fetch(url);
+            if (response.ok) {
+              const buffer = Buffer.from(await response.arrayBuffer());
+              fs.writeFileSync(savePath, buffer);
+              logger.info(
+                { chatJid, file: name, size: buffer.length },
+                'Telegram file downloaded',
+              );
+              storeNonText(
+                ctx,
+                `[Document: ${name}] (saved to /workspace/group/uploads/${name})`,
+              );
+              return;
+            }
+          }
+        } catch (err) {
+          logger.error(
+            { chatJid, file: name, err },
+            'Failed to download Telegram file',
+          );
+        }
+      }
+
+      // Fallback: just store the placeholder
       storeNonText(ctx, `[Document: ${name}]`);
     });
     bot.on('message:sticker', (ctx) => {
@@ -332,7 +380,10 @@ export class TelegramChannel implements Channel {
         'Telegram message sent',
       );
     } catch (err) {
-      logger.error({ jid, bot: instance.name, err }, 'Failed to send Telegram message');
+      logger.error(
+        { jid, bot: instance.name, err },
+        'Failed to send Telegram message',
+      );
     }
   }
 
@@ -400,7 +451,9 @@ registerChannel('telegram', (opts: ChannelOpts) => {
 
   const configs = parseBotConfig(botsConfig, legacyToken);
   if (configs.length === 0) {
-    logger.warn('Telegram: no bot tokens configured (TELEGRAM_BOTS or TELEGRAM_BOT_TOKEN)');
+    logger.warn(
+      'Telegram: no bot tokens configured (TELEGRAM_BOTS or TELEGRAM_BOT_TOKEN)',
+    );
     return null;
   }
 
