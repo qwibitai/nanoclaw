@@ -13,6 +13,10 @@ import {
   getMessageHistory,
   getMessageHistoryAllIos,
   upsertDeviceToken,
+  getAllTasks as getAllScheduledTasks,
+  getTaskById as getScheduledTaskById,
+  updateTask as updateScheduledTask,
+  deleteTask as deleteScheduledTask,
 } from '../db.js';
 import { runDailyNudge } from '../daily-nudge.js';
 import { sendPushToAll } from '../apns.js';
@@ -51,6 +55,7 @@ function isValidStatus(value: string): value is (typeof STATUSES)[number] {
 // Module-level broadcast callbacks
 let broadcastChange: ((fileType: string) => void) | null = null;
 let broadcastDevTasksChange: (() => void) | null = null;
+let broadcastScheduledTasksChange: (() => void) | null = null;
 
 /**
  * Watch the initiatives folder tree and ideas-and-nits file for changes.
@@ -200,6 +205,33 @@ export function watchDevTasks(
     logger.warn('Could not watch tasks directory');
     return () => {};
   }
+}
+
+/**
+ * Register a broadcast callback for scheduled task changes.
+ * Unlike dev tasks (filesystem-based), scheduled tasks live in SQLite,
+ * so there's no directory to watch. Instead, the callback is invoked
+ * after API mutations and should also be called by the task scheduler
+ * after running tasks.
+ */
+export function watchScheduledTasks(
+  onChanged: (tasks: import('../types.js').ScheduledTask[]) => void,
+): () => void {
+  broadcastScheduledTasksChange = () => {
+    onChanged(getAllScheduledTasks());
+  };
+
+  return () => {
+    broadcastScheduledTasksChange = null;
+  };
+}
+
+/**
+ * Notify connected clients that scheduled tasks have changed.
+ * Called by the task scheduler after running tasks so the app stays in sync.
+ */
+export function notifyScheduledTasksChanged(): void {
+  if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
 }
 
 // MARK: - Initiatives folder scanner
@@ -459,6 +491,48 @@ export function handleDataApi(
   if (dispatchMatch) {
     authGuard(req, res, token, () =>
       handleDispatchDevTask(res, parseInt(dispatchMatch[1], 10)),
+    );
+    return true;
+  }
+
+  // --- Pip Tasks (scheduled tasks) endpoints ---
+
+  // List scheduled tasks: GET /api/pip-tasks
+  if (
+    req.method === 'GET' &&
+    url.startsWith('/api/pip-tasks') &&
+    !url.includes('/api/pip-tasks/')
+  ) {
+    authGuard(req, res, token, () => handleListPipTasks(res));
+    return true;
+  }
+
+  // Get single scheduled task: GET /api/pip-tasks/:id
+  const getPipTaskMatch =
+    req.method === 'GET' && url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
+  if (getPipTaskMatch) {
+    authGuard(req, res, token, () =>
+      handleGetPipTask(res, getPipTaskMatch[1]),
+    );
+    return true;
+  }
+
+  // Update scheduled task status: PATCH /api/pip-tasks/:id
+  const patchPipTaskMatch =
+    req.method === 'PATCH' && url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
+  if (patchPipTaskMatch) {
+    authGuard(req, res, token, () =>
+      handleUpdatePipTask(req, res, patchPipTaskMatch[1]),
+    );
+    return true;
+  }
+
+  // Delete scheduled task: DELETE /api/pip-tasks/:id
+  const deletePipTaskMatch =
+    req.method === 'DELETE' && url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
+  if (deletePipTaskMatch) {
+    authGuard(req, res, token, () =>
+      handleDeletePipTask(res, deletePipTaskMatch[1]),
     );
     return true;
   }
@@ -997,6 +1071,101 @@ async function handleDispatchDevTask(
     logger.error({ err, taskId: id }, 'Failed to dispatch dev task');
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to dispatch task' }));
+  }
+}
+
+// MARK: - Pip Tasks (Scheduled Tasks)
+
+function handleListPipTasks(res: http.ServerResponse): void {
+  try {
+    const tasks = getAllScheduledTasks();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ tasks }));
+  } catch (err) {
+    logger.error({ err }, 'Failed to list pip tasks');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to list tasks' }));
+  }
+}
+
+function handleGetPipTask(res: http.ServerResponse, id: string): void {
+  try {
+    const task = getScheduledTaskById(id);
+    if (!task) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Task ${id} not found` }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(task));
+  } catch (err) {
+    logger.error({ err, taskId: id }, 'Failed to get pip task');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to get task' }));
+  }
+}
+
+function handleUpdatePipTask(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  id: string,
+): void {
+  let body = '';
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    try {
+      const task = getScheduledTaskById(id);
+      if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Task ${id} not found` }));
+        return;
+      }
+
+      const raw = JSON.parse(body);
+      // Only allow status updates (pause/resume)
+      const validStatuses = ['active', 'paused'] as const;
+      if (!raw.status || !(validStatuses as readonly string[]).includes(raw.status)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid or missing status. Must be "active" or "paused".' }));
+        return;
+      }
+
+      updateScheduledTask(id, { status: raw.status });
+
+      if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
+
+      const updated = getScheduledTaskById(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(updated));
+    } catch (err) {
+      logger.error({ err, taskId: id }, 'Failed to update pip task');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to update task' }));
+    }
+  });
+}
+
+function handleDeletePipTask(res: http.ServerResponse, id: string): void {
+  try {
+    const task = getScheduledTaskById(id);
+    if (!task) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Task ${id} not found` }));
+      return;
+    }
+
+    deleteScheduledTask(id);
+
+    if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'deleted' }));
+  } catch (err) {
+    logger.error({ err, taskId: id }, 'Failed to delete pip task');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to delete task' }));
   }
 }
 

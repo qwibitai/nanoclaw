@@ -63,6 +63,7 @@ import http from 'http';
 
 import { listTasks as listDevTasks, recoverTasksOnStartup } from './dev-tasks.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { notifyScheduledTasksChanged } from './channels/ios-data-api.js';
 import { sendPushToOfflineDevices } from './apns.js';
 import { startDailyNudgeCron } from './daily-nudge.js';
 import { startICloudPolling } from './icloud-calendar.js';
@@ -700,6 +701,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+    onTaskChanged: notifyScheduledTasksChanged,
   });
   startDailyNudgeCron();
   startICloudPolling(() => {
