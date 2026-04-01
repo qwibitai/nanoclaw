@@ -25,6 +25,210 @@ function columnExists(
   return cols.some((c) => c.name === column);
 }
 
+// ---------------------------------------------------------------------------
+// Schema migrations — append-only. Never edit existing entries.
+// Each migration runs exactly once, tracked in schema_migrations table.
+// ---------------------------------------------------------------------------
+
+const MIGRATIONS: Array<{
+  version: number;
+  description: string;
+  up: (database: Database.Database) => void;
+}> = [
+  {
+    version: 1,
+    description: 'Add context_mode to scheduled_tasks',
+    up: (database) => {
+      if (!columnExists(database, 'scheduled_tasks', 'context_mode')) {
+        database.exec(
+          `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
+        );
+      }
+    },
+  },
+  {
+    version: 2,
+    description: 'Add is_bot_message to messages, backfill from content prefix',
+    up: (database) => {
+      if (!columnExists(database, 'messages', 'is_bot_message')) {
+        database.exec(
+          `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
+        );
+        database
+          .prepare(
+            `UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`,
+          )
+          .run(`${ASSISTANT_NAME}:%`);
+      }
+    },
+  },
+  {
+    version: 3,
+    description: 'Add is_main to registered_groups, backfill from folder=main',
+    up: (database) => {
+      if (!columnExists(database, 'registered_groups', 'is_main')) {
+        database.exec(
+          `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+        );
+        database.exec(
+          `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+        );
+      }
+    },
+  },
+  {
+    version: 4,
+    description: 'Add skills to registered_groups',
+    up: (database) => {
+      if (!columnExists(database, 'registered_groups', 'skills')) {
+        database.exec(
+          `ALTER TABLE registered_groups ADD COLUMN skills TEXT DEFAULT '["general"]'`,
+        );
+      }
+    },
+  },
+  {
+    version: 5,
+    description:
+      'Migrate registered_groups skills default from general to general+coding',
+    up: (database) => {
+      database.exec(
+        `UPDATE registered_groups SET skills = '["general","coding"]' WHERE skills = '["general"]'`,
+      );
+    },
+  },
+  {
+    version: 6,
+    description:
+      'Add channel and is_group to chats, backfill from JID patterns',
+    up: (database) => {
+      if (!columnExists(database, 'chats', 'channel')) {
+        database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
+      }
+      if (!columnExists(database, 'chats', 'is_group')) {
+        database.exec(
+          `ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`,
+        );
+      }
+      database.exec(
+        `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
+      );
+      database.exec(
+        `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
+      );
+      database.exec(
+        `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
+      );
+      database.exec(
+        `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
+      );
+    },
+  },
+  {
+    version: 7,
+    description:
+      'Add processed flag to messages, backfill existing as processed, clean up cursor state',
+    up: (database) => {
+      if (!columnExists(database, 'messages', 'processed')) {
+        database.exec(
+          'ALTER TABLE messages ADD COLUMN processed INTEGER DEFAULT 0',
+        );
+        database.exec(
+          'CREATE INDEX IF NOT EXISTS idx_messages_unprocessed ON messages(processed, chat_jid) WHERE processed = 0',
+        );
+        // Mark all existing messages as processed — already handled by the cursor system
+        database.exec('UPDATE messages SET processed = 1');
+        // Clean up stale cursor keys from router_state
+        database
+          .prepare(
+            "DELETE FROM router_state WHERE key IN ('last_timestamp', 'last_agent_timestamp')",
+          )
+          .run();
+      }
+    },
+  },
+  {
+    version: 8,
+    description: 'Add thread_context_id to messages',
+    up: (database) => {
+      if (!columnExists(database, 'messages', 'thread_context_id')) {
+        database.exec(
+          'ALTER TABLE messages ADD COLUMN thread_context_id INTEGER',
+        );
+      }
+    },
+  },
+  {
+    version: 9,
+    description: 'Migrate active_threads table to thread_contexts',
+    up: (database) => {
+      const hasActiveThreads = database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='active_threads'",
+        )
+        .get();
+      if (hasActiveThreads) {
+        const now = new Date().toISOString();
+        const rows = database
+          .prepare('SELECT chat_jid, thread_id FROM active_threads')
+          .all() as Array<{ chat_jid: string; thread_id: string }>;
+        for (const row of rows) {
+          database
+            .prepare(
+              `INSERT OR IGNORE INTO thread_contexts (chat_jid, thread_id, source, created_at, last_active_at)
+             VALUES (?, ?, 'mention', ?, ?)`,
+            )
+            .run(row.chat_jid, row.thread_id, now, now);
+        }
+        database.exec('DROP TABLE active_threads');
+      }
+    },
+  },
+];
+
+function runMigrations(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version     INTEGER PRIMARY KEY,
+      description TEXT    NOT NULL,
+      applied_at  TEXT    NOT NULL
+    )
+  `);
+
+  const applied = new Set(
+    (
+      database.prepare('SELECT version FROM schema_migrations').all() as Array<{
+        version: number;
+      }>
+    ).map((r) => r.version),
+  );
+
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.version)) continue;
+
+    logger.info(
+      { version: migration.version, description: migration.description },
+      'Applying migration',
+    );
+
+    const tx = database.transaction(() => {
+      migration.up(database);
+      database
+        .prepare(
+          'INSERT INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)',
+        )
+        .run(
+          migration.version,
+          migration.description,
+          new Date().toISOString(),
+        );
+    });
+
+    tx();
+    logger.info({ version: migration.version }, 'Migration applied');
+  }
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -44,11 +248,13 @@ function createSchema(database: Database.Database): void {
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
       thread_context_id INTEGER,
+      processed INTEGER DEFAULT 0,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_unprocessed ON messages(processed, chat_jid) WHERE processed = 0;
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -61,6 +267,7 @@ function createSchema(database: Database.Database): void {
       last_run TEXT,
       last_result TEXT,
       status TEXT DEFAULT 'active',
+      context_mode TEXT DEFAULT 'isolated',
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_next_run ON scheduled_tasks(next_run);
@@ -121,140 +328,13 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      requires_trigger INTEGER DEFAULT 1,
+      is_main INTEGER DEFAULT 0,
+      skills TEXT DEFAULT '["general","coding"]'
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
-    );
-    // Backfill: mark existing bot messages that used the content prefix pattern
-    database
-      .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
-      .run(`${ASSISTANT_NAME}:%`);
-  } catch {
-    /* column already exists */
-  }
-
-  // Add is_main column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
-    );
-    // Backfill: existing rows with folder = 'main' are the main group
-    database.exec(
-      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add skills column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN skills TEXT DEFAULT '["general"]'`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Migrate existing groups from old default ["general"] to new default ["general","coding"]
-  try {
-    database.exec(
-      `UPDATE registered_groups SET skills = '["general","coding"]' WHERE skills = '["general"]'`,
-    );
-  } catch {
-    /* already migrated or table doesn't exist yet */
-  }
-
-  // Add channel and is_group columns if they don't exist (migration for existing DBs)
-  try {
-    database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
-    database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
-    // Backfill from JID patterns
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
-    );
-  } catch {
-    /* columns already exist */
-  }
-
-  // Migration: Add processed flag to messages table
-  if (!columnExists(database, 'messages', 'processed')) {
-    database.exec(
-      'ALTER TABLE messages ADD COLUMN processed INTEGER DEFAULT 0',
-    );
-    database.exec(
-      'CREATE INDEX IF NOT EXISTS idx_messages_unprocessed ON messages(processed, chat_jid) WHERE processed = 0',
-    );
-
-    // Mark all existing messages as processed — they were already handled
-    // by the cursor system before this migration
-    database.exec('UPDATE messages SET processed = 1');
-
-    // Clean up stale cursor keys from router_state now that we use the processed flag
-    database
-      .prepare(
-        "DELETE FROM router_state WHERE key IN ('last_timestamp', 'last_agent_timestamp')",
-      )
-      .run();
-
-    logger.info(
-      'Migration: added processed column to messages, marked all existing as processed',
-    );
-  }
-
-  // Migration: Add thread_context_id to messages table
-  if (!columnExists(database, 'messages', 'thread_context_id')) {
-    database.exec('ALTER TABLE messages ADD COLUMN thread_context_id INTEGER');
-    logger.info('Migration: added thread_context_id column to messages');
-  }
-
-  // Migrate active_threads → thread_contexts
-  try {
-    const hasActiveThreads = database
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='active_threads'",
-      )
-      .get();
-    if (hasActiveThreads) {
-      const now = new Date().toISOString();
-      const rows = database
-        .prepare('SELECT chat_jid, thread_id FROM active_threads')
-        .all() as Array<{ chat_jid: string; thread_id: string }>;
-      for (const row of rows) {
-        database
-          .prepare(
-            `INSERT OR IGNORE INTO thread_contexts (chat_jid, thread_id, source, created_at, last_active_at)
-           VALUES (?, ?, 'mention', ?, ?)`,
-          )
-          .run(row.chat_jid, row.thread_id, now, now);
-      }
-      database.exec('DROP TABLE active_threads');
-    }
-  } catch {
-    /* migration already done */
-  }
+  runMigrations(database);
 }
 
 export function initDatabase(): void {
