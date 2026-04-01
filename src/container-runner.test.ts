@@ -16,6 +16,7 @@ vi.mock('./config.js', () => ({
   GROUP_THREAD_KEY: '__group__',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  OLLAMA_ADMIN_TOOLS: false,
   ONECLI_URL: 'http://localhost:10254',
   PLUGINS_DIR: '/tmp/nanoclaw-test-plugins',
   RESIDENTIAL_PROXY_URL: undefined,
