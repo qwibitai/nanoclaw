@@ -1,8 +1,11 @@
+import fs from 'fs';
 import https from 'https';
+import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -16,6 +19,46 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+/** A named bot instance with its own token and API. */
+interface BotInstance {
+  name: string;
+  bot: Bot;
+}
+
+/**
+ * Parse TELEGRAM_BOTS config string into name→token pairs.
+ * Format: "pip:token123,pickle:token456"
+ */
+export function parseBotConfig(
+  botsConfig: string | undefined,
+  legacyToken: string | undefined,
+): Array<{ name: string; token: string }> {
+  if (botsConfig) {
+    return botsConfig
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const colonIdx = entry.indexOf(':');
+        if (colonIdx === -1) {
+          throw new Error(
+            `Invalid TELEGRAM_BOTS entry "${entry}" — expected "name:token"`,
+          );
+        }
+        return {
+          name: entry.slice(0, colonIdx).trim(),
+          token: entry.slice(colonIdx + 1).trim(),
+        };
+      });
+  }
+
+  if (legacyToken) {
+    return [{ name: 'default', token: legacyToken }];
+  }
+
+  return [];
 }
 
 /**
@@ -44,24 +87,64 @@ async function sendTelegramMessage(
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
-  private bot: Bot | null = null;
+  private bots: Map<string, BotInstance> = new Map();
+  private defaultBotName: string;
   private opts: TelegramChannelOpts;
-  private botToken: string;
+  private botConfigs: Array<{ name: string; token: string }>;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
-    this.botToken = botToken;
+  constructor(
+    botConfigs: Array<{ name: string; token: string }>,
+    opts: TelegramChannelOpts,
+  ) {
+    this.botConfigs = botConfigs;
     this.opts = opts;
+    this.defaultBotName = botConfigs[0]?.name || 'default';
   }
 
   async connect(): Promise<void> {
-    this.bot = new Bot(this.botToken, {
-      client: {
-        baseFetchConfig: { agent: https.globalAgent, compress: true },
-      },
-    });
+    for (const config of this.botConfigs) {
+      const bot = new Bot(config.token, {
+        client: {
+          baseFetchConfig: { agent: https.globalAgent, compress: true },
+        },
+      });
 
+      this.setupBotHandlers(bot, config.name);
+
+      const instance: BotInstance = { name: config.name, bot };
+      this.bots.set(config.name, instance);
+
+      // Start polling — each bot polls independently
+      await new Promise<void>((resolve) => {
+        bot.start({
+          onStart: (botInfo) => {
+            logger.info(
+              {
+                botName: config.name,
+                username: botInfo.username,
+                id: botInfo.id,
+              },
+              'Telegram bot connected',
+            );
+            console.log(
+              `\n  Telegram bot "${config.name}": @${botInfo.username}`,
+            );
+            resolve();
+          },
+        });
+      });
+    }
+
+    if (this.bots.size > 0) {
+      console.log(
+        `  Send /chatid to any bot to get a chat's registration ID\n`,
+      );
+    }
+  }
+
+  private setupBotHandlers(bot: Bot, botName: string): void {
     // Command to get chat ID (useful for registration)
-    this.bot.command('chatid', (ctx) => {
+    bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
       const chatName =
@@ -70,21 +153,21 @@ export class TelegramChannel implements Channel {
           : (ctx.chat as any).title || 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+        `Chat ID: \`tg:${chatId}\`\nBot: ${botName}\nName: ${chatName}\nType: ${chatType}`,
         { parse_mode: 'Markdown' },
       );
     });
 
     // Command to check bot status
-    this.bot.command('ping', (ctx) => {
-      ctx.reply(`${ASSISTANT_NAME} is online.`);
+    bot.command('ping', (ctx) => {
+      ctx.reply(`${ASSISTANT_NAME} (${botName}) is online.`);
     });
 
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
     const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
 
-    this.bot.on('message:text', async (ctx) => {
+    bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
         const cmd = ctx.message.text.slice(1).split(/[\s@]/)[0].toLowerCase();
         if (TELEGRAM_BOT_COMMANDS.has(cmd)) return;
@@ -160,7 +243,7 @@ export class TelegramChannel implements Channel {
       });
 
       logger.info(
-        { chatJid, chatName, sender: senderName },
+        { chatJid, chatName, sender: senderName, bot: botName },
         'Telegram message stored',
       );
     });
@@ -199,47 +282,80 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
+    bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
+    bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
+    bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+    bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document;
+      const name = doc?.file_name || 'file';
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      // Try to download the file into the group's uploads folder
+      if (group && doc?.file_id) {
+        try {
+          const file = await bot.api.getFile(doc.file_id);
+          if (file.file_path) {
+            const groupDir = resolveGroupFolderPath(group.folder);
+            const uploadsDir = path.join(groupDir, 'uploads');
+            fs.mkdirSync(uploadsDir, { recursive: true });
+            const savePath = path.join(uploadsDir, name);
+
+            const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
+            const response = await fetch(url);
+            if (response.ok) {
+              const buffer = Buffer.from(await response.arrayBuffer());
+              fs.writeFileSync(savePath, buffer);
+              logger.info(
+                { chatJid, file: name, size: buffer.length },
+                'Telegram file downloaded',
+              );
+              storeNonText(
+                ctx,
+                `[Document: ${name}] (saved to /workspace/group/uploads/${name})`,
+              );
+              return;
+            }
+          }
+        } catch (err) {
+          logger.error(
+            { chatJid, file: name, err },
+            'Failed to download Telegram file',
+          );
+        }
+      }
+
+      // Fallback: just store the placeholder
       storeNonText(ctx, `[Document: ${name}]`);
     });
-    this.bot.on('message:sticker', (ctx) => {
+    bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
       storeNonText(ctx, `[Sticker ${emoji}]`);
     });
-    this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
-    this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
+    bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
+    bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
     // Handle errors gracefully
-    this.bot.catch((err) => {
-      logger.error({ err: err.message }, 'Telegram bot error');
-    });
-
-    // Start polling — returns a Promise that resolves when started
-    return new Promise<void>((resolve) => {
-      this.bot!.start({
-        onStart: (botInfo) => {
-          logger.info(
-            { username: botInfo.username, id: botInfo.id },
-            'Telegram bot connected',
-          );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
-          );
-          resolve();
-        },
-      });
+    bot.catch((err) => {
+      logger.error({ botName, err: err.message }, 'Telegram bot error');
     });
   }
 
+  /**
+   * Resolve which bot instance should send to a given JID.
+   * Uses the registered group's `bot` field, falling back to the default bot.
+   */
+  private getBotForJid(jid: string): BotInstance | undefined {
+    const group = this.opts.registeredGroups()[jid];
+    const botName = group?.bot || this.defaultBotName;
+    return this.bots.get(botName) || this.bots.values().next().value;
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.bot) {
-      logger.warn('Telegram bot not initialized');
+    const instance = this.getBotForJid(jid);
+    if (!instance) {
+      logger.warn('No Telegram bot available');
       return;
     }
 
@@ -249,24 +365,56 @@ export class TelegramChannel implements Channel {
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text);
+        await sendTelegramMessage(instance.bot.api, numericId, text);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await sendTelegramMessage(
-            this.bot.api,
+            instance.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
           );
         }
       }
-      logger.info({ jid, length: text.length }, 'Telegram message sent');
+      logger.info(
+        { jid, length: text.length, bot: instance.name },
+        'Telegram message sent',
+      );
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send Telegram message');
+      logger.error(
+        { jid, bot: instance.name, err },
+        'Failed to send Telegram message',
+      );
+    }
+  }
+
+  async pinMessage(jid: string, messageId: string): Promise<void> {
+    const instance = this.getBotForJid(jid);
+    if (!instance) {
+      logger.warn('No Telegram bot available for pinMessage');
+      return;
+    }
+
+    try {
+      const numericChatId = jid.replace(/^tg:/, '');
+      await instance.bot.api.pinChatMessage(
+        Number(numericChatId),
+        Number(messageId),
+        { disable_notification: true },
+      );
+      logger.info(
+        { jid, messageId, bot: instance.name },
+        'Telegram message pinned',
+      );
+    } catch (err) {
+      logger.error(
+        { jid, messageId, bot: instance.name, err },
+        'Failed to pin Telegram message',
+      );
     }
   }
 
   isConnected(): boolean {
-    return this.bot !== null;
+    return this.bots.size > 0;
   }
 
   ownsJid(jid: string): boolean {
@@ -274,18 +422,20 @@ export class TelegramChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    if (this.bot) {
-      this.bot.stop();
-      this.bot = null;
-      logger.info('Telegram bot stopped');
+    for (const [name, instance] of this.bots) {
+      instance.bot.stop();
+      logger.info({ botName: name }, 'Telegram bot stopped');
     }
+    this.bots.clear();
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    if (!this.bot || !isTyping) return;
+    if (!isTyping) return;
+    const instance = this.getBotForJid(jid);
+    if (!instance) return;
     try {
       const numericId = jid.replace(/^tg:/, '');
-      await this.bot.api.sendChatAction(numericId, 'typing');
+      await instance.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
@@ -293,12 +443,19 @@ export class TelegramChannel implements Channel {
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
-  const token =
-    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
-  if (!token) {
-    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOTS']);
+  const botsConfig =
+    process.env.TELEGRAM_BOTS || envVars.TELEGRAM_BOTS || undefined;
+  const legacyToken =
+    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || undefined;
+
+  const configs = parseBotConfig(botsConfig, legacyToken);
+  if (configs.length === 0) {
+    logger.warn(
+      'Telegram: no bot tokens configured (TELEGRAM_BOTS or TELEGRAM_BOT_TOKEN)',
+    );
     return null;
   }
-  return new TelegramChannel(token, opts);
+
+  return new TelegramChannel(configs, opts);
 });
