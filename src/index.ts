@@ -49,7 +49,6 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { startMediaCleanup } from './media.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -747,8 +746,6 @@ async function main(): Promise<void> {
       }
     },
   });
-  startMediaCleanup(() => Object.values(registeredGroups).map((g) => g.folder));
-
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

@@ -6,9 +6,6 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { ContentPart, RawContentPart } from './types.js';
 
-const MEDIA_TTL_MS = 60 * 60 * 1000; // 1 hour
-const MEDIA_MAX_BYTES = 500 * 1024 * 1024; // 500 MB per group before LRU eviction
-const MEDIA_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // run cleanup every 10 minutes
 const MEDIA_DIR = 'media';
 
 const MIME_EXT: Record<string, string> = {
@@ -40,9 +37,12 @@ async function downloadRef(ref: string): Promise<Buffer | null> {
       return null;
     }
     return Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    logger.warn({ ref, err }, 'Failed to download media ref');
-    return null;
+  } catch (err: unknown) {
+    if (err instanceof TypeError || err instanceof DOMException) {
+      logger.warn({ ref, err }, 'Failed to download media ref');
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -177,51 +177,4 @@ export function contentPartsToText(parts: ContentPart[]): string {
       }
     })
     .join('\n');
-}
-
-export function cleanupMedia(groupFolder: string): void {
-  const mediaDir = path.join(resolveGroupFolderPath(groupFolder), MEDIA_DIR);
-  if (!fs.existsSync(mediaDir)) return;
-
-  const now = Date.now();
-  try {
-    const files = fs.readdirSync(mediaDir).map((name) => {
-      const filepath = path.join(mediaDir, name);
-      const stat = fs.statSync(filepath);
-      return { filepath, mtimeMs: stat.mtimeMs, size: stat.size };
-    });
-
-    // Phase 1: TTL — delete files older than 1 hour
-    const remaining = files.filter((f) => {
-      if (now - f.mtimeMs > MEDIA_TTL_MS) {
-        fs.unlinkSync(f.filepath);
-        return false;
-      }
-      return true;
-    });
-
-    // Phase 2: LRU — if total size exceeds threshold, evict oldest first
-    let totalSize = remaining.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > MEDIA_MAX_BYTES) {
-      remaining.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
-      for (const f of remaining) {
-        if (totalSize <= MEDIA_MAX_BYTES) break;
-        fs.unlinkSync(f.filepath);
-        totalSize -= f.size;
-      }
-    }
-  } catch (err) {
-    logger.warn({ groupFolder, err }, 'Media cleanup error');
-  }
-}
-
-/** Start periodic media cleanup for all registered groups. */
-export function startMediaCleanup(
-  getGroupFolders: () => string[],
-): ReturnType<typeof setInterval> {
-  return setInterval(() => {
-    for (const folder of getGroupFolders()) {
-      cleanupMedia(folder);
-    }
-  }, MEDIA_CLEANUP_INTERVAL_MS);
 }

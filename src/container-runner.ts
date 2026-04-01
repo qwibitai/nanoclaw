@@ -166,18 +166,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  const handlersSrc = path.join(process.cwd(), 'container', 'handlers');
-  const handlersDst = path.join(DATA_DIR, 'sessions', group.folder, 'handlers');
-  fs.mkdirSync(handlersDst, { recursive: true });
-  if (fs.existsSync(handlersSrc)) {
-    fs.cpSync(handlersSrc, handlersDst, { recursive: true });
-  }
-  mounts.push({
-    hostPath: handlersDst,
-    containerPath: '/workspace/handlers',
-    readonly: true,
-  });
-
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
