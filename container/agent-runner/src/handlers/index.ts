@@ -28,8 +28,8 @@ import { handleVideo } from './video.js';
 import { handleSticker } from './sticker.js';
 
 const MEDIA_DIR = '/workspace/group/media';
-const MEDIA_TTL_MS = 60 * 60 * 1000; // 1 hour
-const MEDIA_MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+const MEDIA_MAX_MB = 500;
+const MEDIA_MAX_BYTES = MEDIA_MAX_MB * 1024 * 1024;
 
 export interface ContentPart {
   type: string;
@@ -100,6 +100,7 @@ export async function buildMessageContent(
   text: string,
   contentParts?: ContentPart[],
 ): Promise<MessageContent> {
+  cleanupMedia();
   if (!contentParts?.length) return text;
 
   const blocks: ContentBlock[] = [];
@@ -116,36 +117,25 @@ export async function buildMessageContent(
 }
 
 /**
- * Delete media files older than 1 hour. If total size still exceeds
- * the threshold, evict oldest files first.
+ * Prevent media files from accumulating indefinitely.
+ * If total size exceeds the threshold, evict oldest files first.
  */
-export function cleanupMedia(): void {
+function cleanupMedia(): void {
   if (!fs.existsSync(MEDIA_DIR)) return;
 
-  const now = Date.now();
   const files = fs.readdirSync(MEDIA_DIR).map((name) => {
     const filepath = `${MEDIA_DIR}/${name}`;
     const stat = fs.statSync(filepath);
     return { filepath, mtimeMs: stat.mtimeMs, size: stat.size };
   });
 
-  // Delete files older than 1 hour
-  const remaining = files.filter((f) => {
-    if (now - f.mtimeMs > MEDIA_TTL_MS) {
-      fs.unlinkSync(f.filepath);
-      return false;
-    }
-    return true;
-  });
+  let totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  if (totalSize <= MEDIA_MAX_BYTES) return;
 
-  // Evict oldest first if over size threshold
-  let totalSize = remaining.reduce((sum, f) => sum + f.size, 0);
-  if (totalSize > MEDIA_MAX_BYTES) {
-    remaining.sort((a, b) => a.mtimeMs - b.mtimeMs);
-    for (const f of remaining) {
-      if (totalSize <= MEDIA_MAX_BYTES) break;
-      fs.unlinkSync(f.filepath);
-      totalSize -= f.size;
-    }
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+  for (const f of files) {
+    if (totalSize <= MEDIA_MAX_BYTES) break;
+    fs.unlinkSync(f.filepath);
+    totalSize -= f.size;
   }
 }

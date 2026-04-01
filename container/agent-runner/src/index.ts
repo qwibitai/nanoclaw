@@ -134,11 +134,7 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-import {
-  buildMessageContent,
-  cleanupMedia,
-  ContentPart,
-} from './handlers/index.js';
+import { buildMessageContent, ContentPart } from './handlers/index.js';
 
 function getSessionSummary(
   sessionId: string,
@@ -707,7 +703,6 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
-      cleanupMedia();
       log(
         `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
       );
