@@ -30,6 +30,8 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  skills?: string[]; // Allowlist of skill names to sync; absent = all, empty = none
+  skillConfig?: Record<string, Record<string, unknown>>; // Per-skill config (injected as env vars)
 }
 
 export interface RegisteredGroup {
