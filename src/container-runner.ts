@@ -704,7 +704,7 @@ export function writeTasksSnapshot(
 
 /**
  * Write dev tasks snapshot for the container to read.
- * Only main group can see dev tasks.
+ * Available to main group and iOS (FamBot) groups.
  */
 export function writeDevTasksSnapshot(
   groupFolder: string,
@@ -718,7 +718,7 @@ export function writeDevTasksSnapshot(
     created_at: string;
   }>,
 ): void {
-  if (!isMain) return;
+  if (!isMain && !groupFolder.startsWith('ios_')) return;
 
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });

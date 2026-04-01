@@ -19,6 +19,7 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const canManageDevTasks = isMain || groupFolder.startsWith('ios_');
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -341,9 +342,9 @@ server.tool(
     description: z.string().optional().describe('Detailed description of what needs to be done'),
   },
   async (args) => {
-    if (!isMain) {
+    if (!canManageDevTasks) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can create dev tasks.' }],
+        content: [{ type: 'text' as const, text: 'Dev task management requires main group or FamBot.' }],
         isError: true,
       };
     }
@@ -372,9 +373,9 @@ server.tool(
     status: z.enum(['open', 'working', 'pr_ready', 'done', 'needs_session', 'has_followups']).optional().describe('Filter by status (omit for all tasks)'),
   },
   async (args) => {
-    if (!isMain) {
+    if (!canManageDevTasks) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can list dev tasks.' }],
+        content: [{ type: 'text' as const, text: 'Dev task management requires main group or FamBot.' }],
         isError: true,
       };
     }
@@ -430,9 +431,9 @@ server.tool(
     description: z.string().optional().describe('New description for the task'),
   },
   async (args) => {
-    if (!isMain) {
+    if (!canManageDevTasks) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can update dev tasks.' }],
+        content: [{ type: 'text' as const, text: 'Dev task management requires main group or FamBot.' }],
         isError: true,
       };
     }
