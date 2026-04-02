@@ -27,8 +27,16 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+const vossEnv = readEnvFile([
+  'VOSS_API_URL',
+  'VOSS_API_KEY',
+  'NOTION_TOKEN',
+  'MOLTBOOK_API_KEY',
+]);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -78,16 +86,8 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // .env shadowing is handled inside the container entrypoint (mount --bind
+    // /dev/null) since Apple Container only supports directory mounts on the host.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -176,6 +176,26 @@ function buildVolumeMounts(
     });
   }
 
+  // Google Calendar MCP credentials directory
+  const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+  if (fs.existsSync(calendarDir)) {
+    mounts.push({
+      hostPath: calendarDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Moltbook MCP server (writable — server writes status/health files to its own directory)
+  const moltbookMcpDir = path.join(homeDir, 'Development', 'moltbook-mcp');
+  if (fs.existsSync(moltbookMcpDir)) {
+    mounts.push({
+      hostPath: moltbookMcpDir,
+      containerPath: '/opt/moltbook-mcp',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -260,6 +280,16 @@ function buildContainerArgs(
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
+
+  // Forward service credentials into the container
+  if (vossEnv.VOSS_API_URL)
+    args.push('-e', `VOSS_API_URL=${vossEnv.VOSS_API_URL}`);
+  if (vossEnv.VOSS_API_KEY)
+    args.push('-e', `VOSS_API_KEY=${vossEnv.VOSS_API_KEY}`);
+  if (vossEnv.NOTION_TOKEN)
+    args.push('-e', `NOTION_TOKEN=${vossEnv.NOTION_TOKEN}`);
+  if (vossEnv.MOLTBOOK_API_KEY)
+    args.push('-e', `MOLTBOOK_API_KEY=${vossEnv.MOLTBOOK_API_KEY}`);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());

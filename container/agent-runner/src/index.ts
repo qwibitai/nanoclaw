@@ -411,6 +411,10 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
+        'mcp__calendar__*',
+        'mcp__voss-crm__*',
+        'mcp__notion__*',
+        'mcp__moltbook__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -429,6 +433,39 @@ async function runQuery(
         gmail: {
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        calendar: {
+          command: 'npx',
+          args: ['-y', '@cocal/google-calendar-mcp'],
+          env: {
+            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
+          },
+        },
+        'voss-crm': {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'voss-mcp.js')],
+          env: {
+            VOSS_API_URL: process.env.VOSS_API_URL || '',
+            VOSS_API_KEY: process.env.VOSS_API_KEY || '',
+          },
+        },
+        notion: {
+          command: 'npx',
+          args: ['-y', '@notionhq/notion-mcp-server'],
+          env: {
+            OPENAPI_MCP_HEADERS: JSON.stringify({
+              Authorization: `Bearer ${process.env.NOTION_TOKEN || ''}`,
+              'Notion-Version': '2022-06-28',
+            }),
+          },
+        },
+        moltbook: {
+          command: 'node',
+          args: ['/opt/moltbook-mcp/index.js'],
+          env: {
+            MOLTBOOK_API_KEY: process.env.MOLTBOOK_API_KEY || '',
+          },
         },
       },
       hooks: {
