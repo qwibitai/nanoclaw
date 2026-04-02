@@ -105,10 +105,12 @@ export class TelegramChannel implements Channel {
       const replyTo = ctx.message.reply_to_message;
       const replyToMessageId = replyTo?.message_id?.toString();
       const replyToContent = replyTo?.text || replyTo?.caption;
-      const replyToSenderName =
-        replyTo?.from?.first_name ||
-        replyTo?.from?.username ||
-        replyTo?.from?.id?.toString();
+      const replyToSenderName = replyTo
+        ? replyTo.from?.first_name ||
+          replyTo.from?.username ||
+          replyTo.from?.id?.toString() ||
+          'Unknown'
+        : undefined;
 
       // Determine chat name
       const chatName =

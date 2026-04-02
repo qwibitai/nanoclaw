@@ -110,6 +110,7 @@ function createTextCtx(overrides: {
   messageId?: number;
   date?: number;
   entities?: any[];
+  reply_to_message?: any;
 }) {
   const chatId = overrides.chatId ?? 100200300;
   const chatType = overrides.chatType ?? 'group';
@@ -129,6 +130,7 @@ function createTextCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
+      reply_to_message: overrides.reply_to_message,
     },
     me: { username: 'andy_ai_bot' },
     reply: vi.fn(),
@@ -568,6 +570,100 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content: 'check https://example.com',
+        }),
+      );
+    });
+  });
+
+  // --- Reply context ---
+
+  describe('reply context', () => {
+    it('extracts reply_to fields when replying to a text message', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Yes, on my way!',
+        reply_to_message: {
+          message_id: 42,
+          text: 'Are you coming tonight?',
+          from: { id: 777, first_name: 'Bob', username: 'bob_user' },
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: 'Yes, on my way!',
+          reply_to_message_id: '42',
+          reply_to_message_content: 'Are you coming tonight?',
+          reply_to_sender_name: 'Bob',
+        }),
+      );
+    });
+
+    it('uses caption when reply has no text (media reply)', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Nice photo!',
+        reply_to_message: {
+          message_id: 50,
+          caption: 'Check this out',
+          from: { id: 888, first_name: 'Carol' },
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          reply_to_message_content: 'Check this out',
+        }),
+      );
+    });
+
+    it('falls back to Unknown when reply sender has no from', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Interesting',
+        reply_to_message: {
+          message_id: 60,
+          text: 'Channel post',
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          reply_to_message_id: '60',
+          reply_to_sender_name: 'Unknown',
+        }),
+      );
+    });
+
+    it('does not set reply fields when no reply_to_message', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: 'Just a normal message' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          reply_to_message_id: undefined,
+          reply_to_message_content: undefined,
+          reply_to_sender_name: undefined,
         }),
       );
     });
