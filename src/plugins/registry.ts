@@ -20,8 +20,6 @@ export interface Plugin {
   name: string;
   /** Env var keys read from .env and injected as -e flags into docker run */
   containerEnvKeys?: string[];
-  /** Path relative to container/ of the shell script sourced inside the container at startup */
-  initScript?: string;
   /** Binary to bake into the container image at build time */
   binaryInstall?: BinaryInstall;
 }

@@ -19,15 +19,11 @@ Check if `src/plugins/registry.ts` exists. If not, the plugin system hasn't been
 
 ### Write the plugin module
 
-Look up the latest release at https://github.com/nicholasgasior/blogwatcher/releases and get the linux/amd64 binary URL. Then copy `${CLAUDE_SKILL_DIR}/files/blogwatcher.ts` to `src/plugins/blogwatcher.ts`, replacing `vX.Y.Z` in the URL with the actual version tag.
+Look up the latest release at https://github.com/nicholasgasior/blogwatcher/releases and get the linux/amd64 binary URL. Then copy `${CLAUDE_SKILL_DIR}/add/src/blogwatcher.ts` to `src/plugins/blogwatcher.ts`, replacing `vX.Y.Z` in the URL with the actual version tag.
 
 ### Register in the plugins barrel
 
-Append to `src/plugins/index.ts`:
-
-```typescript
-import './blogwatcher.js';
-```
+Merge `${CLAUDE_SKILL_DIR}/modify/src/plugins/index.ts` into `src/plugins/index.ts` by appending any lines from the skill file that are not already present.
 
 ### Create container skill
 

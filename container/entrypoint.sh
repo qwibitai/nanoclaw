@@ -6,7 +6,7 @@
 set -e
 
 # Plugin initialization — shell scripts declared by plugin modules, baked into image at build time
-for f in /app/plugin-init/*.sh; do
+for f in /app/plugins/*-init.sh; do
   [ -f "$f" ] && . "$f"
 done
 

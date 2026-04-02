@@ -19,21 +19,17 @@ Check if `src/plugins/registry.ts` exists. If not, the plugin system hasn't been
 
 ### Write the plugin module
 
-Check https://pkgs.tailscale.com/stable/ for the latest stable version. Copy `${CLAUDE_SKILL_DIR}/files/tailscale.ts` to `src/plugins/tailscale.ts`, replacing `1.82.0` in the archive URL with the actual latest stable version.
+Check https://pkgs.tailscale.com/stable/ for the latest stable version. Copy `${CLAUDE_SKILL_DIR}/add/src/tailscale.ts` to `src/plugins/tailscale.ts`, replacing `1.82.0` in the archive URL with the actual latest stable version.
 
 ### Create the init script
 
-Copy `${CLAUDE_SKILL_DIR}/files/tailscale.sh` to `container/plugins/tailscale.sh`.
+Copy `${CLAUDE_SKILL_DIR}/container/plugins/tailscale-init.sh` to `container/plugins/tailscale-init.sh`.
 
 This script is sourced by `container/entrypoint.sh` before the agent runs whenever `TAILSCALE_AUTH_KEY` is set in the container environment.
 
 ### Register in the plugins barrel
 
-Append to `src/plugins/index.ts`:
-
-```typescript
-import './tailscale.js';
-```
+Merge `${CLAUDE_SKILL_DIR}/modify/src/plugins/index.ts` into `src/plugins/index.ts` by appending any lines from the skill file that are not already present.
 
 ### Add env var documentation
 
@@ -103,7 +99,7 @@ The agent should respond with the list of tailnet peers. If tailscale is not con
 The binary wasn't installed. Rebuild: `container/build.sh`
 
 **Agent starts but tailscale not connected**
-Check that `TAILSCALE_AUTH_KEY` is set in `.env` (not just `.env.example`). Check that `container/plugin-init/tailscale.sh` exists and the image was rebuilt.
+Check that `TAILSCALE_AUTH_KEY` is set in `.env` (not just `.env.example`). Check that `container/plugins/tailscale-init.sh` exists and the image was rebuilt.
 
 **Auth key expired**
 Generate a new reusable auth key at https://login.tailscale.com/admin/settings/keys, update `.env`, and restart.
