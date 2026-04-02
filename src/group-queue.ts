@@ -186,7 +186,11 @@ export class GroupQueue {
    */
   sendResetByFolder(groupFolder: string): boolean {
     for (const [, state] of this.groups) {
-      if (state.active && !state.isTaskContainer && state.groupFolder === groupFolder) {
+      if (
+        state.active &&
+        !state.isTaskContainer &&
+        state.groupFolder === groupFolder
+      ) {
         const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
         try {
           fs.mkdirSync(inputDir, { recursive: true });
