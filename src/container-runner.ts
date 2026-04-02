@@ -277,8 +277,15 @@ async function buildContainerArgs(
   }
 
   // Inject plugin-declared env vars (e.g. TAILSCALE_AUTH_KEY for VPN plugins)
-  for (const [key, val] of Object.entries(pluginEnv)) {
-    args.push('-e', `${key}=${val}`);
+  if (Object.keys(pluginEnv).length > 0) {
+    // Write plugin env vars to a temporary env file with restrictive permissions
+    const pluginEnvDir = fs.mkdtempSync(path.join(DATA_DIR, 'plugin-env-'));
+    const envFilePath = path.join(pluginEnvDir, 'env');
+    const envFileContents = Object.entries(pluginEnv)
+      .map(([key, val]) => `${key}=${String(val)}`)
+      .join('\n');
+    fs.writeFileSync(envFilePath, envFileContents, { mode: 0o600 });
+    args.push('--env-file', envFilePath);
   }
 
   args.push(CONTAINER_IMAGE);
@@ -304,9 +311,9 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
-  const pluginEnv = getPluginContainerEnv(
-    readEnvFile(getPluginContainerEnvKeys()),
-  );
+  const pluginEnvKeys = getPluginContainerEnvKeys();
+  const rawEnv = readEnvFile(pluginEnvKeys);
+  const pluginEnv = getPluginContainerEnv(rawEnv);
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,

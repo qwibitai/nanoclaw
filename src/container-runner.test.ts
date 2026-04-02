@@ -293,11 +293,13 @@ describe('container-runner plugin env injection', () => {
     );
 
     const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
-    const pairs = spawnArgs.reduce<string[]>((acc, arg, i) => {
+    const envArgs = spawnArgs.reduce<string[]>((acc, arg, i) => {
       if (spawnArgs[i - 1] === '-e') acc.push(arg);
       return acc;
     }, []);
-    expect(pairs).toContain('PLUGIN_KEY=secret');
+    // Ensure the plugin env key is passed via -e, but do not assert on or expose the raw secret value in argv
+    expect(envArgs).toContain('PLUGIN_KEY');
+    expect(spawnArgs).not.toContain('secret');
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);

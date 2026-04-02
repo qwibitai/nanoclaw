@@ -13,8 +13,31 @@ import { getRegisteredPlugins } from '../src/plugins/registry.js';
 const plugins = getRegisteredPlugins();
 const binaries = plugins
   .filter((p) => p.binaryInstall !== undefined)
-  .map((p) => ({ name: p.name, ...p.binaryInstall }));
+  .map((p) => {
+    const binaryInstall = p.binaryInstall as any;
 
+    if (!binaryInstall || typeof binaryInstall !== 'object') {
+      throw new Error(`Plugin "${p.name}" has an invalid binaryInstall configuration (expected an object).`);
+    }
+
+    if (
+      !('dest' in binaryInstall) ||
+      typeof binaryInstall.dest !== 'string' ||
+      binaryInstall.dest.trim().length === 0
+    ) {
+      throw new Error(
+        `Plugin "${p.name}" must specify a non-empty "dest" string in its binaryInstall configuration.`,
+      );
+    }
+
+    const normalized = {
+      ...binaryInstall,
+      // Default extract to false if not explicitly set
+      extract: binaryInstall.extract ?? false,
+    };
+
+    return { name: p.name, ...normalized };
+  });
 const outPath = path.join(process.cwd(), 'container', 'plugins', 'binaries.json');
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(binaries, null, 2) + '\n');

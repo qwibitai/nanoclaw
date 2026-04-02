@@ -10,7 +10,7 @@ for f in /app/plugins/*-init.sh; do
   [ -f "$f" ] && . "$f"
 done
 
-cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2
+cd /app && npx tsc --outDir /tmp/dist 1>&2
 ln -s /app/node_modules /tmp/dist/node_modules
 chmod -R a-w /tmp/dist
 cat > /tmp/input.json

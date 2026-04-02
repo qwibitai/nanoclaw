@@ -54,20 +54,33 @@ RUN npm run build
 COPY plugins/binaries.json /tmp/plugins.json
 RUN node -e "\
 const fs = require('fs');\
-const { execSync } = require('child_process');\
+const { execFileSync } = require('child_process');\
 const plugins = JSON.parse(fs.readFileSync('/tmp/plugins.json'));\
-for (const p of plugins) {\
-  if (p.url) {\
-    console.log('Installing plugin binary: ' + p.name);\
-    execSync('curl -fsSL -o ' + p.dest + ' ' + p.url);\
-    execSync('chmod +x ' + p.dest);\
-  } else if (p.archive) {\
-    console.log('Installing plugin archive: ' + p.name);\
-    const files = p.extract.join(' ');\
-    execSync('curl -fsSL ' + p.archive + ' | tar xz --strip-components=1 -C /usr/local/bin/ ' + files);\
-    execSync('chmod +x ' + p.extract.map(f => '/usr/local/bin/' + f).join(' '));\
+plugins.forEach((p, index) => {\
+  if (!p || !p.name) {\
+    throw new Error('Invalid plugin entry: missing name');\
   }\
-}\
+  if (p.url) {\
+    if (!p.dest) {\
+      throw new Error('Plugin ' + p.name + ' missing dest for direct download');\
+    }\
+    console.log('Installing plugin binary: ' + p.name);\
+    execFileSync('curl', ['-fsSL', '-o', p.dest, p.url], { stdio: 'inherit' });\
+    execFileSync('chmod', ['+x', p.dest], { stdio: 'inherit' });\
+  } else if (p.archive) {\
+    if (!Array.isArray(p.extract) || p.extract.length === 0) {\
+      throw new Error('Plugin ' + p.name + ' missing extract file list for archive');\
+    }\
+    console.log('Installing plugin archive: ' + p.name);\
+    const archivePath = '/tmp/plugin-archive-' + index + '.tgz';\
+    execFileSync('curl', ['-fsSL', '-o', archivePath, p.archive], { stdio: 'inherit' });\
+    const tarArgs = ['xz', '--strip-components=1', '-C', '/usr/local/bin/'];\
+    for (const f of p.extract) { tarArgs.push(f); }\
+    execFileSync('tar', tarArgs, { stdio: 'inherit' });\
+    const destPaths = p.extract.map(f => '/usr/local/bin/' + f);\
+    execFileSync('chmod', ['+x', ...destPaths], { stdio: 'inherit' });\
+  }\
+});\
 "
 
 # Create workspace directories
