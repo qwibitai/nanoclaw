@@ -32,7 +32,9 @@ function readCreds() {
 }
 
 function writeCreds(creds) {
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), 'utf-8');
+  const tmp = `${CREDENTIALS_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(creds, null, 2), 'utf-8');
+  fs.renameSync(tmp, CREDENTIALS_FILE);
 }
 
 function postForm(data) {

@@ -122,8 +122,12 @@ async function main() {
 
   const msg = `⚠️ Claude Code token 已過期。請執行 /login 重新登入，Anlovely 才能繼續運作。`;
   console.log(msg);
-  await sendTelegram(botToken, chatId, msg);
-  writeState({ lastAlertAt: now });
+  const status = await sendTelegram(botToken, chatId, msg);
+  if (status === 200) {
+    writeState({ lastAlertAt: now });
+  } else {
+    console.error(`Telegram delivery failed (HTTP ${status}) — will retry next run`);
+  }
 }
 
 main();

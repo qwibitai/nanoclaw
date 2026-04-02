@@ -143,7 +143,11 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // identity and instructions from the first run.  (Fixes #1391)
   const groupMdFile = path.join(groupDir, 'CLAUDE.md');
   if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(GROUPS_DIR, 'global', 'CLAUDE.md');
+    const templateFile = path.join(
+      GROUPS_DIR,
+      group.isMain ? 'main' : 'global',
+      'CLAUDE.md',
+    );
     if (fs.existsSync(templateFile)) {
       let content = fs.readFileSync(templateFile, 'utf-8');
       if (ASSISTANT_NAME !== 'Andy') {
