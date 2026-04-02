@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+/**
+ * search — Web search for container agents using DuckDuckGo via agent-browser.
+ *
+ * Usage:
+ *   search "query"              # top 5 results (title + URL + snippet)
+ *   search "query" --limit 10   # up to 10 results
+ *   search "query" --json       # JSON output
+ *
+ * No API key required. Uses agent-browser (Playwright/Chromium) to load
+ * DuckDuckGo HTML results and extract title, URL, and snippet.
+ *
+ * Prerequisites: agent-browser must be installed (already in container).
+ */
+import { execFileSync } from 'child_process';
+import { parseArgs } from 'util';
+
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    limit: { type: 'string', short: 'n', default: '5' },
+    json: { type: 'boolean', default: false },
+  },
+  allowPositionals: true,
+});
+
+const query = positionals.join(' ').trim();
+if (!query) {
+  console.error('Usage: search "query" [--limit N] [--json]');
+  process.exit(1);
+}
+
+const limit = Math.max(1, parseInt(values.limit, 10) || 5);
+
+function browser(args) {
+  return execFileSync('agent-browser', args, { encoding: 'utf-8' }).trim();
+}
+
+function parseResults(html) {
+  const results = [];
+  // Match DDG result article blocks
+  const articleRe = /<article[^>]*data-testid="result"[^>]*>([\s\S]*?)<\/article>/gi;
+  const titleRe = /<a[^>]*data-testid="result-title-a"[^>]*href="([^"]+)"[^>]*><span[^>]*>([\s\S]*?)<\/span>/i;
+  const snippetRe = /<span[^>]*data-result="snippet"[^>]*>([\s\S]*?)<\/span>/i;
+
+  for (const m of html.matchAll(articleRe)) {
+    const block = m[1];
+    const t = block.match(titleRe);
+    const s = block.match(snippetRe);
+    if (!t) continue;
+    results.push({
+      url: t[1],
+      title: t[2].replace(/<[^>]+>/g, '').trim(),
+      snippet: s ? s[1].replace(/<[^>]+>/g, '').trim() : '',
+    });
+    if (results.length >= limit) break;
+  }
+  return results;
+}
+
+async function main() {
+  const url = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&kl=us-en`;
+
+  try {
+    browser(['open', url]);
+    browser(['wait', '--load', 'networkidle']);
+  } catch (err) {
+    console.error('Failed to load search page:', err.message);
+    process.exit(1);
+  }
+
+  let html;
+  try {
+    html = browser(['get', 'html', 'body']);
+  } catch (err) {
+    console.error('Failed to get page content:', err.message);
+    browser(['close']);
+    process.exit(1);
+  }
+
+  browser(['close']);
+
+  const results = parseResults(html);
+
+  if (results.length === 0) {
+    console.log('No results found.');
+    process.exit(0);
+  }
+
+  if (values.json) {
+    console.log(JSON.stringify(results, null, 2));
+    return;
+  }
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    console.log(`[${i + 1}] ${r.title}`);
+    console.log(`    ${r.url}`);
+    if (r.snippet) console.log(`    ${r.snippet}`);
+    console.log();
+  }
+}
+
+main().catch((err) => {
+  console.error(err.message);
+  process.exit(1);
+});

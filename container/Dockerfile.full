@@ -44,6 +44,10 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Install container helper scripts (search, etc.) into PATH
+COPY scripts/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/search
+
 # Build TypeScript
 RUN npm run build
 

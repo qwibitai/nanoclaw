@@ -113,7 +113,10 @@ export function stopContainer(name: string, timeoutMs = 15000): void {
     throw new Error(`Invalid container name: ${name}`);
   }
   // name is regex-validated above — no shell injection risk.
-  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe', timeout: timeoutMs });
+  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, {
+    stdio: 'pipe',
+    timeout: timeoutMs,
+  });
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
