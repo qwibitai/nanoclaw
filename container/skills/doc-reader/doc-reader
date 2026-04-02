@@ -1,0 +1,47 @@
+#!/bin/bash
+# doc-reader: Extract plain text from Office and common document formats
+# Usage: doc-reader <file-path>
+set -euo pipefail
+
+FILE="$1"
+
+if [ ! -f "$FILE" ]; then
+  echo "Error: file not found: $FILE" >&2
+  exit 1
+fi
+
+EXT="${FILE##*.}"
+EXT="${EXT,,}"
+
+case "$EXT" in
+  docx|doc|odt|rtf)
+    pandoc -t plain --wrap=none "$FILE"
+    ;;
+  pptx|ppt|odp)
+    # pandoc extracts slide text and speaker notes
+    pandoc -t plain --wrap=none "$FILE"
+    ;;
+  xlsx|xls|ods)
+    python3 - "$FILE" <<'PYEOF'
+import sys
+import openpyxl
+
+path = sys.argv[1]
+wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+for sheet in wb.worksheets:
+    print(f"=== {sheet.title} ===")
+    for row in sheet.iter_rows(values_only=True):
+        cells = [str(c) if c is not None else "" for c in row]
+        if any(c.strip() for c in cells):
+            print(",".join(cells))
+PYEOF
+    ;;
+  csv|txt|md|text)
+    cat "$FILE"
+    ;;
+  *)
+    echo "Unsupported file type: .$EXT" >&2
+    echo "Supported: docx, doc, odt, rtf, pptx, ppt, odp, xlsx, xls, ods, csv, txt, md" >&2
+    exit 1
+    ;;
+esac

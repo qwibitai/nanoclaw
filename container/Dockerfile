@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    pandoc \
+    python3 \
+    python3-openpyxl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
