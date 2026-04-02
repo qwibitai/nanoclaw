@@ -98,7 +98,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, text: data.text.slice(0, 200) },
                     'IPC message sent',
                   );
                 } else {
