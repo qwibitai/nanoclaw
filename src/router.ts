@@ -33,17 +33,17 @@ export function stripInternalTags(text: string): string {
  * Matched strings are replaced with `[REDACTED]`.
  */
 const SECRET_PATTERNS: RegExp[] = [
-  /sk-ant-[A-Za-z0-9_-]{20,}/g,          // Anthropic
-  /sk-ant-oat[A-Za-z0-9_-]{20,}/g,        // Anthropic OAuth token
-  /sk-[A-Za-z0-9_-]{20,}/g,              // OpenAI
-  /gsk_[A-Za-z0-9_-]{20,}/g,             // Groq
-  /xai-[A-Za-z0-9_-]{20,}/g,             // xAI
-  /ghp_[A-Za-z0-9_]{36,}/g,              // GitHub PAT classic
-  /github_pat_[A-Za-z0-9_]{20,}/g,        // GitHub PAT fine-grained
-  /glpat-[A-Za-z0-9_-]{20,}/g,           // GitLab PAT
-  /AKIA[A-Z0-9]{16}/g,                   // AWS Access Key
-  /Bearer\s+eyJ[A-Za-z0-9_-]{40,}/g,     // Bearer JWT
-  /AIza[A-Za-z0-9_-]{35,}/g,             // Google API Key
+  /sk-ant-[A-Za-z0-9_-]{20,}/g, // Anthropic
+  /sk-ant-oat[A-Za-z0-9_-]{20,}/g, // Anthropic OAuth token
+  /sk-[A-Za-z0-9_-]{20,}/g, // OpenAI
+  /gsk_[A-Za-z0-9_-]{20,}/g, // Groq
+  /xai-[A-Za-z0-9_-]{20,}/g, // xAI
+  /ghp_[A-Za-z0-9_]{36,}/g, // GitHub PAT classic
+  /github_pat_[A-Za-z0-9_]{20,}/g, // GitHub PAT fine-grained
+  /glpat-[A-Za-z0-9_-]{20,}/g, // GitLab PAT
+  /AKIA[A-Z0-9]{16}/g, // AWS Access Key
+  /Bearer\s+eyJ[A-Za-z0-9_-]{40,}/g, // Bearer JWT
+  /AIza[A-Za-z0-9_-]{35,}/g, // Google API Key
 ];
 
 function redactSecrets(text: string): string {

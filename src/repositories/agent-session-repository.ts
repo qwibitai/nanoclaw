@@ -12,7 +12,11 @@ import {
 
 export interface AgentSessionRepository {
   getLiveSession(groupFolder: string, agentType: string): string | undefined;
-  setLiveSession(groupFolder: string, agentType: string, sessionId: string): void;
+  setLiveSession(
+    groupFolder: string,
+    agentType: string,
+    sessionId: string,
+  ): void;
   deleteLiveSession(groupFolder: string, agentType: string): void;
   getNamedSession(
     groupFolder: string,

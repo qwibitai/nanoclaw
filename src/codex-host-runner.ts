@@ -94,15 +94,11 @@ export async function runCodexHostAgent(
     return {
       status: 'error',
       result: null,
-      error:
-        'Codex host runner is not built. Run `npm run build:runners`.',
+      error: 'Codex host runner is not built. Run `npm run build:runners`.',
     };
   }
 
-  const { env, processName } = prepareCodexHostEnvironment(
-    group,
-    input,
-  );
+  const { env, processName } = prepareCodexHostEnvironment(group, input);
 
   return new Promise((resolve) => {
     const proc = spawn(process.execPath, [RUNNER_ENTRY], {
@@ -130,7 +126,10 @@ export async function runCodexHostAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error({ group: group.name, processName }, 'Codex host runner timed out');
+      logger.error(
+        { group: group.name, processName },
+        'Codex host runner timed out',
+      );
       proc.kill('SIGTERM');
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
@@ -227,7 +226,8 @@ export async function runCodexHostAgent(
             status: 'error',
             result: null,
             newSessionId,
-            error: stderr.trim() || `Codex host runner exited with code ${code}`,
+            error:
+              stderr.trim() || `Codex host runner exited with code ${code}`,
           },
         );
         return;

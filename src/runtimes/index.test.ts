@@ -74,15 +74,17 @@ describe('runtime dispatch', () => {
       },
     });
 
-    expect(serviceNeedsContainerRuntime({
-      'dc:1': {
-        name: 'Codex',
-        folder: 'codex',
-        trigger: '@codex',
-        added_at: '2026-03-31T00:00:00.000Z',
-        agentType: 'codex',
-      },
-    })).toBe(false);
+    expect(
+      serviceNeedsContainerRuntime({
+        'dc:1': {
+          name: 'Codex',
+          folder: 'codex',
+          trigger: '@codex',
+          added_at: '2026-03-31T00:00:00.000Z',
+          agentType: 'codex',
+        },
+      }),
+    ).toBe(false);
     expect(mockEnsureContainerRuntimeRunning).not.toHaveBeenCalled();
     expect(mockCleanupOrphans).not.toHaveBeenCalled();
   });

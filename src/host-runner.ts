@@ -34,14 +34,34 @@ export type HostAgentCli = 'gemini' | 'copilot' | 'codex';
 
 // Complex query keywords (Korean + English) that warrant a stronger model
 const COMPLEX_KEYWORDS = [
-  '분석', '설명해', '왜', '어떻게', '비교', '차이', '정리해', '요약',
-  '코드', '버그', '구현', '설계', '아키텍처',
-  'analyze', 'explain', 'compare', 'difference', 'implement', 'design', 'architecture', 'debug',
+  '분석',
+  '설명해',
+  '왜',
+  '어떻게',
+  '비교',
+  '차이',
+  '정리해',
+  '요약',
+  '코드',
+  '버그',
+  '구현',
+  '설계',
+  '아키텍처',
+  'analyze',
+  'explain',
+  'compare',
+  'difference',
+  'implement',
+  'design',
+  'architecture',
+  'debug',
 ];
 
 function isComplexPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
-  return prompt.length > 300 || COMPLEX_KEYWORDS.some((kw) => lower.includes(kw));
+  return (
+    prompt.length > 300 || COMPLEX_KEYWORDS.some((kw) => lower.includes(kw))
+  );
 }
 
 /**
@@ -52,7 +72,10 @@ function pickGeminiModel(_prompt: string): string {
   return 'gemini-2.5-flash';
 }
 
-function extractImagePaths(text: string): { cleanText: string; imagePaths: string[] } {
+function extractImagePaths(text: string): {
+  cleanText: string;
+  imagePaths: string[];
+} {
   const imagePattern = /\[Image:\s*(\/[^\]]+)\]/g;
   const imagePaths: string[] = [];
   let match: RegExpExecArray | null;
@@ -125,9 +148,15 @@ function spawnOnce(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     proc.stdout.on('data', (data: Buffer) => chunks.push(data.toString()));
-    proc.stderr.on('data', (data: Buffer) => { stderrOutput += data.toString(); });
-    proc.on('close', (code) => resolve({ code, stdout: chunks.join('').trim(), stderr: stderrOutput }));
-    proc.on('error', (err) => resolve({ code: -1, stdout: '', stderr: err.message }));
+    proc.stderr.on('data', (data: Buffer) => {
+      stderrOutput += data.toString();
+    });
+    proc.on('close', (code) =>
+      resolve({ code, stdout: chunks.join('').trim(), stderr: stderrOutput }),
+    );
+    proc.on('error', (err) =>
+      resolve({ code: -1, stdout: '', stderr: err.message }),
+    );
   });
 }
 
@@ -135,14 +164,14 @@ function spawnOnce(
  * After a successful gemini run, fetch the latest session UUID from the cwd.
  * Returns undefined if no sessions exist yet.
  */
-async function captureGeminiSessionId(cwd: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
-  const { stdout } = await spawnOnce(
-    GEMINI_BIN,
-    ['--list-sessions'],
-    cwd,
-    env,
+async function captureGeminiSessionId(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const { stdout } = await spawnOnce(GEMINI_BIN, ['--list-sessions'], cwd, env);
+  const match = stdout.match(
+    /\[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\]/,
   );
-  const match = stdout.match(/\[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\]/);
   return match?.[1];
 }
 
@@ -154,10 +183,7 @@ export interface HostAgentOptions {
   onOutput?: (output: ContainerOutput) => Promise<void>;
 }
 
-function resolveGeminiModel(
-  prompt: string,
-  modelOverride?: string,
-): string {
+function resolveGeminiModel(prompt: string, modelOverride?: string): string {
   return modelOverride || pickGeminiModel(prompt);
 }
 
@@ -170,9 +196,11 @@ function resolveCopilotArgs(
   modelOverride?: string,
   reasoningEffortOverride?: string,
 ): string[] {
-  const model = modelOverride || (isComplexPrompt(prompt) ? 'gpt-4.1' : 'gpt-5-mini');
+  const model =
+    modelOverride || (isComplexPrompt(prompt) ? 'gpt-4.1' : 'gpt-5-mini');
   const args = ['--allow-all-tools', '--model', model];
-  const effort = reasoningEffortOverride || (model === 'gpt-5-mini' ? 'xhigh' : undefined);
+  const effort =
+    reasoningEffortOverride || (model === 'gpt-5-mini' ? 'xhigh' : undefined);
   if (effort && supportsCopilotReasoningEffort(model)) {
     args.push('--reasoning-effort', effort);
   }
@@ -193,12 +221,8 @@ export async function runHostAgent(
   groupFolder: string,
   opts: HostAgentOptions = {},
 ): Promise<ContainerOutput> {
-  const {
-    resumeSessionId,
-    modelOverride,
-    reasoningEffortOverride,
-    onOutput,
-  } = opts;
+  const { resumeSessionId, modelOverride, reasoningEffortOverride, onOutput } =
+    opts;
   const groupDir = resolveGroupFolderPath(groupFolder);
 
   // Prepend agent-specific SYSTEM-{agentCli}.md if present, else shared SYSTEM.md
@@ -214,17 +238,24 @@ export async function runHostAgent(
     : prompt;
 
   // Build base args per CLI
-  const buildArgs = (): { command: string; args: string[]; resultFile?: string } => {
+  const buildArgs = (): {
+    command: string;
+    args: string[];
+    resultFile?: string;
+  } => {
     if (agentCli === 'gemini') {
       prepareGeminiWorkspace(groupDir);
       const resumeArgs = resumeSessionId ? ['--resume', resumeSessionId] : [];
       return {
         command: GEMINI_BIN,
         args: [
-          '--model', resolveGeminiModel(fullPrompt, modelOverride),
+          '--model',
+          resolveGeminiModel(fullPrompt, modelOverride),
           ...resumeArgs,
-          '--prompt', fullPrompt,
-          '--yolo', '--output-format=text',
+          '--prompt',
+          fullPrompt,
+          '--yolo',
+          '--output-format=text',
         ],
       };
     } else if (agentCli === 'copilot') {
@@ -319,36 +350,51 @@ export async function runHostAgent(
     if (resultFile && fs.existsSync(resultFile)) {
       fs.unlinkSync(resultFile);
     }
-    const model = agentCli === 'gemini'
-      ? resolveGeminiModel(fullPrompt, modelOverride)
-      : agentCli === 'copilot'
-        ? (() => {
-          const args = resolveCopilotArgs(
-            fullPrompt,
-            modelOverride,
-            reasoningEffortOverride,
-          );
-          const modelIndex = args.indexOf('--model');
-          const effortIndex = args.indexOf('--reasoning-effort');
-          const resolvedModel =
-            modelIndex >= 0 ? args[modelIndex + 1] : 'unknown';
-          const resolvedEffort =
-            effortIndex >= 0 ? args[effortIndex + 1] : 'default';
-          return `${resolvedModel}(effort:${resolvedEffort})`;
-        })()
-        : `${resolveCodexModel(modelOverride)}(effort:${resolveCodexEffort(reasoningEffortOverride)})`;
+    const model =
+      agentCli === 'gemini'
+        ? resolveGeminiModel(fullPrompt, modelOverride)
+        : agentCli === 'copilot'
+          ? (() => {
+              const args = resolveCopilotArgs(
+                fullPrompt,
+                modelOverride,
+                reasoningEffortOverride,
+              );
+              const modelIndex = args.indexOf('--model');
+              const effortIndex = args.indexOf('--reasoning-effort');
+              const resolvedModel =
+                modelIndex >= 0 ? args[modelIndex + 1] : 'unknown';
+              const resolvedEffort =
+                effortIndex >= 0 ? args[effortIndex + 1] : 'default';
+              return `${resolvedModel}(effort:${resolvedEffort})`;
+            })()
+          : `${resolveCodexModel(modelOverride)}(effort:${resolveCodexEffort(reasoningEffortOverride)})`;
     const keyLabel = agentCli === 'gemini' ? `key #${i + 1}/${attempts}` : '';
-    logger.info({ agentCli, groupFolder, model, keyLabel, resuming: !!resumeSessionId }, 'Spawning host agent');
+    logger.info(
+      { agentCli, groupFolder, model, keyLabel, resuming: !!resumeSessionId },
+      'Spawning host agent',
+    );
 
-    const { code, stdout, stderr } = await spawnOnce(command, args, groupDir, env);
+    const { code, stdout, stderr } = await spawnOnce(
+      command,
+      args,
+      groupDir,
+      env,
+    );
     let resultText = stdout;
     if (agentCli === 'codex' && resultFile && fs.existsSync(resultFile)) {
       resultText = fs.readFileSync(resultFile, 'utf-8').trim();
     }
-    logger.info({ agentCli, groupFolder, code, resultLen: resultText.length }, 'Host agent finished');
+    logger.info(
+      { agentCli, groupFolder, code, resultLen: resultText.length },
+      'Host agent finished',
+    );
 
     if (isQuotaError(stderr, stdout)) {
-      logger.warn({ agentCli, keyIndex: i + 1 }, 'Quota error detected, trying next key');
+      logger.warn(
+        { agentCli, keyIndex: i + 1 },
+        'Quota error detected, trying next key',
+      );
       continue;
     }
 
@@ -371,7 +417,11 @@ export async function runHostAgent(
       newSessionId = 'active';
     }
 
-    const output: ContainerOutput = { status: 'success', result: resultText || null, newSessionId };
+    const output: ContainerOutput = {
+      status: 'success',
+      result: resultText || null,
+      newSessionId,
+    };
     await onOutput?.(output);
     return output;
   }

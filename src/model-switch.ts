@@ -89,9 +89,9 @@ export async function ensureOllamaServerRunning(): Promise<{
 
 export function resolvePreferredOllamaModel(): string | undefined {
   const configured =
-    process.env.CLAUDE_OLLAMA_MODEL
-    || process.env.OLLAMA_MODEL
-    || process.env.DEFAULT_OLLAMA_MODEL;
+    process.env.CLAUDE_OLLAMA_MODEL ||
+    process.env.OLLAMA_MODEL ||
+    process.env.DEFAULT_OLLAMA_MODEL;
   if (configured?.trim()) return configured.trim();
 
   const preferredModels = [
@@ -166,7 +166,9 @@ export function writeModelSwitchHandoff(args: {
 
   lines.push('', '## Current Focus');
   if (latestUserMessage) {
-    lines.push(`- Latest user request: ${truncateLine(latestUserMessage.content, 400)}`);
+    lines.push(
+      `- Latest user request: ${truncateLine(latestUserMessage.content, 400)}`,
+    );
   } else {
     lines.push('- No recent user message found.');
   }

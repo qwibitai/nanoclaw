@@ -191,9 +191,10 @@ export function startCredentialProxy(
 
         (async () => {
           // Fresh OAuth token for this request
-          const freshToken = authMode === 'oauth'
-            ? (readClaudeCredentials() || oauthToken)
-            : undefined;
+          const freshToken =
+            authMode === 'oauth'
+              ? readClaudeCredentials() || oauthToken
+              : undefined;
 
           const headers = buildHeaders(
             req.headers as Record<string, string>,
@@ -227,7 +228,7 @@ export function startCredentialProxy(
                   const parsed = JSON.parse(bodyStr);
                   isExpired =
                     parsed?.error?.type === 'authentication_error' &&
-                    (parsed?.error?.message as string ?? '')
+                    ((parsed?.error?.message as string) ?? '')
                       .toLowerCase()
                       .includes('expired');
                 } catch (err) {
@@ -243,7 +244,9 @@ export function startCredentialProxy(
                 }
 
                 // Attempt token refresh and retry once
-                logger.warn('Detected expired OAuth token — refreshing and retrying');
+                logger.warn(
+                  'Detected expired OAuth token — refreshing and retrying',
+                );
                 const newToken = await refreshClaudeOAuthToken();
                 if (!newToken) {
                   // Refresh failed — return original 401

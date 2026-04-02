@@ -33,9 +33,25 @@ import {
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.json', '.csv', '.xml', '.html', '.htm',
-  '.yaml', '.yml', '.toml', '.log', '.ts', '.js', '.py',
-  '.sh', '.css', '.env', '.ini', '.cfg',
+  '.txt',
+  '.md',
+  '.json',
+  '.csv',
+  '.xml',
+  '.html',
+  '.htm',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.log',
+  '.ts',
+  '.js',
+  '.py',
+  '.sh',
+  '.css',
+  '.env',
+  '.ini',
+  '.cfg',
 ]);
 const MAX_INLINE_BYTES = 32 * 1024;
 
@@ -90,7 +106,9 @@ export class DiscordChannel implements Channel {
     if (agentType !== 'claude-code') this.name = `discord-${agentType}`;
   }
 
-  private getRegisteredGroupForChannel(chatJid: string): RegisteredGroup | undefined {
+  private getRegisteredGroupForChannel(
+    chatJid: string,
+  ): RegisteredGroup | undefined {
     if (this.scope === 'main-only') {
       return getAllGroupsForJid(chatJid).find((group) => group.isMain === true);
     }
@@ -203,7 +221,8 @@ export class DiscordChannel implements Channel {
 
       // In dedicated single-agent rooms, plain messages should behave like direct prompts.
       const requiresTrigger = registeredGroup.requiresTrigger !== false;
-      const isSingleAgentRoom = getRegisteredAgentTypesForJid(chatJid).length === 1;
+      const isSingleAgentRoom =
+        getRegisteredAgentTypesForJid(chatJid).length === 1;
       if (requiresTrigger && isSingleAgentRoom) {
         const trigger = registeredGroup.trigger || `@${ASSISTANT_NAME}`;
         const triggerPattern = new RegExp(
@@ -259,7 +278,9 @@ export class DiscordChannel implements Channel {
               const text = await resp.text();
               fs.writeFileSync(destPath, text);
               if (text.length <= MAX_INLINE_BYTES) {
-                attachmentLines.push(`[File: ${filename}]\n\`\`\`\n${text}\n\`\`\``);
+                attachmentLines.push(
+                  `[File: ${filename}]\n\`\`\`\n${text}\n\`\`\``,
+                );
                 continue;
               }
               attachmentLines.push(`[File: ${agentPath}]`);

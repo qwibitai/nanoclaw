@@ -21,11 +21,20 @@ const COPILOT_BIN = '/opt/homebrew/bin/copilot';
 const MAX_ROUNDS = 3;
 
 // Status codes agents use to signal state
-const STATUS_PATTERN = /\[(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)(?::\s*([\s\S]*?))?\]/;
+const STATUS_PATTERN =
+  /\[(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)(?::\s*([\s\S]*?))?\]/;
 
-type AgentStatus = 'DONE' | 'DONE_WITH_CONCERNS' | 'BLOCKED' | 'NEEDS_CONTEXT' | null;
+type AgentStatus =
+  | 'DONE'
+  | 'DONE_WITH_CONCERNS'
+  | 'BLOCKED'
+  | 'NEEDS_CONTEXT'
+  | null;
 
-function extractStatus(text: string): { status: AgentStatus; detail: string | null } {
+function extractStatus(text: string): {
+  status: AgentStatus;
+  detail: string | null;
+} {
   const match = STATUS_PATTERN.exec(text);
   if (!match) return { status: null, detail: null };
   return {
@@ -46,7 +55,11 @@ function runCli(
 ): Promise<string | null> {
   return new Promise((resolve) => {
     const chunks: string[] = [];
-    const proc = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(command, args, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     proc.stdout.on('data', (d: Buffer) => chunks.push(d.toString()));
     proc.on('close', (code) => {
       const result = chunks.join('').trim();
@@ -56,17 +69,33 @@ function runCli(
   });
 }
 
-async function askGemini(prompt: string, env: NodeJS.ProcessEnv, cwd: string): Promise<string | null> {
+async function askGemini(
+  prompt: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<string | null> {
   return runCli(
     NODE_BIN,
-    ['--no-warnings=DEP0040', GEMINI_SCRIPT, '--prompt', prompt, '--yolo', '--output-format=text'],
+    [
+      '--no-warnings=DEP0040',
+      GEMINI_SCRIPT,
+      '--prompt',
+      prompt,
+      '--yolo',
+      '--output-format=text',
+    ],
     env,
     cwd,
   );
 }
 
 async function askCopilot(prompt: string, cwd: string): Promise<string | null> {
-  return runCli(COPILOT_BIN, ['-p', prompt, '--allow-all-tools'], process.env as NodeJS.ProcessEnv, cwd);
+  return runCli(
+    COPILOT_BIN,
+    ['-p', prompt, '--allow-all-tools'],
+    process.env as NodeJS.ProcessEnv,
+    cwd,
+  );
 }
 
 export async function runMultiAgentDiscussion(
@@ -124,7 +153,10 @@ export async function runMultiAgentDiscussion(
   }
 
   // Round loop: Gemini → Copilot → Gemini → ... up to MAX_ROUNDS total turns
-  const agentSchedule: { name: string; call: (prompt: string) => Promise<string | null> }[] = [];
+  const agentSchedule: {
+    name: string;
+    call: (prompt: string) => Promise<string | null>;
+  }[] = [];
   for (let i = 0; i < MAX_ROUNDS; i++) {
     if (i % 2 === 0) {
       agentSchedule.push({
@@ -145,7 +177,7 @@ export async function runMultiAgentDiscussion(
     const instructions =
       name === 'Gemini'
         ? 'You are Gemini. Review the problem critically. Challenge assumptions.'
-        : 'You are GitHub Copilot. Review Gemini\'s position critically. Add or challenge.';
+        : "You are GitHub Copilot. Review Gemini's position critically. Add or challenge.";
 
     const prompt = buildPrompt(name, instructions);
     logger.info({ agent: name, groupFolder }, 'Calling agent');
@@ -200,10 +232,14 @@ export async function runMultiAgentDiscussion(
     lines.push(`🚫 **${lastTurn.agent} is blocked**\n${stopReason ?? ''}`);
     lines.push(`⏸ Waiting for your input.`);
   } else if (lastTurn.status === 'NEEDS_CONTEXT') {
-    lines.push(`⏸ **${lastTurn.agent} needs your input:**\n${stopReason ?? ''}`);
+    lines.push(
+      `⏸ **${lastTurn.agent} needs your input:**\n${stopReason ?? ''}`,
+    );
   } else {
     // Reached max rounds without resolution
-    lines.push(`⏸ **Max discussion rounds reached.** Review above and let agents know how to proceed.`);
+    lines.push(
+      `⏸ **Max discussion rounds reached.** Review above and let agents know how to proceed.`,
+    );
   }
 
   const result = lines.join('\n\n---\n\n');

@@ -20,10 +20,7 @@ import {
   writeModelSwitchHandoff,
 } from '../model-switch.js';
 import { findChannel } from '../router.js';
-import {
-  startRemoteControl,
-  stopRemoteControl,
-} from '../remote-control.js';
+import { startRemoteControl, stopRemoteControl } from '../remote-control.js';
 import { getAgentType } from '../runtimes/index.js';
 import type { Channel, NewMessage, RegisteredGroup } from '../types.js';
 import { AgentSessionService } from './agent-session-service.js';
@@ -35,9 +32,7 @@ interface ChannelCommandServiceDeps {
   sessionService: AgentSessionService;
 }
 
-export function createChannelCommandService(
-  deps: ChannelCommandServiceDeps,
-): {
+export function createChannelCommandService(deps: ChannelCommandServiceDeps): {
   handleInboundCommand(chatJid: string, msg: NewMessage): Promise<boolean>;
 } {
   const handledPauseCommands = new Set<string>();
@@ -56,7 +51,9 @@ export function createChannelCommandService(
       '@nanoclaw_admin',
       '@claude_bot',
       '@claude',
-    ].filter((value): value is string => Boolean(value && value.trim().length > 0));
+    ].filter((value): value is string =>
+      Boolean(value && value.trim().length > 0),
+    );
 
     for (const prefix of candidatePrefixes) {
       if (!trimmed.toLowerCase().startsWith(prefix.toLowerCase())) continue;
@@ -90,7 +87,8 @@ export function createChannelCommandService(
       `model=\`${model}\``,
       `effort=\`${effort}\``,
     ];
-    if (thinking !== undefined) extras.push(`thinking=\`${thinking ? 'on' : 'off'}\``);
+    if (thinking !== undefined)
+      extras.push(`thinking=\`${thinking ? 'on' : 'off'}\``);
     if (budget !== undefined) extras.push(`budget=\`${budget}\``);
     return extras.join(', ');
   }
@@ -99,7 +97,8 @@ export function createChannelCommandService(
     if (!ms || ms < 1000) return '0s';
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
-    if (s < 3600) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+    if (s < 3600)
+      return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
     return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
   }
 
@@ -131,9 +130,7 @@ export function createChannelCommandService(
       })
         .toString()
         .trim();
-      return dirty
-        ? `${appVersion} (${sha}, dirty)`
-        : `${appVersion} (${sha})`;
+      return dirty ? `${appVersion} (${sha}, dirty)` : `${appVersion} (${sha})`;
     } catch (err) {
       if (!isError(err)) throw err;
       return appVersion;
@@ -142,8 +139,9 @@ export function createChannelCommandService(
 
   async function handleStatusCommand(chatJid: string): Promise<void> {
     const group = deps.getRegisteredGroups()[chatJid];
-    const channel = findChannel(deps.channels, chatJid)
-      ?? deps.channels.find((ch) => ch.isConnected());
+    const channel =
+      findChannel(deps.channels, chatJid) ??
+      deps.channels.find((ch) => ch.isConnected());
     if (!group || !channel) return;
 
     if (!group.isMain) {
@@ -204,7 +202,11 @@ export function createChannelCommandService(
     if (!channel) return;
 
     if (command === '/remote-control') {
-      const result = await startRemoteControl(msg.sender, chatJid, process.cwd());
+      const result = await startRemoteControl(
+        msg.sender,
+        chatJid,
+        process.cwd(),
+      );
       if (result.ok) {
         await channel.sendMessage(chatJid, result.url);
       } else {
@@ -228,8 +230,9 @@ export function createChannelCommandService(
     command: string,
     chatJid: string,
   ): Promise<void> {
-    const channel = findChannel(deps.channels, chatJid)
-      ?? deps.channels.find((ch) => ch.isConnected());
+    const channel =
+      findChannel(deps.channels, chatJid) ??
+      deps.channels.find((ch) => ch.isConnected());
     if (!channel) return;
 
     const parts = command.split(/\s+/);
@@ -278,7 +281,10 @@ export function createChannelCommandService(
         chatJid,
         `⏸ **${agentLabel}** paused until ${timeStr} (${hours}h)`,
       );
-      logger.info({ chatJid, agentLabel, hours }, 'Agent(s) paused via /pause command');
+      logger.info(
+        { chatJid, agentLabel, hours },
+        'Agent(s) paused via /pause command',
+      );
       return;
     }
 
@@ -305,15 +311,19 @@ export function createChannelCommandService(
 
     const agentLabel = targetAgent ?? 'All agents';
     await channel.sendMessage(chatJid, `▶️ **${agentLabel}** resumed`);
-    logger.info({ chatJid, agentLabel }, 'Agent(s) resumed via /resume command');
+    logger.info(
+      { chatJid, agentLabel },
+      'Agent(s) resumed via /resume command',
+    );
   }
 
   async function handleSessionCommand(
     command: string,
     chatJid: string,
   ): Promise<void> {
-    const channel = findChannel(deps.channels, chatJid)
-      ?? deps.channels.find((ch) => ch.isConnected());
+    const channel =
+      findChannel(deps.channels, chatJid) ??
+      deps.channels.find((ch) => ch.isConnected());
     if (!channel) return;
 
     const parts = command.trim().split(/\s+/);
@@ -340,7 +350,10 @@ export function createChannelCommandService(
       return;
     }
 
-    const currentLabel = deps.sessionService.getCurrentLabel(group.folder, 'codex');
+    const currentLabel = deps.sessionService.getCurrentLabel(
+      group.folder,
+      'codex',
+    );
 
     if (cmd === '/sessions') {
       const namedSessions = deps.sessionService.listNamedSessions(
@@ -423,8 +436,9 @@ export function createChannelCommandService(
     chatJid: string,
   ): Promise<void> {
     const group = deps.getRegisteredGroups()[chatJid];
-    const channel = findChannel(deps.channels, chatJid)
-      ?? deps.channels.find((ch) => ch.isConnected());
+    const channel =
+      findChannel(deps.channels, chatJid) ??
+      deps.channels.find((ch) => ch.isConnected());
     if (!group || !channel) return;
 
     const parts = command.trim().split(/\s+/);
@@ -448,12 +462,20 @@ export function createChannelCommandService(
           thinkingBudget: undefined,
         },
       };
-      if (updatedGroup.containerConfig && Object.values(updatedGroup.containerConfig).every((value) => value === undefined)) {
+      if (
+        updatedGroup.containerConfig &&
+        Object.values(updatedGroup.containerConfig).every(
+          (value) => value === undefined,
+        )
+      ) {
         updatedGroup.containerConfig = undefined;
       }
       deps.getRegisteredGroups()[chatJid] = updatedGroup;
       setRegisteredGroup(chatJid, updatedGroup);
-      deps.sessionService.clearLiveSession(updatedGroup.folder, getAgentType(updatedGroup));
+      deps.sessionService.clearLiveSession(
+        updatedGroup.folder,
+        getAgentType(updatedGroup),
+      );
       deps.queue.closeStdin(chatJid);
       await channel.sendMessage(
         chatJid,
@@ -556,7 +578,10 @@ export function createChannelCommandService(
   }
 
   return {
-    async handleInboundCommand(chatJid: string, msg: NewMessage): Promise<boolean> {
+    async handleInboundCommand(
+      chatJid: string,
+      msg: NewMessage,
+    ): Promise<boolean> {
       const trimmed = normalizeInboundCommand(
         msg.content,
         deps.getRegisteredGroups()[chatJid],

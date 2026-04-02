@@ -134,7 +134,9 @@ function buildWorkerPrompt(opts: {
           .map((entry) => `[${entry.agent}] ${entry.text}`)
           .join('\n\n')}`
       : '';
-  const taskLines = opts.tasks.map((task, index) => `${index + 1}. ${task}`).join('\n');
+  const taskLines = opts.tasks
+    .map((task, index) => `${index + 1}. ${task}`)
+    .join('\n');
 
   return `${opts.basePrompt}${history}
 
@@ -205,7 +207,11 @@ ${findings}`;
 function formatSynthesisFollowUp(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return trimmed;
-  if (/^(additional review|follow-up after team review|team review update|추가 검토|후속 검토)/i.test(trimmed)) {
+  if (
+    /^(additional review|follow-up after team review|team review update|추가 검토|후속 검토)/i.test(
+      trimmed,
+    )
+  ) {
     return trimmed;
   }
   return `Follow-up after team review:\n\n${trimmed}`;
@@ -320,7 +326,8 @@ export class PairedRoomService {
           WORKER_ORDER.indexOf((b.agentType ?? 'claude-code') as never),
       );
 
-    const publicAgents = planners.length > 0 ? planners : activeGroups.slice(0, 1);
+    const publicAgents =
+      planners.length > 0 ? planners : activeGroups.slice(0, 1);
     const conversationLog: ConversationEntry[] = [];
     const workerTasks: WorkerTaskMap = {};
     const workerFindings: WorkerFinding[] = [];
@@ -390,7 +397,12 @@ export class PairedRoomService {
 
       successfulPlannerCount++;
       if (publicReply) {
-        await this.sendPublicAgentMessage(chatJid, planner, agentType, publicReply);
+        await this.sendPublicAgentMessage(
+          chatJid,
+          planner,
+          agentType,
+          publicReply,
+        );
         conversationLog.push({
           agent: toAgentLabel(agentType),
           text: publicReply,
@@ -503,7 +515,10 @@ export class PairedRoomService {
       );
 
       if (status === 'error') {
-        logger.warn({ chatJid, agentType }, 'Worker agent failed in paired room');
+        logger.warn(
+          { chatJid, agentType },
+          'Worker agent failed in paired room',
+        );
         continue;
       }
 

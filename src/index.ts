@@ -20,10 +20,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
-} from './container-runner.js';
+import { writeGroupsSnapshot, writeTasksSnapshot } from './container-runner.js';
 import { PROXY_BIND_HOST } from './container-runtime.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -56,11 +53,14 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, findChannelForAgent, formatMessages, formatOutbound } from './router.js';
-import { ensureRequiredRuntimes } from './runtimes/index.js';
 import {
-  restoreRemoteControl,
-} from './remote-control.js';
+  findChannel,
+  findChannelForAgent,
+  formatMessages,
+  formatOutbound,
+} from './router.js';
+import { ensureRequiredRuntimes } from './runtimes/index.js';
+import { restoreRemoteControl } from './remote-control.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -130,9 +130,14 @@ function loadState(): void {
   // Paired rooms (jids with multiple agent_types) are detected separately because
   // getAllRegisteredGroups() returns one representative group per JID.
   registeredGroups = getAllRegisteredGroups();
-  const pairedRoomCount = Object.keys(registeredGroups).filter((jid) => isPairedRoomJid(jid)).length;
+  const pairedRoomCount = Object.keys(registeredGroups).filter((jid) =>
+    isPairedRoomJid(jid),
+  ).length;
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length, pairedRooms: pairedRoomCount },
+    {
+      groupCount: Object.keys(registeredGroups).length,
+      pairedRooms: pairedRoomCount,
+    },
     'State loaded',
   );
 }
@@ -258,7 +263,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // ── Pause check: skip processing if agent(s) are paused ──────────────
   if (isPairedRoomJid(chatJid)) {
     const allGroups = getAllGroupsForJid(chatJid);
-    const allPaused = allGroups.every((g) => isGroupPaused(chatJid, g.agentType ?? 'claude-code'));
+    const allPaused = allGroups.every((g) =>
+      isGroupPaused(chatJid, g.agentType ?? 'claude-code'),
+    );
     if (allPaused) {
       logger.info({ chatJid }, 'All agents paused in paired room, skipping');
       return true;
@@ -287,9 +294,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // ── Paired room: discussion loop (Claude → Copilot → Gemini, repeat) ────
   if (isPairedRoomJid(chatJid)) {
     await channel.setTyping?.(chatJid, true);
-    let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
-      channel.setTyping?.(chatJid, true)?.catch(() => {});
-    }, 8000);
+    let typingInterval: ReturnType<typeof setInterval> | null = setInterval(
+      () => {
+        channel.setTyping?.(chatJid, true)?.catch(() => {});
+      },
+      8000,
+    );
     const clearTyping = () => {
       if (typingInterval) {
         clearInterval(typingInterval);
@@ -316,8 +326,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   // ── End paired room ───────────────────────────────────────────────────
 
-
-
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -334,9 +342,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, true);
   // Refresh typing indicator every 8s (WhatsApp/Telegram expire it after ~10s)
-  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
-    channel.setTyping?.(chatJid, true)?.catch(() => {});
-  }, 8000);
+  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(
+    () => {
+      channel.setTyping?.(chatJid, true)?.catch(() => {});
+    },
+    8000,
+  );
 
   const clearTyping = () => {
     if (typingInterval) {
@@ -354,32 +365,32 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     prompt,
     chatJid,
     async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-      clearTyping();
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+        clearTyping();
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-      clearTyping();
-    }
+      if (result.status === 'error') {
+        hadError = true;
+        clearTyping();
+      }
     },
   );
 
@@ -595,29 +606,36 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      commandService.handleInboundCommand(chatJid, msg).then((handled) => {
-        if (handled) return;
+      commandService
+        .handleInboundCommand(chatJid, msg)
+        .then((handled) => {
+          if (handled) return;
 
-        // Sender allowlist drop mode: discard messages from denied senders before storing
-        if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
-          const cfg = loadSenderAllowlist();
+          // Sender allowlist drop mode: discard messages from denied senders before storing
           if (
-            shouldDropMessage(chatJid, cfg) &&
-            !isSenderAllowed(chatJid, msg.sender, cfg)
+            !msg.is_from_me &&
+            !msg.is_bot_message &&
+            registeredGroups[chatJid]
           ) {
-            if (cfg.logDenied) {
-              logger.debug(
-                { chatJid, sender: msg.sender },
-                'sender-allowlist: dropping message (drop mode)',
-              );
+            const cfg = loadSenderAllowlist();
+            if (
+              shouldDropMessage(chatJid, cfg) &&
+              !isSenderAllowed(chatJid, msg.sender, cfg)
+            ) {
+              if (cfg.logDenied) {
+                logger.debug(
+                  { chatJid, sender: msg.sender },
+                  'sender-allowlist: dropping message (drop mode)',
+                );
+              }
+              return;
             }
-            return;
           }
-        }
-        storeMessage(msg);
-      }).catch((err) =>
-        logger.error({ err, chatJid }, 'Inbound command handling error'),
-      );
+          storeMessage(msg);
+        })
+        .catch((err) =>
+          logger.error({ err, chatJid }, 'Inbound command handling error'),
+        );
     },
     onChatMetadata: (
       chatJid: string,
@@ -707,13 +725,19 @@ async function main(): Promise<void> {
   // Announce restart to any groups that were interrupted at last shutdown
   const restartCtx = consumeRestartContext();
   if (restartCtx) {
-    logger.info({ interruptedCount: restartCtx.groups.length }, 'Announcing restart recovery');
+    logger.info(
+      { interruptedCount: restartCtx.groups.length },
+      'Announcing restart recovery',
+    );
     for (const group of restartCtx.groups) {
       const ch = findChannel(channels, group.chatJid);
       if (ch?.isConnected()) {
         const msg = buildRestartAnnouncement(group, restartCtx.signal);
         ch.sendMessage(group.chatJid, msg).catch((err) =>
-          logger.warn({ chatJid: group.chatJid, err }, 'Failed to send restart announcement'),
+          logger.warn(
+            { chatJid: group.chatJid, err },
+            'Failed to send restart announcement',
+          ),
         );
       }
     }
@@ -722,7 +746,10 @@ async function main(): Promise<void> {
   // Retry any work_items that failed to deliver before the last shutdown
   const undelivered = getUndeliveredWorkItems();
   if (undelivered.length > 0) {
-    logger.info({ count: undelivered.length }, 'Retrying undelivered work items');
+    logger.info(
+      { count: undelivered.length },
+      'Retrying undelivered work items',
+    );
     for (const item of undelivered) {
       const ch = findChannelForAgent(channels, item.agent_type);
       if (!ch?.isConnected()) continue;

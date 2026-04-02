@@ -162,7 +162,9 @@ describe('channel model command', () => {
     expect(groups['dc:admin'].containerConfig?.model).toBe('gpt-5.4');
     expect(groups['dc:admin'].containerConfig?.reasoningEffort).toBe('high');
     expect(getRegisteredGroup('dc:admin', 'claude-code')).toBeUndefined();
-    expect(getRegisteredGroup('dc:admin', 'codex')?.containerConfig?.model).toBe('gpt-5.4');
+    expect(
+      getRegisteredGroup('dc:admin', 'codex')?.containerConfig?.model,
+    ).toBe('gpt-5.4');
     expect(repository.deleteLiveSession).toHaveBeenCalled();
     expect(closeStdin).toHaveBeenCalledWith('dc:admin');
     expect(fakeChannel.sent[0]).toContain('agent=`codex`');
@@ -193,13 +195,18 @@ describe('channel model command', () => {
     const commandService = createChannelCommandService({
       channels: [fakeChannel],
       getRegisteredGroups: () => groups,
-      queue: { closeStdin: vi.fn(), getStatuses: () => [{
-        jid: 'dc:admin',
-        status: 'processing',
-        elapsedMs: 3200,
-        pendingMessages: false,
-        pendingTasks: 1,
-      }] } as never,
+      queue: {
+        closeStdin: vi.fn(),
+        getStatuses: () => [
+          {
+            jid: 'dc:admin',
+            status: 'processing',
+            elapsedMs: 3200,
+            pendingMessages: false,
+            pendingTasks: 1,
+          },
+        ],
+      } as never,
       sessionService: service,
     });
 
@@ -308,7 +315,9 @@ describe('channel model command', () => {
       timestamp: new Date().toISOString(),
     } as NewMessage);
 
-    expect(groups['dc:claude'].containerConfig?.providerPreset).toBe('anthropic');
+    expect(groups['dc:claude'].containerConfig?.providerPreset).toBe(
+      'anthropic',
+    );
     expect(groups['dc:claude'].containerConfig?.model).toBe('opus');
     expect(closeStdin).toHaveBeenCalledWith('dc:claude');
   });
