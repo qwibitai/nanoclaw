@@ -522,9 +522,15 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             channel
-              .sendMessage(chatJid, `:hourglass_flowing_sand: _Working on it..._`)
+              .sendMessage(
+                chatJid,
+                `:hourglass_flowing_sand: _Working on it..._`,
+              )
               .catch((err) =>
-                logger.debug({ chatJid, err }, 'Failed to send ack for piped message'),
+                logger.debug(
+                  { chatJid, err },
+                  'Failed to send ack for piped message',
+                ),
               );
             // Show typing indicator while the container processes the piped message
             channel
