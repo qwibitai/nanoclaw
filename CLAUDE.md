@@ -85,7 +85,19 @@ systemctl --user restart nanoclaw
 
 ## Code Quality
 
-Run `/simplify` before every PR or push to main. This reviews changed code for reuse, quality, and efficiency issues and fixes them.
+Every change must pass `npm run build && npm test` before any review gate. Then run gates based on change type:
+
+| Change Type | Example | Gates |
+|-------------|---------|-------|
+| Trivial | Typo, comment, config value, log message | `/simplify` only |
+| Bug fix / normal feature | New IPC command, fix race condition, add config option | `/claw-review-swarm` then `/simplify` |
+| New subsystem / architectural | New channel type, new directory, new dependency, 4+ new files | `/best-practice-check` then `/claw-review-swarm` then `/simplify` |
+
+Run `/best-practice-check` when: 4+ new files, new directory, new dependency, or a pattern not already used in the codebase.
+
+Skip `/claw-review-swarm` only for changes where correctness is self-evident (string literals, comments, config values with no logic impact). Default: when in doubt, run it.
+
+Re-run `npm run build && npm test` after fixing any gate findings, before committing.
 
 ## Troubleshooting
 

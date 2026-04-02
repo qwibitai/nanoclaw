@@ -342,8 +342,8 @@ export class DiscordChannel implements Channel {
     });
 
     // Handle button clicks and slash commands.
-    // Deploy is restricted to #nanoclaw-dev and its threads.
-    const deployChannelId = '1480411210183610418';
+    // Deploy is restricted to #general (main group) and its threads.
+    const deployChannelId = '1479489866193571902';
     this.client.on(Events.InteractionCreate, async (interaction) => {
       const parentId = DiscordChannel.getInteractionParentId(interaction);
       const isNanoclawChannel =

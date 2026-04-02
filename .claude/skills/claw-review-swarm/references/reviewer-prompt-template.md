@@ -13,7 +13,7 @@ Review the following code changes as a {ROLE} reviewer.
 
 ## Review Criteria
 
-{CRITERIA — paste the relevant sections from review-criteria.md}
+{CRITERIA — extracted from docs.nanoclaw.dev pages relevant to this reviewer's domain. Do NOT use static criteria files.}
 
 ## The Diff
 
