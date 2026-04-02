@@ -219,12 +219,14 @@ export class TelegramChannel implements Channel {
 
         // Download the image
         const buffer = await new Promise<Buffer>((resolve, reject) => {
-          https.get(url, (res) => {
-            const chunks: Buffer[] = [];
-            res.on('data', (c: Buffer) => chunks.push(c));
-            res.on('end', () => resolve(Buffer.concat(chunks)));
-            res.on('error', reject);
-          }).on('error', reject);
+          https
+            .get(url, (res) => {
+              const chunks: Buffer[] = [];
+              res.on('data', (c: Buffer) => chunks.push(c));
+              res.on('end', () => resolve(Buffer.concat(chunks)));
+              res.on('error', reject);
+            })
+            .on('error', reject);
         });
 
         const groupDir = path.join(GROUPS_DIR, group.folder);
@@ -232,16 +234,26 @@ export class TelegramChannel implements Channel {
         const result = await processImage(buffer, groupDir, caption);
 
         const timestamp = new Date(ctx.message.date * 1000).toISOString();
-        const senderName = ctx.from?.first_name || ctx.from?.username || 'Unknown';
-        const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+        const senderName =
+          ctx.from?.first_name || ctx.from?.username || 'Unknown';
+        const isGroup =
+          ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'telegram',
+          isGroup,
+        );
         this.opts.onMessage(chatJid, {
           id: ctx.message.message_id.toString(),
           chat_jid: chatJid,
           sender: ctx.from?.id?.toString() || '',
           sender_name: senderName,
-          content: result ? result.content : `[Photo]${caption ? ` ${caption}` : ''}`,
+          content: result
+            ? result.content
+            : `[Photo]${caption ? ` ${caption}` : ''}`,
           timestamp,
           is_from_me: false,
         });
@@ -274,7 +286,8 @@ export class TelegramChannel implements Channel {
 
         const messageId = update.message_id.toString();
         const reactorJid = update.user?.id?.toString() || '';
-        const reactorName = update.user?.first_name || update.user?.username || 'Unknown';
+        const reactorName =
+          update.user?.first_name || update.user?.username || 'Unknown';
         const timestamp = new Date(update.date * 1000).toISOString();
 
         // new_reaction contains the current reactions from this user
@@ -389,7 +402,12 @@ export class TelegramChannel implements Channel {
 
   async sendReaction(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
     emoji: string,
   ): Promise<void> {
     if (!this.bot) return;
@@ -408,7 +426,10 @@ export class TelegramChannel implements Channel {
   async reactToLatestMessage(chatJid: string, emoji: string): Promise<void> {
     // Telegram doesn't easily expose the latest message ID without tracking it,
     // so this is a best-effort implementation
-    logger.debug({ chatJid, emoji }, 'reactToLatestMessage not fully supported on Telegram');
+    logger.debug(
+      { chatJid, emoji },
+      'reactToLatestMessage not fully supported on Telegram',
+    );
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
