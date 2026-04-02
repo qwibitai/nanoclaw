@@ -71,7 +71,6 @@ export class StatusTracker {
   }
 
   markReceived(messageId: string, chatJid: string, fromMe: boolean): boolean {
-    if (!this.deps.isMainGroup(chatJid)) return false;
     if (this.tracked.has(messageId)) return false;
 
     const msg: TrackedMessage = {
