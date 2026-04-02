@@ -19,9 +19,8 @@ vi.mock('../logger.js', () => ({
 
 // Mock backoff
 vi.mock('../backoff.js', () => ({
-  calculateBackoff: vi.fn(
-    (errors: number, base: number, _max: number) =>
-      errors > 0 ? base * Math.pow(2, errors) : base,
+  calculateBackoff: vi.fn((errors: number, base: number, _max: number) =>
+    errors > 0 ? base * Math.pow(2, errors) : base,
   ),
 }));
 
@@ -61,9 +60,9 @@ import { logger } from '../logger.js';
 import { calculateBackoff } from '../backoff.js';
 
 // Capture the factory registered at import time (before clearAllMocks wipes calls)
-const registeredFactory = vi.mocked(registerChannel).mock.calls.find(
-  (call) => call[0] === 'google-chat',
-)?.[1];
+const registeredFactory = vi
+  .mocked(registerChannel)
+  .mock.calls.find((call) => call[0] === 'google-chat')?.[1];
 
 // --- Firestore mock helpers ---
 const mockUpdate = vi.fn().mockResolvedValue({});

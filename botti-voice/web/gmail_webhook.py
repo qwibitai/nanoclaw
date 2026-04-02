@@ -24,6 +24,26 @@ from typing import Optional
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+# Firestore for cross-instance signaling to NanoClaw
+_firestore_client = None
+_firestore_available = False
+
+def _get_firestore():
+    """Lazily initialize Firestore client. Returns None if unavailable."""
+    global _firestore_client, _firestore_available
+    if _firestore_client is not None:
+        return _firestore_client
+    if not _firestore_available and _firestore_client is None:
+        try:
+            from google.cloud import firestore as _fs
+            _firestore_client = _fs.Client()
+            _firestore_available = True
+            logger.info("Firestore client initialized for Gmail webhook signaling")
+        except Exception as e:
+            _firestore_available = False
+            logger.warning(f"Firestore not available for Gmail webhook signaling: {e}")
+    return _firestore_client
+
 logger = logging.getLogger(__name__)
 
 # Accounts to monitor: agent_id -> {refresh_token, client_id, client_secret, email}
@@ -196,6 +216,9 @@ def process_notification(pubsub_data: str) -> Optional[dict]:
     # Write to state file (same format as boty-agent state.py)
     _write_state(agent_id, emails)
 
+    # Write signal to Firestore for NanoClaw instances to pick up
+    _write_firestore_signal(agent_id, email, history_id, [e["id"] for e in emails])
+
     logger.info(f"Gmail webhook: {len(emails)} new message(s) for {agent_id}")
     return {"agent_id": agent_id, "email": email, "new_count": len(emails), "messages": emails}
 
@@ -222,3 +245,23 @@ def _write_state(agent_id: str, emails: list):
 
     with open(state_file, "w") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def _write_firestore_signal(agent_id: str, email: str, history_id: str, message_ids: list):
+    """Write a signal to Firestore so NanoClaw instances can pick up new Gmail activity.
+    Path: gmail-notify/{agent_id}/signals/{auto_id}
+    Non-fatal: if Firestore is unavailable, just log and continue."""
+    try:
+        db = _get_firestore()
+        if not db:
+            return
+        db.collection("gmail-notify").document(agent_id).collection("signals").add({
+            "messageIds": message_ids,
+            "email": email,
+            "historyId": history_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processed": False,
+        })
+        logger.info(f"Firestore signal written for {agent_id}: {len(message_ids)} message(s)")
+    except Exception as e:
+        logger.warning(f"Failed to write Firestore signal for {agent_id}: {e}")

@@ -41,7 +41,9 @@ export async function downloadAndSaveMedia(
     {
       logger: {
         level: 'info',
-        child() { return this; },
+        child() {
+          return this;
+        },
         trace() {},
         debug: console.debug.bind(console),
         info: console.info.bind(console),

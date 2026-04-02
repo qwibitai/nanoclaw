@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { Firestore } from '@google-cloud/firestore';
 import { google, gmail_v1 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 
@@ -15,6 +16,17 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+// Firestore webhook signal polling config
+const GMAIL_WEBHOOK_ENABLED =
+  process.env.GMAIL_WEBHOOK_ENABLED === 'true';
+const FIRESTORE_SIGNAL_POLL_MS = 5_000; // 5 seconds — lightweight Firestore check
+const GMAIL_WEBHOOK_FALLBACK_POLL_MS = 300_000; // 5 minutes when webhook is active
+const AGENT_NAME =
+  process.env.GOOGLE_CHAT_AGENT_NAME || 'nanoclaw';
+const SERVICE_ACCOUNT_PATH =
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  path.join(os.homedir(), '.firebase-mcp', 'adp-service-account.json');
 
 // --- Gmail send allowlist config (external JSON with cache) ---
 
@@ -144,9 +156,16 @@ export class GmailChannel implements Channel {
   private userEmail = '';
   private lastDeliveredThreadId = '';
 
-  constructor(opts: GmailChannelOpts, pollIntervalMs = 60000) {
+  // Firestore webhook signal polling
+  private firestore: Firestore | null = null;
+  private signalTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(opts: GmailChannelOpts, pollIntervalMs?: number) {
     this.opts = opts;
-    this.pollIntervalMs = pollIntervalMs;
+    // When webhook signals are enabled, use longer fallback interval for Gmail API polling
+    this.pollIntervalMs =
+      pollIntervalMs ??
+      (GMAIL_WEBHOOK_ENABLED ? GMAIL_WEBHOOK_FALLBACK_POLL_MS : 60_000);
   }
 
   async connect(): Promise<void> {
@@ -212,6 +231,11 @@ export class GmailChannel implements Channel {
     // Initial poll
     await this.pollForMessages();
     schedulePoll();
+
+    // Start Firestore signal polling if webhook mode enabled
+    if (GMAIL_WEBHOOK_ENABLED) {
+      this.initFirestoreSignalPoller();
+    }
   }
 
   private isDirectSendAllowed(recipientEmail: string): boolean {
@@ -377,9 +401,85 @@ export class GmailChannel implements Channel {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
+    if (this.signalTimer) {
+      clearTimeout(this.signalTimer);
+      this.signalTimer = null;
+    }
+    if (this.firestore) {
+      await this.firestore.terminate();
+      this.firestore = null;
+    }
     this.gmail = null;
     this.oauth2Client = null;
     logger.info('Gmail channel stopped');
+  }
+
+  // --- Firestore webhook signal polling ---
+
+  private initFirestoreSignalPoller(): void {
+    if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+      logger.warn(
+        { path: SERVICE_ACCOUNT_PATH },
+        'Gmail webhook: service account not found, Firestore signal polling disabled',
+      );
+      return;
+    }
+
+    try {
+      this.firestore = new Firestore({
+        keyFilename: SERVICE_ACCOUNT_PATH,
+      });
+      logger.info(
+        { agent: AGENT_NAME, intervalMs: FIRESTORE_SIGNAL_POLL_MS },
+        'Gmail webhook signal polling enabled (Firestore)',
+      );
+    } catch (err) {
+      logger.warn({ err }, 'Failed to init Firestore for Gmail signals');
+      return;
+    }
+
+    const scheduleSignalPoll = () => {
+      this.signalTimer = setTimeout(() => {
+        this.checkFirestoreSignals()
+          .catch((err) =>
+            logger.error({ err }, 'Gmail Firestore signal poll error'),
+          )
+          .finally(() => {
+            if (this.firestore) scheduleSignalPoll();
+          });
+      }, FIRESTORE_SIGNAL_POLL_MS);
+    };
+
+    scheduleSignalPoll();
+  }
+
+  private async checkFirestoreSignals(): Promise<void> {
+    if (!this.firestore) return;
+
+    const collectionPath = `gmail-notify/${AGENT_NAME}/signals`;
+    const snapshot = await this.firestore
+      .collection(collectionPath)
+      .where('processed', '==', false)
+      .orderBy('timestamp', 'asc')
+      .limit(10)
+      .get();
+
+    if (snapshot.empty) return;
+
+    logger.info(
+      { count: snapshot.size, agent: AGENT_NAME },
+      'Gmail webhook signal(s) received, triggering poll',
+    );
+
+    // Trigger an immediate Gmail API poll
+    await this.pollForMessages();
+
+    // Mark signals as processed
+    const batch = this.firestore.batch();
+    for (const doc of snapshot.docs) {
+      batch.update(doc.ref, { processed: true });
+    }
+    await batch.commit();
   }
 
   // --- Private ---

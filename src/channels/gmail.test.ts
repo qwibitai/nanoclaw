@@ -701,14 +701,10 @@ describe('GmailChannel', () => {
 
     it('filters Precedence: bulk/list', () => {
       expect(
-        callFilter('info@company.com', [
-          { name: 'Precedence', value: 'bulk' },
-        ]),
+        callFilter('info@company.com', [{ name: 'Precedence', value: 'bulk' }]),
       ).toBe(true);
       expect(
-        callFilter('info@company.com', [
-          { name: 'Precedence', value: 'list' },
-        ]),
+        callFilter('info@company.com', [{ name: 'Precedence', value: 'list' }]),
       ).toBe(true);
     });
 

@@ -65,12 +65,32 @@ async def webhook_gmail(request: Request):
 
 @app.on_event("startup")
 async def startup_gmail_watches():
-    """Register accounts and start Gmail watches on boot."""
-    # Load accounts from env: GMAIL_WEBHOOK_ACCOUNTS='{"boty":{"email":"sam@bestoftours.co.uk","refresh_token":"...","client_id":"...","client_secret":"..."}}'
+    """Register accounts and start Gmail watches on boot.
+
+    All 4 agents should be registered in GMAIL_WEBHOOK_ACCOUNTS:
+      - botti  (yacine@bestoftours.co.uk)
+      - sam    (sam@bestoftours.co.uk)
+      - thais  (thais@bestoftours.co.uk)
+      - alan   (ala@bestoftours.co.uk)
+
+    Format: GMAIL_WEBHOOK_ACCOUNTS='{"botti":{"email":"yacine@bestoftours.co.uk","refresh_token":"..."},...}'
+    """
+    expected_agents = {"botti", "sam", "thais", "alan"}
     accounts_json = os.environ.get("GMAIL_WEBHOOK_ACCOUNTS", "")
     if accounts_json:
         try:
             accounts = json.loads(accounts_json)
+            configured = set(accounts.keys())
+            missing = expected_agents - configured
+            if missing:
+                logger.warning(
+                    f"Gmail webhook: missing agents {missing}. "
+                    f"Configured: {configured}. "
+                    f"Expected: {expected_agents}"
+                )
+            else:
+                logger.info(f"Gmail webhook: all expected agents configured: {configured}")
+
             for agent_id, acct in accounts.items():
                 gmail_register(
                     agent_id,

@@ -9,3 +9,4 @@ python-dotenv>=1.0.0
 google-api-python-client>=2.160.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
+google-cloud-firestore>=2.19.0
