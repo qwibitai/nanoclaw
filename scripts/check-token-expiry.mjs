@@ -20,6 +20,7 @@ const RESEND_INTERVAL_MS = 4 * 60 * 60 * 1000; // re-alert at most once per 4h
 const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const STATE_FILE = path.join(os.tmpdir(), 'nanoclaw-token-alert.json');
 const ENV_FILE = path.join(import.meta.dirname, '..', '.env');
+const ASSISTANT_NAME = readEnv('ASSISTANT_NAME') || 'Anlovely';
 
 function readEnv(key) {
   try {
@@ -120,7 +121,7 @@ async function main() {
     process.exit(1);
   }
 
-  const msg = `⚠️ Claude Code token 已過期。請執行 /login 重新登入，Anlovely 才能繼續運作。`;
+  const msg = `⚠️ Claude Code token 已過期。請執行 /login 重新登入，${ASSISTANT_NAME} 才能繼續運作。`;
   console.log(msg);
   const status = await sendTelegram(botToken, chatId, msg);
   if (status === 200) {

@@ -147,7 +147,38 @@ function setupLaunchd(
   fs.writeFileSync(refreshPlistPath, refreshPlist);
   logger.info({ refreshPlistPath }, 'Wrote token-refresh launchd plist');
 
-  for (const p of [plistPath, refreshPlistPath]) {
+  // Token-check job — warns via Telegram every 4h if token stays expired.
+  const checkPlistPath = path.join(
+    homeDir,
+    'Library',
+    'LaunchAgents',
+    'com.nanoclaw.token-check.plist',
+  );
+  const checkPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw.token-check</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodePath}</string>
+        <string>${projectRoot}/scripts/check-token-expiry.mjs</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>StandardOutPath</key>
+    <string>${projectRoot}/logs/token-check.log</string>
+    <key>StandardErrorPath</key>
+    <string>${projectRoot}/logs/token-check.log</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>`;
+  fs.writeFileSync(checkPlistPath, checkPlist);
+  logger.info({ checkPlistPath }, 'Wrote token-check launchd plist');
+
+  for (const p of [plistPath, refreshPlistPath, checkPlistPath]) {
     try {
       // p is a path built from os.homedir() and projectRoot — no user input
       execSync(`launchctl load ${JSON.stringify(p)}`, { stdio: 'ignore' });
