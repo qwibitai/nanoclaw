@@ -1,0 +1,18 @@
+skill: wechat
+version: 1.0.0
+description: "WeChat integration via Tencent iLink Bot API"
+core_version: 0.1.0
+adds:
+  - src/channels/weixin.ts
+  - src/channels/weixin.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+structured:
+  npm_dependencies:
+    qrcode-terminal: "^0.12.0"
+  env_additions:
+    - WEIXIN_ENABLED
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/weixin.test.ts"
