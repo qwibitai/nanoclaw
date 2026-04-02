@@ -241,6 +241,24 @@ async function buildContainerArgs(
   });
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
+    // On SELinux-enforcing systems, files written by OneCLI to /tmp get the
+    // default tmp_t context which Docker cannot read. Relabel any .pem files
+    // that OneCLI just mounted so the container can access them. chcon is a
+    // no-op on non-SELinux systems and we ignore failures silently.
+    const pemPaths = args
+      .filter((_, i) => args[i - 1] === '-v')
+      .map((v) => v.split(':')[0])
+      .filter((p) => p.endsWith('.pem'));
+    if (pemPaths.length > 0) {
+      try {
+        const { execFileSync } = await import('child_process');
+        execFileSync('chcon', ['-t', 'container_file_t', ...pemPaths], {
+          stdio: 'ignore',
+        });
+      } catch {
+        // chcon not available or SELinux not enforcing — safe to ignore
+      }
+    }
   } else {
     logger.warn(
       { containerName },
@@ -265,7 +283,7 @@ async function buildContainerArgs(
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}:z`);
     }
   }
 

@@ -32,9 +32,9 @@ beforeEach(() => {
 // --- Pure functions ---
 
 describe('readonlyMountArgs', () => {
-  it('returns -v flag with :ro suffix', () => {
+  it('returns -v flag with :ro,z suffix (SELinux label)', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
-    expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+    expect(args).toEqual(['-v', '/host/path:/container/path:ro,z']);
   });
 });
 
