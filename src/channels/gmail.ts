@@ -467,6 +467,15 @@ export class GmailChannel implements Channel {
     // Skip emails from self (our own replies)
     if (senderEmail === this.userEmail) return;
 
+    // Skip automated/marketing emails before spawning an agent
+    if (this.isAutomatedEmail(senderEmail, headers)) {
+      logger.debug(
+        { messageId, from: senderEmail, subject },
+        'Skipping automated/marketing email',
+      );
+      return;
+    }
+
     // Extract body text
     const body = this.extractTextBody(msg.data.payload);
 
@@ -531,6 +540,93 @@ export class GmailChannel implements Channel {
       { mainJid, from: senderName, subject },
       'Gmail email delivered to main group',
     );
+  }
+
+  // ---- Email filtering ----
+
+  // Sender prefixes that indicate automated/noreply emails
+  private static NOREPLY_PREFIXES = [
+    'noreply@',
+    'no-reply@',
+    'no_reply@',
+    'donotreply@',
+    'do-not-reply@',
+    'mailer-daemon@',
+    'postmaster@',
+    'notifications@',
+    'notification@',
+    'alert@',
+    'alerts@',
+  ];
+
+  // Known marketing/bulk email sender domains
+  private static MARKETING_DOMAINS = [
+    'mail.beehiiv.com',
+    'email.mailchimp.com',
+    'sendgrid.net',
+    'mandrillapp.com',
+    'mailgun.org',
+    'amazonses.com',
+    'constantcontact.com',
+    'campaign-archive.com',
+    'hubspotlinks.com',
+    'list-manage.com',
+    'mailerlite.com',
+    'sendinblue.com',
+    'brevo.com',
+    'klaviyo.com',
+    'customer.io',
+    'intercom-mail.com',
+    'drip.com',
+    'getresponse.com',
+    'activecampaign.com',
+  ];
+
+  private isAutomatedEmail(
+    senderEmail: string,
+    headers: Array<{ name?: string | null; value?: string | null }>,
+  ): boolean {
+    const email = senderEmail.toLowerCase();
+    const getHeader = (name: string) =>
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value || '';
+
+    // 1. Noreply sender prefixes
+    if (
+      GmailChannel.NOREPLY_PREFIXES.some((prefix) => email.startsWith(prefix))
+    ) {
+      return true;
+    }
+
+    // 2. Known marketing sender domains
+    const domain = email.split('@')[1] || '';
+    if (GmailChannel.MARKETING_DOMAINS.some((d) => domain.endsWith(d))) {
+      return true;
+    }
+
+    // 3. List-Unsubscribe header (strong newsletter signal)
+    if (getHeader('List-Unsubscribe')) {
+      return true;
+    }
+
+    // 4. Precedence: bulk or list (standard header for mailing lists)
+    const precedence = getHeader('Precedence').toLowerCase();
+    if (precedence === 'bulk' || precedence === 'list') {
+      return true;
+    }
+
+    // 5. Auto-Submitted header (bounces, auto-replies)
+    const autoSubmitted = getHeader('Auto-Submitted').toLowerCase();
+    if (autoSubmitted && autoSubmitted !== 'no') {
+      return true;
+    }
+
+    // 6. X-Mailer or X-Campaign headers (bulk mailers)
+    if (getHeader('X-Campaign-Id') || getHeader('X-Mailchimp-Id')) {
+      return true;
+    }
+
+    return false;
   }
 
   private extractTextBody(

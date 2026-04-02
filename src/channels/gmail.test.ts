@@ -15,9 +15,8 @@ vi.mock('../logger.js', () => ({
 
 // Mock backoff
 vi.mock('../backoff.js', () => ({
-  calculateBackoff: vi.fn(
-    (errors: number, base: number, _max: number) =>
-      errors > 0 ? base * Math.pow(2, errors) : base,
+  calculateBackoff: vi.fn((errors: number, base: number, _max: number) =>
+    errors > 0 ? base * Math.pow(2, errors) : base,
   ),
 }));
 
@@ -84,12 +83,8 @@ import { calculateBackoff } from '../backoff.js';
 
 // --- Gmail API mock functions ---
 const mockSend = vi.fn().mockResolvedValue({});
-const mockDraftsCreate = vi
-  .fn()
-  .mockResolvedValue({ data: { id: 'draft-1' } });
-const mockMessagesList = vi
-  .fn()
-  .mockResolvedValue({ data: { messages: [] } });
+const mockDraftsCreate = vi.fn().mockResolvedValue({ data: { id: 'draft-1' } });
+const mockMessagesList = vi.fn().mockResolvedValue({ data: { messages: [] } });
 const mockMessagesGet = vi.fn();
 const mockMessagesModify = vi.fn().mockResolvedValue({});
 
@@ -664,6 +659,100 @@ describe('GmailChannel', () => {
         ch as unknown as { buildQuery: () => string }
       ).buildQuery();
       expect(query).toBe('is:unread in:inbox');
+    });
+  });
+
+  describe('isAutomatedEmail filtering', () => {
+    function callFilter(
+      senderEmail: string,
+      headers: Array<{ name: string; value: string }> = [],
+    ): boolean {
+      const ch = new GmailChannel(makeOpts());
+      return (
+        ch as unknown as {
+          isAutomatedEmail: (
+            email: string,
+            headers: Array<{ name?: string | null; value?: string | null }>,
+          ) => boolean;
+        }
+      ).isAutomatedEmail(senderEmail, headers);
+    }
+
+    it('filters noreply@ senders', () => {
+      expect(callFilter('noreply@company.com')).toBe(true);
+      expect(callFilter('no-reply@service.io')).toBe(true);
+      expect(callFilter('donotreply@example.com')).toBe(true);
+    });
+
+    it('filters known marketing domains', () => {
+      expect(callFilter('news@mail.beehiiv.com')).toBe(true);
+      expect(callFilter('campaign@email.mailchimp.com')).toBe(true);
+      expect(callFilter('info@sendgrid.net')).toBe(true);
+      expect(callFilter('hello@brevo.com')).toBe(true);
+    });
+
+    it('filters List-Unsubscribe header', () => {
+      expect(
+        callFilter('real@company.com', [
+          { name: 'List-Unsubscribe', value: '<mailto:unsub@list.com>' },
+        ]),
+      ).toBe(true);
+    });
+
+    it('filters Precedence: bulk/list', () => {
+      expect(
+        callFilter('info@company.com', [
+          { name: 'Precedence', value: 'bulk' },
+        ]),
+      ).toBe(true);
+      expect(
+        callFilter('info@company.com', [
+          { name: 'Precedence', value: 'list' },
+        ]),
+      ).toBe(true);
+    });
+
+    it('filters Auto-Submitted (not "no")', () => {
+      expect(
+        callFilter('bounce@example.com', [
+          { name: 'Auto-Submitted', value: 'auto-replied' },
+        ]),
+      ).toBe(true);
+      expect(
+        callFilter('bounce@example.com', [
+          { name: 'Auto-Submitted', value: 'auto-generated' },
+        ]),
+      ).toBe(true);
+    });
+
+    it('does NOT filter Auto-Submitted: no', () => {
+      expect(
+        callFilter('person@company.com', [
+          { name: 'Auto-Submitted', value: 'no' },
+        ]),
+      ).toBe(false);
+    });
+
+    it('filters X-Campaign-Id header', () => {
+      expect(
+        callFilter('marketing@company.com', [
+          { name: 'X-Campaign-Id', value: 'abc123' },
+        ]),
+      ).toBe(true);
+    });
+
+    it('passes through normal emails', () => {
+      expect(callFilter('eline@bestoftours.co.uk')).toBe(false);
+      expect(callFilter('ahmed@bestoftours.co.uk')).toBe(false);
+      expect(callFilter('client@hotel.com')).toBe(false);
+    });
+
+    it('passes through emails with Precedence: first-class', () => {
+      expect(
+        callFilter('person@company.com', [
+          { name: 'Precedence', value: 'first-class' },
+        ]),
+      ).toBe(false);
     });
   });
 });
