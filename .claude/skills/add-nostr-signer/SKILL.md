@@ -1,6 +1,6 @@
 ---
 name: add-nostr-signer
-description: "Nostr signing daemon — keeps private key in kernel keyring, signs events via Unix socket. Required by add-nostr-dm, add-whitenoise, and add-nwc-wallet skills."
+description: "Nostr signing daemon — keeps private key in kernel keyring, signs events via Unix socket with per-session scoping and rate limiting. Required by add-nostr-dm, add-whitenoise, and add-nwc-wallet skills."
 ---
 
 *Synthesized by Jorgenclaw (AI agent) and Claude Code (host AI), with direct feedback and verification from Scott Jorgensen*
@@ -16,6 +16,8 @@ This skill installs a signing daemon that holds your Nostr private key securely 
 | Component | What it does |
 |-----------|-------------|
 | **Signing daemon** (`tools/nostr-signer/index.js`) | A background service that reads your private key from the Linux keyring at startup and signs Nostr events on request |
+| **Session manager** (`tools/nostr-signer/sessions.js`) | Issues short-lived tokens scoped to specific event kinds — the agent gets a permission slip, not the key |
+| **Rate limiter** (`tools/nostr-signer/rate-limiter.js`) | Prevents signing abuse — configurable burst, per-minute, and per-hour limits per session |
 | **clawstr-post** (`tools/nostr-signer/clawstr-post.js`) | A command-line tool that lets the agent post to Nostr relays by delegating signing to the daemon |
 | **Unix socket** | The daemon listens on a socket file — other programs connect to it to request signatures |
 | **Kernel keyring** | A secure area of Linux memory where your private key is stored — it never touches disk |
@@ -187,6 +189,40 @@ This should print the same public key.
 | Permission denied on socket | Socket has wrong permissions | The daemon sets `chmod 600` automatically — make sure you're running as the same user |
 | Key lost after reboot | Kernel keyring is cleared on reboot | Re-add the key with `keyctl padd` and restart the daemon |
 | "EADDRINUSE" error | Old socket file wasn't cleaned up | Delete the stale socket: `rm $XDG_RUNTIME_DIR/nostr-signer.sock` and restart |
+
+## Session Security (New)
+
+The daemon now supports **scoped sessions** — short-lived tokens that limit what an agent can sign.
+
+### How it works
+
+At container startup, the orchestrator (or user) creates a session:
+
+```bash
+echo '{"method":"session_start","params":{"scope":"1,9734,1111","ttl":"28800"}}' \
+  | nc -U $XDG_RUNTIME_DIR/nostr-signer.sock -w 2
+```
+
+This returns a session token valid for 8 hours, scoped to kind:1 (posts), kind:9734 (zaps), and kind:1111 (comments). The container passes this token with every `sign_event` request.
+
+### What gets blocked
+
+- **Out-of-scope kinds:** A session scoped to `[1, 1111]` cannot sign kind:0 (profile updates) or kind:8 (badge awards)
+- **Rate exceeded:** More than 5 requests in 10 seconds, 10 per minute, or 100 per hour triggers rejection
+- **Expired sessions:** After TTL, all requests with that token are rejected
+- **Invalid/revoked tokens:** Immediately rejected
+
+Every rejection is logged to `~/NanoClaw/groups/main/status/signer-alerts.log`.
+
+### Backwards compatible
+
+Existing tools that sign without a session token still work — the daemon logs a deprecation warning but signs normally. No migration required to upgrade.
+
+### Full documentation
+
+See `docs/nostr-signer-sessions.md` for the complete guide with hands-on testing commands, troubleshooting, and migration recommendations.
+
+---
 
 ## Removal
 

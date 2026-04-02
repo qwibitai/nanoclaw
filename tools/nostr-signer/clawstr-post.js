@@ -16,7 +16,7 @@
 import { connect } from 'net';
 
 const SOCKET_PATH = process.env.NOSTR_SIGNER_SOCKET || '/run/nostr/signer.sock';
-const DEFAULT_RELAYS = (process.env.NOSTR_RELAYS || 'wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social').split(',');
+const DEFAULT_RELAYS = (process.env.NOSTR_RELAYS || 'wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net,wss://relay.nostr.band,wss://purplepag.es').split(',');
 
 // --- Socket helpers ---
 
@@ -112,12 +112,16 @@ async function cmdPost(subclaw, content) {
   }
 }
 
-async function cmdReply(eventId, content) {
-  if (!eventId || !content) {
-    console.error('Usage: clawstr-post reply <event-id> "content"');
+async function cmdReply(eventId, subclaw, content) {
+  if (!eventId || !subclaw || !content) {
+    console.error('Usage: clawstr-post reply <event-id> <subclaw> "content"');
     process.exit(1);
   }
+  const subclawUrl = `https://clawstr.com/c/${subclaw}`;
+  const postUrl = `https://clawstr.com/c/${subclaw}/post/${eventId}`;
   const tags = [
+    ['I', subclawUrl], ['K', 'web'],
+    ['i', postUrl], ['k', '1111'],
     ['e', eventId, '', 'reply'],
     ['L', 'agent'], ['l', 'ai', 'agent'],
     ['client', 'clawstr-cli'],
@@ -166,7 +170,7 @@ const [,, cmd, ...args] = process.argv;
 try {
   switch (cmd) {
     case 'post':    await cmdPost(args[0], args.slice(1).join(' ')); break;
-    case 'reply':   await cmdReply(args[0], args.slice(1).join(' ')); break;
+    case 'reply':   await cmdReply(args[0], args[1], args.slice(2).join(' ')); break;
     case 'upvote':  await cmdUpvote(args[0]); break;
     case 'pubkey':  console.log(await getPubkey()); break;
     case 'sign':    await cmdSign(args[0]); break;

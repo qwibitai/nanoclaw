@@ -7,14 +7,37 @@
  * on request via a Unix socket.
  *
  * The agent can USE the key without ever SEEING the key.
+ *
+ * Security layers:
+ * - Session tokens with TTL and event-kind scope
+ * - Per-session rate limiting
+ * - Legacy mode (no token) supported with deprecation warning
  */
 
 import { execSync } from 'child_process';
 import { createServer } from 'net';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, appendFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { decode as decodeNsec } from 'nostr-tools/nip19';
 import { unwrapEvent as nip17Unwrap, wrapManyEvents as nip17WrapMany } from 'nostr-tools/nip17';
+import * as nip44 from 'nostr-tools/nip44';
+import * as nip04 from 'nostr-tools/nip04';
+import { createSession, validateSession, revokeSession, getSessionInfo } from './sessions.js';
+import { checkRate, clearRate, getRateStats } from './rate-limiter.js';
+
+// --- Alert log ---
+const ALERT_LOG = process.env.SIGNER_ALERT_LOG
+  || `${process.env.HOME || '/tmp'}/NanoClaw/groups/main/status/signer-alerts.log`;
+
+function logAlert(msg) {
+  try {
+    const dir = dirname(ALERT_LOG);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(ALERT_LOG, `${new Date().toISOString()} ${msg}\n`);
+  } catch { /* best effort */ }
+  console.warn(`[nostr-signer] ALERT: ${msg}`);
+}
 
 // --- Load key from kernel keyring ---
 let secretKeyHex;
@@ -34,6 +57,9 @@ try {
 const pubkey = getPublicKey(secretKeyHex);
 console.log(`[nostr-signer] Public key: ${pubkey}`);
 
+// Track legacy (no-token) usage to log deprecation
+let legacyWarningLogged = false;
+
 // --- Socket path ---
 const SOCKET_PATH = process.env.NOSTR_SIGNER_SOCKET
   || `${process.env.XDG_RUNTIME_DIR || '/run/user/1000'}/nostr-signer.sock`;
@@ -42,7 +68,7 @@ const SOCKET_PATH = process.env.NOSTR_SIGNER_SOCKET
 if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
 
 // --- Handle requests ---
-function handleRequest(data) {
+async function handleRequest(data) {
   try {
     const req = JSON.parse(data);
 
@@ -50,10 +76,58 @@ function handleRequest(data) {
       return JSON.stringify({ pubkey });
     }
 
+    // --- Session management ---
+    if (req.method === 'session_start') {
+      const p = req.params || {};
+      const scope = (p.scope || '1,9734,1111').split(',').map(Number);
+      const ttl = parseInt(p.ttl || '28800', 10);
+      const session = createSession(scope, ttl, p.pid || null);
+      return JSON.stringify({ session });
+    }
+
+    if (req.method === 'session_revoke') {
+      const p = req.params || {};
+      if (!p.token) return JSON.stringify({ error: 'Missing required field: token' });
+      const revoked = revokeSession(p.token);
+      clearRate(p.token);
+      return JSON.stringify({ revoked });
+    }
+
+    if (req.method === 'session_info') {
+      const p = req.params || {};
+      if (!p.token) return JSON.stringify({ error: 'Missing required field: token' });
+      const info = getSessionInfo(p.token);
+      const rateStats = getRateStats(p.token);
+      return JSON.stringify({ session: info, rateStats });
+    }
+
+    // --- sign_event (with optional session token) ---
     if (req.method === 'sign_event') {
       const p = req.params || {};
       if (p.kind === undefined) return JSON.stringify({ error: 'Missing required field: kind' });
       if (p.content === undefined) return JSON.stringify({ error: 'Missing required field: content' });
+
+      // Session validation (if token provided)
+      if (p.session_token) {
+        const sv = validateSession(p.session_token, p.kind);
+        if (!sv.valid) {
+          logAlert(`sign_event rejected: ${sv.error} (kind=${p.kind}, token=${p.session_token.slice(0, 12)}...)`);
+          return JSON.stringify({ error: sv.error });
+        }
+
+        // Rate limiting
+        const rl = checkRate(p.session_token);
+        if (!rl.allowed) {
+          logAlert(`sign_event rate-limited: ${rl.error} (token=${p.session_token.slice(0, 12)}...)`);
+          return JSON.stringify({ error: rl.error });
+        }
+      } else {
+        // Legacy mode — no session token
+        if (!legacyWarningLogged) {
+          console.warn('[nostr-signer] DEPRECATION: sign_event called without session_token. Use session_start to create a scoped session.');
+          legacyWarningLogged = true;
+        }
+      }
 
       const eventTemplate = {
         kind: p.kind,
@@ -90,6 +164,60 @@ function handleRequest(data) {
       }
     }
 
+    if (req.method === 'nip44_encrypt') {
+      const p = req.params || {};
+      if (!p.plaintext) return JSON.stringify({ error: 'Missing required field: plaintext' });
+      if (!p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: peer_pubkey' });
+      try {
+        const convKey = nip44.v2.utils.getConversationKey(secretKeyHex, p.peer_pubkey);
+        const ciphertext = nip44.v2.encrypt(p.plaintext, convKey);
+        return JSON.stringify({ result: ciphertext, error: null });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: `nip44_encrypt failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip44_decrypt') {
+      const p = req.params || {};
+      if (!p.ciphertext) return JSON.stringify({ error: 'Missing required field: ciphertext' });
+      if (!p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: peer_pubkey' });
+      try {
+        const convKey = nip44.v2.utils.getConversationKey(secretKeyHex, p.peer_pubkey);
+        const plaintext = nip44.v2.decrypt(p.ciphertext, convKey);
+        return JSON.stringify({ result: plaintext, error: null });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: `nip44_decrypt failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip04_encrypt') {
+      const p = req.params || {};
+      if (!p.plaintext && !p.message) return JSON.stringify({ error: 'Missing required field: plaintext' });
+      if (!p.recipientPubkey && !p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: recipientPubkey' });
+      try {
+        const text = p.plaintext || p.message;
+        const peer = p.recipientPubkey || p.peer_pubkey;
+        const ciphertext = await nip04.encrypt(secretKeyHex, peer, text);
+        return JSON.stringify({ ciphertext, error: null });
+      } catch (err) {
+        return JSON.stringify({ error: `nip04_encrypt failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'nip04_decrypt') {
+      const p = req.params || {};
+      if (!p.ciphertext && !p.content) return JSON.stringify({ error: 'Missing required field: ciphertext' });
+      if (!p.senderPubkey && !p.peer_pubkey) return JSON.stringify({ error: 'Missing required field: senderPubkey' });
+      try {
+        const cipher = p.ciphertext || p.content;
+        const peer = p.senderPubkey || p.peer_pubkey;
+        const plaintext = await nip04.decrypt(secretKeyHex, peer, cipher);
+        return JSON.stringify({ plaintext, error: null });
+      } catch (err) {
+        return JSON.stringify({ error: `nip04_decrypt failed: ${err.message}` });
+      }
+    }
+
     return JSON.stringify({ error: `Unknown method: ${req.method}` });
   } catch (err) {
     return JSON.stringify({ error: `Parse error: ${err.message}` });
@@ -99,10 +227,20 @@ function handleRequest(data) {
 // --- Start server ---
 const server = createServer((conn) => {
   let buf = '';
-  conn.on('data', (chunk) => { buf += chunk; });
-  conn.on('end', () => {
-    const response = handleRequest(buf);
-    conn.end(response + '\n');
+  conn.setEncoding('utf8');
+  conn.on('data', async (chunk) => {
+    buf += chunk;
+    // Process when we get a complete JSON object (ends with } or newline)
+    if (buf.trimEnd().endsWith('}')) {
+      const input = buf;
+      buf = '';
+      try {
+        const response = await handleRequest(input);
+        conn.end(response + '\n');
+      } catch (err) {
+        conn.end(JSON.stringify({ error: err.message }) + '\n');
+      }
+    }
   });
 });
 
@@ -110,6 +248,9 @@ server.listen(SOCKET_PATH, () => {
   // Set socket permissions to owner-only
   execSync(`chmod 600 ${SOCKET_PATH}`);
   console.log(`[nostr-signer] Listening on ${SOCKET_PATH}`);
+  console.log(`[nostr-signer] Session management: enabled`);
+  console.log(`[nostr-signer] Rate limiting: enabled (10/min, 100/hr)`);
+  console.log(`[nostr-signer] Legacy mode: allowed (with deprecation warning)`);
 });
 
 // --- Graceful shutdown ---
