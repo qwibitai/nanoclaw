@@ -47,11 +47,12 @@ Formatting is automatically applied based on the channel you're responding in (D
 
 ## Memory
 
-Searchable history is in two locations:
+Searchable history is in three locations:
 - `conversations/` — summaries and selected past conversations
-- `threads/` — full thread session history (each subfolder is a thread ID)
+- `threads/` — each subfolder is a thread ID containing `summary.txt` (auto-indexed titles) and sometimes session notes. Useful for finding thread IDs and topics, but not full message content.
+- **SQLite database** (`/workspace/project/store/messages.db`) — the authoritative source for full message history. Query the `messages` table filtered by `chat_jid` (thread ID) for complete conversations including both user and agent messages.
 
-When asked to search thread history, recall past sessions, or resume previous work, search both locations.
+When asked to search thread history or resume previous work, use `threads/` summaries to identify the right thread, then query the database for the full conversation.
 
 When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
