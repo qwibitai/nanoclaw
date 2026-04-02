@@ -28,13 +28,9 @@
     "google-auth-library": "^9.15.1",
     "googleapis": "^146.0.0",
     "imapflow": "^1.2.18",
-    "openai": "^6.27.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "yaml": "^2.8.2",
-    "zod": "^4.3.6"
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
