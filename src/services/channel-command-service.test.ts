@@ -1,5 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const mockEnsureOllamaServerRunning = vi.fn(async () => ({
+  ok: true,
+  started: false,
+}));
+const mockResolvePreferredOllamaModel = vi.fn(
+  () => 'qwen3.5:35b-a3b-coding-nvfp4',
+);
+const mockWriteModelSwitchHandoff = vi.fn(
+  (_args: {
+    chatJid: string;
+    group: RegisteredGroup;
+    previousRuntime: string;
+    nextRuntime: string;
+    requestedBy?: string;
+  }) => '/tmp/handoff.md',
+);
+
+vi.mock('../model-switch.js', () => ({
+  ensureOllamaServerRunning: () => mockEnsureOllamaServerRunning(),
+  resolvePreferredOllamaModel: () => mockResolvePreferredOllamaModel(),
+  writeModelSwitchHandoff: (args: {
+    chatJid: string;
+    group: RegisteredGroup;
+    previousRuntime: string;
+    nextRuntime: string;
+    requestedBy?: string;
+  }) => mockWriteModelSwitchHandoff(args),
+}));
+
 import {
   _closeDatabase,
   _initTestDatabase,
@@ -49,6 +78,10 @@ function createSessionService() {
 describe('channel model command', () => {
   beforeEach(() => {
     _initTestDatabase();
+    vi.clearAllMocks();
+    mockResolvePreferredOllamaModel.mockReturnValue(
+      'qwen3.5:35b-a3b-coding-nvfp4',
+    );
   });
 
   afterEach(() => {
@@ -219,7 +252,11 @@ describe('channel model command', () => {
 
     expect(groups['dc:admin'].agentType).toBe('claude-code');
     expect(groups['dc:admin'].containerConfig?.providerPreset).toBe('ollama');
-    expect(groups['dc:admin'].containerConfig?.model).toBeUndefined();
+    expect(groups['dc:admin'].containerConfig?.model).toBe(
+      'qwen3.5:35b-a3b-coding-nvfp4',
+    );
+    expect(mockEnsureOllamaServerRunning).toHaveBeenCalled();
+    expect(mockWriteModelSwitchHandoff).toHaveBeenCalled();
     expect(fakeChannel.sent[0]).toContain('provider=`ollama`');
   });
 
@@ -258,6 +295,9 @@ describe('channel model command', () => {
 
     expect(groups['dc:claude'].agentType).toBe('claude-code');
     expect(groups['dc:claude'].containerConfig?.providerPreset).toBe('ollama');
+    expect(groups['dc:claude'].containerConfig?.model).toBe(
+      'qwen3.5:35b-a3b-coding-nvfp4',
+    );
 
     await commandService.handleInboundCommand('dc:claude', {
       id: 'm6',
@@ -270,6 +310,47 @@ describe('channel model command', () => {
 
     expect(groups['dc:claude'].containerConfig?.providerPreset).toBe('anthropic');
     expect(groups['dc:claude'].containerConfig?.model).toBe('opus');
+    expect(closeStdin).toHaveBeenCalledWith('dc:claude');
+  });
+
+  it('accepts trigger-prefixed model commands in claude rooms', async () => {
+    const claudeGroup: RegisteredGroup = {
+      name: 'Claude Room',
+      folder: 'discord_claude',
+      trigger: '@nanoclaw_admin',
+      added_at: '2026-04-02T00:00:00.000Z',
+      agentType: 'claude-code',
+      containerConfig: {
+        providerPreset: 'anthropic',
+        model: 'sonnet',
+      },
+    };
+    setRegisteredGroup('dc:claude', claudeGroup);
+    const fakeChannel = createFakeChannel('dc:claude');
+    const { service } = createSessionService();
+    const closeStdin = vi.fn();
+    const groups = { 'dc:claude': claudeGroup };
+    const commandService = createChannelCommandService({
+      channels: [fakeChannel],
+      getRegisteredGroups: () => groups,
+      queue: { closeStdin } as never,
+      sessionService: service,
+    });
+
+    const handled = await commandService.handleInboundCommand('dc:claude', {
+      id: 'm7',
+      chat_jid: 'dc:claude',
+      sender: 'u1',
+      sender_name: 'user',
+      content: '@nanoclaw_admin /model ollama',
+      timestamp: new Date().toISOString(),
+    } as NewMessage);
+
+    expect(handled).toBe(true);
+    expect(groups['dc:claude'].containerConfig?.providerPreset).toBe('ollama');
+    expect(groups['dc:claude'].containerConfig?.model).toBe(
+      'qwen3.5:35b-a3b-coding-nvfp4',
+    );
     expect(closeStdin).toHaveBeenCalledWith('dc:claude');
   });
 });
