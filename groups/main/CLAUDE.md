@@ -234,7 +234,7 @@ När användaren ber dig bygga något:
    gh repo create Fruset/projektnamn --private --clone
    cd projektnamn
    ```
-4. *Lokal dev-server* — Portarna 3000-3010 är exponerade från din container. Användaren kan öppna `http://localhost:3000` direkt. Kör `npm install` och `npm run dev` inuti containern (i `/tmp/` eller projektkatalogen), INTE i `/workspace/projects/` (mountad host-mapp med inkompatibla binaries).
+4. *Lokal dev-server* — Portarna 3000 och 3002-3010 är exponerade från din container. **Port 3001 är INTE tillgänglig** (credential proxy). Användaren kan öppna `http://localhost:3000` direkt.
    ```bash
    # Kopiera projekt till container-lokal mapp, installera, starta
    cp -r /workspace/projects/projektnamn /tmp/projektnamn
@@ -243,6 +243,7 @@ När användaren ber dig bygga något:
    npm run dev -- -p 3000
    # Användaren öppnar http://localhost:3000
    ```
+   Kör ALDRIG dev-server på port 3001. Använd 3000 som default.
 5. *Börja smått* — Bygg en fungerande MVP, inte en perfekt app
 5. *Kvalitetskontroll innan du visar* — Leverera aldrig halvfärdigt
 6. *Visa framsteg* — Deploya tidigt med `vercel`, skicka preview-URL, iterera baserat på feedback
