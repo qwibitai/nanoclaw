@@ -60,11 +60,7 @@ describe('StatusTracker', () => {
 
       expect(deps.sendReaction).toHaveBeenCalledTimes(3);
       const emojis = deps.sendReaction.mock.calls.map((c) => c[2]);
-      expect(emojis).toEqual([
-        '\u{1F4AD}',
-        '\u{1F504}',
-        '\u{2705}',
-      ]);
+      expect(emojis).toEqual(['\u{1F4AD}', '\u{1F504}', '\u{2705}']);
     });
 
     it('rejects backward transitions (WORKING -> THINKING is no-op)', async () => {
@@ -185,11 +181,7 @@ describe('StatusTracker', () => {
       tracker.markDone('msg1');
 
       await tracker.flush();
-      expect(order).toEqual([
-        '\u{1F4AD}',
-        '\u{1F504}',
-        '\u{2705}',
-      ]);
+      expect(order).toEqual(['\u{1F4AD}', '\u{1F504}', '\u{2705}']);
     });
   });
 

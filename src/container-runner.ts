@@ -243,6 +243,13 @@ function buildContainerArgs(
     '4',
   ];
 
+  // Expose dev server ports for main containers so user can access via localhost
+  if (isMain) {
+    for (let port = 3000; port <= 3010; port++) {
+      args.push('-p', `${port}:${port}`);
+    }
+  }
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
