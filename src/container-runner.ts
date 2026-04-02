@@ -244,8 +244,10 @@ function buildContainerArgs(
   ];
 
   // Expose dev server ports for main containers so user can access via localhost
+  // Skip 3001 — credential proxy uses that port
   if (isMain) {
     for (let port = 3000; port <= 3010; port++) {
+      if (port === CREDENTIAL_PROXY_PORT) continue;
       args.push('-p', `${port}:${port}`);
     }
   }
