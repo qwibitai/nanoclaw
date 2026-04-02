@@ -24,6 +24,7 @@ VALID_AGENTS = {"botti", "sam", "thais", "alan"}
 DEFAULT_AGENT = "botti"
 YACINE_EMAIL = "yacine@bestoftours.co.uk"
 CHAT_VERIFICATION_TOKEN = os.environ.get("CHAT_VERIFICATION_TOKEN", "")
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 # Space → agent mapping. Loaded from Firestore at startup, editable live.
 # Firestore doc: chat-config/space-mapping  { "spaces/XXX": "sam", ... }
@@ -222,6 +223,11 @@ async def handle_agent_event(agent_name: str, request: Request) -> dict[str, Any
 # Admin: update space mapping
 @app.post("/admin/map-space")
 async def map_space(request: Request) -> dict[str, str]:
+    if not ADMIN_API_KEY:
+        raise HTTPException(status_code=503, detail="Admin endpoint disabled (ADMIN_API_KEY not configured)")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {ADMIN_API_KEY}":
+        raise HTTPException(status_code=403, detail="Invalid API key")
     body = await request.json()
     space_name = body.get("space")
     agent = body.get("agent")

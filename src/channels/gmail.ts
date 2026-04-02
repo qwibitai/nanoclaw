@@ -15,6 +15,106 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+// --- Gmail send allowlist config (external JSON with cache) ---
+
+interface GmailSendAllowlistConfig {
+  direct_send: string[];
+  notify_email: string;
+  cc_email: string;
+}
+
+const GMAIL_ALLOWLIST_PATH = path.join(
+  os.homedir(),
+  '.config',
+  'nanoclaw',
+  'gmail-send-allowlist.json',
+);
+
+const GMAIL_ALLOWLIST_DEFAULTS: GmailSendAllowlistConfig = {
+  direct_send: [
+    'eline@bestoftours.co.uk',
+    'ahmed@bestoftours.co.uk',
+    'yacine@bestoftours.co.uk',
+  ],
+  notify_email: 'yacine@bestoftours.co.uk',
+  cc_email: 'yacine@bestoftours.co.uk',
+};
+
+const GMAIL_ALLOWLIST_CACHE_TTL_MS = 60_000;
+let _gmailAllowlistCache: GmailSendAllowlistConfig | null = null;
+let _gmailAllowlistCacheTs = 0;
+
+function loadGmailSendAllowlist(): GmailSendAllowlistConfig {
+  if (
+    _gmailAllowlistCache &&
+    Date.now() - _gmailAllowlistCacheTs < GMAIL_ALLOWLIST_CACHE_TTL_MS
+  ) {
+    return _gmailAllowlistCache;
+  }
+
+  let config: GmailSendAllowlistConfig;
+
+  try {
+    const raw = fs.readFileSync(GMAIL_ALLOWLIST_PATH, 'utf-8');
+    const parsed = JSON.parse(raw);
+    config = {
+      direct_send: Array.isArray(parsed.direct_send)
+        ? parsed.direct_send.map((e: string) => e.toLowerCase().trim())
+        : GMAIL_ALLOWLIST_DEFAULTS.direct_send,
+      notify_email: parsed.notify_email || GMAIL_ALLOWLIST_DEFAULTS.notify_email,
+      cc_email: parsed.cc_email || GMAIL_ALLOWLIST_DEFAULTS.cc_email,
+    };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist — create with defaults
+      try {
+        const dir = path.dirname(GMAIL_ALLOWLIST_PATH);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          GMAIL_ALLOWLIST_PATH,
+          JSON.stringify(GMAIL_ALLOWLIST_DEFAULTS, null, 2) + '\n',
+        );
+        logger.info(
+          { path: GMAIL_ALLOWLIST_PATH },
+          'Created default gmail-send-allowlist.json',
+        );
+      } catch (writeErr) {
+        logger.warn(
+          { err: writeErr, path: GMAIL_ALLOWLIST_PATH },
+          'Failed to create default gmail-send-allowlist.json',
+        );
+      }
+      config = { ...GMAIL_ALLOWLIST_DEFAULTS };
+    } else {
+      logger.warn(
+        { err, path: GMAIL_ALLOWLIST_PATH },
+        'Failed to read gmail-send-allowlist.json, using defaults',
+      );
+      config = { ...GMAIL_ALLOWLIST_DEFAULTS };
+    }
+  }
+
+  // Env var override still works as fallback
+  const envOverride = process.env.GMAIL_DIRECT_SEND_ALLOWLIST;
+  if (envOverride) {
+    config.direct_send = envOverride
+      .toLowerCase()
+      .split(',')
+      .map((e) => e.trim())
+      .filter(Boolean);
+  }
+  if (process.env.GMAIL_NOTIFY_EMAIL) {
+    config.notify_email = process.env.GMAIL_NOTIFY_EMAIL;
+  }
+  if (process.env.GMAIL_CC_EMAIL) {
+    config.cc_email = process.env.GMAIL_CC_EMAIL;
+  }
+
+  _gmailAllowlistCache = config;
+  _gmailAllowlistCacheTs = Date.now();
+  return config;
+}
+
 export interface GmailChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -114,17 +214,9 @@ export class GmailChannel implements Channel {
     schedulePoll();
   }
 
-  // Emails to these addresses are sent directly (with CC to notify).
-  // All other recipients get a draft + notification instead.
-  private static DIRECT_SEND_ALLOWLIST = new Set(
-    (process.env.GMAIL_DIRECT_SEND_ALLOWLIST || 'eline@bestoftours.co.uk,ahmed@bestoftours.co.uk,yacine@bestoftours.co.uk')
-      .toLowerCase().split(',').map(e => e.trim()).filter(Boolean),
-  );
-  private static NOTIFY_EMAIL = process.env.GMAIL_NOTIFY_EMAIL || 'yacine@bestoftours.co.uk';
-  private static CC_EMAIL = process.env.GMAIL_CC_EMAIL || 'yacine@bestoftours.co.uk';
-
   private isDirectSendAllowed(recipientEmail: string): boolean {
-    return GmailChannel.DIRECT_SEND_ALLOWLIST.has(recipientEmail.toLowerCase());
+    const cfg = loadGmailSendAllowlist();
+    return cfg.direct_send.includes(recipientEmail.toLowerCase());
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -175,6 +267,8 @@ export class GmailChannel implements Channel {
       ? meta.subject
       : `Re: ${meta.subject}`;
 
+    const allowlistCfg = loadGmailSendAllowlist();
+
     if (this.isDirectSendAllowed(meta.sender)) {
       // Direct send to allowlisted recipients, CC yacine@
       const headerLines = [
@@ -184,8 +278,8 @@ export class GmailChannel implements Channel {
         `In-Reply-To: ${meta.messageId}`,
         `References: ${meta.messageId}`,
       ];
-      if (meta.sender.toLowerCase() !== GmailChannel.CC_EMAIL.toLowerCase()) {
-        headerLines.push(`Cc: ${GmailChannel.CC_EMAIL}`);
+      if (meta.sender.toLowerCase() !== allowlistCfg.cc_email.toLowerCase()) {
+        headerLines.push(`Cc: ${allowlistCfg.cc_email}`);
       }
       headerLines.push('Content-Type: text/plain; charset=utf-8', '', text);
 
@@ -239,15 +333,15 @@ export class GmailChannel implements Channel {
 
         // Notify yacine@ about the pending draft
         const notifyHeaders = [
-          `To: ${GmailChannel.NOTIFY_EMAIL}`,
+          `To: ${allowlistCfg.notify_email}`,
           `From: ${this.userEmail}`,
           `Subject: [Draft pending] ${subject} → ${meta.sender}`,
           'Content-Type: text/plain; charset=utf-8',
           '',
           `Draft reply created for ${meta.senderName} <${meta.sender}>.\n\n` +
-          `Subject: ${subject}\n` +
-          `---\n${text}\n---\n\n` +
-          `Review and send from ${this.userEmail} drafts.`,
+            `Subject: ${subject}\n` +
+            `---\n${text}\n---\n\n` +
+            `Review and send from ${this.userEmail} drafts.`,
         ].join('\r\n');
 
         const encodedNotify = Buffer.from(notifyHeaders)
@@ -261,7 +355,7 @@ export class GmailChannel implements Channel {
           requestBody: { raw: encodedNotify },
         });
         logger.info(
-          { to: GmailChannel.NOTIFY_EMAIL, draftFor: meta.sender },
+          { to: allowlistCfg.notify_email, draftFor: meta.sender },
           'Draft notification sent',
         );
       } catch (err) {

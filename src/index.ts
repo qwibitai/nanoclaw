@@ -261,7 +261,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           try {
             await gchatChannel.sendMessage(gchatJid, text);
           } catch (err) {
-            logger.warn({ err, gchatJid }, 'Failed to cross-post to Google Chat');
+            logger.warn(
+              { err, gchatJid },
+              'Failed to cross-post to Google Chat',
+            );
           }
           delete lastGchatReplyTarget[group.folder];
         }
@@ -433,6 +436,12 @@ async function main(): Promise<void> {
   loadState();
   restoreRemoteControl();
 
+  // Remote control PIN guard
+  const REMOTE_CONTROL_PIN = process.env.REMOTE_CONTROL_PIN || '';
+  if (!REMOTE_CONTROL_PIN) {
+    logger.warn('REMOTE_CONTROL_PIN not set — remote control is disabled');
+  }
+
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
     CREDENTIAL_PROXY_PORT,
@@ -468,7 +477,22 @@ async function main(): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
-    if (command === '/remote-control') {
+    // PIN authentication for /remote-control (not required for /remote-control-end)
+    if (command.startsWith('/remote-control') && command !== '/remote-control-end') {
+      if (!REMOTE_CONTROL_PIN) {
+        await channel.sendMessage(chatJid, 'Remote control is disabled (REMOTE_CONTROL_PIN not configured).');
+        return;
+      }
+      const parts = command.split(/\s+/);
+      const suppliedPin = parts[1] || '';
+      if (suppliedPin !== REMOTE_CONTROL_PIN) {
+        logger.warn({ chatJid, sender: msg.sender }, 'Remote control: access denied (wrong PIN)');
+        await channel.sendMessage(chatJid, 'Access denied');
+        return;
+      }
+    }
+
+    if (command.startsWith('/remote-control') && command !== '/remote-control-end') {
       const result = await startRemoteControl(
         msg.sender,
         chatJid,
@@ -497,7 +521,7 @@ async function main(): Promise<void> {
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+      if (trimmed.startsWith('/remote-control')) {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );

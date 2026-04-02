@@ -166,13 +166,14 @@ function buildVolumeMounts(
   });
 
   // Gmail credentials directory (for Gmail MCP inside the container)
+  // Read-only: token refresh happens outside containers via credential proxy
   const homeDir = os.homedir();
   const gmailDir = path.join(homeDir, '.gmail-mcp');
   if (fs.existsSync(gmailDir)) {
     mounts.push({
       hostPath: gmailDir,
       containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
+      readonly: true,
     });
   }
 
@@ -187,12 +188,13 @@ function buildVolumeMounts(
   }
 
   // Google Workspace CLI credentials (for gws MCP inside the container)
+  // Read-only: token refresh happens outside containers via credential proxy
   const gwsDir = path.join(homeDir, '.config', 'gws');
   if (fs.existsSync(gwsDir)) {
     mounts.push({
       hostPath: gwsDir,
       containerPath: '/home/node/.config/gws',
-      readonly: false, // GWS may need to refresh OAuth tokens
+      readonly: true,
     });
   }
 
