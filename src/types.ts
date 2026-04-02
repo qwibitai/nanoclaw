@@ -94,8 +94,13 @@ export interface Channel {
   // Optional: reaction support
   sendReaction?(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
   ): Promise<void>;
   reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 }

@@ -603,6 +603,20 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+
+  // Invalidate session if MCP server config has changed since session was created.
+  // The SDK resumes sessions with the old MCP config, so new servers won't be available.
+  const MCP_SERVERS = ['nanoclaw', 'gmail', 'icloud', 'calendar'];
+  const mcpFingerprint = MCP_SERVERS.sort().join(',');
+  const fingerprintPath = '/home/node/.claude/.mcp-fingerprint';
+  const savedFingerprint = fs.existsSync(fingerprintPath) ? fs.readFileSync(fingerprintPath, 'utf-8').trim() : '';
+  if (sessionId && savedFingerprint !== mcpFingerprint) {
+    log(`MCP config changed (was: "${savedFingerprint}", now: "${mcpFingerprint}"), starting fresh session`);
+    sessionId = undefined;
+  }
+  fs.mkdirSync(path.dirname(fingerprintPath), { recursive: true });
+  fs.writeFileSync(fingerprintPath, mcpFingerprint);
+
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs

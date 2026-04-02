@@ -372,14 +372,20 @@ export function getMessagesSince(
 
 export function getMessageFromMe(messageId: string, chatJid: string): boolean {
   const row = db
-    .prepare(`SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`)
+    .prepare(
+      `SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
     .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
   return row?.is_from_me === 1;
 }
 
-export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean } | undefined {
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; fromMe: boolean } | undefined {
   const row = db
-    .prepare(`SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`)
+    .prepare(
+      `SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
     .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
   if (!row) return undefined;
   return { id: row.id, fromMe: row.is_from_me === 1 };
@@ -388,30 +394,30 @@ export function getLatestMessage(chatJid: string): { id: string; fromMe: boolean
 export function storeReaction(reaction: Reaction): void {
   if (!reaction.emoji) {
     db.prepare(
-      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`
+      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
     ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
     return;
   }
   db.prepare(
     `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     reaction.message_id,
     reaction.message_chat_jid,
     reaction.reactor_jid,
     reaction.reactor_name || null,
     reaction.emoji,
-    reaction.timestamp
+    reaction.timestamp,
   );
 }
 
 export function getReactionsForMessage(
   messageId: string,
-  chatJid: string
+  chatJid: string,
 ): Reaction[] {
   return db
     .prepare(
-      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`
+      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
     )
     .all(messageId, chatJid) as Reaction[];
 }
@@ -419,8 +425,10 @@ export function getReactionsForMessage(
 export function getMessagesByReaction(
   reactorJid: string,
   emoji: string,
-  chatJid?: string
-): Array<Reaction & { content: string; sender_name: string; message_timestamp: string }> {
+  chatJid?: string,
+): Array<
+  Reaction & { content: string; sender_name: string; message_timestamp: string }
+> {
   const sql = chatJid
     ? `
       SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
@@ -437,7 +445,11 @@ export function getMessagesByReaction(
       ORDER BY r.timestamp DESC
     `;
 
-  type Result = Reaction & { content: string; sender_name: string; message_timestamp: string };
+  type Result = Reaction & {
+    content: string;
+    sender_name: string;
+    message_timestamp: string;
+  };
   return chatJid
     ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
     : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
@@ -445,11 +457,11 @@ export function getMessagesByReaction(
 
 export function getReactionsByUser(
   reactorJid: string,
-  limit: number = 50
+  limit: number = 50,
 ): Reaction[] {
   return db
     .prepare(
-      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`
+      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`,
     )
     .all(reactorJid, limit) as Reaction[];
 }
@@ -679,6 +691,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -700,6 +713,7 @@ export function getRegisteredGroup(
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1 ? true : undefined,
   };
 }
 
@@ -708,8 +722,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -718,6 +732,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.isMain ? 1 : 0,
   );
 }
 
@@ -730,6 +745,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -750,6 +766,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isMain: row.is_main === 1 ? true : undefined,
     };
   }
   return result;

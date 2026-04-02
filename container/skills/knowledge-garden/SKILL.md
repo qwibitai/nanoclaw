@@ -39,6 +39,7 @@ title: Understanding AI Scaling Laws
 platform: article
 date: 2026-03-27
 tags: [ai, scaling, neural-networks, research]
+status: unread
 summary: A deep dive into how AI model performance scales with compute and data. The authors argue scaling alone is insufficient without architectural improvements.
 ---
 
@@ -112,6 +113,7 @@ From the extracted content, generate:
 - `platform` — `article`, `reddit`, `pdf`, or `other`
 - `date` — today's date (YYYY-MM-DD)
 - `tags` — 3–6 lowercase topic tags derived from content (e.g. `[ai, scaling, research]`)
+- `status` — always `unread` for new saves
 - `summary` — 2–3 sentences covering the main point
 - `takeaways` — 3–5 key ideas as bullet points (go in the body, not frontmatter)
 
@@ -192,3 +194,98 @@ Then read the frontmatter of each to show title, date, and summary.
 - **No extractable content:** Save the URL and title only, set summary to "content not extractable".
 - **Reddit:** WebFetch usually works. If it returns the login page, use agent-browser.
 - **Duplicate URL:** Report the existing saved entry to the user. Don't overwrite unless asked.
+
+---
+
+## Reading status
+
+Every saved item has a `status` field in its frontmatter:
+
+- `unread` — saved but not yet read/engaged with (default for new saves)
+- `read` — user has read or engaged with it
+- `revisit` — user wants to come back to this later
+
+### Marking as read
+
+When the user says "I read that", "done with that", "finished the X article", or discusses the content in a way that shows they've read it — update the frontmatter:
+
+```bash
+# Find the file
+grep -rl "^title:.*KEYWORD" /workspace/group/library/
+
+# Update status (use sed or Edit tool)
+sed -i 's/^status: unread/status: read/' /path/to/file.md
+```
+
+### Marking as revisit
+
+When the user says "remind me about this later", "come back to this", "bookmark for later" — set status to `revisit`.
+
+### Querying by status
+
+```bash
+# Count unread items
+grep -rl "^status: unread" /workspace/group/library/ | wc -l
+
+# List unread titles
+grep -B5 "^status: unread" /workspace/group/library/*.md | grep "^title:" | sed 's/title: //'
+
+# List revisit items
+grep -B5 "^status: revisit" /workspace/group/library/*.md | grep "^title:" | sed 's/title: //'
+```
+
+---
+
+## Recommendations (scheduled task)
+
+When the user asks you to set up reading recommendations (or you notice they have 5+ unread items), offer to schedule a regular nudge.
+
+### What the nudge looks like
+
+Pick ONE unread item. Prioritize:
+1. `revisit` items first — the user explicitly wanted to come back
+2. Older unread items — don't let things go stale
+3. Items with tags matching recent conversations — relevance
+
+Send a short, casual message:
+
+```
+🌱 from your garden:
+
+*Title of the Article*
+Two sentence summary here.
+
+want me to give you the highlights, or mark it as read?
+```
+
+Keep it to one item per nudge. Don't overwhelm. The goal is a gentle tap, not a reading assignment.
+
+### If the user engages
+
+- "give me the highlights" → read the full content, give them a concise breakdown with key quotes
+- "mark as read" / "skip" → update status to `read`
+- "remind me later" → update status to `revisit`
+- "stop these" → cancel the scheduled task
+
+### Garden stats
+
+When the user asks "how's my garden?" or "what's in my library?":
+
+```bash
+total=$(ls /workspace/group/library/*.md 2>/dev/null | wc -l)
+unread=$(grep -rl "^status: unread" /workspace/group/library/ 2>/dev/null | wc -l)
+read=$(grep -rl "^status: read" /workspace/group/library/ 2>/dev/null | wc -l)
+revisit=$(grep -rl "^status: revisit" /workspace/group/library/ 2>/dev/null | wc -l)
+```
+
+Reply with something like:
+
+```
+🌿 your garden: 12 items
+
+• 7 unread
+• 3 read
+• 2 to revisit
+
+want me to recommend something?
+```

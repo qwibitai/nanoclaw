@@ -284,7 +284,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             : JSON.stringify(result.result);
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
         if (text) {
           await channel.sendMessage(chatJid, text);
           outputSentToUser = true;
@@ -603,6 +606,10 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
   restoreRemoteControl();
+
+  // Keep Calendar OAuth token fresh (MCP server inside containers can't persist refreshed tokens)
+  const { startCalendarTokenKeeper } = await import('./calendar-token.js');
+  startCalendarTokenKeeper();
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
