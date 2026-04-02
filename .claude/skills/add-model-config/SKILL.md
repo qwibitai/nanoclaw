@@ -1,11 +1,11 @@
 ---
 name: add-model-config
-description: Enable per-group model, effort, and thinking configuration for container agents. Reads a model-config.json from each group's folder and passes it to the agent SDK on every invocation.
+description: Enable per-group model, effort, and thinking configuration for container agents. Stores config in the group's containerConfig in the database and passes it to the agent SDK on every invocation.
 ---
 
 # Add Model Configuration
 
-This skill adds optional `model`, `effort`, and `thinking` fields to `ContainerInput` and wires up the host to read per-group config from `groups/<name>/model-config.json`. Omitting the config file leaves SDK defaults unchanged — existing behaviour is fully preserved.
+This skill adds optional `model`, `effort`, and `thinking` fields to `ContainerInput` and wires up the host to read them from the group's `containerConfig` in the database. Omitting config leaves SDK defaults unchanged — existing behaviour is fully preserved.
 
 Use `/configure-group` after this skill to set the model config for individual groups.
 
@@ -14,16 +14,16 @@ Use `/configure-group` after this skill to set the model config for individual g
 ### Check if already applied
 
 ```bash
-grep -q "model-config.json" src/index.ts && echo "already applied" || echo "not applied"
+grep -q "ThinkingConfig" src/types.ts && echo "already applied" || echo "not applied"
 ```
 
 If already applied, stop here.
 
 ## Phase 2: Edit source files
 
-### 1. `src/container-runner.ts` — add ThinkingConfig type and three fields to ContainerInput
+### 1. `src/types.ts` — add ThinkingConfig and three fields to ContainerConfig
 
-Find the `ContainerInput` interface (search for `export interface ContainerInput`). Directly above it, add the `ThinkingConfig` type:
+Add the `ThinkingConfig` exported type directly above the `ContainerConfig` interface:
 
 ```typescript
 export type ThinkingConfig =
@@ -32,7 +32,7 @@ export type ThinkingConfig =
   | { type: 'disabled' };
 ```
 
-Inside `ContainerInput`, add three optional fields after `script?`:
+Inside `ContainerConfig`, add three optional fields after `timeout?`:
 
 ```typescript
   model?: string;
@@ -40,12 +40,27 @@ Inside `ContainerInput`, add three optional fields after `script?`:
   thinking?: ThinkingConfig;
 ```
 
-### 2. `container/agent-runner/src/index.ts` — import ThinkingConfig and extend ContainerInput
+### 2. `src/container-runner.ts` — add three fields to ContainerInput
 
-Add `ThinkingConfig` to the existing SDK import line:
+Inside the `ContainerInput` interface, add three optional fields after `script?`:
 
 ```typescript
-import { query, HookCallback, PreCompactHookInput, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk';
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  thinking?: import('./types.js').ThinkingConfig;
+```
+
+### 3. `container/agent-runner/src/index.ts` — import ThinkingConfig and extend ContainerInput
+
+Add `ThinkingConfig` to the existing SDK import:
+
+```typescript
+import {
+  query,
+  HookCallback,
+  PreCompactHookInput,
+  ThinkingConfig,
+} from '@anthropic-ai/claude-agent-sdk';
 ```
 
 Inside the local `ContainerInput` interface, add three optional fields after `script?`:
@@ -56,7 +71,7 @@ Inside the local `ContainerInput` interface, add three optional fields after `sc
   thinking?: ThinkingConfig;
 ```
 
-In `runQuery()`, find the `query()` call and add the three fields to its options just before the `env:` line:
+In `runQuery()`, find the `query()` call and add the three fields just before the `env:` line:
 
 ```typescript
       model: containerInput.model,
@@ -64,25 +79,9 @@ In `runQuery()`, find the `query()` call and add the three fields to its options
       thinking: containerInput.thinking,
 ```
 
-### 3. `src/index.ts` — read model config and pass it to runContainerAgent
+### 4. `src/index.ts` — pass model config from group.containerConfig
 
-Add a helper function after the imports, before the first function definition:
-
-```typescript
-function readGroupModelConfig(folder: string): { model?: string; effort?: 'low' | 'medium' | 'high' | 'max'; thinking?: import('./container-runner.js').ThinkingConfig } {
-  try {
-    const configPath = path.join(resolveGroupFolderPath(folder), 'model-config.json');
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch {
-    // ignore malformed config
-  }
-  return {};
-}
-```
-
-Find the `runContainerAgent` call in the message handler (search for `groupFolder: group.folder,`). Spread the model config into the `ContainerInput`:
+Find the `runContainerAgent` call in the message handler (search for `groupFolder: group.folder,`). Pass the model fields from `containerConfig`:
 
 ```typescript
     const output = await runContainerAgent(
@@ -94,29 +93,15 @@ Find the `runContainerAgent` call in the message handler (search for `groupFolde
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        ...readGroupModelConfig(group.folder),
+        model: group.containerConfig?.model,
+        effort: group.containerConfig?.effort,
+        thinking: group.containerConfig?.thinking,
       },
 ```
 
-### 4. `src/task-scheduler.ts` — same for scheduled tasks
+### 5. `src/task-scheduler.ts` — same for scheduled tasks
 
-Add the same helper function after the imports in `task-scheduler.ts`:
-
-```typescript
-function readGroupModelConfig(folder: string): { model?: string; effort?: 'low' | 'medium' | 'high' | 'max'; thinking?: import('./container-runner.js').ThinkingConfig } {
-  try {
-    const configPath = path.join(resolveGroupFolderPath(folder), 'model-config.json');
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch {
-    // ignore malformed config
-  }
-  return {};
-}
-```
-
-Find the `runContainerAgent` call (search for `isScheduledTask: true,`). Spread the model config into the `ContainerInput`:
+The task scheduler already looks up the full group object. Find the `runContainerAgent` call (search for `isScheduledTask: true,`) and pass the model fields from `group.containerConfig`:
 
 ```typescript
       {
@@ -128,7 +113,9 @@ Find the `runContainerAgent` call (search for `isScheduledTask: true,`). Spread 
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
-        ...readGroupModelConfig(task.group_folder),
+        model: group.containerConfig?.model,
+        effort: group.containerConfig?.effort,
+        thinking: group.containerConfig?.thinking,
       },
 ```
 
@@ -155,29 +142,22 @@ systemctl --user restart nanoclaw
 
 ## After Installation
 
-Create `groups/<name>/model-config.json` to set the model for a group, or run `/configure-group` to do it interactively.
+Use `/configure-group` to set the model config for individual groups interactively. Config is stored in the database alongside other group settings — no restart needed after changes.
 
-Example config file:
+Model shorthands supported by the SDK:
 
-```json
-{
-  "model": "haiku",
-  "effort": "low"
-}
-```
+| Shorthand | Model |
+|-----------|-------|
+| `haiku`   | claude-haiku-4-5 |
+| `sonnet`  | claude-sonnet-4-6 |
+| `opus`    | claude-opus-4-6 |
 
-```json
-{
-  "model": "opus",
-  "thinking": { "type": "adaptive" }
-}
-```
-
-All three fields are optional. An empty or missing config file leaves SDK defaults unchanged.
+All three fields are optional. Groups without config use SDK defaults.
 
 ## Removal
 
-1. Remove `ThinkingConfig` and the three fields from `ContainerInput` in `src/container-runner.ts`
-2. Remove `ThinkingConfig` from the import, the three fields from `ContainerInput`, and the three lines from `query()` options in `container/agent-runner/src/index.ts`
-3. Remove `readGroupModelConfig` and the `...readGroupModelConfig(...)` spreads from `src/index.ts` and `src/task-scheduler.ts`
-4. `npm run build && ./container/build.sh` and restart
+1. Remove `ThinkingConfig` type and the three fields from `ContainerConfig` in `src/types.ts`
+2. Remove the three fields from `ContainerInput` in `src/container-runner.ts`
+3. Remove `ThinkingConfig` from the import, the three fields from local `ContainerInput`, and the three lines from `query()` options in `container/agent-runner/src/index.ts`
+4. Remove the `model/effort/thinking` lines from the `runContainerAgent` calls in `src/index.ts` and `src/task-scheduler.ts`
+5. `npm run build && ./container/build.sh` and restart
