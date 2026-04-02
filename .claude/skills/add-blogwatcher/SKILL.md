@@ -19,21 +19,7 @@ Check if `src/plugins/registry.ts` exists. If not, the plugin system hasn't been
 
 ### Write the plugin module
 
-Look up the latest release at https://github.com/nicholasgasior/blogwatcher/releases and get the linux/amd64 binary URL. Then create `src/plugins/blogwatcher.ts`:
-
-```typescript
-import { registerPlugin } from './registry.js';
-
-registerPlugin({
-  name: 'blogwatcher',
-  binaryInstall: {
-    url: 'https://github.com/nicholasgasior/blogwatcher/releases/download/vX.Y.Z/blogwatcher-linux-amd64',
-    dest: '/usr/local/bin/blogwatcher',
-  },
-});
-```
-
-Use the exact binary URL from the latest release page (replace `vX.Y.Z` with the actual version tag).
+Look up the latest release at https://github.com/nicholasgasior/blogwatcher/releases and get the linux/amd64 binary URL. Then copy `${CLAUDE_SKILL_DIR}/files/blogwatcher.ts` to `src/plugins/blogwatcher.ts`, replacing `vX.Y.Z` in the URL with the actual version tag.
 
 ### Register in the plugins barrel
 
@@ -45,39 +31,7 @@ import './blogwatcher.js';
 
 ### Create container skill
 
-Create `container/skills/blogwatcher/SKILL.md`:
-
-```markdown
----
-name: blogwatcher
-description: blogwatcher CLI — read and monitor RSS/Atom feeds from the command line.
----
-
-# blogwatcher CLI
-
-The `blogwatcher` binary is available in this container for reading RSS and Atom feeds.
-
-## Basic usage
-
-```
-# Fetch and display a feed
-blogwatcher fetch <feed-url>
-
-# Watch a feed for new items (polls at interval)
-blogwatcher watch <feed-url>
-
-# List items as JSON
-blogwatcher fetch --format json <feed-url>
-```
-
-## Example
-
-```
-blogwatcher fetch https://news.ycombinator.com/rss
-```
-
-Run `blogwatcher --help` for all options.
-```
+Copy `${CLAUDE_SKILL_DIR}/container/skills/blogwatcher/SKILL.md` to `container/skills/blogwatcher/SKILL.md`.
 
 ### Validate code changes
 

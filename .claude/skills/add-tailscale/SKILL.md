@@ -19,51 +19,11 @@ Check if `src/plugins/registry.ts` exists. If not, the plugin system hasn't been
 
 ### Write the plugin module
 
-Check https://pkgs.tailscale.com/stable/ for the latest stable version, then create `src/plugins/tailscale.ts`:
-
-```typescript
-import { registerPlugin } from './registry.js';
-
-registerPlugin({
-  name: 'tailscale',
-  containerEnvKeys: ['TAILSCALE_AUTH_KEY', 'TAILSCALE_HOSTNAME'],
-  initScript: 'plugin-init/tailscale.sh',
-  binaryInstall: {
-    archive: 'https://pkgs.tailscale.com/stable/tailscale_1.82.0_amd64.tgz',
-    extract: ['tailscale', 'tailscaled'],
-    dest: '/usr/local/bin/',
-  },
-});
-```
-
-Replace `1.82.0` with the actual latest stable version.
+Check https://pkgs.tailscale.com/stable/ for the latest stable version. Copy `${CLAUDE_SKILL_DIR}/files/tailscale.ts` to `src/plugins/tailscale.ts`, replacing `1.82.0` in the archive URL with the actual latest stable version.
 
 ### Create the init script
 
-Create `container/plugins/tailscale.sh`:
-
-```bash
-#!/bin/bash
-# Start Tailscale in userspace networking mode (no root or /dev/net/tun needed)
-if [ -n "$TAILSCALE_AUTH_KEY" ]; then
-    tailscaled --state=mem: --tun=userspace-networking --socket=/tmp/tailscale.sock 2>/tmp/tailscaled.log &
-    # Wait for daemon socket to appear (up to 10 s)
-    for i in $(seq 1 10); do
-        tailscale --socket=/tmp/tailscale.sock status >/dev/null 2>&1 && break
-        sleep 1
-    done
-    TS_UP_ARGS="--auth-key=$TAILSCALE_AUTH_KEY --accept-routes --timeout=10s"
-    if [ -n "$TAILSCALE_HOSTNAME" ]; then
-        TS_UP_ARGS="$TS_UP_ARGS --hostname=$TAILSCALE_HOSTNAME"
-    fi
-    mkdir -p /var/run/tailscale
-    ln -sf /tmp/tailscale.sock /var/run/tailscale/tailscaled.sock
-    tailscale --socket=/tmp/tailscale.sock up $TS_UP_ARGS || true
-    # Serve port 8088 over HTTPS on the tailnet
-    tailscale --socket=/tmp/tailscale.sock serve --bg 8088 2>/tmp/tailscale-serve.log || true
-    echo "[tailscale] Setup complete"
-fi
-```
+Copy `${CLAUDE_SKILL_DIR}/files/tailscale.sh` to `container/plugins/tailscale.sh`.
 
 This script is sourced by `container/entrypoint.sh` before the agent runs whenever `TAILSCALE_AUTH_KEY` is set in the container environment.
 
@@ -86,30 +46,7 @@ TAILSCALE_HOSTNAME=nanoclaw
 
 ### Create container skill
 
-Create `container/skills/tailscale/SKILL.md`:
-
-```markdown
----
-name: tailscale
-description: Tailscale VPN — the container is connected to a tailnet. Use tailscale hostnames to reach private services.
----
-
-# Tailscale VPN
-
-This container is connected to a Tailscale network (tailnet). You can reach private hosts by their Tailscale hostname or IP.
-
-## What you can do
-
-- Access internal APIs, databases, or services by tailscale hostname (e.g. `http://my-server:8080`)
-- Use `tailscale status` to see connected peers
-- Use `tailscale ping <hostname>` to check reachability
-
-## Notes
-
-- Tailscale runs in userspace networking mode
-- DNS for tailnet hostnames resolves automatically via `100.100.100.100`
-- Internet traffic routes normally (not through tailnet unless `--exit-node` was configured)
-```
+Copy `${CLAUDE_SKILL_DIR}/container/skills/tailscale/SKILL.md` to `container/skills/tailscale/SKILL.md`.
 
 ### Validate code changes
 
