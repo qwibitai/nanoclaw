@@ -246,6 +246,19 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass git identity so commits/deploys use the host user's identity
+  const gitEnv = readEnvFile(['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL']);
+  const gitName = gitEnv.GIT_AUTHOR_NAME || process.env.GIT_AUTHOR_NAME;
+  const gitEmail = gitEnv.GIT_AUTHOR_EMAIL || process.env.GIT_AUTHOR_EMAIL;
+  if (gitName) {
+    args.push('-e', `GIT_AUTHOR_NAME=${gitName}`);
+    args.push('-e', `GIT_COMMITTER_NAME=${gitName}`);
+  }
+  if (gitEmail) {
+    args.push('-e', `GIT_AUTHOR_EMAIL=${gitEmail}`);
+    args.push('-e', `GIT_COMMITTER_EMAIL=${gitEmail}`);
+  }
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
