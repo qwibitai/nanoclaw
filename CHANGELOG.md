@@ -2,6 +2,18 @@
 
 All notable changes to NanoClaw will be documented in this file.
 
+## [1.2.19] — 2026-04-02 (fork: yanggf8/nanoclaw)
+
+### Search capability for container agents
+- **feat:** `container/scripts/search` — DuckDuckGo web search via `agent-browser` (Playwright/Chromium). Usage: `search "query" [--limit N] [--json]`. No API key required; parses DDG HTML article blocks for title, URL, and snippet.
+- **feat:** `container/Dockerfile.full` — `search` script is copied into `/usr/local/bin/` so agents can call it directly from any Bash tool invocation.
+
+### Upstream cherry-picks (task scripts)
+- **feat:** Agents can now attach a bash `script` to `schedule_task` / `update_task`. The script runs before the agent is woken; if it outputs `{ "wakeAgent": false }` the agent is skipped and waits for the next scheduled run. Suppresses unnecessary API invocations for polling/monitoring tasks.
+- **fix:** Spurious chat message no longer sent when a task script suppresses the wake-up.
+- **fix:** `script` field now included in `current_tasks.json` snapshot.
+- **docs:** Task Scripts instructions added to `groups/main/CLAUDE.md` and `groups/global/CLAUDE.md`.
+
 ## [1.2.19] — 2026-03-29 (fork: yanggf8/nanoclaw)
 
 ### OAuth token auto-refresh (updated 2026-03-29)
