@@ -1,6 +1,6 @@
 ---
 name: configure-group
-description: Configure or reconfigure a group's full agent definition — purpose, persona, channel, trigger, container skills, env vars, and mounts. Use when registering a new group or updating an existing one. Main group only.
+description: Configure or reconfigure a group's full agent definition — purpose, persona, channel, trigger, model, container skills, env vars, and mounts. Use when registering a new group or updating an existing one. Main group only. Requires /add-model-config to be installed for model configuration.
 disable-model-invocation: true
 ---
 
@@ -48,9 +48,35 @@ Use `AskUserQuestion` to collect:
 1. **Name**: What should this agent be called? (e.g. "Andy", "Aria")
 2. **Purpose**: In a sentence or two, what is this agent for? (e.g. "Family assistant for the immediate family group — handles home automation, shopping lists, and schedules", "Work assistant for the dev team — helps with code reviews and deployment status")
 
-This purpose statement drives the skills selection in Phase 5.
+This purpose statement drives the skills selection in Phase 6.
 
-## Phase 4: Channel & Trigger
+## Phase 4: Model Configuration
+
+Check if `/add-model-config` is installed:
+
+```bash
+grep -q "ThinkingConfig" /workspace/project/src/types.ts && echo "installed" || echo "not installed"
+```
+
+If installed, ask the user if they want to configure a specific model for this group. If not installed, skip this phase silently.
+
+If they want to configure a model, ask:
+
+1. **Model** — which Claude model should this group use?
+
+| Shorthand | Best for |
+|-----------|----------|
+| `haiku`   | High-frequency chat, simple tasks — fast and cheap |
+| `sonnet`  | Coding, analysis, structured tasks — default sweet spot |
+| `opus`    | Deep research, complex planning — use with `thinking: adaptive` |
+
+2. **Effort** (optional) — omit for most groups. Use `"low"` for lightweight high-frequency groups, `"max"` only for opus on demanding tasks.
+
+3. **Thinking** (optional) — only relevant for opus. `{ "type": "adaptive" }` enables extended reasoning.
+
+Store the chosen values to include in `containerConfig` during Phase 7. If the user wants SDK defaults, leave all three unset.
+
+## Phase 5: Channel & Trigger
 
 **Channel** is inferred from the JID format or folder prefix. Confirm with the user:
 
@@ -72,7 +98,7 @@ Set `requiresTrigger: false` for all-messages, `true` (default) for trigger-only
 
 **Trigger word** — defaults to `@{Name}`. Ask if they want a different trigger word.
 
-## Phase 5: Skills
+## Phase 6: Skills
 
 ### Read available skills
 
@@ -124,7 +150,7 @@ For skills that need filesystem paths (additional mounts):
 
 Collect all values before moving on.
 
-## Phase 6: Build CLAUDE.md
+## Phase 7: Build CLAUDE.md
 
 Compose a `CLAUDE.md` for the group. Use the main group's CLAUDE.md as a structural reference — it lives at `/workspace/project/groups/main/CLAUDE.md`.
 
@@ -178,7 +204,7 @@ Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 Show the draft CLAUDE.md to the user and ask for confirmation or edits before writing it.
 
-## Phase 7: Review & Apply
+## Phase 8: Review & Apply
 
 Show a full summary before making any changes:
 
@@ -187,6 +213,7 @@ Group: {name} ({jid})
 Folder: {folder}
 Trigger: {trigger word} / {all messages | trigger only}
 Channel: {channel}
+Model: {model or "SDK default"} / Effort: {effort or "default"} / Thinking: {thinking or "default"}
 
 Skills: {list or "all"}
 Skill config:
@@ -228,6 +255,9 @@ Call `mcp__nanoclaw__register_group` with:
   "trigger": "<trigger>",
   "requiresTrigger": <true|false>,
   "containerConfig": {
+    "model": "<model>",
+    "effort": "<effort>",
+    "thinking": { "type": "adaptive" },
     "skills": ["skill-a", "skill-b"],
     "skillConfig": {
       "weather": { "WEATHER_LOCATION": "London, UK" }
@@ -243,7 +273,7 @@ Call `mcp__nanoclaw__register_group` with:
 }
 ```
 
-Omit `skills` entirely if all skills should be available. Omit `containerConfig` entirely if there's nothing to configure.
+Omit `model`, `effort`, and `thinking` if using SDK defaults. Omit `skills` entirely if all skills should be available. Omit `containerConfig` entirely if there's nothing to configure.
 
 ### 3. Confirm
 
