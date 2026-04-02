@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NanoClaw Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    background: #0a0a0a;
+    color: #e5e5e5;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.3px;
+  }
+  .refresh-info {
+    font-size: 12px;
+    color: #666;
+  }
+  .summary-bar {
+    display: flex;
+    gap: 24px;
+    padding: 14px 20px;
+    background: #141414;
+    border: 1px solid #222;
+    border-radius: 10px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .summary-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .summary-item .label { color: #888; }
+  .summary-item .value { color: #fff; font-weight: 600; }
+  .summary-item .value.green { color: #22c55e; }
+  .summary-item .value.red { color: #ef4444; }
+  .summary-item .value.yellow { color: #eab308; }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot.green { background: #22c55e; }
+  .dot.red { background: #ef4444; }
+  .dot.yellow { background: #eab308; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: #141414;
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #333; }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .card-subtitle {
+    font-size: 12px;
+    color: #666;
+    margin-top: 2px;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .status-badge.running { background: rgba(34,197,94,0.12); color: #22c55e; }
+  .status-badge.stopped { background: rgba(239,68,68,0.12); color: #ef4444; }
+
+  .card-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 20px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .field.full { grid-column: 1 / -1; }
+  .field-label {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .field-value {
+    font-size: 14px;
+    color: #ccc;
+  }
+  .field-value.mono {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 13px;
+  }
+
+  .channels-list {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .channel-tag {
+    padding: 2px 8px;
+    background: rgba(99,102,241,0.12);
+    color: #818cf8;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .channel-tag.none {
+    background: rgba(100,100,100,0.12);
+    color: #666;
+  }
+
+  .error-count {
+    color: #ef4444;
+    font-weight: 600;
+  }
+  .error-count.zero {
+    color: #666;
+    font-weight: 400;
+  }
+
+  .loading {
+    text-align: center;
+    padding: 60px;
+    color: #666;
+    font-size: 14px;
+  }
+
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    .grid { grid-template-columns: 1fr; }
+    .summary-bar { gap: 12px; padding: 12px 14px; }
+    .card-body { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>NanoClaw Dashboard</h1>
+  <div class="refresh-info">
+    <span id="lastRefresh">Loading...</span>
+    <span style="color:#444;margin:0 6px;">|</span>
+    <span style="color:#555;cursor:pointer;" onclick="fetchStatus()" title="Refresh now">Refresh</span>
+  </div>
+</div>
+
+<div class="summary-bar" id="summaryBar">
+  <div class="summary-item"><span class="label">Loading...</span></div>
+</div>
+
+<div class="grid" id="agentGrid">
+  <div class="loading">Fetching agent status...</div>
+</div>
+
+<script>
+function timeAgo(isoStr) {
+  if (!isoStr) return 'N/A';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  if (diff < 0) return 'just now';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return secs + 's ago';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm ago';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ' + (hrs % 24) + 'h ago';
+}
+
+function formatTime(isoStr) {
+  if (!isoStr) return 'N/A';
+  return new Date(isoStr).toLocaleString();
+}
+
+function renderSummary(summary) {
+  const bar = document.getElementById('summaryBar');
+  const allGreen = summary.running === summary.total;
+  const hasErrors = summary.totalErrors > 0;
+
+  bar.innerHTML = `
+    <div class="summary-item">
+      <span class="dot ${allGreen ? 'green' : 'red'}"></span>
+      <span class="value ${allGreen ? 'green' : 'red'}">${summary.running}/${summary.total}</span>
+      <span class="label">agents running</span>
+    </div>
+    <div class="summary-item">
+      <span class="value">${summary.totalContainers}</span>
+      <span class="label">containers active</span>
+    </div>
+    <div class="summary-item">
+      <span class="value ${hasErrors ? 'red' : ''}">${summary.totalErrors}</span>
+      <span class="label">errors (1h)</span>
+    </div>
+  `;
+}
+
+function renderAgents(agents) {
+  const grid = document.getElementById('agentGrid');
+  if (!agents.length) {
+    grid.innerHTML = '<div class="loading">No NanoClaw instances found.</div>';
+    return;
+  }
+
+  grid.innerHTML = agents.map(a => {
+    const channelsHtml = a.channels.length
+      ? a.channels.map(c => `<span class="channel-tag">${c}</span>`).join('')
+      : '<span class="channel-tag none">none detected</span>';
+
+    const errClass = a.errors > 0 ? 'error-count' : 'error-count zero';
+
+    return `
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">${a.assistantName}</div>
+            <div class="card-subtitle">${a.name}${a.serviceName ? ' / ' + a.serviceName : ''}</div>
+          </div>
+          <span class="status-badge ${a.status}">
+            <span class="dot ${a.status === 'running' ? 'green' : 'red'}"></span>
+            ${a.status}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="field full">
+            <div class="field-label">Channels</div>
+            <div class="channels-list">${channelsHtml}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Last Activity</div>
+            <div class="field-value" title="${formatTime(a.lastActivity)}">${timeAgo(a.lastActivity)}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Active Containers</div>
+            <div class="field-value">${a.activeContainers}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Errors (1h)</div>
+            <div class="field-value ${errClass}">${a.errors}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Model</div>
+            <div class="field-value mono">${a.model}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Proxy Port</div>
+            <div class="field-value mono">${a.port || 'N/A'}</div>
+          </div>
+          <div class="field">
+            <div class="field-label">Uptime</div>
+            <div class="field-value" title="${formatTime(a.uptime)}">${a.uptime ? timeAgo(a.uptime) : 'N/A'}</div>
+          </div>
+          ${a.pid ? `
+          <div class="field">
+            <div class="field-label">PID</div>
+            <div class="field-value mono">${a.pid}</div>
+          </div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function fetchStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    renderSummary(data.summary);
+    renderAgents(data.agents);
+    document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('lastRefresh').textContent = 'Error: ' + e.message;
+  }
+}
+
+// Initial fetch and auto-refresh
+fetchStatus();
+setInterval(fetchStatus, 30000);
+</script>
+</body>
+</html>
