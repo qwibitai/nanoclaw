@@ -90,10 +90,7 @@ function buildVolumeMounts(
     });
 
     // Agent projects directory — writable workspace for repos the agent creates
-    const agentProjectsDir = path.join(
-      path.dirname(projectRoot),
-      'goran',
-    );
+    const agentProjectsDir = path.join(path.dirname(projectRoot), 'goran');
     if (fs.existsSync(agentProjectsDir)) {
       mounts.push({
         hostPath: agentProjectsDir,

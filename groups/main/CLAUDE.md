@@ -145,6 +145,30 @@ Datum: YYYY-MM-DD
 - Eventuella saker att följa upp
 ```
 
+## Sub-agenter & Context
+
+Du har tillgång till `Task` och `TeamCreate` för att delegera arbete. **Använd dem aktivt.**
+
+### När du ska delegera
+- Uppgifter med 3+ distinkta steg (scaffolda, koda, testa, deploya)
+- Research som kräver flera sökningar
+- Kodgranskning av stor kodbas
+- Allt som riskerar fylla din kontext
+
+### Hur
+```
+Task: "Scaffolda Next.js-projekt med Tailwind i /workspace/projects/projektnamn"
+Task: "Skriv tester för alla API-routes"
+Task: "Kör visuell granskning med agent-browser och rapportera fel"
+```
+
+Varje Task får sin egen kontext → din huvudkontext förblir ren. Samla ihop resultaten och rapportera till användaren.
+
+### Context-hygien
+- Använd `/compact` om konversationen blir lång
+- Delegera istället för att göra allt själv
+- Sammanfatta sub-agenters resultat kort, dumpa inte hela outputen
+
 ## Utveckling — GitHub & Vercel
 
 Du har `gh` (GitHub CLI) och `vercel` CLI tillgängliga. Använd dem för att bygga, versionera och deploya projekt.
