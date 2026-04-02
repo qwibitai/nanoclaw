@@ -178,6 +178,33 @@ export class GroupQueue {
   }
 
   /**
+   * Send a session reset control message to the active container identified by
+   * its group folder. The container will clear its in-memory sessionId and
+   * resumeAt before starting the next query, ensuring /new-session takes effect
+   * even while the container is idle-waiting or mid-query.
+   * Returns true if the message was written, false if no matching active container.
+   */
+  sendResetByFolder(groupFolder: string): boolean {
+    for (const [, state] of this.groups) {
+      if (state.active && !state.isTaskContainer && state.groupFolder === groupFolder) {
+        const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+        try {
+          fs.mkdirSync(inputDir, { recursive: true });
+          const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
+          const filepath = path.join(inputDir, filename);
+          const tempPath = `${filepath}.tmp`;
+          fs.writeFileSync(tempPath, JSON.stringify({ type: 'reset' }));
+          fs.renameSync(tempPath, filepath);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * Signal the active container to wind down by writing a close sentinel.
    */
   closeStdin(groupJid: string): void {
