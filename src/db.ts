@@ -449,7 +449,7 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      'prompt' | 'script' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
     >
   >,
 ): void {
@@ -459,6 +459,10 @@ export function updateTask(
   if (updates.prompt !== undefined) {
     fields.push('prompt = ?');
     values.push(updates.prompt);
+  }
+  if (updates.script !== undefined) {
+    fields.push('script = ?');
+    values.push(updates.script);
   }
   if (updates.schedule_type !== undefined) {
     fields.push('schedule_type = ?');
