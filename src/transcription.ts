@@ -19,7 +19,10 @@ export async function transcribeAudio(
 ): Promise<string | null> {
   const modelPath = path.resolve(WHISPER_MODEL);
   if (!fs.existsSync(modelPath)) {
-    logger.warn({ modelPath }, 'Whisper model not found, skipping transcription');
+    logger.warn(
+      { modelPath },
+      'Whisper model not found, skipping transcription',
+    );
     return null;
   }
 

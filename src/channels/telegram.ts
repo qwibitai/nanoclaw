@@ -228,7 +228,9 @@ export class TelegramChannel implements Channel {
               https
                 .get(url, (res) => {
                   if (res.statusCode !== 200) {
-                    reject(new Error(`Download failed: HTTP ${res.statusCode}`));
+                    reject(
+                      new Error(`Download failed: HTTP ${res.statusCode}`),
+                    );
                     return;
                   }
                   res.pipe(out);
@@ -244,7 +246,10 @@ export class TelegramChannel implements Channel {
           }
         }
       } catch (err: any) {
-        logger.warn({ err: err.message, chatJid }, 'Failed to download Telegram photo');
+        logger.warn(
+          { err: err.message, chatJid },
+          'Failed to download Telegram photo',
+        );
       }
       storeNonText(ctx, placeholder);
     });
@@ -283,11 +288,18 @@ export class TelegramChannel implements Channel {
             const transcript = await transcribeAudio(oggPath);
             if (transcript) placeholder = `[Voice: ${transcript}]`;
           } finally {
-            try { fs.unlinkSync(oggPath); } catch { /* ignore */ }
+            try {
+              fs.unlinkSync(oggPath);
+            } catch {
+              /* ignore */
+            }
           }
         }
       } catch (err: any) {
-        logger.warn({ err: err.message, chatJid }, 'Failed to transcribe voice message');
+        logger.warn(
+          { err: err.message, chatJid },
+          'Failed to transcribe voice message',
+        );
       }
       storeNonText(ctx, placeholder);
     });
