@@ -79,11 +79,12 @@ vi.mock('./env.js', () => ({
 vi.mock('./plugins/index.js', () => ({}));
 
 // Mock plugin registry
-const mockRunPluginHooks = vi.fn().mockResolvedValue(undefined);
-const mockGetPluginEnvKeys = vi.fn(() => [] as string[]);
+const mockGetPluginContainerEnvKeys = vi.fn(() => [] as string[]);
+const mockGetPluginContainerEnv = vi.fn((env: Record<string, string>) => env);
 vi.mock('./plugins/registry.js', () => ({
-  getPluginEnvKeys: () => mockGetPluginEnvKeys(),
-  runPluginHooks: (...args: unknown[]) => mockRunPluginHooks(...args),
+  getPluginContainerEnvKeys: () => mockGetPluginContainerEnvKeys(),
+  getPluginContainerEnv: (env: Record<string, string>) =>
+    mockGetPluginContainerEnv(env),
 }));
 
 // Create a controllable fake ChildProcess
@@ -121,6 +122,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 import { readEnvFile } from './env.js';
@@ -245,27 +247,33 @@ describe('container-runner timeout behavior', () => {
   });
 });
 
-describe('container-runner plugin hooks', () => {
+describe('container-runner plugin env injection', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
-    mockRunPluginHooks.mockClear();
-    mockGetPluginEnvKeys.mockClear();
+    mockGetPluginContainerEnvKeys.mockClear();
+    mockGetPluginContainerEnv.mockClear();
     vi.mocked(readEnvFile).mockClear();
+    vi.mocked(spawn).mockClear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('reads plugin env keys and calls preStart before spawning', async () => {
-    mockGetPluginEnvKeys.mockReturnValue(['PLUGIN_KEY']);
+  it('reads plugin env keys and passes them to readEnvFile', async () => {
+    mockGetPluginContainerEnvKeys.mockReturnValue(['PLUGIN_KEY']);
     vi.mocked(readEnvFile).mockReturnValue({ PLUGIN_KEY: 'secret' });
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
 
-    // preStart must be called before we even get output
-    expect(mockRunPluginHooks).toHaveBeenCalledWith('preStart', { PLUGIN_KEY: 'secret' });
+    expect(mockGetPluginContainerEnvKeys).toHaveBeenCalled();
+    expect(vi.mocked(readEnvFile)).toHaveBeenCalledWith(['PLUGIN_KEY']);
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
@@ -274,68 +282,67 @@ describe('container-runner plugin hooks', () => {
     await resultPromise;
   });
 
-  it('calls postStop after container exits', async () => {
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+  it('injects plugin env vars as -e flags in container spawn args', async () => {
+    mockGetPluginContainerEnv.mockReturnValue({ PLUGIN_KEY: 'secret' });
 
-    emitOutputMarker(fakeProc, { status: 'success', result: 'done' });
-    await vi.advanceTimersByTimeAsync(10);
-    fakeProc.emit('close', 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
 
-    expect(mockRunPluginHooks).toHaveBeenCalledWith('postStop', expect.any(Object));
-  });
-
-  it('calls preStart before postStop across the container lifecycle', async () => {
-    const callOrder: string[] = [];
-    mockRunPluginHooks.mockImplementation(async (phase: string) => {
-      callOrder.push(phase);
-    });
-
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const pairs = spawnArgs.reduce<string[]>((acc, arg, i) => {
+      if (spawnArgs[i - 1] === '-e') acc.push(arg);
+      return acc;
+    }, []);
+    expect(pairs).toContain('PLUGIN_KEY=secret');
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
-
-    expect(callOrder[0]).toBe('preStart');
-    expect(callOrder[callOrder.length - 1]).toBe('postStop');
   });
 
-  it('passes the env read from readEnvFile to both hooks', async () => {
-    const env = { MY_TOKEN: 'abc123' };
-    mockGetPluginEnvKeys.mockReturnValue(['MY_TOKEN']);
-    vi.mocked(readEnvFile).mockReturnValue(env);
+  it('passes env from readEnvFile through getPluginContainerEnv', async () => {
+    const rawEnv = { MY_TOKEN: 'abc123', UNRELATED: 'ignored' };
+    mockGetPluginContainerEnvKeys.mockReturnValue(['MY_TOKEN']);
+    vi.mocked(readEnvFile).mockReturnValue(rawEnv);
+    mockGetPluginContainerEnv.mockImplementation((env) => ({ MY_TOKEN: env['MY_TOKEN'] ?? '' }));
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    expect(mockGetPluginContainerEnv).toHaveBeenCalledWith(rawEnv);
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
-
-    for (const call of mockRunPluginHooks.mock.calls) {
-      expect(call[1]).toEqual(env);
-    }
   });
 
-  it('postStop failure is swallowed and does not reject the run', async () => {
-    mockRunPluginHooks.mockImplementation(async (phase: string) => {
-      if (phase === 'postStop') throw new Error('tailscale down failed');
-    });
+  it('succeeds with no plugin env when registry returns empty', async () => {
+    mockGetPluginContainerEnv.mockReturnValue({});
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
-
     const result = await resultPromise;
-    // Run still succeeds despite postStop throwing
     expect(result.status).toBe('success');
   });
 });
