@@ -41,10 +41,17 @@ if command -v container &>/dev/null; then
   STUCK=$(container ls --format json 2>/dev/null | /usr/local/bin/node -e "
     const now = Date.now() / 1000;
     const max = $MAX_CONTAINER_AGE_SECONDS;
+    const APPLE_EPOCH_OFFSET = 978307200; // Apple epoch (2001-01-01) to Unix epoch
     const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
     d.filter(c => c.configuration.id.startsWith('nanoclaw-') && c.status === 'running')
-      .filter(c => (now - c.startedDate) > max)
-      .forEach(c => console.log(c.configuration.id + '|' + Math.round(now - c.startedDate) + 's'));
+      .filter(c => {
+        const startUnix = c.startedDate + APPLE_EPOCH_OFFSET;
+        return (now - startUnix) > max;
+      })
+      .forEach(c => {
+        const age = Math.round(now - (c.startedDate + APPLE_EPOCH_OFFSET));
+        console.log(c.configuration.id + '|' + age + 's');
+      });
   " 2>/dev/null)
 
   if [ -n "$STUCK" ]; then
