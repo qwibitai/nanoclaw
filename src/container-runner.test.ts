@@ -310,7 +310,9 @@ describe('container-runner plugin env injection', () => {
     const rawEnv = { MY_TOKEN: 'abc123', UNRELATED: 'ignored' };
     mockGetPluginContainerEnvKeys.mockReturnValue(['MY_TOKEN']);
     vi.mocked(readEnvFile).mockReturnValue(rawEnv);
-    mockGetPluginContainerEnv.mockImplementation((env) => ({ MY_TOKEN: env['MY_TOKEN'] ?? '' }));
+    mockGetPluginContainerEnv.mockImplementation((env) => ({
+      MY_TOKEN: env['MY_TOKEN'] ?? '',
+    }));
 
     const resultPromise = runContainerAgent(
       testGroup,

@@ -304,7 +304,9 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
-  const pluginEnv = getPluginContainerEnv(readEnvFile(getPluginContainerEnvKeys()));
+  const pluginEnv = getPluginContainerEnv(
+    readEnvFile(getPluginContainerEnvKeys()),
+  );
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,

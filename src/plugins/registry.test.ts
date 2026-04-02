@@ -25,7 +25,10 @@ describe('registerPlugin / getRegisteredPlugins', () => {
   it('registers multiple plugins in order', () => {
     registerPlugin({ name: 'alpha' });
     registerPlugin({ name: 'beta' });
-    expect(getRegisteredPlugins().map((p) => p.name)).toEqual(['alpha', 'beta']);
+    expect(getRegisteredPlugins().map((p) => p.name)).toEqual([
+      'alpha',
+      'beta',
+    ]);
   });
 
   it('returns a copy — mutations do not affect the registry', () => {
@@ -42,7 +45,10 @@ describe('getPluginContainerEnvKeys', () => {
   });
 
   it('returns containerEnvKeys declared by a plugin', () => {
-    registerPlugin({ name: 'vpn', containerEnvKeys: ['VPN_TOKEN', 'VPN_HOST'] });
+    registerPlugin({
+      name: 'vpn',
+      containerEnvKeys: ['VPN_TOKEN', 'VPN_HOST'],
+    });
     expect(getPluginContainerEnvKeys()).toEqual(
       expect.arrayContaining(['VPN_TOKEN', 'VPN_HOST']),
     );
@@ -54,7 +60,9 @@ describe('getPluginContainerEnvKeys', () => {
     const keys = getPluginContainerEnvKeys();
     const unique = new Set(keys);
     expect(keys.length).toBe(unique.size);
-    expect(keys).toEqual(expect.arrayContaining(['SHARED_KEY', 'KEY_A', 'KEY_B']));
+    expect(keys).toEqual(
+      expect.arrayContaining(['SHARED_KEY', 'KEY_A', 'KEY_B']),
+    );
   });
 
   it('skips plugins without containerEnvKeys', () => {
@@ -71,7 +79,11 @@ describe('getPluginContainerEnv', () => {
 
   it('returns only keys declared by plugins', () => {
     registerPlugin({ name: 'a', containerEnvKeys: ['KEY_A'] });
-    const result = getPluginContainerEnv({ KEY_A: '1', KEY_B: '2', OTHER: '3' });
+    const result = getPluginContainerEnv({
+      KEY_A: '1',
+      KEY_B: '2',
+      OTHER: '3',
+    });
     expect(result).toEqual({ KEY_A: '1' });
   });
 
@@ -83,7 +95,11 @@ describe('getPluginContainerEnv', () => {
   it('collects keys from multiple plugins', () => {
     registerPlugin({ name: 'a', containerEnvKeys: ['KEY_A'] });
     registerPlugin({ name: 'b', containerEnvKeys: ['KEY_B'] });
-    const result = getPluginContainerEnv({ KEY_A: 'alpha', KEY_B: 'beta', EXTRA: 'x' });
+    const result = getPluginContainerEnv({
+      KEY_A: 'alpha',
+      KEY_B: 'beta',
+      EXTRA: 'x',
+    });
     expect(result).toEqual({ KEY_A: 'alpha', KEY_B: 'beta' });
   });
 });
