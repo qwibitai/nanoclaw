@@ -21,7 +21,12 @@ export function formatMessages(
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  // Add thread indicator when all messages share the same thread_ts
+  // (i.e., this batch was split by thread-aware routing)
+  const threadTs = messages[0]?.thread_ts;
+  const threadAttr = threadTs ? ` thread="${escapeXml(threadTs)}"` : '';
+
+  return `${header}<messages${threadAttr}>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

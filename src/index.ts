@@ -209,54 +209,58 @@ export function _setRegisteredGroups(
 }
 
 /**
- * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
+ * Group messages by thread_ts for thread-aware routing.
+ * Messages with no thread_ts (channel-level) are grouped under the key '__channel__'.
+ * Messages with a thread_ts are grouped by that value.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
-  if (!group) return true;
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
-    return true;
+function groupByThread(messages: NewMessage[]): Map<string, NewMessage[]> {
+  const threadGroups = new Map<string, NewMessage[]>();
+  for (const msg of messages) {
+    const key = msg.thread_ts || '__channel__';
+    const existing = threadGroups.get(key);
+    if (existing) {
+      existing.push(msg);
+    } else {
+      threadGroups.set(key, [msg]);
+    }
   }
+  return threadGroups;
+}
 
+/**
+ * Process a single thread group of messages: check trigger, format, invoke agent,
+ * and route the reply back to the correct thread.
+ */
+async function processThreadGroup(
+  chatJid: string,
+  group: RegisteredGroup,
+  channel: Channel,
+  threadMessages: NewMessage[],
+  threadTs: string | undefined,
+): Promise<{ hadError: boolean; outputSentToUser: boolean }> {
   const isMainGroup = group.isMain === true;
-
-  const missedMessages = getMessagesSince(
-    chatJid,
-    getOrRecoverCursor(chatJid),
-    ASSISTANT_NAME,
-    MAX_MESSAGES_PER_PROMPT,
-  );
-
-  if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
+    const hasTrigger = threadMessages.some(
       (m) =>
         triggerPattern.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (!hasTrigger) return { hadError: false, outputSentToUser: false };
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
-
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  const prompt = formatMessages(threadMessages, TIMEZONE);
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
-    'Processing messages',
+    {
+      group: group.name,
+      messageCount: threadMessages.length,
+      threadTs: threadTs || 'channel',
+    },
+    'Processing thread group',
   );
 
   // Track idle timer for closing stdin when agent is idle
@@ -288,7 +292,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // Route reply to the correct thread (threadTs is passed to sendMessage)
+        await channel.sendMessage(chatJid, text, threadTs);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -307,10 +312,75 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (output === 'error') {
+    hadError = true;
+  }
+
+  return { hadError, outputSentToUser };
+}
+
+/**
+ * Process all pending messages for a group.
+ * Called by the GroupQueue when it's this group's turn.
+ *
+ * Messages are grouped by thread_ts so each Slack thread gets its own
+ * agent invocation with replies routed back to the correct thread.
+ * Non-Slack channels have thread_ts=undefined so all their messages
+ * are grouped together (preserving existing behavior).
+ */
+async function processGroupMessages(chatJid: string): Promise<boolean> {
+  const group = registeredGroups[chatJid];
+  if (!group) return true;
+
+  const channel = findChannel(channels, chatJid);
+  if (!channel) {
+    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+    return true;
+  }
+
+  const missedMessages = getMessagesSince(
+    chatJid,
+    getOrRecoverCursor(chatJid),
+    ASSISTANT_NAME,
+    MAX_MESSAGES_PER_PROMPT,
+  );
+
+  if (missedMessages.length === 0) return true;
+
+  // Group messages by thread for thread-aware routing
+  const threadGroups = groupByThread(missedMessages);
+
+  // Advance cursor so the piping path in startMessageLoop won't re-fetch
+  // these messages. Save the old cursor so we can roll back on error.
+  const previousCursor = lastAgentTimestamp[chatJid] || '';
+  lastAgentTimestamp[chatJid] =
+    missedMessages[missedMessages.length - 1].timestamp;
+  saveState();
+
+  let anyError = false;
+  let anyOutputSent = false;
+
+  // Process each thread group independently
+  for (const [threadKey, threadMessages] of threadGroups) {
+    // threadKey is either a Slack thread_ts or '__channel__' for channel-level messages
+    const threadTs = threadKey === '__channel__' ? undefined : threadKey;
+
+    const { hadError, outputSentToUser } = await processThreadGroup(
+      chatJid,
+      group,
+      channel,
+      threadMessages,
+      threadTs,
+    );
+
+    if (hadError) anyError = true;
+    if (outputSentToUser) anyOutputSent = true;
+  }
+
+  if (anyError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
+    if (anyOutputSent) {
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
