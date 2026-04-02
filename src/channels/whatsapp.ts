@@ -487,7 +487,10 @@ export class WhatsAppChannel implements Channel {
         mimetype: mimeType,
         caption: caption || undefined,
       });
-      logger.info({ jid, size: imageBuffer.length, caption: !!caption }, 'WhatsApp image sent');
+      logger.info(
+        { jid, size: imageBuffer.length, caption: !!caption },
+        'WhatsApp image sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send WhatsApp image');
       throw err;

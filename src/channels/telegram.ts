@@ -415,7 +415,10 @@ export class TelegramChannel implements Channel {
         new InputFile(imageBuffer, 'image.jpg'),
         { caption: caption || undefined },
       );
-      logger.info({ jid, size: imageBuffer.length, caption: !!caption }, 'Telegram image sent');
+      logger.info(
+        { jid, size: imageBuffer.length, caption: !!caption },
+        'Telegram image sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram image');
     }
