@@ -10,9 +10,15 @@ import {
   setRegisteredGroup,
   setGroupPause,
 } from '../db.js';
+import { DEFAULT_TRIGGER, TIMEZONE } from '../config.js';
 import { isError, isSyntaxError } from '../error-utils.js';
 import { GroupQueue } from '../group-queue.js';
 import { logger } from '../logger.js';
+import {
+  ensureOllamaServerRunning,
+  resolvePreferredOllamaModel,
+  writeModelSwitchHandoff,
+} from '../model-switch.js';
 import { findChannel } from '../router.js';
 import {
   startRemoteControl,
@@ -20,7 +26,6 @@ import {
 } from '../remote-control.js';
 import { getAgentType } from '../runtimes/index.js';
 import type { Channel, NewMessage, RegisteredGroup } from '../types.js';
-import { TIMEZONE } from '../config.js';
 import { AgentSessionService } from './agent-session-service.js';
 
 interface ChannelCommandServiceDeps {
@@ -39,6 +44,28 @@ export function createChannelCommandService(
   const handledSessionCommands = new Set<string>();
   const handledModelCommands = new Set<string>();
   const handledStatusCommands = new Set<string>();
+
+  function normalizeInboundCommand(
+    rawContent: string,
+    group?: RegisteredGroup,
+  ): string {
+    const trimmed = rawContent.trim();
+    const candidatePrefixes = [
+      group?.trigger?.trim(),
+      DEFAULT_TRIGGER,
+      '@nanoclaw_admin',
+      '@claude_bot',
+      '@claude',
+    ].filter((value): value is string => Boolean(value && value.trim().length > 0));
+
+    for (const prefix of candidatePrefixes) {
+      if (!trimmed.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+      const remainder = trimmed.slice(prefix.length).trimStart();
+      if (remainder.startsWith('/')) return remainder;
+    }
+
+    return trimmed;
+  }
 
   function normalizeAgentType(value?: string): string | undefined {
     if (!value) return undefined;
@@ -468,8 +495,16 @@ export function createChannelCommandService(
 
     if (nextAgentType === 'claude-code') {
       if (model?.toLowerCase() === 'ollama') {
+        const ollama = await ensureOllamaServerRunning();
+        if (!ollama.ok) {
+          await channel.sendMessage(
+            chatJid,
+            `⚠️ Failed to switch to Ollama: ${ollama.error}`,
+          );
+          return;
+        }
         providerPreset = 'ollama';
-        model = undefined;
+        model = resolvePreferredOllamaModel();
         reasoningEffort = undefined;
       } else {
         providerPreset = 'anthropic';
@@ -491,6 +526,13 @@ export function createChannelCommandService(
     if (previousAgentType !== nextAgentType) {
       deleteRegisteredGroup(chatJid, previousAgentType);
     }
+    const handoffPath = writeModelSwitchHandoff({
+      chatJid,
+      group,
+      previousRuntime: formatModelStatus(group),
+      nextRuntime: formatModelStatus(updatedGroup),
+      requestedBy: group.isMain ? 'admin' : group.name,
+    });
     deps.getRegisteredGroups()[chatJid] = updatedGroup;
     setRegisteredGroup(chatJid, updatedGroup);
     deps.sessionService.clearLiveSession(group.folder, previousAgentType);
@@ -499,7 +541,7 @@ export function createChannelCommandService(
 
     await channel.sendMessage(
       chatJid,
-      `Updated runtime: ${formatModelStatus(updatedGroup)}. Next message will use a fresh session.`,
+      `Updated runtime: ${formatModelStatus(updatedGroup)}. Next message will use a fresh session.\nHandoff: \`${handoffPath}\``,
     );
     logger.info(
       {
@@ -515,7 +557,10 @@ export function createChannelCommandService(
 
   return {
     async handleInboundCommand(chatJid: string, msg: NewMessage): Promise<boolean> {
-      const trimmed = msg.content.trim();
+      const trimmed = normalizeInboundCommand(
+        msg.content,
+        deps.getRegisteredGroups()[chatJid],
+      );
 
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         await handleRemoteControl(trimmed, chatJid, msg);
