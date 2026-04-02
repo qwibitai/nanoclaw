@@ -14,6 +14,14 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import {
+  buildAllowedTools,
+  buildContainerSecurityRules,
+  isSenderTrusted,
+  loadSecurityPolicy,
+  readKillswitch,
+  SecurityPolicy,
+} from './security-policy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -74,8 +82,21 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+/** Filter messages to only authorized senders. No-op when owner_ids is empty. */
+function filterAuthorized(messages: NewMessage[]): NewMessage[] {
+  const { owner_ids, trusted_members } = securityPolicy.trust;
+  if (owner_ids.length === 0) return messages;
+  return messages.filter(
+    (m) =>
+      m.is_from_me ||
+      owner_ids.includes(m.sender) ||
+      trusted_members.includes(m.sender),
+  );
+}
+
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let securityPolicy: SecurityPolicy;
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -83,13 +104,13 @@ function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => {
+    (res: { created: boolean }) => {
       logger.info(
         { jid, identifier, created: res.created },
         'OneCLI agent ensured',
       );
     },
-    (err) => {
+    (err: unknown) => {
       logger.debug(
         { jid, identifier, err: String(err) },
         'OneCLI agent ensure skipped',
@@ -227,13 +248,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  // Killswitch check for interactive messages
+  const ks = readKillswitch(securityPolicy, group.folder);
+  if (!ks.canRun) {
+    logger.info(
+      { chatJid, folder: group.folder },
+      'Killswitch active, refusing interactive message',
+    );
+    await channel.sendMessage(chatJid, ks.message);
+    return true;
+  }
+
   const isMainGroup = group.isMain === true;
 
-  const missedMessages = getMessagesSince(
-    chatJid,
-    getOrRecoverCursor(chatJid),
-    ASSISTANT_NAME,
-    MAX_MESSAGES_PER_PROMPT,
+  const missedMessages = filterAuthorized(
+    getMessagesSince(
+      chatJid,
+      getOrRecoverCursor(chatJid),
+      ASSISTANT_NAME,
+      MAX_MESSAGES_PER_PROMPT,
+    ),
   );
 
   if (missedMessages.length === 0) return true;
@@ -251,6 +285,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
+
+  // Trust only when ALL non-bot senders are owners (prevent untrusted piggyback)
+  const externalMessages = missedMessages.filter((m) => !m.is_from_me);
+  const senderTrusted =
+    externalMessages.length > 0 &&
+    externalMessages.every((m) => isSenderTrusted(securityPolicy, m.sender));
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -282,32 +322,37 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        const text = formatOutbound(raw);
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    senderTrusted,
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -340,6 +385,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  senderTrusted?: boolean,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -391,10 +437,14 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        senderTrusted,
+        securityRules: buildContainerSecurityRules(securityPolicy),
+        allowedTools: buildAllowedTools(securityPolicy),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      securityPolicy,
     );
 
     if (output.newSessionId) {
@@ -509,9 +559,18 @@ async function startMessageLoop(): Promise<void> {
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+          const messagesToSend = filterAuthorized(
+            allPending.length > 0 ? allPending : groupMessages,
+          );
+          if (messagesToSend.length === 0) continue;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
+
+          // Killswitch check for message piping to active containers
+          const ksLoop = readKillswitch(securityPolicy, group.folder);
+          if (!ksLoop.canRun) {
+            await channel.sendMessage(chatJid, ksLoop.message);
+            continue;
+          }
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -569,6 +628,8 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  securityPolicy = loadSecurityPolicy();
+  logger.info('Security policy loaded');
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -712,9 +773,11 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      const text = formatOutbound(rawText);
+      if (!text) return Promise.resolve();
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
