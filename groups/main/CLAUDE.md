@@ -47,7 +47,11 @@ Formatting is automatically applied based on the channel you're responding in (D
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+Searchable history is in two locations:
+- `conversations/` — summaries and selected past conversations
+- `threads/` — full thread session history (each subfolder is a thread ID)
+
+When asked to search thread history, recall past sessions, or resume previous work, search both locations.
 
 When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
