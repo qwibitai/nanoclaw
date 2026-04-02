@@ -27,6 +27,12 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
+import './plugins/index.js';
+import {
+  getPluginContainerEnvKeys,
+  getPluginContainerEnv,
+} from './plugins/registry.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -226,6 +232,7 @@ function buildVolumeMounts(
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  pluginEnv: Record<string, string>,
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
@@ -269,6 +276,11 @@ async function buildContainerArgs(
     }
   }
 
+  // Inject plugin-declared env vars (e.g. TAILSCALE_AUTH_KEY for VPN plugins)
+  for (const [key, val] of Object.entries(pluginEnv)) {
+    args.push('-e', `${key}=${val}`);
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
@@ -292,9 +304,11 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+  const pluginEnv = getPluginContainerEnv(readEnvFile(getPluginContainerEnvKeys()));
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
+    pluginEnv,
     agentIdentifier,
   );
 

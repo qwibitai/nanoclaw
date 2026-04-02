@@ -48,14 +48,37 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Install plugin binaries declared in plugins/binaries.json.
+# Each entry is either a direct URL download or a .tgz archive with named binaries to extract.
+# This step is a no-op when the array is empty.
+COPY plugins/binaries.json /tmp/plugins.json
+RUN node -e "\
+const fs = require('fs');\
+const { execSync } = require('child_process');\
+const plugins = JSON.parse(fs.readFileSync('/tmp/plugins.json'));\
+for (const p of plugins) {\
+  if (p.url) {\
+    console.log('Installing plugin binary: ' + p.name);\
+    execSync('curl -fsSL -o ' + p.dest + ' ' + p.url);\
+    execSync('chmod +x ' + p.dest);\
+  } else if (p.archive) {\
+    console.log('Installing plugin archive: ' + p.name);\
+    const files = p.extract.join(' ');\
+    execSync('curl -fsSL ' + p.archive + ' | tar xz --strip-components=1 -C /usr/local/bin/ ' + files);\
+    execSync('chmod +x ' + p.extract.map(f => '/usr/local/bin/' + f).join(' '));\
+  }\
+}\
+"
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
-# Create entrypoint script
-# Container input (prompt, group info) is passed via stdin JSON.
-# Credentials are injected by the host's credential proxy — never passed here.
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Plugin container-init scripts (sourced at container startup before the agent runs)
+COPY plugins/ /app/plugins/
+
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

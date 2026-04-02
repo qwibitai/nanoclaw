@@ -4,15 +4,19 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$SCRIPT_DIR/.."
 
 IMAGE_NAME="nanoclaw-agent"
 TAG="${1:-latest}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 
+echo "Generating plugin manifest..."
+(cd "$PROJECT_DIR" && npx tsx scripts/generate-plugin-manifest.ts)
+
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
+cd "$SCRIPT_DIR"
 ${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
 
 echo ""
