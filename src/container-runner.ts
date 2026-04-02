@@ -88,6 +88,19 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Agent projects directory — writable workspace for repos the agent creates
+    const agentProjectsDir = path.join(
+      path.dirname(projectRoot),
+      'goran',
+    );
+    if (fs.existsSync(agentProjectsDir)) {
+      mounts.push({
+        hostPath: agentProjectsDir,
+        containerPath: '/workspace/projects',
+        readonly: false,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({

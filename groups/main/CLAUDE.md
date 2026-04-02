@@ -172,9 +172,11 @@ Du har en `VERCEL_TOKEN` env var. Använd `vercel --token $VERCEL_TOKEN` för ko
 När användaren ber dig bygga något:
 1. *Fråga först* — Vad ska det göra? Vem är målgruppen? Finns det en design-referens?
 2. *Föreslå stack* — Rekommendera teknologi baserat på behoven
-3. *Skapa eget repo* — Varje projekt ska ha sitt eget GitHub-repo under användarens konto. Blanda aldrig projekt i samma repo.
+3. *Skapa eget repo* — Varje projekt ska ha sitt eget GitHub-repo under användarens konto. Klona till `/workspace/projects/` (din permanenta projektmapp). Blanda aldrig projekt i samma repo.
    ```bash
+   cd /workspace/projects
    gh repo create Fruset/projektnamn --private --clone
+   cd projektnamn
    ```
 4. *Börja smått* — Bygg en fungerande MVP, inte en perfekt app
 5. *Kvalitetskontroll innan du visar* — Leverera aldrig halvfärdigt
