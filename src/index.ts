@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,6 +18,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { startGooseMcpServer } from './goose-mcp-server.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -51,16 +52,175 @@ let messageLoopRunning = false;
 
 /**
  * Determine the model family from a group's model.conf.
- * Returns 'local' if model.conf contains 'local', otherwise 'claude'.
+ * Returns 'local' for non-Claude models,
+ * otherwise 'claude'.
  */
+const LOCAL_MODEL_FAMILIES = new Set(['local']);
+
+// Endpoint for the local model server on radeon
+const LOCAL_MODEL_ENDPOINT = 'http://192.168.68.57:8083';
+
+const GOOSE_IMAGE = 'ghcr.io/block/goose:latest';
+const MCP_RESEARCH_URL = 'http://192.168.68.57:8000/mcp';
+
 function getModelFamily(groupFolder: string): string {
   const modelConfPath = path.join(GROUPS_DIR, groupFolder, 'model.conf');
   try {
     const value = fs.readFileSync(modelConfPath, 'utf-8').trim().toLowerCase();
-    return value === 'local' ? 'local' : 'claude';
+    return LOCAL_MODEL_FAMILIES.has(value) ? 'local' : 'claude';
   } catch {
     return 'claude';
   }
+}
+
+function getModelName(groupFolder: string): string {
+  const modelConfPath = path.join(GROUPS_DIR, groupFolder, 'model.conf');
+  try {
+    return fs.readFileSync(modelConfPath, 'utf-8').trim().toLowerCase();
+  } catch {
+    return 'haiku';
+  }
+}
+
+/**
+ * Run Goose CLI in a Docker container for non-Claude models.
+ * Returns the text result from Goose.
+ */
+async function runGooseAgent(
+  group: RegisteredGroup,
+  prompt: string,
+  modelName: string,
+  chatJid: string,
+  onResult: (text: string) => void,
+): Promise<ContainerOutput> {
+  const endpoint = LOCAL_MODEL_ENDPOINT;
+
+  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const groupDir = path.join(GROUPS_DIR, group.folder);
+
+  // Load system prompt from CLAUDE.md
+  let systemPrompt = '';
+  const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
+  if (fs.existsSync(claudeMdPath)) {
+    systemPrompt = fs.readFileSync(claudeMdPath, 'utf-8');
+  }
+
+  // Build the full prompt with system context
+  const fullPrompt = systemPrompt
+    ? `[System instructions - follow these closely]\n${systemPrompt}\n[End system instructions]\n\nUser message:\n${prompt}`
+    : prompt;
+
+  // Start a temporary HTTP MCP server so Goose has access to nanoclaw
+  // tools (send_message, send_image, schedule_task, etc.)
+  let mcpHandle: { url: string; close: () => Promise<void> } | null = null;
+  try {
+    mcpHandle = await startGooseMcpServer({
+      chatJid,
+      groupFolder: group.folder,
+      isMain,
+    });
+    logger.info({ group: group.name, url: mcpHandle.url }, 'Started Goose MCP server');
+  } catch (err) {
+    logger.error({ group: group.name, err }, 'Failed to start Goose MCP server, continuing without nanoclaw tools');
+  }
+
+  const containerName = `goose-${group.folder}-${Date.now()}`;
+
+  const args = [
+    'run', '--rm', '-i',
+    '--name', containerName,
+    '--network', 'host',
+    '-e', `GOOSE_PROVIDER=openai`,
+    '-e', `GOOSE_MODEL=nemotron-nano`,
+    '-e', `OPENAI_HOST=${endpoint}`,
+    '-e', 'OPENAI_API_KEY=not-needed',
+    '-e', 'GOOSE_CONTEXT_LIMIT=131072',
+    // Mount group directory for file access
+    '-v', `${groupDir}:/workspace/group`,
+    '-w', '/workspace/group',
+    // Mount tool-images output directory
+    '-v', `${path.resolve('dashboard/dist/tool-images')}:/workspace/tool-images`,
+    GOOSE_IMAGE,
+    'run',
+    '--no-session',
+    '-q',
+    // MCP extensions: nanoclaw (local HTTP), research, mast, viz, ai
+    ...(mcpHandle ? ['--with-streamable-http-extension', mcpHandle.url] : []),
+    '--with-streamable-http-extension', MCP_RESEARCH_URL,
+    '--with-streamable-http-extension', 'http://192.168.68.57:8001/mcp',
+    '--with-streamable-http-extension', 'http://192.168.68.57:8002/mcp',
+    '--with-streamable-http-extension', 'http://192.168.68.57:8003/mcp',
+    '-t', fullPrompt,
+  ];
+
+  return new Promise<ContainerOutput>((resolve) => {
+    let stdout = '';
+    let stderr = '';
+
+    const proc = spawn('docker', args);
+    logger.info({ group: group.name, containerName }, 'Spawning Goose container');
+
+    proc.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', async (code) => {
+      // Clean up the HTTP MCP server
+      if (mcpHandle) {
+        await mcpHandle.close().catch((err) =>
+          logger.warn({ group: group.name, err }, 'Error closing Goose MCP server'),
+        );
+      }
+
+      // Strip Goose tool execution traces from output.
+      // Even with -q, Goose outputs lines like:
+      //   ────────────────
+      //   ▸ tool_name extension
+      //     param: value
+      let cleaned = stdout;
+      cleaned = cleaned.replace(/\s*─{2,}[─\s]*\n\s*▸[^\n]*(?:\n\s{2,}[^\n]*)*/g, '');
+      // Also remove standalone ─── lines
+      cleaned = cleaned.replace(/^[\s─]+$/gm, '');
+      const result = cleaned.trim();
+      logger.info(
+        { group: group.name, containerName, code, resultLen: result.length },
+        'Goose container finished',
+      );
+
+      if (code !== 0 && !result) {
+        resolve({
+          status: 'error',
+          result: null,
+          modelFamily: 'local',
+          error: `Goose exited with code ${code}: ${stderr.slice(0, 500)}`,
+        });
+        return;
+      }
+
+      onResult(result);
+      resolve({
+        status: 'success',
+        result,
+        modelFamily: 'local',
+      });
+    });
+
+    proc.on('error', async (err) => {
+      if (mcpHandle) {
+        await mcpHandle.close().catch(() => {});
+      }
+      resolve({
+        status: 'error',
+        result: null,
+        modelFamily: 'local',
+        error: `Failed to spawn Goose: ${err.message}`,
+      });
+    });
+  });
 }
 
 let whatsapp: NullChannel;
@@ -265,8 +425,24 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const modelFamily = getModelFamily(group.folder);
+  const modelName = getModelName(group.folder);
+  const modelFamily = LOCAL_MODEL_FAMILIES.has(modelName) ? 'local' : 'claude';
   const sessionId = sessions[group.folder]?.[modelFamily];
+
+  // Non-Claude models: use Goose CLI instead of the Claude SDK container
+  if (LOCAL_MODEL_FAMILIES.has(modelName)) {
+    logger.info({ group: group.name, model: modelName }, 'Using Goose for non-Claude model');
+    const output = await runGooseAgent(group, prompt, modelName, chatJid, (text) => {
+      if (onOutput) {
+        onOutput({ status: 'success', result: text, modelFamily: 'local' });
+      }
+    });
+    if (output.status === 'error') {
+      logger.error({ group: group.name, error: output.error }, 'Goose agent error');
+      return 'error';
+    }
+    return 'success';
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();

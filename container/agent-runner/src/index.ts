@@ -62,28 +62,31 @@ const MODEL_MAP: Record<string, string> = {
   'haiku': 'claude-haiku-4-5-20251001',
   'sonnet': 'claude-sonnet-4-5-20250929',
   'opus': 'claude-opus-4-6',
-  'local': 'claude-local',
+  'local': 'qwen3-30b',
 };
 
-// LiteLLM proxy translates Claude API format to OpenAI-compatible format
-const LITELLM_PROXY_URL = 'http://127.0.0.1:4000';
+// OpenAI-compatible endpoints for non-Claude models.
+// These bypass the Claude SDK and use Goose CLI.
+const OPENAI_ENDPOINTS: Record<string, string> = {
+  'local': 'http://192.168.68.57:8083',
+};
 
 interface ModelConfig {
   model?: string;
-  apiBaseUrl?: string;
+  useOpenAI?: boolean;
+  openaiEndpoint?: string;
 }
 
 function readModelConfig(): ModelConfig {
   try {
     if (fs.existsSync(MODEL_CONF_PATH)) {
       const value = fs.readFileSync(MODEL_CONF_PATH, 'utf-8').trim().toLowerCase();
-      if (value === 'local') {
-        return { model: MODEL_MAP['local'], apiBaseUrl: LITELLM_PROXY_URL };
+      if (value in OPENAI_ENDPOINTS) {
+        return { model: MODEL_MAP[value] || value, useOpenAI: true, openaiEndpoint: OPENAI_ENDPOINTS[value] };
       }
       if (MODEL_MAP[value]) {
         return { model: MODEL_MAP[value] };
       }
-      // Allow full model IDs too
       if (value.startsWith('claude-')) {
         return { model: value };
       }
@@ -463,14 +466,9 @@ async function runQuery(
 
   const modelConfig = readModelConfig();
   if (modelConfig.model) {
-    log(`Using model: ${modelConfig.model}${modelConfig.apiBaseUrl ? ` via ${modelConfig.apiBaseUrl}` : ''}`);
+    log(`Using model: ${modelConfig.model}${modelConfig.useOpenAI ? ` (OpenAI mode via ${modelConfig.openaiEndpoint})` : ''}`);
   }
-  if (modelConfig.apiBaseUrl) {
-    sdkEnv['ANTHROPIC_BASE_URL'] = modelConfig.apiBaseUrl;
-    // LiteLLM proxy needs an API key header but doesn't validate it
-    if (!sdkEnv['ANTHROPIC_API_KEY']) {
-      sdkEnv['ANTHROPIC_API_KEY'] = 'not-needed';
-    }
+  if (false) { // LiteLLM proxy path removed
   }
 
   for await (const message of query({
@@ -571,6 +569,186 @@ async function runQuery(
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
+
+
+// ── Goose CLI integration (for non-Claude models) ───────────
+//
+// Runs `goose run` as a subprocess with the openai provider pointing
+// at the configured endpoint. Goose handles tool calling, file ops,
+// bash, web fetch, MCP, context compaction — everything the Claude
+// SDK provides but for OpenAI-compatible models.
+
+import { spawn, execSync } from 'child_process';
+
+const GOOSE_TIMEOUT_MS = 300_000;  // 5 min max per query
+const GOOSE_SESSION_NAME = 'nanoclaw-main';
+
+/**
+ * Check if goose CLI is available (installed in container or host).
+ */
+function findGooseBin(): string | null {
+  for (const candidate of ['/usr/local/bin/goose', '/home/goose/.local/bin/goose', '/usr/bin/goose']) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  try {
+    const result = execSync('which goose 2>/dev/null', { encoding: 'utf-8' }).trim();
+    if (result) return result;
+  } catch { /* not found */ }
+  return null;
+}
+
+/**
+ * Run a query using Goose CLI with the OpenAI-compatible provider.
+ * Goose provides: tool calling, file ops, bash, web fetch, MCP,
+ * context compaction, and session management.
+ */
+async function runQueryGoose(
+  prompt: string,
+  config: ModelConfig,
+  containerInput: ContainerInput,
+): Promise<{ closedDuringQuery: boolean }> {
+  const gooseBin = findGooseBin();
+  if (!gooseBin) {
+    log('Goose CLI not found, falling back to error');
+    writeOutput({
+      status: 'error', result: null, modelFamily: 'local',
+      error: 'Goose CLI not installed in container',
+    });
+    return { closedDuringQuery: false };
+  }
+
+  const endpoint = config.openaiEndpoint!;
+  const modelName = config.model || 'nemotron-nano';
+
+  // Load system prompt from CLAUDE.md
+  let systemPrompt = '';
+  const claudeMdPath = '/workspace/group/CLAUDE.md';
+  if (fs.existsSync(claudeMdPath)) {
+    systemPrompt = fs.readFileSync(claudeMdPath, 'utf-8');
+  }
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    GOOSE_PROVIDER: 'openai',
+    GOOSE_MODEL: modelName,
+    OPENAI_HOST: endpoint,
+    OPENAI_API_KEY: 'not-needed',
+    GOOSE_CONTEXT_LIMIT: '131072',
+    HOME: process.env.HOME || '/home/node',
+  };
+
+  // Build goose command args.
+  // Include all MCP servers that the Claude SDK path gets:
+  // nanoclaw (via stdio extension using the IPC MCP server in this container),
+  // research, mast, viz, ai (all HTTP).
+  const nanoclawMcpPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ipc-mcp-stdio.js');
+  const nanoclawEnv = [
+    `NANOCLAW_CHAT_JID=${containerInput.chatJid}`,
+    `NANOCLAW_GROUP_FOLDER=${containerInput.groupFolder}`,
+    `NANOCLAW_IS_MAIN=${containerInput.isMain ? '1' : '0'}`,
+  ].join(' ');
+
+  const args = [
+    'run',
+    '--name', GOOSE_SESSION_NAME,
+    '-r',  // resume session for conversation continuity
+    '--with-builtin', 'developer',
+    // Nanoclaw MCP via stdio (send_message, send_image, schedule_task, etc.)
+    '--with-extension', `${nanoclawEnv} node ${nanoclawMcpPath}`,
+    // HTTP MCP servers: research, mast, viz, ai
+    '--with-streamable-http-extension', 'http://192.168.68.57:8000/mcp',
+    '--with-streamable-http-extension', 'http://192.168.68.57:8001/mcp',
+    '--with-streamable-http-extension', 'http://192.168.68.57:8002/mcp',
+    '--with-streamable-http-extension', 'http://192.168.68.57:8003/mcp',
+    '-q',  // quiet mode — only final text response on stdout
+  ];
+
+  // Add system prompt
+  if (systemPrompt) {
+    args.push('--system', systemPrompt);
+  }
+
+  args.push('-t', prompt);
+
+  log(`Goose: running ${modelName} via ${endpoint}`);
+  log(`Goose: args = ${args.slice(0, 6).join(' ')} ... -t "${prompt.slice(0, 80)}"`);
+
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const proc = spawn(gooseBin, args, {
+      env,
+      cwd: '/workspace/group',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+      setTimeout(() => proc.kill('SIGKILL'), 5000);
+    }, GOOSE_TIMEOUT_MS);
+
+    proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+    proc.on('close', (code: number | null) => {
+      clearTimeout(timer);
+
+      if (timedOut) {
+        log('Goose: timed out');
+        writeOutput({
+          status: 'error', result: null, modelFamily: 'local',
+          error: 'Goose query timed out',
+        });
+        resolve({ closedDuringQuery: false });
+        return;
+      }
+
+      if (shouldClose()) {
+        resolve({ closedDuringQuery: true });
+        return;
+      }
+
+      // Strip Goose tool execution traces from output.
+      // Even with -q, Goose outputs lines like:
+      //   ──────────────
+      //   ▸ tool_name
+      //     param: value
+      // We keep only the final text after the last trace block.
+      let cleaned = stdout;
+      // Remove all tool trace blocks (──── lines and ▸ lines with indented params)
+      cleaned = cleaned.replace(/\s*─{4,}[─\s]*\n\s*▸[^\n]*(?:\n\s{2,}[^\n]*)*/g, '');
+      const result = cleaned.trim() || null;
+
+      if (result) {
+        log(`Goose: success (${result.length} chars, exit ${code})`);
+        writeOutput({ status: 'success', result, modelFamily: 'local' });
+      } else if (code !== 0) {
+        log(`Goose: failed (exit ${code}): ${stderr.slice(0, 200)}`);
+        writeOutput({
+          status: 'error', result: null, modelFamily: 'local',
+          error: `Goose exit ${code}: ${stderr.slice(0, 200)}`,
+        });
+      } else {
+        log('Goose: empty response');
+        writeOutput({
+          status: 'success',
+          result: '(empty response)',
+          modelFamily: 'local',
+        });
+      }
+
+      resolve({ closedDuringQuery: false });
+    });
+
+    // Close stdin immediately — goose reads from -t flag
+    proc.stdin.end();
+  });
+}
+
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -617,9 +795,29 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
+  const modelConfig = readModelConfig();
   let resumeAt: string | undefined;
   try {
     while (true) {
+      // Non-Claude models use Goose CLI (tool calling, file ops,
+      // bash, MCP, context compaction — full agent capabilities)
+      if (modelConfig.useOpenAI) {
+        log(`Starting Goose query (model: ${modelConfig.model}, endpoint: ${modelConfig.openaiEndpoint})...`);
+        const gooseResult = await runQueryGoose(prompt, modelConfig, containerInput);
+        if (gooseResult.closedDuringQuery) {
+          log('Close sentinel consumed during Goose query, exiting');
+          break;
+        }
+        log('Goose query ended, waiting for next IPC message...');
+        const nextMessage = await waitForIpcMessage();
+        if (nextMessage === null) {
+          log('Close sentinel received, exiting');
+          break;
+        }
+        prompt = nextMessage;
+        continue;
+      }
+
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
