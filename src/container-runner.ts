@@ -168,9 +168,9 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  for (const sub of ['messages', 'tasks', 'input']) {
+    fs.mkdirSync(path.join(groupIpcDir, sub), { recursive: true });
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -695,6 +695,40 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+}
+
+/**
+ * Map ScheduledTask rows from the DB to the snapshot format and write.
+ * Convenience wrapper to avoid repeating the field mapping at every call site.
+ */
+export function writeTasksSnapshotFromDb(
+  groupFolder: string,
+  isMain: boolean,
+  dbTasks: Array<{
+    id: string;
+    group_folder: string;
+    prompt: string;
+    script?: string | null;
+    schedule_type: string;
+    schedule_value: string;
+    status: string;
+    next_run: string | null;
+  }>,
+): void {
+  writeTasksSnapshot(
+    groupFolder,
+    isMain,
+    dbTasks.map((t) => ({
+      id: t.id,
+      groupFolder: t.group_folder,
+      prompt: t.prompt,
+      script: t.script || undefined,
+      schedule_type: t.schedule_type,
+      schedule_value: t.schedule_value,
+      status: t.status,
+      next_run: t.next_run,
+    })),
+  );
 }
 
 export interface AvailableGroup {

@@ -183,31 +183,19 @@ export function storeChatMetadata(
 ): void {
   const ch = channel ?? null;
   const group = isGroup === undefined ? null : isGroup ? 1 : 0;
+  const displayName = name || chatJid;
+  const nameUpdate = name ? 'name = excluded.name,' : '';
 
-  if (name) {
-    // Update with name, preserving existing timestamp if newer
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, name, timestamp, ch, group);
-  } else {
-    // Update timestamp only, preserve existing name if any
-    db.prepare(
-      `
-      INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time),
-        channel = COALESCE(excluded.channel, channel),
-        is_group = COALESCE(excluded.is_group, is_group)
-    `,
-    ).run(chatJid, chatJid, timestamp, ch, group);
-  }
+  db.prepare(
+    `
+    INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(jid) DO UPDATE SET
+      ${nameUpdate}
+      last_message_time = MAX(last_message_time, excluded.last_message_time),
+      channel = COALESCE(excluded.channel, channel),
+      is_group = COALESCE(excluded.is_group, is_group)
+  `,
+  ).run(chatJid, displayName, timestamp, ch, group);
 }
 
 /**
@@ -271,34 +259,17 @@ export function setLastGroupSync(): void {
 /**
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
+ * Accepts both the NewMessage interface and inline objects.
  */
-export function storeMessage(msg: NewMessage): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
-  );
-}
-
-/**
- * Store a message directly.
- */
-export function storeMessageDirect(msg: {
+export function storeMessage(msg: {
   id: string;
   chat_jid: string;
   sender: string;
   sender_name: string;
   content: string;
   timestamp: string;
-  is_from_me: boolean;
-  is_bot_message?: boolean;
+  is_from_me?: boolean | number;
+  is_bot_message?: boolean | number;
 }): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -314,6 +285,54 @@ export function storeMessageDirect(msg: {
   );
 }
 
+/**
+ * @deprecated Use storeMessage() instead — kept for backwards compatibility.
+ */
+export const storeMessageDirect = storeMessage;
+
+/**
+ * Shared query builder for fetching non-bot messages.
+ * Both getNewMessages and getMessagesSince use this core query with
+ * different WHERE clauses — extracted to avoid duplicating the SQL
+ * and the bot-message filtering logic.
+ */
+function queryMessages(
+  chatFilter: { jids: string[] } | { chatJid: string },
+  sinceTimestamp: string,
+  botPrefix: string,
+  limit: number,
+): NewMessage[] {
+  const isMulti = 'jids' in chatFilter;
+  const chatClause = isMulti
+    ? `chat_jid IN (${chatFilter.jids.map(() => '?').join(',')})`
+    : `chat_jid = ?`;
+  const chatParams = isMulti ? chatFilter.jids : [chatFilter.chatJid];
+
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE timestamp > ? AND ${chatClause}
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+
+  return db
+    .prepare(sql)
+    .all(
+      sinceTimestamp,
+      ...chatParams,
+      `${botPrefix}:%`,
+      limit,
+    ) as NewMessage[];
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
@@ -322,25 +341,7 @@ export function getNewMessages(
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
-  const placeholders = jids.map(() => '?').join(',');
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE timestamp > ? AND chat_jid IN (${placeholders})
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-
-  const rows = db
-    .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+  const rows = queryMessages({ jids }, lastTimestamp, botPrefix, limit);
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -356,23 +357,7 @@ export function getMessagesSince(
   botPrefix: string,
   limit: number = 200,
 ): NewMessage[] {
-  // Filter bot messages using both the is_bot_message flag AND the content
-  // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
-      FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
-  `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  return queryMessages({ chatJid }, sinceTimestamp, botPrefix, limit);
 }
 
 export function getLastBotMessageTimestamp(
@@ -431,46 +416,30 @@ export function getAllTasks(): ScheduledTask[] {
     .all() as ScheduledTask[];
 }
 
+/** Columns that can be updated via updateTask(). */
+const UPDATABLE_TASK_COLUMNS = [
+  'prompt',
+  'script',
+  'schedule_type',
+  'schedule_value',
+  'next_run',
+  'status',
+] as const;
+
 export function updateTask(
   id: string,
   updates: Partial<
-    Pick<
-      ScheduledTask,
-      | 'prompt'
-      | 'script'
-      | 'schedule_type'
-      | 'schedule_value'
-      | 'next_run'
-      | 'status'
-    >
+    Pick<ScheduledTask, (typeof UPDATABLE_TASK_COLUMNS)[number]>
   >,
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  if (updates.prompt !== undefined) {
-    fields.push('prompt = ?');
-    values.push(updates.prompt);
-  }
-  if (updates.script !== undefined) {
-    fields.push('script = ?');
-    values.push(updates.script || null);
-  }
-  if (updates.schedule_type !== undefined) {
-    fields.push('schedule_type = ?');
-    values.push(updates.schedule_type);
-  }
-  if (updates.schedule_value !== undefined) {
-    fields.push('schedule_value = ?');
-    values.push(updates.schedule_value);
-  }
-  if (updates.next_run !== undefined) {
-    fields.push('next_run = ?');
-    values.push(updates.next_run);
-  }
-  if (updates.status !== undefined) {
-    fields.push('status = ?');
-    values.push(updates.status);
+  for (const col of UPDATABLE_TASK_COLUMNS) {
+    if (updates[col] !== undefined) {
+      fields.push(`${col} = ?`);
+      values.push(col === 'script' ? updates[col] || null : updates[col]);
+    }
   }
 
   if (fields.length === 0) return;
@@ -578,33 +547,27 @@ export function getAllSessions(): Record<string, string> {
 
 // --- Registered group accessors ---
 
-export function getRegisteredGroup(
-  jid: string,
-): (RegisteredGroup & { jid: string }) | undefined {
-  const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-        is_main: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
+interface RegisteredGroupRow {
+  jid: string;
+  name: string;
+  folder: string;
+  trigger_pattern: string;
+  added_at: string;
+  container_config: string | null;
+  requires_trigger: number | null;
+  is_main: number | null;
+}
+
+/** Convert a DB row to a RegisteredGroup, or null if the folder is invalid. */
+function rowToRegisteredGroup(row: RegisteredGroupRow): RegisteredGroup | null {
   if (!isValidGroupFolder(row.folder)) {
     logger.warn(
       { jid: row.jid, folder: row.folder },
       'Skipping registered group with invalid folder',
     );
-    return undefined;
+    return null;
   }
   return {
-    jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
@@ -616,6 +579,18 @@ export function getRegisteredGroup(
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
   };
+}
+
+export function getRegisteredGroup(
+  jid: string,
+): (RegisteredGroup & { jid: string }) | undefined {
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .get(jid) as RegisteredGroupRow | undefined;
+  if (!row) return undefined;
+  const group = rowToRegisteredGroup(row);
+  if (!group) return undefined;
+  return { jid: row.jid, ...group };
 }
 
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
@@ -638,37 +613,13 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    is_main: number | null;
-  }>;
+  const rows = db
+    .prepare('SELECT * FROM registered_groups')
+    .all() as RegisteredGroupRow[];
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
-    if (!isValidGroupFolder(row.folder)) {
-      logger.warn(
-        { jid: row.jid, folder: row.folder },
-        'Skipping registered group with invalid folder',
-      );
-      continue;
-    }
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger:
-        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      isMain: row.is_main === 1 ? true : undefined,
-    };
+    const group = rowToRegisteredGroup(row);
+    if (group) result[row.jid] = group;
   }
   return result;
 }
