@@ -9,8 +9,8 @@ Compose a Sunday evening week-ahead summary. Designed to run as a scheduled task
 
 ## Steps
 
-1. Read `/workspace/extra/family-docs/family-members.md` for family context
-2. Read `/workspace/extra/family-docs/school/MOC.md` for school context, check health and household MOCs for relevant reminders
+1. Read `/workspace/extra/family-vault/MOC.md` for family context (then drill into relevant nodes)
+2. Read `/workspace/extra/family-vault/school/MOC.md` for school context, check health and household MOCs for relevant reminders
 3. Check today's date and determine the upcoming Mon–Sun range
 4. Compose a week-ahead message that includes:
    - The week's date range

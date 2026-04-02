@@ -294,8 +294,12 @@ export function validateMount(
   let effectiveReadonly = true; // Default to readonly
 
   if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
+    if (
+      !isMain &&
+      allowlist.nonMainReadOnly &&
+      !allowedRoot.bypassNonMainReadOnly
+    ) {
+      // Non-main groups forced to read-only (unless root opts out)
       effectiveReadonly = true;
       logger.info(
         {
@@ -404,6 +408,12 @@ export function generateAllowlistTemplate(): string {
         path: '~/Documents/work',
         allowReadWrite: false,
         description: 'Work documents (read-only)',
+      },
+      {
+        path: '~/shared-data',
+        allowReadWrite: true,
+        bypassNonMainReadOnly: true,
+        description: 'Shared data (read-write for all groups)',
       },
     ],
     blockedPatterns: [

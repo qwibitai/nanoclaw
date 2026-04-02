@@ -19,7 +19,7 @@ Adapted from Compound Engineering's ce:brainstorm pattern.
 
 ### Phase 1: Context Gathering
 
-1. Read any relevant family docs (`/workspace/extra/family-docs/MOC.md` first, then specific files)
+1. Read any relevant family docs (`/workspace/extra/family-vault/MOC.md` first, then specific files)
 2. Check workspace for any context Boris has shared about this initiative
 
 ### Phase 2: Collaborative Dialogue

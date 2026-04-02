@@ -159,10 +159,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   logger.info('IPC watcher started (per-group namespaces)');
 }
 
-function refreshDevTasksSnapshot(
-  groupFolder: string,
-  isMain: boolean,
-): void {
+function refreshDevTasksSnapshot(groupFolder: string, isMain: boolean): void {
   const tasks = listDevTasks();
   writeDevTasksSnapshot(
     groupFolder,

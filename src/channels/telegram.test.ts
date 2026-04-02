@@ -238,7 +238,10 @@ describe('parseBotConfig', () => {
   });
 
   it('handles whitespace in config', () => {
-    const configs = parseBotConfig(' pip : token1 , pickle : token2 ', undefined);
+    const configs = parseBotConfig(
+      ' pip : token1 , pickle : token2 ',
+      undefined,
+    );
     expect(configs).toEqual([
       { name: 'pip', token: 'token1' },
       { name: 'pickle', token: 'token2' },
@@ -517,11 +520,9 @@ describe('TelegramChannel', () => {
 
       await channel.pinMessage('tg:100200300', '42');
 
-      expect(lastBot().api.pinChatMessage).toHaveBeenCalledWith(
-        100200300,
-        42,
-        { disable_notification: true },
-      );
+      expect(lastBot().api.pinChatMessage).toHaveBeenCalledWith(100200300, 42, {
+        disable_notification: true,
+      });
     });
 
     it('handles pin failure gracefully', async () => {

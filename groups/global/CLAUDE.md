@@ -47,6 +47,14 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Family Vault
+
+Family knowledge lives at `/workspace/extra/family-vault/`. The vault has its own `CLAUDE.md` with full conventions — it's auto-loaded when the vault is mounted.
+
+**Navigation:** Start from `MOC.md`. Follow wikilinks to navigate. Do NOT glob the vault directory.
+
+When you learn something important about the family, write it to the vault (create or update a node, update the MOC, append to `_log.md`).
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:

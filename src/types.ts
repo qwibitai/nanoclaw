@@ -23,6 +23,9 @@ export interface AllowedRoot {
   path: string;
   // Whether read-write mounts are allowed under this root
   allowReadWrite: boolean;
+  // If true, this root keeps read-write access even when nonMainReadOnly is set.
+  // Only meaningful when allowReadWrite is also true.
+  bypassNonMainReadOnly?: boolean;
   // Optional description for documentation
   description?: string;
 }

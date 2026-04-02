@@ -28,6 +28,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  createTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -61,7 +62,10 @@ import {
 } from './sender-allowlist.js';
 import http from 'http';
 
-import { listTasks as listDevTasks, recoverTasksOnStartup } from './dev-tasks.js';
+import {
+  listTasks as listDevTasks,
+  recoverTasksOnStartup,
+} from './dev-tasks.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { notifyScheduledTasksChanged } from './channels/ios-data-api.js';
 import { sendPushToOfflineDevices } from './apns.js';
@@ -517,6 +521,110 @@ function recoverPendingMessages(): void {
   }
 }
 
+function processInboxFiles(
+  inboxDir: string,
+  registeredGroupsFn: () => Record<string, RegisteredGroup>,
+): void {
+  const sourcesDir = path.dirname(inboxDir); // _sources/
+
+  let files: string[];
+  try {
+    files = fs.readdirSync(inboxDir).filter((f) => !f.startsWith('.'));
+  } catch {
+    return;
+  }
+
+  if (files.length === 0) return;
+
+  // Find the main group's JID and folder for scheduling the task
+  const groups = registeredGroupsFn();
+  let mainJid = '';
+  let mainFolder = '';
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.isMain) {
+      mainJid = jid;
+      mainFolder = group.folder;
+      break;
+    }
+  }
+
+  if (!mainFolder) {
+    logger.warn('No main group found, cannot process vault inbox files');
+    return;
+  }
+
+  for (const filename of files) {
+    const srcPath = path.join(inboxDir, filename);
+    const destPath = path.join(sourcesDir, filename);
+
+    try {
+      // Move from _inbox/ to _sources/ (prevents reprocessing)
+      fs.renameSync(srcPath, destPath);
+      logger.info({ filename }, 'Moved vault inbox file to _sources/');
+
+      // Schedule a once task for the main group to process the file
+      const vaultPath = `/workspace/extra/family-vault/_sources/${filename}`;
+      const taskId = `vault-inbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      createTask({
+        id: taskId,
+        group_folder: mainFolder,
+        chat_jid: mainJid,
+        prompt: `A new file was dropped into the family vault inbox: \`${vaultPath}\`. Read it and process it into knowledge nodes in the vault. Create appropriate nodes with frontmatter, update the MOC, and append to _log.md.`,
+        schedule_type: 'once',
+        schedule_value: new Date().toISOString(),
+        context_mode: 'isolated',
+        next_run: new Date().toISOString(),
+        status: 'active',
+        created_at: new Date().toISOString(),
+      });
+      logger.info(
+        { taskId, filename },
+        'Scheduled vault inbox processing task',
+      );
+    } catch (err) {
+      logger.error({ filename, err }, 'Failed to process vault inbox file');
+    }
+  }
+}
+
+function startVaultInboxWatcher(
+  registeredGroupsFn: () => Record<string, RegisteredGroup>,
+): void {
+  const inboxDir = path.join(
+    process.env.HOME || '/Users/fambot',
+    'sigma-data',
+    'family-vault',
+    '_sources',
+    '_inbox',
+  );
+
+  // Ensure directory exists
+  if (!fs.existsSync(inboxDir)) {
+    logger.info(
+      { inboxDir },
+      'Vault inbox directory does not exist, skipping watcher',
+    );
+    return;
+  }
+
+  logger.info({ inboxDir }, 'Starting vault inbox watcher');
+
+  // Check for any files already in inbox on startup
+  processInboxFiles(inboxDir, registeredGroupsFn);
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  fs.watch(inboxDir, (eventType, filename) => {
+    if (!filename || filename.startsWith('.')) return;
+    // Debounce: wait for the file to finish writing
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      processInboxFiles(inboxDir, registeredGroupsFn);
+    }, 2000);
+  });
+}
+
 function ensureContainerSystemRunning(): boolean {
   const available = ensureContainerRuntimeRunning();
   if (available) cleanupOrphans();
@@ -709,6 +817,7 @@ async function main(): Promise<void> {
       'iCloud calendar changed — clients will see updates on next fetch',
     );
   });
+  startVaultInboxWatcher(() => registeredGroups);
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);

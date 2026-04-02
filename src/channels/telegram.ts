@@ -84,6 +84,34 @@ async function sendTelegramMessage(
   }
 }
 
+/**
+ * Save a buffer to the vault's _sources/telegram/ directory.
+ * Returns the container-visible path if successful, null otherwise.
+ */
+function saveToVault(filename: string, buffer: Buffer): string | null {
+  try {
+    const vaultSourcesDir = path.join(
+      process.env.HOME || '/Users/fambot',
+      'sigma-data',
+      'family-vault',
+      '_sources',
+      'telegram',
+    );
+    fs.mkdirSync(vaultSourcesDir, { recursive: true });
+
+    const date = new Date().toISOString().slice(0, 10);
+    const safeName = `${date}-${filename}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const savePath = path.join(vaultSourcesDir, safeName);
+    fs.writeFileSync(savePath, buffer);
+
+    logger.info({ file: safeName, size: buffer.length }, 'File saved to vault');
+    return `/workspace/extra/family-vault/_sources/telegram/${safeName}`;
+  } catch (err) {
+    logger.error({ filename, err }, 'Failed to save file to vault');
+    return null;
+  }
+}
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -282,7 +310,38 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) {
+        storeNonText(ctx, '[Photo]');
+        return;
+      }
+
+      const photos = ctx.message.photo;
+      const largest = photos?.[photos.length - 1];
+      if (largest?.file_id) {
+        try {
+          const file = await bot.api.getFile(largest.file_id);
+          if (file.file_path) {
+            const msgId = ctx.message.message_id.toString();
+            const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
+            const response = await fetch(url);
+            if (response.ok) {
+              const buffer = Buffer.from(await response.arrayBuffer());
+              const vaultPath = saveToVault(`photo-${msgId}.jpg`, buffer);
+              if (vaultPath) {
+                storeNonText(ctx, `[Photo] (saved to ${vaultPath})`);
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          logger.error({ chatJid, err }, 'Failed to download Telegram photo');
+        }
+      }
+      storeNonText(ctx, '[Photo]');
+    });
     bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
@@ -311,10 +370,13 @@ export class TelegramChannel implements Channel {
                 { chatJid, file: name, size: buffer.length },
                 'Telegram file downloaded',
               );
-              storeNonText(
-                ctx,
-                `[Document: ${name}] (saved to /workspace/group/uploads/${name})`,
-              );
+
+              // Also save to vault
+              const vaultPath = saveToVault(name, buffer);
+              const locationNote = vaultPath
+                ? `saved to ${vaultPath}`
+                : `saved to /workspace/group/uploads/${name}`;
+              storeNonText(ctx, `[Document: ${name}] (${locationNote})`);
               return;
             }
           }

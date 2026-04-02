@@ -22,7 +22,7 @@ Ask Boris which initiative to plan — initiatives are managed externally via th
 ### Phase 1: Gather Context
 
 1. Ask Boris for context on the initiative if not provided in $ARGUMENTS
-2. Read any relevant family docs (`/workspace/extra/family-docs/MOC.md` first)
+2. Read any relevant family docs (`/workspace/extra/family-vault/MOC.md` first)
 4. If there's no brainstorm text yet, suggest running `/brainstorm` first
 
 ### Phase 2: Research

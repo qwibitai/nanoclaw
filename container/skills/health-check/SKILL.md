@@ -9,9 +9,9 @@ Review family health info and flag anything that needs attention.
 
 ## Steps
 
-1. Read `/workspace/extra/family-docs/health/MOC.md` to understand what health files are available
+1. Read `/workspace/extra/family-vault/health/MOC.md` to understand what health files are available
 2. Read each file listed in the MOC
-3. Read `/workspace/extra/family-docs/family-members.md` for birthdays (to flag upcoming check-ups by age)
+3. Read `/workspace/extra/family-vault/people/family.md` for birthdays (to flag upcoming check-ups by age)
 4. Compose a summary of:
    - Current allergies and sensitivities (confirm nothing's changed)
    - Any upcoming medical appointments or overdue check-ups

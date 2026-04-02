@@ -511,9 +511,7 @@ export function handleDataApi(
   const getPipTaskMatch =
     req.method === 'GET' && url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
   if (getPipTaskMatch) {
-    authGuard(req, res, token, () =>
-      handleGetPipTask(res, getPipTaskMatch[1]),
-    );
+    authGuard(req, res, token, () => handleGetPipTask(res, getPipTaskMatch[1]));
     return true;
   }
 
@@ -529,7 +527,8 @@ export function handleDataApi(
 
   // Delete scheduled task: DELETE /api/pip-tasks/:id
   const deletePipTaskMatch =
-    req.method === 'DELETE' && url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
+    req.method === 'DELETE' &&
+    url.match(/^\/api\/pip-tasks\/([a-zA-Z0-9_-]+)$/);
   if (deletePipTaskMatch) {
     authGuard(req, res, token, () =>
       handleDeletePipTask(res, deletePipTaskMatch[1]),
@@ -1126,9 +1125,16 @@ function handleUpdatePipTask(
       const raw = JSON.parse(body);
       // Only allow status updates (pause/resume)
       const validStatuses = ['active', 'paused'] as const;
-      if (!raw.status || !(validStatuses as readonly string[]).includes(raw.status)) {
+      if (
+        !raw.status ||
+        !(validStatuses as readonly string[]).includes(raw.status)
+      ) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid or missing status. Must be "active" or "paused".' }));
+        res.end(
+          JSON.stringify({
+            error: 'Invalid or missing status. Must be "active" or "paused".',
+          }),
+        );
         return;
       }
 
