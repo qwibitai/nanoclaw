@@ -37,6 +37,7 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => false),
       mkdirSync: vi.fn(),
+      mkdtempSync: vi.fn((prefix: string) => prefix + 'test123'),
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
@@ -282,7 +283,7 @@ describe('container-runner plugin env injection', () => {
     await resultPromise;
   });
 
-  it('injects plugin env vars as -e flags in container spawn args', async () => {
+  it('injects plugin env vars via --env-file in container spawn args', async () => {
     mockGetPluginContainerEnv.mockReturnValue({ PLUGIN_KEY: 'secret' });
 
     const resultPromise = runContainerAgent(
@@ -292,13 +293,12 @@ describe('container-runner plugin env injection', () => {
       vi.fn(async () => {}),
     );
 
+    // Let microtasks settle so buildContainerArgs (async) completes and spawn is called
+    await vi.advanceTimersByTimeAsync(1);
+
     const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
-    const envArgs = spawnArgs.reduce<string[]>((acc, arg, i) => {
-      if (spawnArgs[i - 1] === '-e') acc.push(arg);
-      return acc;
-    }, []);
-    // Ensure the plugin env key is passed via -e, but do not assert on or expose the raw secret value in argv
-    expect(envArgs).toContain('PLUGIN_KEY');
+    // Ensure plugin env vars are injected via --env-file (values never exposed in argv)
+    expect(spawnArgs).toContain('--env-file');
     expect(spawnArgs).not.toContain('secret');
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
