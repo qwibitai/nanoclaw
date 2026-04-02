@@ -83,6 +83,14 @@ async function main() {
   const results = parseResults(html);
 
   if (results.length === 0) {
+    // Small page = DDG blocked or markup changed; large page = genuine no-results
+    if (html.length < 1000) {
+      console.error(
+        `Search returned no results and page was unexpectedly short (${html.length} bytes). ` +
+          'DDG may be rate-limiting or its markup changed. Try again or use agent-browser directly.',
+      );
+      process.exit(1);
+    }
     console.log('No results found.');
     process.exit(0);
   }

@@ -4,6 +4,8 @@ description: Browse the web for any task — research topics, read articles, int
 allowed-tools: Bash(agent-browser:*)
 ---
 
+> **Quick web search:** For keyword searches, use `search "query"` instead — it's faster (no interactive browser session needed) and returns ranked results directly. Use `agent-browser` when you need to navigate, interact, log in, or extract data from a specific page.
+
 # Browser Automation with agent-browser
 
 ## Quick start
