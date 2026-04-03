@@ -278,6 +278,51 @@ async function extractOnecliEnv(
   return env;
 }
 
+interface BoxConfig {
+  env: Record<string, string>;
+  user: string | undefined;
+}
+
+/**
+ * Build container environment variables and user config.
+ * Encapsulates credential resolution and host uid/gid mapping.
+ */
+async function buildBoxConfig(
+  containerName: string,
+  agentIdentifier?: string,
+): Promise<BoxConfig> {
+  // Use SDK-provided credential resolver if set, else OneCLI gateway
+  let credentialEnv: Record<string, string>;
+  if (_credentialResolver) {
+    credentialEnv = await _credentialResolver();
+  } else {
+    credentialEnv = await extractOnecliEnv(containerName, agentIdentifier);
+  }
+
+  const env: Record<string, string> = {
+    ...credentialEnv,
+    TZ: TIMEZONE,
+    AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
+  };
+
+  // Run as host user so bind-mounted files are accessible.
+  // Skip when running as root (uid 0), as the container's node user (uid 1000),
+  // or when getuid is unavailable (native Windows without WSL).
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  const user =
+    hostUid != null && hostUid !== 0 && hostUid !== 1000
+      ? `${hostUid}:${hostGid}`
+      : undefined;
+
+  if (user) {
+    env['HOME'] = '/home/node';
+  }
+
+  return { env, user };
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -297,30 +342,10 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Build environment variables — use credential resolver if set, else OneCLI
-  let credentialEnv: Record<string, string>;
-  if (_credentialResolver) {
-    credentialEnv = await _credentialResolver();
-  } else {
-    credentialEnv = await extractOnecliEnv(containerName, agentIdentifier);
-  }
-  const boxEnv: Record<string, string> = {
-    ...credentialEnv,
-    TZ: TIMEZONE,
-    AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
-    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
-  };
-
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  const userStr =
-    hostUid != null && hostUid !== 0 && hostUid !== 1000
-      ? `${hostUid}:${hostGid}`
-      : undefined;
-
-  if (userStr) {
-    boxEnv['HOME'] = '/home/node';
-  }
+  const { env: boxEnv, user: userStr } = await buildBoxConfig(
+    containerName,
+    agentIdentifier,
+  );
 
   const boxOptions = {
     image: BOX_IMAGE,
