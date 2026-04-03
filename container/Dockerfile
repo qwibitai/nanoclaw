@@ -74,8 +74,9 @@ plugins.forEach((p, index) => {\
     console.log('Installing plugin archive: ' + p.name);\
     const archivePath = '/tmp/plugin-archive-' + index + '.tgz';\
     execFileSync('curl', ['-fsSL', '-o', archivePath, p.archive], { stdio: 'inherit' });\
-    const tarArgs = ['xz', '--strip-components=1', '-C', '/usr/local/bin/'];\
-    for (const f of p.extract) { tarArgs.push(f); }\
+    const stripComponents = p.stripComponents ?? 0;\
+    const tarArgs = ['xzf', archivePath, '--strip-components=' + stripComponents, '-C', '/usr/local/bin/'];\
+    if (stripComponents === 0) { for (const f of p.extract) { tarArgs.push(f); } }\
     execFileSync('tar', tarArgs, { stdio: 'inherit' });\
     const destPaths = p.extract.map(f => '/usr/local/bin/' + f);\
     execFileSync('chmod', ['+x', ...destPaths], { stdio: 'inherit' });\
@@ -85,6 +86,9 @@ plugins.forEach((p, index) => {\
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+# Pre-create directories that plugin init scripts need (must exist and be writable by node user)
+RUN mkdir -p /var/run/tailscale && chown node:node /var/run/tailscale
 
 # Plugin container-init scripts (sourced at container startup before the agent runs)
 COPY plugins/ /app/plugins/

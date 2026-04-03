@@ -14,6 +14,8 @@ export interface BinaryInstall {
   archive?: string;
   /** Binary filenames to extract from the archive */
   extract?: string[];
+  /** Number of leading path components to strip when extracting (default: 0) */
+  stripComponents?: number;
 }
 
 export interface Plugin {
