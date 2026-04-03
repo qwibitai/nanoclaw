@@ -5,7 +5,7 @@ description: Add the blogwatcher CLI to the NanoClaw agent container for reading
 
 # Add Blogwatcher Plugin
 
-This skill installs the [blogwatcher](https://github.com/nicholasgasior/blogwatcher) CLI binary inside the agent container so the agent can read and monitor RSS/Atom feeds on demand.
+This skill installs the [blogwatcher](https://github.com/hyaxia/blogwatcher) CLI binary inside the agent container so the agent can read and monitor RSS/Atom feeds on demand.
 
 ## Phase 1: Pre-flight
 
@@ -19,7 +19,7 @@ Check if `src/plugins/registry.ts` exists. If not, the plugin system hasn't been
 
 ### Write the plugin module
 
-Look up the latest release at https://github.com/nicholasgasior/blogwatcher/releases and get the linux/amd64 binary URL. Then copy `${CLAUDE_SKILL_DIR}/add/src/blogwatcher.ts` to `src/plugins/blogwatcher.ts`, replacing `vX.Y.Z` in the URL with the actual version tag.
+Look up the latest release at https://github.com/hyaxia/blogwatcher/releases and get the linux/amd64 binary URL. Then copy `${CLAUDE_SKILL_DIR}/add/src/blogwatcher.ts` to `src/plugins/blogwatcher.ts`, replacing `vX.Y.Z` in the URL with the actual version tag.
 
 ### Register in the plugins barrel
 
@@ -65,4 +65,4 @@ The agent should respond with the blogwatcher help output.
 The binary wasn't installed. Check that `binaryInstall` is declared in `src/plugins/blogwatcher.ts` and rebuild: `container/build.sh`
 
 **Download failed during build**
-Check that the URL in `binaryInstall.url` points to a valid release asset. Visit https://github.com/nicholasgasior/blogwatcher/releases to find the correct URL.
+Check that the URL in `binaryInstall.url` points to a valid release asset. Visit https://github.com/hyaxia/blogwatcher/releases to find the correct URL.
