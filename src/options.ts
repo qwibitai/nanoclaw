@@ -6,7 +6,12 @@
  */
 
 import type { ContainerConfig, MountAllowlist } from './types.js';
-export type { ContainerConfig, AdditionalMount, MountAllowlist, AllowedRoot } from './types.js';
+export type {
+  ContainerConfig,
+  AdditionalMount,
+  MountAllowlist,
+  AllowedRoot,
+} from './types.js';
 
 /** Resolves credentials to env vars injected into agent containers.
  *  Called once per container spawn. Return a map like { ANTHROPIC_API_KEY: 'sk-...' }. */
