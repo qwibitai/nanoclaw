@@ -1,0 +1,42 @@
+{
+  "topic": "Environment and ecology basics",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-env-1",
+      "question": "In an aquatic ecosystem, the pyramid of biomass is often inverted. The best explanation for this is:",
+      "options": [
+        "Aquatic producers photosynthesize less efficiently than terrestrial plants",
+        "Small but rapidly reproducing phytoplankton support a larger biomass of zooplankton and fish",
+        "Water reduces the energy transfer efficiency between trophic levels below 10%",
+        "Decomposers in water are more active, reducing standing biomass of producers continuously"
+      ],
+      "answerIndex": 1,
+      "explanation": "Phytoplankton have a very fast reproduction rate — their biomass at any instant is low but turnover is high. The zooplankton and fish they support have greater standing biomass, inverting the usual pattern despite the 10% energy rule still holding."
+    },
+    {
+      "id": "upsc-env-2",
+      "question": "Which of the following is the most accurate description of a Biosphere Reserve compared to a National Park?",
+      "options": [
+        "A Biosphere Reserve prohibits all human activity, whereas National Parks allow limited tourism",
+        "A Biosphere Reserve has a zoned structure (core, buffer, transition) allowing graduated human use; a National Park prohibits all human habitation and resource use",
+        "Biosphere Reserves are declared under the Wildlife Protection Act; National Parks are declared under the Environment Protection Act",
+        "A Biosphere Reserve is specific to marine ecosystems; National Parks apply only to terrestrial areas"
+      ],
+      "answerIndex": 1,
+      "explanation": "Biosphere Reserves have three zones: the core zone (fully protected), buffer zone (limited research and tourism), and transition zone (sustainable human use and settlement). National Parks have stricter human exclusion — no grazing, no habitation, no resource extraction."
+    },
+    {
+      "id": "upsc-env-3",
+      "question": "Among the greenhouse gases, methane (CH₄) is considered more potent than CO₂ because:",
+      "options": [
+        "Methane persists in the atmosphere for over 500 years, far longer than CO₂",
+        "Methane has a much higher global warming potential per molecule over a 100-year period",
+        "Methane reacts with ozone directly, destroying the ozone layer faster than CO₂",
+        "Methane is entirely produced by human industrial activities, unlike CO₂ which has natural sources"
+      ],
+      "answerIndex": 1,
+      "explanation": "CH₄ has a GWP of approximately 28–36 times that of CO₂ over 100 years. However, CO₂ persists in the atmosphere much longer. CH₄ degrades in roughly 12 years. Both have natural and human sources — paddy fields, cattle, and landfills are major CH₄ emitters."
+    }
+  ]
+}

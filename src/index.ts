@@ -34,6 +34,7 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
   getMessagesSince,
@@ -48,7 +49,10 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { syncHeartbeatTasksForChat } from './heartbeat.js';
 import { startIpcWatcher } from './ipc.js';
+import { recordQuizProgress } from './learning-progress.js';
+import { buildLearnerOnboardingPrompt } from './onboarding.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -256,7 +260,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  let prompt = formatMessages(missedMessages, TIMEZONE);
+  if (!isMainGroup) {
+    prompt = buildLearnerOnboardingPrompt(prompt, group.folder, missedMessages);
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -338,6 +345,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  try {
+    syncHeartbeatTasksForChat(chatJid, group);
+  } catch (err) {
+    logger.warn(
+      { chatJid, folder: group.folder, err },
+      'Failed to synchronize heartbeat tasks after learner update',
+    );
+  }
+
   return true;
 }
 
@@ -409,6 +425,26 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Detect stale/corrupt session — clear it so the next retry starts fresh.
+      // The session .jsonl can go missing after a crash mid-write, manual
+      // deletion, or disk-full. The existing backoff in group-queue.ts
+      // handles the retry; we just need to remove the broken session ID.
+      const isStaleSession =
+        sessionId &&
+        output.error &&
+        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+          output.error,
+        );
+
+      if (isStaleSession) {
+        logger.warn(
+          { group: group.name, staleSessionId: sessionId, error: output.error },
+          'Stale session detected — clearing for next retry',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -563,6 +599,14 @@ async function main(): Promise<void> {
   // Recovers from missed creates (e.g. OneCLI was down at registration time).
   for (const [jid, group] of Object.entries(registeredGroups)) {
     ensureOneCLIAgent(jid, group);
+    try {
+      syncHeartbeatTasksForChat(jid, group);
+    } catch (err) {
+      logger.warn(
+        { jid, folder: group.folder, err },
+        'Failed to synchronize heartbeat tasks during startup',
+      );
+    }
   }
 
   restoreRemoteControl();
@@ -648,6 +692,32 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      const group = registeredGroups[chatJid];
+      if (group && !group.isMain && !msg.is_from_me && !msg.is_bot_message) {
+        try {
+          const progressResult = recordQuizProgress(group.folder, msg.content, {
+            submittedAt: msg.timestamp,
+          });
+          if (progressResult.status === 'updated') {
+            logger.info(
+              {
+                chatJid,
+                groupFolder: group.folder,
+                score: progressResult.score,
+                total: progressResult.total,
+                weakTopic: progressResult.weakTopic,
+              },
+              'Recorded quiz progress from learner reply',
+            );
+          }
+        } catch (err) {
+          logger.warn(
+            { chatJid, folder: group.folder, err },
+            'Failed to record quiz progress from learner reply',
+          );
+        }
+      }
     },
     onChatMetadata: (
       chatJid: string,

@@ -49,13 +49,30 @@ When the user has an explicit learning goal, prefer keeping the operating state 
 - `RESOURCE_LIST.md` — prioritized books, videos, courses, links
 - `HEARTBEAT.md` — delivery cadence for lessons, quizzes, revision, and weekly reports
 
+When present, also read `LEARNING_PROGRESS.json` for host-tracked quiz outcomes, weak topics, and revision targets. Treat it as structured state owned by the runtime.
+
 Create them only when they help the learner. Keep them concise and keep them current.
+
+## Learner Onboarding
+
+When the workspace is missing any of the four learning system files, or when `WHO_I_AM.md` still says `Onboarding status: pending`, treat the next learner turn as onboarding work.
+
+- Extract goal, current state, and constraints from the conversation before asking more questions
+- Ask at most 3 focused questions if a critical field is still missing
+- Update `WHO_I_AM.md`, `STUDY_PLAN.md`, `RESOURCE_LIST.md`, and `HEARTBEAT.md` in the same turn
+- Replace `Onboarding status: pending` with `Onboarding status: active` once the files are usable for coaching
+- Prefer structured exam-package files under `/workspace/project/exams/` over inventing a syllabus from scratch
+- If available, use `/workspace/project/exams/source-registry.json` and `/workspace/project/exams/{slug}/sources.json` as the starting map for topic research
+- When package content is missing for the learner's current topic, create structured assets under `/workspace/group/content/{plans,lessons,quizzes}/` so the host can reuse them on later scheduled runs
+- Use the `content-research` skill workflow for consistent source vetting and output format when generating those assets
+- Record the proposed lesson, quiz, and weekly report cadence in `HEARTBEAT.md`; the host runtime will synchronize managed recurring tasks from that file once onboarding is active and timezone matches the runtime
 
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
+
 - Create files for structured learner state when the information will matter later
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -67,6 +84,7 @@ Format messages based on the channel you're responding to. Check your group fold
 ### Slack channels (folder starts with `slack_`)
 
 Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+
 - `*bold*` (single asterisks)
 - `_italic_` (underscores)
 - `<https://url|link text>` for links (NOT `[text](url)`)

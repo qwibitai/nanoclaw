@@ -1,0 +1,25 @@
+{
+  "exam": "UPSC CSE",
+  "prelims": [
+    "History of India and Indian National Movement",
+    "Indian and World Geography",
+    "Indian Polity and Governance",
+    "Economic and Social Development",
+    "Environment, Ecology, Biodiversity, and Climate Change",
+    "General Science",
+    "Current events of national and international importance"
+  ],
+  "mainsOverlap": [
+    "Governance and Constitution",
+    "Social issues and development",
+    "International relations",
+    "Internal security and disaster management",
+    "Ethics and case-study reasoning"
+  ],
+  "skills": [
+    "Elimination in objective questions",
+    "Revision under time pressure",
+    "Current affairs integration",
+    "Answer structuring for mains-ready learning"
+  ]
+}

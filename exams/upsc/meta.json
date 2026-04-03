@@ -12,14 +12,20 @@
   ],
   "defaultCadence": {
     "lesson": "07:00",
-    "currentAffairs": "08:00",
     "quiz": "21:00",
     "weeklyReport": "Sunday 08:00"
   },
   "requiredFiles": [
     "syllabus.json",
     "resources.json",
-    "plans/6-month-prelims.json"
+    "sources.json",
+    "plans/6-month-prelims.json",
+    "lessons/foundation/ancient-india.md",
+    "quizzes/foundation/ancient-india.json",
+    "lessons/foundation/indian-polity-federalism.md",
+    "quizzes/foundation/indian-polity-federalism.json",
+    "lessons/foundation/indian-monsoon-basics.md",
+    "quizzes/foundation/indian-monsoon-basics.json"
   ],
   "notes": [
     "Use pre-written lessons where possible.",

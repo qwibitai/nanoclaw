@@ -1,0 +1,57 @@
+{
+  "plan": "6-month prelims",
+  "durationWeeks": 24,
+  "weeklyHoursTarget": 20,
+  "phases": [
+    {
+      "name": "foundation",
+      "weeks": "1-8",
+      "objective": "Build NCERT-level understanding and subject map",
+      "focus": [
+        "History basics",
+        "Geography basics",
+        "Polity basics",
+        "Economy basics"
+      ]
+    },
+    {
+      "name": "coverage",
+      "weeks": "9-16",
+      "objective": "Move to standard books and high-yield topics",
+      "focus": [
+        "Modern history",
+        "Indian polity",
+        "Environment",
+        "Science and tech",
+        "Current affairs integration"
+      ]
+    },
+    {
+      "name": "revision",
+      "weeks": "17-20",
+      "objective": "Compress notes and drill weak topics",
+      "focus": [
+        "Error log review",
+        "Flashcard revision",
+        "Topic-wise MCQs",
+        "Formula and fact recall"
+      ]
+    },
+    {
+      "name": "mock-tests",
+      "weeks": "21-24",
+      "objective": "Simulate exam conditions and sharpen decision-making",
+      "focus": [
+        "Full-length mocks",
+        "Time management",
+        "Guess discipline",
+        "Post-test analysis"
+      ]
+    }
+  ],
+  "weeklyPattern": [
+    "5 study days for new learning",
+    "1 day for cumulative revision",
+    "1 day for quiz or mock analysis"
+  ]
+}

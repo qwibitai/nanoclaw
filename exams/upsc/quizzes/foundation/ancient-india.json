@@ -1,0 +1,42 @@
+{
+  "topic": "Ancient India foundations",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-ancient-1",
+      "question": "Which factor most strongly explains the rise of Magadha among the Mahajanapadas?",
+      "options": [
+        "Its coastal trade monopoly",
+        "Access to fertile plains, rivers, and iron resources",
+        "Its exclusive use of cavalry warfare",
+        "Direct patronage from Gupta rulers"
+      ],
+      "answerIndex": 1,
+      "explanation": "Magadha benefited from geography, agricultural surplus, river connectivity, and nearby iron ore, which strengthened both warfare and administration."
+    },
+    {
+      "id": "upsc-ancient-2",
+      "question": "Which of the following is more characteristic of the Indus Valley Civilization than the Later Vedic period?",
+      "options": [
+        "Painted Grey Ware settlements",
+        "Elaborate urban drainage and planned cities",
+        "Centrality of sacrificial rituals",
+        "Pastoral clan-based political structure"
+      ],
+      "answerIndex": 1,
+      "explanation": "Planned urban settlements with drainage are a signature Harappan feature, unlike Later Vedic society."
+    },
+    {
+      "id": "upsc-ancient-3",
+      "question": "Why are Ashokan inscriptions especially important in ancient Indian history?",
+      "options": [
+        "They are the only surviving literary sources from the Mauryan period",
+        "They provide direct evidence about state communication, dhamma, and administration",
+        "They record the complete Vedic corpus",
+        "They describe Gupta-era scientific progress"
+      ],
+      "answerIndex": 1,
+      "explanation": "Ashokan inscriptions are primary historical evidence for Mauryan governance, imperial communication, and Ashoka's dhamma policy."
+    }
+  ]
+}

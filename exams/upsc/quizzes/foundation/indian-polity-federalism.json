@@ -1,0 +1,42 @@
+{
+  "topic": "Indian polity federalism basics",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-polity-fed-1",
+      "question": "Why is the Indian system often described as federal with unitary bias?",
+      "options": [
+        "Because States can unilaterally amend the Constitution",
+        "Because the Constitution divides powers but gives the Union stronger structural authority in key situations",
+        "Because India has no written Constitution",
+        "Because the judiciary is controlled by State legislatures"
+      ],
+      "answerIndex": 1,
+      "explanation": "India has federal features like division of powers and an independent judiciary, but the Union remains structurally stronger through provisions like residuary powers and emergency arrangements."
+    },
+    {
+      "id": "upsc-polity-fed-2",
+      "question": "In the Indian constitutional scheme, residuary legislative powers belong to:",
+      "options": [
+        "State legislatures",
+        "The Governor",
+        "Parliament",
+        "The Supreme Court"
+      ],
+      "answerIndex": 2,
+      "explanation": "Residuary powers are assigned to Parliament, which is one of the reasons India is seen as having a unitary tilt."
+    },
+    {
+      "id": "upsc-polity-fed-3",
+      "question": "Which body is primarily associated with recommending the distribution of tax revenues between the Union and the States?",
+      "options": [
+        "Inter-State Council",
+        "Finance Commission",
+        "Election Commission",
+        "NITI Aayog"
+      ],
+      "answerIndex": 1,
+      "explanation": "The Finance Commission recommends how certain tax revenues should be distributed between the Union and the States."
+    }
+  ]
+}

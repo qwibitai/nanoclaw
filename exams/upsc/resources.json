@@ -1,0 +1,79 @@
+{
+  "exam": "UPSC CSE",
+  "tracks": [
+    {
+      "phase": "foundation",
+      "resources": [
+        {
+          "type": "book",
+          "title": "NCERT History (Ancient, Medieval, Modern)",
+          "purpose": "Build factual base before standard references"
+        },
+        {
+          "type": "book",
+          "title": "NCERT Geography + Atlas practice",
+          "purpose": "Cover map-based and concept-heavy prelims questions"
+        },
+        {
+          "type": "book",
+          "title": "NCERT Polity and Economy basics",
+          "purpose": "Prepare for standard texts with stronger fundamentals"
+        }
+      ]
+    },
+    {
+      "phase": "coverage",
+      "resources": [
+        {
+          "type": "book",
+          "title": "Indian Polity by M. Laxmikanth",
+          "purpose": "Core polity reference for prelims and mains overlap"
+        },
+        {
+          "type": "book",
+          "title": "Spectrum Modern History",
+          "purpose": "Fast revision-friendly coverage of modern India"
+        },
+        {
+          "type": "book",
+          "title": "Environment and Ecology concise source",
+          "purpose": "High-yield scoring area with repeated question patterns"
+        }
+      ]
+    },
+    {
+      "phase": "revision",
+      "resources": [
+        {
+          "type": "notes",
+          "title": "Topic-wise error log",
+          "purpose": "Track weak areas and repeat mistakes for spaced revision"
+        },
+        {
+          "type": "flashcards",
+          "title": "Articles, amendments, indices, schemes",
+          "purpose": "Improve recall for factual elimination-based MCQs"
+        }
+      ]
+    },
+    {
+      "phase": "mock-tests",
+      "resources": [
+        {
+          "type": "mock-series",
+          "title": "Full-length prelim mock tests",
+          "purpose": "Build exam temperament and timing"
+        },
+        {
+          "type": "analysis",
+          "title": "Post-mock review sheets",
+          "purpose": "Convert wrong answers into revision tasks"
+        }
+      ]
+    }
+  ],
+  "currentAffairs": {
+    "daily": "Read one trusted newspaper or digest and summarize in your own words",
+    "weekly": "Compile issue-wise notes for polity, economy, environment, and international relations"
+  }
+}

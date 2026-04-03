@@ -1,0 +1,42 @@
+{
+  "topic": "Modern India history foundations",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-modern-hist-1",
+      "question": "Which of the following best explains why the Battle of Buxar (1764) was more significant than Plassey (1757) for establishing British supremacy?",
+      "options": [
+        "It was the first military engagement between Indian rulers and the East India Company",
+        "It defeated a coalition of Mughal, Awadh, and Mir Qasim forces, establishing real political authority",
+        "It gave the Company control over Bengal's trade routes alone",
+        "It led directly to the abolition of the Mughal Empire"
+      ],
+      "answerIndex": 1,
+      "explanation": "Buxar involved a combined Mughal-Awadh-Mir Qasim force. Defeating this coalition gave the Company genuine political power, not just trading privileges. Plassey was more of a managed coup."
+    },
+    {
+      "id": "upsc-modern-hist-2",
+      "question": "The Ryotwari system of land revenue, as introduced by Thomas Munro in Madras, differed from the Zamindari system primarily because it:",
+      "options": [
+        "Collected revenue through village headmen rather than hereditary landlords",
+        "Created a direct settlement between the state and individual cultivating peasants",
+        "Fixed revenue permanently without possibility of revision",
+        "Applied only to uncultivated waste land, not to productive fields"
+      ],
+      "answerIndex": 1,
+      "explanation": "Ryotwari established a direct revenue relationship between the colonial state and individual ryots (cultivators), bypassing intermediate landlords. Zamindari used hereditary landlords as intermediaries."
+    },
+    {
+      "id": "upsc-modern-hist-3",
+      "question": "Gandhi's decision to withdraw the Non-Cooperation Movement in 1922 despite widespread momentum was primarily triggered by:",
+      "options": [
+        "The British government's promise to hold fresh elections",
+        "Violence by a mob at Chauri Chaura that killed police officers",
+        "The imprisonment of Bal Gangadhar Tilak",
+        "A directive from the Indian National Congress working committee"
+      ],
+      "answerIndex": 1,
+      "explanation": "The Chauri Chaura incident in Gorakhpur, where protestors burned a police station killing 22 officers, convinced Gandhi that the movement had not yet achieved the discipline needed for non-violent mass action."
+    }
+  ]
+}

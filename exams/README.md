@@ -24,4 +24,4 @@ Design principles:
 - make graceful degradation possible on weaker models
 - keep packages community-editable and easy to review in git
 
-The first scaffold in this fork is `exams/upsc/meta.json`.
+The first scaffold in this fork is `exams/upsc/`, which now includes starter `meta.json`, `syllabus.json`, `resources.json`, `plans/6-month-prelims.json`, and a small multi-topic lesson and quiz bank for onboarding and scheduled delivery.

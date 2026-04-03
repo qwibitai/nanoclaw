@@ -1,0 +1,42 @@
+{
+  "topic": "Indian geography fundamentals",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-geo-1",
+      "question": "Which physiographic region of India is known as Bhangar, and what distinguishes it from Khadar?",
+      "options": [
+        "Bhangar refers to the Himalayan foothills; Khadar refers to the Terai belt",
+        "Bhangar is older alluvial soil above flood levels; Khadar is newer alluvium deposited by active rivers",
+        "Bhangar covers coastal plains; Khadar refers to river delta formations",
+        "Bhangar is rocky Deccan plateau soil; Khadar is the sandy Rajasthan belt"
+      ],
+      "answerIndex": 1,
+      "explanation": "Bhangar (older alluvium) lies above the flood plains and is less fertile. Khadar (newer alluvium) sits closer to river channels, replenished by periodic flooding, and is generally more fertile."
+    },
+    {
+      "id": "upsc-geo-2",
+      "question": "Narmada and Tapi rivers flow westward but do not form deltas. The primary reason is:",
+      "options": [
+        "Their discharge volume is insufficient to carry sediment to the coast",
+        "They flow through rift valleys with steep gradient, depositing little sediment before reaching the sea",
+        "Their watersheds are protected forest areas that prevent erosion and sediment load",
+        "They originate in the Himalayan range, making them perennial but low in sediment"
+      ],
+      "answerIndex": 1,
+      "explanation": "Narmada and Tapi flow through faulted rift valleys. The steep gradient and short coastal stretch mean sediment is carried quickly into the sea and dispersed, forming estuaries rather than delta fans."
+    },
+    {
+      "id": "upsc-geo-3",
+      "question": "Black cotton soil (Regur) is well-suited for cotton cultivation primarily because of its:",
+      "options": [
+        "High iron and phosphorus content",
+        "High moisture-retention capacity and self-tilling property when wet",
+        "Sandy texture which allows fast drainage and root penetration",
+        "Acidic pH that promotes cotton-specific mycorrhizae"
+      ],
+      "answerIndex": 1,
+      "explanation": "Regur's high clay content — especially montmorillonite — absorbs moisture rapidly and retains it through dry periods. It also cracks deeply when dry (self-tilling), reducing tillage effort. These properties suit the long dry-spell tolerance needed for cotton."
+    }
+  ]
+}

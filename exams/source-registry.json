@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "categories": {
+    "history": {
+      "sources": [
+        {
+          "type": "web",
+          "name": "NCERT Textbooks",
+          "url": "https://ncert.nic.in/textbook.php",
+          "strategy": "Find chapter-wise school-level fundamentals before advanced notes"
+        },
+        {
+          "type": "search",
+          "name": "Open educational references",
+          "strategy": "Search for topic summary, timelines, and concept explainers from reputable educational domains"
+        }
+      ]
+    },
+    "polity": {
+      "sources": [
+        {
+          "type": "web",
+          "name": "Legislative and constitutional references",
+          "strategy": "Use official legal and parliamentary sources for constitutional topics"
+        },
+        {
+          "type": "search",
+          "name": "Policy explainers",
+          "strategy": "Search for policy background articles with clear definitions and examples"
+        }
+      ]
+    },
+    "geography": {
+      "sources": [
+        {
+          "type": "web",
+          "name": "Government and scientific portals",
+          "strategy": "Use official environment and geography datasets for factual grounding"
+        },
+        {
+          "type": "search",
+          "name": "Concept explainers",
+          "strategy": "Search for visual and map-based explanations where possible"
+        }
+      ]
+    }
+  },
+  "globalSources": [
+    {
+      "type": "search",
+      "name": "Topic bootstrap",
+      "strategy": "Search '<topic> beginner guide + exam prep' and prioritize structured educational sources"
+    }
+  ]
+}

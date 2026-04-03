@@ -1,0 +1,42 @@
+{
+  "topic": "Indian economy basics",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-econ-1",
+      "question": "Which of the following statements correctly distinguishes NITI Aayog from the Planning Commission it replaced?",
+      "options": [
+        "NITI Aayog has constitutional status and can allocate funds to states directly",
+        "NITI Aayog is a policy advisory body with no fund-disbursement authority, unlike the Planning Commission",
+        "NITI Aayog focuses exclusively on rural development, while the Planning Commission covered all sectors",
+        "NITI Aayog publishes Five-Year Plans under a different name to align with state plans"
+      ],
+      "answerIndex": 1,
+      "explanation": "NITI Aayog is a think-tank and advisory body. It cannot allocate plan funds to states — that power moved to the Finance Commission and direct transfers. The Planning Commission had real resource-allocation authority."
+    },
+    {
+      "id": "upsc-econ-2",
+      "question": "If India's fiscal deficit for a year is ₹15 lakh crore and interest payments are ₹9 lakh crore, the primary deficit is:",
+      "options": [
+        "₹24 lakh crore",
+        "₹9 lakh crore",
+        "₹6 lakh crore",
+        "₹15 lakh crore"
+      ],
+      "answerIndex": 2,
+      "explanation": "Primary deficit = fiscal deficit − interest payments = 15 − 9 = 6 lakh crore. It shows how much the government is borrowing for current and capital expenditure excluding legacy interest burden."
+    },
+    {
+      "id": "upsc-econ-3",
+      "question": "Cash Reserve Ratio (CRR) and Statutory Liquidity Ratio (SLR) differ in that:",
+      "options": [
+        "CRR is maintained with RBI in cash; SLR is maintained by banks in liquid assets like gold and approved securities",
+        "CRR applies to scheduled commercial banks only; SLR applies to NBFCs and co-operative banks",
+        "CRR funds earn interest from RBI; SLR funds are non-interest bearing",
+        "SLR controls money supply directly whereas CRR has no direct monetary effect"
+      ],
+      "answerIndex": 0,
+      "explanation": "CRR is a fraction of net demand and time liabilities held as cash with RBI — it earns no interest. SLR is maintained in liquid assets (gold, T-bills, approved securities) held by the bank itself. Both are monetary tools but work differently."
+    }
+  ]
+}

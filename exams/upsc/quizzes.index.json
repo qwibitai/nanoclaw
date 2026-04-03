@@ -1,0 +1,39 @@
+{
+  "entries": [
+    {
+      "path": "quizzes/foundation/ancient-india.json",
+      "topic": "Ancient India foundations",
+      "keywords": ["ancient india", "indus valley", "vedic", "mauryan", "gupta", "harappan", "buddhism", "jainism", "mahajanapadas", "history"]
+    },
+    {
+      "path": "quizzes/foundation/modern-india-history.json",
+      "topic": "Modern India history foundations",
+      "keywords": ["modern india", "british rule", "colonialism", "nationalism", "gandhi", "congress", "non-cooperation", "civil disobedience", "independence", "history"]
+    },
+    {
+      "path": "quizzes/foundation/indian-polity-federalism.json",
+      "topic": "Indian polity federalism basics",
+      "keywords": ["polity", "federalism", "constitution", "centre state relations", "concurrent list", "union list", "state list", "seventh schedule", "governance"]
+    },
+    {
+      "path": "quizzes/foundation/indian-economy-basics.json",
+      "topic": "Indian economy basics",
+      "keywords": ["economy", "gdp", "planning", "niti aayog", "fiscal deficit", "rbi", "monetary policy", "agriculture", "msp", "external sector"]
+    },
+    {
+      "path": "quizzes/foundation/indian-geography-fundamentals.json",
+      "topic": "Indian geography fundamentals",
+      "keywords": ["geography", "physiography", "himalayas", "drainage", "rivers", "soils", "climate", "monsoon", "natural vegetation", "terrain"]
+    },
+    {
+      "path": "quizzes/foundation/indian-monsoon-basics.json",
+      "topic": "Indian monsoon basics",
+      "keywords": ["monsoon", "southwest monsoon", "northeast monsoon", "rainfall", "weather", "climate", "geography", "seasons", "imd"]
+    },
+    {
+      "path": "quizzes/foundation/environment-ecology-basics.json",
+      "topic": "Environment and ecology basics",
+      "keywords": ["environment", "ecology", "ecosystem", "biodiversity", "conservation", "climate change", "pollution", "hotspots", "national park", "biosphere reserve"]
+    }
+  ]
+}

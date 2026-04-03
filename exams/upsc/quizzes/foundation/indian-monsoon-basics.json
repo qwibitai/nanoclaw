@@ -1,0 +1,42 @@
+{
+  "topic": "Indian monsoon basics",
+  "exam": "UPSC CSE",
+  "questions": [
+    {
+      "id": "upsc-monsoon-1",
+      "question": "What is the most basic driver behind the seasonal reversal associated with the Indian monsoon?",
+      "options": [
+        "Only volcanic activity in the Indian Ocean",
+        "Differential heating of land and sea creating seasonal pressure changes",
+        "Permanent high pressure over the Himalayas throughout the year",
+        "Rotation of the Earth without any role for pressure gradients"
+      ],
+      "answerIndex": 1,
+      "explanation": "The land-sea heating contrast creates the seasonal pressure pattern that underlies the monsoon system."
+    },
+    {
+      "id": "upsc-monsoon-2",
+      "question": "Why do the Western Ghats receive heavy rainfall during the southwest monsoon?",
+      "options": [
+        "Because they lie in a major desert belt",
+        "Because they block retreating winter winds only",
+        "Because moist winds are forced to rise over the relief, producing orographic rainfall",
+        "Because they are far from the Arabian Sea"
+      ],
+      "answerIndex": 2,
+      "explanation": "Moist monsoon winds are forced upward by the Western Ghats, cool, and condense into heavy rainfall."
+    },
+    {
+      "id": "upsc-monsoon-3",
+      "question": "Which region is especially known for receiving important rainfall during the retreating monsoon season?",
+      "options": [
+        "Punjab",
+        "Rajasthan",
+        "Tamil Nadu coast",
+        "Ladakh"
+      ],
+      "answerIndex": 2,
+      "explanation": "Tamil Nadu benefits significantly from retreating monsoon rainfall, unlike many other parts of India that receive most of their rain earlier."
+    }
+  ]
+}

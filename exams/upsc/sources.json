@@ -1,0 +1,32 @@
+{
+  "exam": "UPSC CSE",
+  "slug": "upsc",
+  "sources": [
+    {
+      "category": "syllabus",
+      "type": "web",
+      "name": "UPSC Official Website",
+      "url": "https://upsc.gov.in",
+      "strategy": "Use official notifications and syllabus references as primary truth"
+    },
+    {
+      "category": "foundation",
+      "type": "web",
+      "name": "NCERT Textbook Portal",
+      "url": "https://ncert.nic.in/textbook.php",
+      "strategy": "Start with class-wise NCERT chapters for baseline concepts"
+    },
+    {
+      "category": "current-affairs",
+      "type": "search",
+      "name": "Weekly current affairs digests",
+      "strategy": "Find concise, issue-wise weekly summaries and cross-check with one primary source"
+    },
+    {
+      "category": "practice",
+      "type": "search",
+      "name": "Previous year question discussions",
+      "strategy": "Find solved PYQs and extract recurring topic patterns"
+    }
+  ]
+}
