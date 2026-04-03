@@ -24,6 +24,8 @@ export interface Plugin {
   containerEnvKeys?: string[];
   /** Binary to bake into the container image at build time */
   binaryInstall?: BinaryInstall;
+  /** Directories to pre-create with node:node ownership (needed when init scripts run as non-root) */
+  containerDirectories?: string[];
 }
 
 const plugins: Plugin[] = [];

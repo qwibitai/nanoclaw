@@ -11,7 +11,11 @@ if [ -n "$TAILSCALE_AUTH_KEY" ]; then
     if [ -n "$TAILSCALE_HOSTNAME" ]; then
         TS_UP_ARGS="$TS_UP_ARGS --hostname=$TAILSCALE_HOSTNAME"
     fi
-    mkdir -p /var/run/tailscale
+    # Verify directory exists (should be pre-created during docker build via containerDirectories)
+    if [ ! -d /var/run/tailscale ]; then
+        echo "[tailscale] ERROR: /var/run/tailscale does not exist. Check that containerDirectories is set in the plugin registration."
+        exit 1
+    fi
     ln -sf /tmp/tailscale.sock /var/run/tailscale/tailscaled.sock
     tailscale --socket=/tmp/tailscale.sock up $TS_UP_ARGS || true
     # Serve port 8088 over HTTPS on the tailnet

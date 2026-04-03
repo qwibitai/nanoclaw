@@ -45,3 +45,12 @@ fs.writeFileSync(outPath, JSON.stringify(binaries, null, 2) + '\n');
 console.log(
   `Generated plugins/binaries.json (${binaries.length} plugin${binaries.length !== 1 ? 's' : ''} with binaries)`,
 );
+
+// Generate directories.json from containerDirectories declarations
+const directories = [...new Set(plugins.flatMap((p) => p.containerDirectories ?? []))];
+const dirsPath = path.join(process.cwd(), 'container', 'plugins', 'directories.json');
+fs.writeFileSync(dirsPath, JSON.stringify(directories, null, 2) + '\n');
+
+console.log(
+  `Generated plugins/directories.json (${directories.length} director${directories.length !== 1 ? 'ies' : 'y'})`,
+);

@@ -88,7 +88,17 @@ plugins.forEach((p, index) => {\
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Pre-create directories that plugin init scripts need (must exist and be writable by node user)
-RUN mkdir -p /var/run/tailscale && chown node:node /var/run/tailscale
+COPY plugins/directories.json /tmp/plugins-dirs.json
+RUN node -e "\
+const fs = require('fs');\
+const { execFileSync } = require('child_process');\
+const dirs = JSON.parse(fs.readFileSync('/tmp/plugins-dirs.json'));\
+dirs.forEach(dir => {\
+  console.log('Creating plugin directory: ' + dir);\
+  execFileSync('mkdir', ['-p', dir], { stdio: 'inherit' });\
+  execFileSync('chown', ['node:node', dir], { stdio: 'inherit' });\
+});\
+"
 
 # Plugin container-init scripts (sourced at container startup before the agent runs)
 COPY plugins/ /app/plugins/
