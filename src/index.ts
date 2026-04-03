@@ -19,6 +19,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
+import { seedGroupMemoryFiles } from './agent/memory.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -141,6 +142,73 @@ function saveState(): void {
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
+function rewriteAssistantNameInMemoryFile(filePath: string): void {
+  if (ASSISTANT_NAME === 'Andy') {
+    return;
+  }
+
+  let content = fs.readFileSync(filePath, 'utf-8');
+  content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
+  content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
+  fs.writeFileSync(filePath, content);
+}
+
+function ensureGroupMemoryFilesReady(
+  groupDir: string,
+  group: RegisteredGroup,
+  logMessage: string,
+): void {
+  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+
+  const seededMemory = seedGroupMemoryFiles({
+    targetDir: groupDir,
+    templateDir: path.join(GROUPS_DIR, group.isMain ? 'main' : 'global'),
+  });
+
+  for (const file of [seededMemory.canonical, seededMemory.compatibility]) {
+    if (!file.created) {
+      continue;
+    }
+
+    rewriteAssistantNameInMemoryFile(file.path);
+    logger.info(
+      { folder: group.folder, file: file.path, seededFrom: file.seededFrom },
+      logMessage,
+    );
+  }
+}
+
+function restoreRegisteredGroupsOnStartup(
+  groups: Record<string, RegisteredGroup>,
+): void {
+  for (const [jid, group] of Object.entries(groups)) {
+    let groupDir: string;
+    try {
+      groupDir = resolveGroupFolderPath(group.folder);
+    } catch (err) {
+      logger.warn(
+        { jid, folder: group.folder, err },
+        'Skipping startup recovery for group with invalid folder',
+      );
+      continue;
+    }
+
+    ensureGroupMemoryFilesReady(
+      groupDir,
+      group,
+      'Created memory file during startup recovery',
+    );
+    ensureOneCLIAgent(jid, group);
+  }
+}
+
+/** @internal - exported for testing */
+export function _restoreRegisteredGroupsOnStartupForTest(
+  groups: Record<string, RegisteredGroup>,
+): void {
+  restoreRegisteredGroupsOnStartup(groups);
+}
+
 function registerGroup(jid: string, group: RegisteredGroup): void {
   let groupDir: string;
   try {
@@ -156,28 +224,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
-  // Create group folder
-  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-  // Copy CLAUDE.md template into the new group folder so agents have
-  // identity and instructions from the first run.  (Fixes #1391)
-  const groupMdFile = path.join(groupDir, 'CLAUDE.md');
-  if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(
-      GROUPS_DIR,
-      group.isMain ? 'main' : 'global',
-      'CLAUDE.md',
-    );
-    if (fs.existsSync(templateFile)) {
-      let content = fs.readFileSync(templateFile, 'utf-8');
-      if (ASSISTANT_NAME !== 'Andy') {
-        content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
-        content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
-      }
-      fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
-    }
-  }
+  // Seed the provider-neutral AGENT.md first, then render CLAUDE.md as a
+  // compatibility file for the current Claude runtime. Never overwrite
+  // existing user-authored memory files.
+  ensureGroupMemoryFilesReady(
+    groupDir,
+    group,
+    'Created memory file during group registration',
+  );
 
   // Ensure a corresponding OneCLI agent exists (best-effort, non-blocking)
   ensureOneCLIAgent(jid, group);
@@ -186,6 +240,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+/** @internal - exported for testing */
+export function _registerGroupForTest(
+  jid: string,
+  group: RegisteredGroup,
+): void {
+  registerGroup(jid, group);
 }
 
 /**
@@ -572,12 +634,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
-
-  // Ensure OneCLI agents exist for all registered groups.
-  // Recovers from missed creates (e.g. OneCLI was down at registration time).
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    ensureOneCLIAgent(jid, group);
-  }
+  restoreRegisteredGroupsOnStartup(registeredGroups);
 
   restoreRemoteControl();
 

@@ -414,11 +414,16 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  if (!containerInput.isMain) {
+    const canonicalGlobalMemoryPath = '/workspace/global/AGENT.md';
+    const legacyGlobalMemoryPath = '/workspace/global/CLAUDE.md';
+
+    if (fs.existsSync(canonicalGlobalMemoryPath)) {
+      globalClaudeMd = fs.readFileSync(canonicalGlobalMemoryPath, 'utf-8');
+    } else if (fs.existsSync(legacyGlobalMemoryPath)) {
+      globalClaudeMd = fs.readFileSync(legacyGlobalMemoryPath, 'utf-8');
+    }
   }
 
   // Discover additional directories mounted at /workspace/extra/*
