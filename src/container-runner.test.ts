@@ -205,8 +205,11 @@ describe('container-runner with BoxLite', () => {
       onOutput,
     );
 
-    // Let box creation and exec settle
-    await vi.advanceTimersByTimeAsync(10);
+    // Settle the deep async setup chain (dynamic import → OneCLI →
+    // buildBoxConfig → spawnBox → readStdout). Each await in the chain
+    // needs a microtask flush; individual small advances ensure full drainage
+    // that a single advanceTimersByTimeAsync may not achieve.
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
     // Emit output with a result
     emitOutputToExec(mockExec, {
@@ -215,18 +218,19 @@ describe('container-runner with BoxLite', () => {
       newSessionId: 'session-123',
     });
 
-    // Let output processing settle
-    await vi.advanceTimersByTimeAsync(10);
+    // Settle output processing (sets hadStreamingOutput=true, resets timeout)
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
-    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
-    await vi.advanceTimersByTimeAsync(1830000);
+    // Fire the hard timeout. resetTimeout() rescheduled the timer,
+    // so advance well past it to avoid boundary timing issues.
+    await vi.advanceTimersByTimeAsync(1830000 + 1000);
 
     // Close streams and resolve wait (simulating box being killed)
     mockExec.closeStdout();
     mockExec.closeStderr();
     mockExec.resolveWait(137);
 
-    await vi.advanceTimersByTimeAsync(10);
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');

@@ -5,9 +5,9 @@ export interface AdditionalMount {
 }
 
 /**
- * Mount Allowlist - Security configuration for additional mounts
- * This file should be stored at ~/.config/agentlite/mount-allowlist.json
- * and is NOT mounted into any container, making it tamper-proof from agents.
+ * Mount Allowlist - Security configuration for additional mounts.
+ * Can be passed directly via AgentLiteOptions.mountAllowlist (SDK mode)
+ * or loaded from a JSON file (CLI mode). Never mounted into containers.
  */
 export interface MountAllowlist {
   // Directories that can be mounted into containers

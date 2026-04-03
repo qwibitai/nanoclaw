@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { isValidTimezone } from './timezone.js';
 
 import type { AgentLiteOptions } from './options.js';
+import type { MountAllowlist } from './types.js';
 
 /** Internal config overrides (not part of public SDK API). Used by CLI. */
 export interface InternalConfigOverrides {
@@ -63,19 +64,12 @@ export function getProjectRoot(): string {
   return PROJECT_ROOT;
 }
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export let MOUNT_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'agentlite',
-  'mount-allowlist.json',
-);
-export let SENDER_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'agentlite',
-  'sender-allowlist.json',
-);
+// Mount security: allowlist stored OUTSIDE project root, never mounted into containers.
+// In SDK mode, prefer MOUNT_ALLOWLIST (in-memory object) over MOUNT_ALLOWLIST_PATH (file).
+// The file path default is empty — CLI mode sets it via applyInternalConfig().
+export let MOUNT_ALLOWLIST: MountAllowlist | null = null;
+export let MOUNT_ALLOWLIST_PATH = '';
+export let SENDER_ALLOWLIST_PATH = '';
 export let STORE_DIR = '';
 export let GROUPS_DIR = '';
 export let DATA_DIR = '';
@@ -129,6 +123,11 @@ export function applyConfig(opts: AgentLiteOptions): void {
   if (opts.name) {
     ASSISTANT_NAME = opts.name;
     TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(opts.name)}\\b`, 'i');
+  }
+
+  // Mount allowlist — in-memory object, no file needed in SDK mode
+  if (opts.mountAllowlist !== undefined) {
+    MOUNT_ALLOWLIST = opts.mountAllowlist;
   }
 
   // Paths — workdir is resolved at call time (not import time) so Electron

@@ -33,7 +33,14 @@ export type {
   CredentialResolver,
   GroupOptions,
 } from './options.js';
-export type { Channel, RegisteredGroup } from './types.js';
+export type {
+  Channel,
+  RegisteredGroup,
+  ContainerConfig,
+  AdditionalMount,
+  MountAllowlist,
+  AllowedRoot,
+} from './types.js';
 
 export class AgentLite {
   private _channels: Channel[] = [];
@@ -106,6 +113,7 @@ export class AgentLite {
       isMain: options.isMain ?? false,
       requiresTrigger:
         options.requiresTrigger ?? (options.isMain ? false : true),
+      containerConfig: options.containerConfig,
     };
 
     this._groups.set(jid, group);

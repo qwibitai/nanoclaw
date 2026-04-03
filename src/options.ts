@@ -5,6 +5,14 @@
  * so the API surface is easy to review and doesn't pull in runtime logic.
  */
 
+import type { ContainerConfig, MountAllowlist } from './types.js';
+export type {
+  ContainerConfig,
+  AdditionalMount,
+  MountAllowlist,
+  AllowedRoot,
+} from './types.js';
+
 /** Resolves credentials to env vars injected into agent containers.
  *  Called once per container spawn. Return a map like { ANTHROPIC_API_KEY: 'sk-...' }. */
 export type CredentialResolver = () => Promise<Record<string, string>>;
@@ -24,6 +32,9 @@ export interface AgentLiteOptions {
   workdir?: string;
   /** Model/LLM configuration. If not provided, falls back to OneCLI gateway for credentials. */
   model?: ModelOptions;
+  /** Mount allowlist for container security. Defines which host paths can be mounted.
+   *  If not provided, all additional mounts are blocked. */
+  mountAllowlist?: MountAllowlist;
 }
 
 /** Simplified group options for SDK registration. */
@@ -33,4 +44,5 @@ export interface GroupOptions {
   folder?: string;
   trigger?: string;
   requiresTrigger?: boolean;
+  containerConfig?: ContainerConfig;
 }
