@@ -18,7 +18,7 @@ Three execution layers: (1) NanoClaw orchestrator handles message routing and sc
 | `src/ipc.ts` | IPC watcher, task processing, document uploads |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/commands.ts` | Telegram slash commands: /pause, /resume, /status, /approve, /reject, /quota |
+| `src/commands.ts` | Telegram slash commands: /pause, /resume, /status, /approve, /reject, /quota, /reset-mode, /codex |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/credential-proxy.ts` | Proxy that injects API credentials into containers (OAuth auto-refresh) |
 | `src/remote-control.ts` | Spawns `claude -p` sessions from Telegram, returns Remote Control URL |
@@ -45,6 +45,8 @@ Handled mechanically in `src/commands.ts` — no LLM, no container, instant resp
 | `/approve [taskId]` | Approve a pending task in the approval queue |
 | `/reject [taskId]` | Reject a pending task |
 | `/quota` | Show quota usage breakdown (weighted units, model split, throttle state) |
+| `/reset-mode` | Reset mode from paused/maintenance back to active |
+| `/codex [on\|off]` | Toggle Codex delegation (on) or Claude subagents (off) |
 
 ## Governance Module (container/agent-runner/src/governance/)
 
