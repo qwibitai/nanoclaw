@@ -22,6 +22,7 @@ Two phases: **Extract** (build the migration guide) and **Upgrade** (use it). If
 - Data directories (`groups/`, `store/`, `data/`, `.env`) are never touched — only code.
 - Be helpful: offer to do things (stash, commit, stop services) rather than telling the user to do them.
 - **Use sub-agents for exploration.** Spawn haiku sub-agents to explore the codebase, trace skill merges, diff files, and identify customizations. This keeps the main context focused on the user conversation and decision-making.
+- **Always use absolute paths in worktrees.** The Bash tool resets the working directory between calls. Never use relative `cd .upgrade-worktree` — always use the full absolute path: `cd /absolute/path/.upgrade-worktree && <command>`. Store the worktree absolute path in a variable at creation time and reference it throughout.
 - **Balance exploration and asking.** Don't bombard the user with questions when you can figure things out from the code. Don't burn endless tokens exploring when the user could clarify in one sentence. Use sub-agents to explore first, then ask the user targeted questions about things that are ambiguous or where intent isn't clear from the code alone.
 - **Scale effort to complexity.** Not every migration needs the full process. Assess the scope early and take the lightest path that fits.
 
@@ -72,9 +73,10 @@ Conditions:
 ### Tier 3: Complex
 
 Conditions (any of):
-- Large total diff (15+ changed files) or many new files added (indicates many skills applied)
-- Lots of insertions/deletions suggesting deep source changes
-- Many skills applied (the presence of many new files — channel files, skill directories — is the signal, not per-file analysis)
+- Many new files added (indicates many skills applied) — discount files that come purely from skill merges when assessing complexity; a fork with 3 skills and no other changes is simpler than it looks by file count alone
+- Deep source changes to core files (`src/index.ts`, `src/container-runner.ts`, etc.) beyond what skills introduced
+- Lots of insertions/deletions in user-authored code (not skill-merged code)
+- Many skills applied (3+) AND the user confirms or sub-agents find customizations on top of them
 
 Use the full process: multiple sub-agents in parallel, directory-based guide, migration plan.
 
@@ -150,6 +152,13 @@ Each sub-agent task:
 > 4. Assess detail level: could a fresh Claude session reproduce this from intent alone, or does it need specific code snippets, API details, import paths?
 > 5. For non-standard changes, extract the key code, imports, API calls, and configurations verbatim.
 
+**Inter-skill conflicts:** If multiple skills are applied, spawn an additional sub-agent to check for interactions between them. Look for:
+- Duplicate declarations (same variable/constant defined by two skill branches)
+- Conflicting approaches (one skill throws on missing env var, another provides a fallback)
+- Shared files modified by multiple skills
+
+Document any findings in the "Skill Interactions" section of the migration guide so they can be resolved after skill branches are re-merged during upgrade.
+
 ## 1.5 Confirm with user
 
 After sub-agents report back, compile the findings and present to the user.
@@ -204,6 +213,15 @@ List each skill with its branch name. These are reapplied by merging the upstrea
 - `add-voice-transcription` — branch `skill/voice-transcription`
 
 Custom skills (user-created, not from upstream): `.claude/skills/my-custom-skill/` — copy as-is from main tree.
+
+## Skill Interactions
+
+(Document known conflicts or interactions between applied skills.
+When two or more skills modify the same file or depend on shared
+config, describe the conflict and how to resolve it after merging.
+Example: skill A and skill B both add a PROXY_BIND_HOST declaration —
+after merging both, deduplicate. Or: skill A throws if ENV_VAR is
+missing, but skill B provides a fallback — use the fallback version.)
 
 ## Modifications to Applied Skills
 
@@ -334,8 +352,12 @@ Ask (AskUserQuestion) to proceed or abort.
 ## 2.3 Create upgrade worktree
 
 ```bash
+PROJECT_ROOT=$(pwd)
 git worktree add .upgrade-worktree upstream/$UPSTREAM_BRANCH --detach
+WORKTREE="$PROJECT_ROOT/.upgrade-worktree"
 ```
+
+Store `$PROJECT_ROOT` and `$WORKTREE` as absolute paths. Use `$WORKTREE` in all subsequent commands — never `cd .upgrade-worktree` with a relative path.
 
 ## 2.4 Reapply skills in worktree
 
@@ -344,7 +366,7 @@ For each skill listed in the migration guide's "Applied Skills" section:
 1. Check if branch exists: `git branch -r --list "upstream/$branch"`
 2. If yes, merge it in the worktree:
    ```bash
-   cd .upgrade-worktree && git merge upstream/skill/<name> --no-edit && cd ..
+   cd "$WORKTREE" && git merge upstream/skill/<name> --no-edit
    ```
 3. If missing, warn the user (skill may have been removed or renamed upstream).
 4. If any skill merge conflicts, stop and tell the user — the skill needs updating for the new upstream.
@@ -369,7 +391,7 @@ For behavior customizations (CLAUDE.md files): copy from the main tree. These ar
 ## 2.6 Validate in worktree
 
 ```bash
-cd .upgrade-worktree && npm install && npm run build && npm test; cd ..
+cd "$WORKTREE" && npm install && npm run build && npm test
 ```
 
 If build fails, show the error. Fix only issues caused by the migration. If unclear, ask the user.
@@ -389,13 +411,13 @@ If testing live:
 
 2. Symlink data into the worktree:
    ```bash
-   ln -s $(pwd)/store .upgrade-worktree/store
-   ln -s $(pwd)/data .upgrade-worktree/data
-   ln -s $(pwd)/groups .upgrade-worktree/groups
-   ln -s $(pwd)/.env .upgrade-worktree/.env
+   ln -s "$PROJECT_ROOT/store" "$WORKTREE/store"
+   ln -s "$PROJECT_ROOT/data" "$WORKTREE/data"
+   ln -s "$PROJECT_ROOT/groups" "$WORKTREE/groups"
+   ln -s "$PROJECT_ROOT/.env" "$WORKTREE/.env"
    ```
 
-3. Start from worktree: `cd .upgrade-worktree && npm run dev`
+3. Start from worktree: `cd "$WORKTREE" && npm run dev`
 
 4. Ask the user to send a test message from their phone. Wait for them to confirm it works.
 
@@ -403,22 +425,39 @@ If testing live:
 
 6. Clean up symlinks:
    ```bash
-   rm .upgrade-worktree/store .upgrade-worktree/data .upgrade-worktree/groups .upgrade-worktree/.env
+   rm "$WORKTREE/store" "$WORKTREE/data" "$WORKTREE/groups" "$WORKTREE/.env"
    ```
 
 ## 2.8 Swap into main tree
 
+The swap must be done carefully — the worktree has the upgraded code, but main needs to point to it cleanly. Use absolute paths throughout.
+
 ```bash
-UPGRADE_COMMIT=$(cd .upgrade-worktree && git rev-parse HEAD)
-git checkout -B upgrade-staging $UPGRADE_COMMIT
-git worktree remove .upgrade-worktree --force
+# 1. Capture the worktree HEAD before removing it
+WORKTREE_PATH=$(cd "$PROJECT_ROOT/.upgrade-worktree" && pwd)
+UPGRADE_COMMIT=$(git -C "$WORKTREE_PATH" rev-parse HEAD)
+
+# 2. Copy the migration guide out of the worktree before removing it
+cp -r "$WORKTREE_PATH/.nanoclaw-migrations" /tmp/nanoclaw-migrations-backup 2>/dev/null || true
+
+# 3. Remove the worktree
+git worktree remove "$WORKTREE_PATH" --force
+
+# 4. Point the current branch at the upgraded commit
+git reset --hard $UPGRADE_COMMIT
+
+# 5. Restore the migration guide and update its hashes
+cp -r /tmp/nanoclaw-migrations-backup/* .nanoclaw-migrations/ 2>/dev/null || true
+rm -rf /tmp/nanoclaw-migrations-backup
 ```
 
-Copy the migration guide back and update its header hashes. Offer to commit:
+Update the guide's header hashes to reflect the new state. Offer to commit:
 ```bash
 git add .nanoclaw-migrations/
 git commit -m "chore: upgrade to upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"
 ```
+
+Do NOT use `git checkout -B` to create an intermediate branch — this caused issues in practice. The `git reset --hard` to the upgrade commit is the cleanest path since the backup tag already preserves the pre-upgrade state.
 
 ## 2.9 Post-upgrade
 
