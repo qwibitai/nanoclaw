@@ -28,19 +28,23 @@ export interface Plugin {
   containerDirectories?: string[];
 }
 
-const plugins: Plugin[] = [];
+const plugins = new Map<string, Plugin>();
 
 export function registerPlugin(plugin: Plugin): void {
-  plugins.push(plugin);
+  plugins.set(plugin.name, plugin);
 }
 
 export function getRegisteredPlugins(): Plugin[] {
-  return [...plugins];
+  return [...plugins.values()];
 }
 
 /** Collect all container env keys declared by registered plugins */
 export function getPluginContainerEnvKeys(): string[] {
-  return [...new Set(plugins.flatMap((p) => p.containerEnvKeys ?? []))];
+  return [
+    ...new Set(
+      [...plugins.values()].flatMap((p) => p.containerEnvKeys ?? []),
+    ),
+  ];
 }
 
 /** Filter env to only the keys plugins declared, for injection into docker run */
@@ -48,7 +52,7 @@ export function getPluginContainerEnv(
   env: Record<string, string>,
 ): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const plugin of plugins) {
+  for (const plugin of plugins.values()) {
     for (const key of plugin.containerEnvKeys ?? []) {
       if (env[key] !== undefined) result[key] = env[key];
     }
@@ -58,5 +62,5 @@ export function getPluginContainerEnv(
 
 /** Reset plugin registry — for testing only */
 export function _resetForTesting(): void {
-  plugins.length = 0;
+  plugins.clear();
 }
