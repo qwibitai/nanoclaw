@@ -13,7 +13,15 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 echo "Generating plugin manifest..."
 (cd "$PROJECT_DIR" && npx tsx scripts/generate-plugin-manifest.ts)
 
-# Display what plugins contributed
+echo "Building NanoClaw agent container image..."
+echo "Image: ${IMAGE_NAME}:${TAG}"
+
+cd "$SCRIPT_DIR"
+${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
+
+echo ""
+echo "Build complete!"
+echo "Image: ${IMAGE_NAME}:${TAG}"
 echo ""
 echo "Plugin contributions:"
 if [ -f "$SCRIPT_DIR/plugins/binaries.json" ]; then
@@ -33,17 +41,6 @@ fi
 if [ "$BINARIES" -eq 0 ] && [ "$DIRS" -eq 0 ]; then
   echo "  (none)"
 fi
-echo ""
-
-echo "Building NanoClaw agent container image..."
-echo "Image: ${IMAGE_NAME}:${TAG}"
-
-cd "$SCRIPT_DIR"
-${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
-
-echo ""
-echo "Build complete!"
-echo "Image: ${IMAGE_NAME}:${TAG}"
 echo ""
 echo "Test with:"
 echo "  echo '{\"prompt\":\"What is 2+2?\",\"groupFolder\":\"test\",\"chatJid\":\"test@g.us\",\"isMain\":false}' | ${CONTAINER_RUNTIME} run -i ${IMAGE_NAME}:${TAG}"
