@@ -24,6 +24,7 @@ import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, IncomingMessage, RequestOptions } from 'http';
 
+import { HOST_CLAUDE_DIR } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
@@ -34,11 +35,8 @@ export interface ProxyConfig {
 }
 
 // Credentials file path (where Claude Code stores OAuth tokens)
-const CREDENTIALS_PATH = path.join(
-  os.homedir(),
-  '.claude',
-  '.credentials.json',
-);
+// Uses HOST_CLAUDE_DIR so services running as non-atlas users still find the right file.
+const CREDENTIALS_PATH = path.join(HOST_CLAUDE_DIR, '.credentials.json');
 
 // Anthropic OAuth endpoints
 const OAUTH_BASE = 'https://claude.ai';

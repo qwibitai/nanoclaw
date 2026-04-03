@@ -26,6 +26,11 @@ const QUOTA_TRACKING_PATH = path.join(
   'quota-tracking.jsonl',
 );
 const MODE_PATH = path.join(ATLAS_STATE_DIR, 'state', 'mode.json');
+
+// Mission state paths
+const MISSIONS_DIR = path.join(ATLAS_STATE_DIR, 'swarm', 'missions');
+const MISSION_TEMPLATES_PATH = path.join(ATLAS_STATE_DIR, 'swarm', 'mission-templates.json');
+const HOST_TASKS_PENDING = path.join(ATLAS_STATE_DIR, 'host-tasks', 'pending');
 const APPROVAL_PENDING_DIR = path.join(
   ATLAS_STATE_DIR,
   'approval-queue',
@@ -80,6 +85,8 @@ export function handleCommand(text: string): CommandResult {
       return { handled: true, response: handleReject(args) };
     case '/quota':
       return { handled: true, response: handleQuota() };
+    case '/mission':
+      return { handled: true, response: handleMission(args) };
     case '/reset-mode':
       return { handled: true, response: handleResetMode() };
     default:
@@ -344,6 +351,225 @@ function handleResetMode(): string {
   }
 }
 
+
+function handleMission(args: string[]): string {
+  if (args.length === 0) {
+    return `Usage:
+  /mission list — Show recent missions
+  /mission status <id> — Mission details
+  /mission create <type> [entity] — Create mission (queues for approval)
+  /mission approve <id> — Execute approved mission
+  /mission stop <id> — Stop running mission
+  /mission types — List available mission types`;
+  }
+
+  const subcmd = args[0].toLowerCase();
+  const subargs = args.slice(1);
+
+  switch (subcmd) {
+    case 'list':
+      return missionList();
+    case 'status':
+      return missionStatus(subargs[0]);
+    case 'create':
+      return missionCreate(subargs[0], subargs[1]);
+    case 'approve':
+      return missionApprove(subargs[0]);
+    case 'stop':
+      return missionStop(subargs[0]);
+    case 'types':
+      return missionTypes();
+    default:
+      return `Unknown mission command: ${subcmd}`;
+  }
+}
+
+function missionTypes(): string {
+  try {
+    if (!fs.existsSync(MISSION_TEMPLATES_PATH)) return 'No mission templates found.';
+    const data = JSON.parse(fs.readFileSync(MISSION_TEMPLATES_PATH, 'utf-8'));
+    const templates = data.templates || {};
+    const lines = ['Available mission types:'];
+    for (const [key, tmpl] of Object.entries(templates)) {
+      const t = tmpl as { name: string; estimated_cost: number; estimated_minutes: number; roles: Record<string, unknown> };
+      const roleCount = Object.keys(t.roles || {}).length;
+      lines.push(`  ${key} — ${t.name} (${roleCount} roles, ~$${t.estimated_cost}, ~${t.estimated_minutes}min)`);
+    }
+    return lines.join('\n');
+  } catch (err) {
+    return `Error reading templates: ${err}`;
+  }
+}
+
+function missionList(): string {
+  try {
+    if (!fs.existsSync(MISSIONS_DIR)) return 'No missions yet.';
+    const dirs = fs.readdirSync(MISSIONS_DIR).filter(d =>
+      fs.statSync(path.join(MISSIONS_DIR, d)).isDirectory()
+    ).sort().reverse().slice(0, 10);
+
+    if (dirs.length === 0) return 'No missions yet.';
+
+    const lines = ['Recent missions:'];
+    for (const dir of dirs) {
+      const statusPath = path.join(MISSIONS_DIR, dir, 'status.json');
+      try {
+        const status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+        const roleCount = Object.keys(status.roles || {}).length;
+        lines.push(`  ${dir} | ${status.status} | ${roleCount} roles | ${status.started_at || 'pending'}`);
+      } catch {
+        lines.push(`  ${dir} | (no status file)`);
+      }
+    }
+    return lines.join('\n');
+  } catch (err) {
+    return `Error: ${err}`;
+  }
+}
+
+function missionStatus(id?: string): string {
+  if (!id) return 'Usage: /mission status <mission-id>';
+  try {
+    // Find mission by partial match
+    if (!fs.existsSync(MISSIONS_DIR)) return 'No missions directory.';
+    const dirs = fs.readdirSync(MISSIONS_DIR);
+    const match = dirs.find(d => d.includes(id));
+    if (!match) return `Mission not found: ${id}`;
+
+    const statusPath = path.join(MISSIONS_DIR, match, 'status.json');
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+    const lines = [
+      `Mission: ${match}`,
+      `Status: ${status.status}`,
+      `Started: ${status.started_at || 'n/a'}`,
+      `Completed: ${status.completed_at || 'running'}`,
+      '',
+      'Roles:'
+    ];
+    for (const [role, roleStatus] of Object.entries(status.roles || {})) {
+      lines.push(`  ${role}: ${roleStatus}`);
+    }
+
+    // Check for outputs
+    const workspace = path.join(MISSIONS_DIR, match, 'workspace');
+    if (fs.existsSync(workspace)) {
+      const outputs = fs.readdirSync(workspace).filter(f => f.endsWith('-output.md'));
+      if (outputs.length > 0) {
+        lines.push('');
+        lines.push('Outputs:');
+        for (const f of outputs) {
+          const size = fs.statSync(path.join(workspace, f)).size;
+          lines.push(`  ${f} (${size} bytes)`);
+        }
+      }
+    }
+
+    return lines.join('\n');
+  } catch (err) {
+    return `Error: ${err}`;
+  }
+}
+
+function missionCreate(missionType?: string, entity?: string): string {
+  if (!missionType) return 'Usage: /mission create <type> [entity]\nRun /mission types for available types.';
+  try {
+    if (!fs.existsSync(MISSION_TEMPLATES_PATH)) return 'No mission templates found.';
+    const data = JSON.parse(fs.readFileSync(MISSION_TEMPLATES_PATH, 'utf-8'));
+    const template = data.templates?.[missionType];
+    if (!template) return `Unknown mission type: ${missionType}\nRun /mission types for available types.`;
+
+    const missionId = `mission-${Date.now()}`;
+    const missionEntity = entity || 'atlas_main';
+
+    // Queue as host-executor task
+    const task = {
+      task_id: missionId,
+      type: 'mission',
+      entity: missionEntity,
+      brief: template.brief_template,
+      roster: { roles: template.roles },
+      model: 'sonnet',
+      status: 'pending_approval',
+      created_at: new Date().toISOString(),
+      created_via: 'telegram',
+      mission_type: missionType,
+    };
+
+    // Write to approval queue, not directly to pending
+    const approvalDir = path.join(ATLAS_STATE_DIR, 'approval-queue', 'pending');
+    fs.mkdirSync(approvalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(approvalDir, `${missionId}.json`),
+      JSON.stringify(task, null, 2)
+    );
+
+    const roleNames = Object.keys(template.roles).join(', ');
+    return `Mission created: ${missionId}\nType: ${template.name}\nEntity: ${missionEntity}\nRoles: ${roleNames}\nEst. cost: ~$${template.estimated_cost}\n\n⏳ Awaiting approval. Run: /mission approve ${missionId}`;
+  } catch (err) {
+    return `Error: ${err}`;
+  }
+}
+
+function missionApprove(id?: string): string {
+  if (!id) return 'Usage: /mission approve <mission-id>';
+  try {
+    const approvalDir = path.join(ATLAS_STATE_DIR, 'approval-queue', 'pending');
+    if (!fs.existsSync(approvalDir)) return 'No pending approvals.';
+
+    const files = fs.readdirSync(approvalDir).filter(f => f.includes(id));
+    if (files.length === 0) return `No pending mission found: ${id}`;
+
+    const filePath = path.join(approvalDir, files[0]);
+    const task = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+    if (task.type !== 'mission') return `Item ${id} is not a mission.`;
+
+    // Move to host-executor pending tasks
+    delete task.status;
+    fs.mkdirSync(HOST_TASKS_PENDING, { recursive: true });
+    fs.writeFileSync(
+      path.join(HOST_TASKS_PENDING, files[0]),
+      JSON.stringify(task, null, 2)
+    );
+
+    // Remove from approval queue
+    fs.unlinkSync(filePath);
+
+    logger.info({ missionId: id }, 'Mission approved and queued for execution');
+    return `✅ Mission approved: ${id}\nQueued for execution. Use /mission list to track.`;
+  } catch (err) {
+    return `Error: ${err}`;
+  }
+}
+
+function missionStop(id?: string): string {
+  if (!id) return 'Usage: /mission stop <mission-id>';
+  try {
+    if (!fs.existsSync(MISSIONS_DIR)) return 'No missions directory.';
+    const dirs = fs.readdirSync(MISSIONS_DIR);
+    const match = dirs.find(d => d.includes(id));
+    if (!match) return `Mission not found: ${id}`;
+
+    const statusPath = path.join(MISSIONS_DIR, match, 'status.json');
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+
+    if (status.status !== 'running') {
+      return `Mission ${match} is ${status.status}, not running.`;
+    }
+
+    status.status = 'stopped';
+    status.stopped_at = new Date().toISOString();
+    status.stopped_by = 'ceo_telegram';
+    fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+
+    // Note: actual process termination happens via host-executor monitoring
+    // This sets the flag that the monitor checks
+    logger.info({ missionId: match }, 'Mission stop requested via Telegram');
+    return `🛑 Mission stopped: ${match}\nRunning processes will be terminated by host-executor.`;
+  } catch (err) {
+    return `Error: ${err}`;
+  }
+}
 // --- Helper functions ---
 
 function readMode(): string {

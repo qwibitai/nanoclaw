@@ -11,7 +11,7 @@ import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
-import { MOUNT_ALLOWLIST_PATH } from './config.js';
+import { HOME_DIR, MOUNT_ALLOWLIST_PATH } from './config.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
 const logger = pino({
@@ -122,7 +122,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
  * Expand ~ to home directory and resolve to absolute path
  */
 function expandPath(p: string): string {
-  const homeDir = process.env.HOME || os.homedir();
+  const homeDir = HOME_DIR;
   if (p.startsWith('~/')) {
     return path.join(homeDir, p.slice(2));
   }
