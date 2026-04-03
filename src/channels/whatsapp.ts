@@ -25,6 +25,7 @@ import {
   storeReaction,
   updateChatName,
 } from '../db.js';
+import { analyzeImage, analyzeVideo, isGeminiEnabled } from '../gemini.js';
 import { isImageMessage, processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
@@ -229,14 +230,47 @@ export class WhatsAppChannel implements Channel {
               if (result) {
                 content = result.content;
               }
+              // Gemini image analysis (append to whatever content we have)
+              if (isGeminiEnabled()) {
+                const analysis = await analyzeImage(
+                  buffer as Buffer,
+                  msg.message?.imageMessage?.mimetype || undefined,
+                  caption,
+                );
+                if (analysis) {
+                  content = content
+                    ? `${content}\n[Gemini Image Analysis: ${analysis}]`
+                    : `[Gemini Image Analysis: ${analysis}]`;
+                }
+              }
             } catch (err) {
               logger.warn({ err, jid: chatJid }, 'Image - download failed');
             }
           }
 
+          // Video attachment handling
+          if (msg.message?.videoMessage) {
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              const mimetype = msg.message.videoMessage.mimetype || 'video/mp4';
+              const caption = msg.message.videoMessage.caption || '';
+              if (isGeminiEnabled()) {
+                const analysis = await analyzeVideo(buffer as Buffer, mimetype, caption);
+                content = caption
+                  ? `${caption}\n[Video Analysis: ${analysis || 'unavailable'}]`
+                  : `[Video Analysis: ${analysis || 'unavailable'}]`;
+              } else {
+                content = caption || '[Video - no analysis (GEMINI_API_KEY not set)]';
+              }
+            } catch (err) {
+              logger.warn({ err }, 'Video - processing failed');
+              content = msg.message.videoMessage.caption || '[Video - processing failed]';
+            }
+          }
+
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           // but allow voice messages through for transcription
-          if (!content && !isVoiceMessage(msg)) continue;
+          if (!content && !isVoiceMessage(msg) && !msg.message?.videoMessage) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];

@@ -39,6 +39,13 @@ vi.mock('../transcription.js', () => ({
     .mockResolvedValue('Hello this is a voice message'),
 }));
 
+// Mock gemini module
+vi.mock('../gemini.js', () => ({
+  isGeminiEnabled: vi.fn(() => false),
+  analyzeImage: vi.fn().mockResolvedValue(null),
+  analyzeVideo: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock image module
 vi.mock('../image.js', () => ({
   isImageMessage: vi.fn().mockReturnValue(false),

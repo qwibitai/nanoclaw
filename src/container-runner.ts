@@ -276,6 +276,13 @@ function buildContainerArgs(
     args.push('-e', `ICLOUD_APP_PASSWORD=${icloudPass}`);
   }
 
+  // Pass Gemini API key for video/image analysis inside the container
+  const geminiKey =
+    process.env.GEMINI_API_KEY || readEnvFile(['GEMINI_API_KEY']).GEMINI_API_KEY;
+  if (geminiKey) {
+    args.push('-e', `GEMINI_API_KEY=${geminiKey}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
