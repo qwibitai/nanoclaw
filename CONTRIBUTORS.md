@@ -20,3 +20,4 @@ Thanks to everyone who has contributed to NanoClaw!
 - [leonalfredbot-ship-it](https://github.com/leonalfredbot-ship-it) — Alfred-the-buttler
 - [moktamd](https://github.com/moktamd)
 - [gurixs-carson](https://github.com/gurixs-carson)
+- [henricook](https://github.com/henricook) — Henri Cook
