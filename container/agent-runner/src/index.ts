@@ -4,9 +4,10 @@
  *
  * Input protocol:
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
+ *   IPC:   Follow-up messages written as JSON files to $NANOCLAW_IPC_DIR/input/
+ *          Defaults to /workspace/ipc/input when NANOCLAW_IPC_DIR is unset.
  *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ *          Sentinel: $NANOCLAW_IPC_DIR/input/_close — signals session end
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
@@ -60,7 +61,8 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
+const IPC_INPUT_DIR = path.join(IPC_DIR, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 

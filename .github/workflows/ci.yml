@@ -13,13 +13,25 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            container/agent-runner/package-lock.json
       - run: npm ci
 
       - name: Format check
         run: npm run format:check
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Tests
-        run: npx vitest run
+        run: npm test
+
+      - name: Agent runner install
+        run: npm --prefix container/agent-runner ci
+
+      - name: Agent runner build
+        run: npm --prefix container/agent-runner run build
+
+      - name: Agent runner tests
+        run: npm --prefix container/agent-runner run test
