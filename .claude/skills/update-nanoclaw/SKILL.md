@@ -188,7 +188,7 @@ After validation succeeds, check if the update introduced any breaking changes.
 Determine which CHANGELOG entries are new by diffing against the backup tag:
 - `git diff <backup-tag-from-step-1>..HEAD -- CHANGELOG.md`
 
-Parse the diff output for lines starting with `+[BREAKING]`. Each such line is one breaking change entry. The format is:
+Parse the diff output for added lines (starting with `+`) that contain `[BREAKING]` anywhere in the line. Each such line is one breaking change entry. The format is:
 ```
 [BREAKING] <description>. Run `/<skill-name>` to <action>.
 ```
