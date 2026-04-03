@@ -739,6 +739,39 @@ export interface AvailableGroup {
  * Only main group can see all available groups (for activation).
  * Non-main groups only see their own registration status.
  */
+/**
+ * Write calendar events snapshot for the container to read.
+ * All groups can see calendar events.
+ */
+export function writeCalendarSnapshot(
+  groupFolder: string,
+  events: Array<{
+    id: string;
+    summary: string;
+    startDate: string;
+    endDate: string | null;
+    isAllDay: boolean;
+    description: string | null;
+    source: string;
+  }>,
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const calendarFile = path.join(groupIpcDir, 'current_calendar.json');
+  fs.writeFileSync(
+    calendarFile,
+    JSON.stringify(
+      {
+        events,
+        lastSync: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,

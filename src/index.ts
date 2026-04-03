@@ -18,6 +18,7 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
+  writeCalendarSnapshot,
   writeDevTasksSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -45,6 +46,7 @@ import {
   storeMessage,
   storeMessageDirect,
 } from './db.js';
+import { getEvents } from './calendar-service.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -345,6 +347,34 @@ async function runAgent(
       created_at: t.created_at,
     })),
   );
+
+  // Update calendar snapshot (6 months back + 6 months forward)
+  try {
+    const now = new Date();
+    const sixMonthsBack = new Date(now);
+    sixMonthsBack.setMonth(sixMonthsBack.getMonth() - 6);
+    sixMonthsBack.setHours(0, 0, 0, 0);
+    const sixMonthsForward = new Date(now);
+    sixMonthsForward.setMonth(sixMonthsForward.getMonth() + 6);
+    const calendarEvents = await getEvents(sixMonthsBack, sixMonthsForward);
+    writeCalendarSnapshot(
+      group.folder,
+      calendarEvents.map((e) => ({
+        id: e.id,
+        summary: e.summary,
+        startDate: e.startDate,
+        endDate: e.endDate,
+        isAllDay: e.isAllDay,
+        description: e.description,
+        source: e.source,
+      })),
+    );
+  } catch (err) {
+    logger.warn(
+      { err, group: group.name },
+      'Failed to write calendar snapshot',
+    );
+  }
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();

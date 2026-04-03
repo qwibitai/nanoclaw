@@ -335,6 +335,77 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 );
 
 server.tool(
+  'get_calendar',
+  `Get family calendar events. Returns events from iCloud family calendars and school calendars (6 months back through 6 months forward). Use this to answer questions about the calendar, upcoming events, past events, scheduling, and availability. This is a key source of family context — check it when questions touch on schedules, plans, or what's happening.`,
+  {
+    start_date: z.string().optional().describe('Filter: only events on or after this date (ISO 8601, e.g. "2026-04-01")'),
+    end_date: z.string().optional().describe('Filter: only events before this date (ISO 8601, e.g. "2026-05-01")'),
+  },
+  async (args) => {
+    const calendarFile = path.join(IPC_DIR, 'current_calendar.json');
+
+    try {
+      if (!fs.existsSync(calendarFile)) {
+        return { content: [{ type: 'text' as const, text: 'No calendar data available. Calendar may not be configured.' }] };
+      }
+
+      const data = JSON.parse(fs.readFileSync(calendarFile, 'utf-8'));
+      let events: Array<{
+        id: string;
+        summary: string;
+        startDate: string;
+        endDate: string | null;
+        isAllDay: boolean;
+        description: string | null;
+        source: string;
+      }> = data.events || [];
+
+      if (events.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No calendar events available.' }] };
+      }
+
+      // Apply optional date filters
+      if (args.start_date) {
+        const start = new Date(args.start_date).toISOString();
+        events = events.filter((e) => e.startDate >= start);
+      }
+      if (args.end_date) {
+        const end = new Date(args.end_date).toISOString();
+        events = events.filter((e) => e.startDate < end);
+      }
+
+      if (events.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No events found in that date range.' }] };
+      }
+
+      const formatted = events
+        .map((e) => {
+          const date = new Date(e.startDate);
+          const dateStr = e.isAllDay
+            ? date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })
+            : date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) +
+              ' ' +
+              date.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+          let line = `• ${dateStr} — ${e.summary}`;
+          if (e.source) line += ` [${e.source}]`;
+          if (e.description) line += `\n  ${e.description}`;
+          return line;
+        })
+        .join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `${events.length} events:\n\n${formatted}\n\nSnapshot: ${data.lastSync}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading calendar: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
   'create_dev_task',
   'Create a new dev task for tracking development work. Returns the created task ID.',
   {
