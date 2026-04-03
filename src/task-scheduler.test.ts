@@ -18,6 +18,54 @@ describe('task scheduler', () => {
     vi.useRealTimers();
   });
 
+  it('enqueues tasks under the target group JID, not chat_jid', async () => {
+    // Regression for #1603: when chat_jid differs from the target group's JID
+    // (e.g. set to the caller's JID for result delivery), the task must still
+    // occupy the target group's queue slot — not the caller's.
+    createTask({
+      id: 'task-jid-mismatch',
+      group_folder: 'worker-group',
+      chat_jid: 'caller@g.us', // caller's JID — different from the worker's
+      prompt: 'run',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'worker@g.us': { name: 'Worker', folder: 'worker-group', trigger: '@bot', added_at: '' },
+      }),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Must enqueue under the worker's JID, not the caller's
+    expect(enqueueTask).toHaveBeenCalledWith(
+      'worker@g.us',
+      'task-jid-mismatch',
+      expect.any(Function),
+    );
+    expect(enqueueTask).not.toHaveBeenCalledWith(
+      'caller@g.us',
+      expect.any(String),
+      expect.any(Function),
+    );
+  });
+
   it('pauses due tasks with invalid group folders to prevent retry churn', async () => {
     createTask({
       id: 'task-invalid-folder',

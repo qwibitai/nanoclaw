@@ -78,6 +78,7 @@ export interface SchedulerDependencies {
 async function runTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
+  queueJid: string,
 ): Promise<void> {
   const startTime = Date.now();
   let groupDir: string;
@@ -165,7 +166,7 @@ async function runTask(
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
-      deps.queue.closeStdin(task.chat_jid);
+      deps.queue.closeStdin(queueJid);
     }, TASK_CLOSE_DELAY_MS);
   };
 
@@ -183,7 +184,7 @@ async function runTask(
         script: task.script || undefined,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        deps.onProcess(queueJid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -192,7 +193,7 @@ async function runTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
+          deps.queue.notifyIdle(queueJid);
           scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === 'error') {
@@ -264,8 +265,17 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
+        // Resolve the target group's JID from group_folder for queue occupancy.
+        // chat_jid may differ (e.g. set to the caller's JID for result delivery),
+        // so we must not use it to determine which queue slot the task occupies.
+        const groups = deps.registeredGroups();
+        const queueJid =
+          Object.keys(groups).find(
+            (jid) => groups[jid].folder === currentTask.group_folder,
+          ) ?? currentTask.chat_jid;
+
+        deps.queue.enqueueTask(queueJid, currentTask.id, () =>
+          runTask(currentTask, deps, queueJid),
         );
       }
     } catch (err) {
