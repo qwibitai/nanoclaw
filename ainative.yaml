@@ -1,0 +1,39 @@
+workspace:
+  base_branch: main
+  dependency_policy: assume_committed
+agents:
+  builder:
+    type: codex-exec
+    model: gpt-5.4
+    sandbox: workspace-write
+    extra_args:
+    - --full-auto
+    - -c
+    - model_reasoning_effort="xhigh"
+  critic:
+    type: codex-exec
+    model: gpt-5.4
+    sandbox: workspace-write
+    extra_args:
+    - --full-auto
+    - -c
+    - model_reasoning_effort="xhigh"
+  verifier:
+    type: codex-exec
+    model: gpt-5.4
+    sandbox: workspace-write
+    extra_args:
+    - --full-auto
+    - -c
+    - model_reasoning_effort="xhigh"
+  pr_reviewer:
+    type: codex-review
+    model: gpt-5.4
+    base_branch: main
+    extra_args:
+    - -c
+    - model_reasoning_effort="xhigh"
+git:
+  branch_prefix: codex
+  conventional_prefix: feat
+  pr_draft: true
