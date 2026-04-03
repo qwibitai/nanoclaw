@@ -27,7 +27,7 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
-/** Stop a container by name. Uses execFileSync to avoid shell injection. */
+/** Stop a container by name. Validates name to avoid shell injection via execSync. */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
     throw new Error(`Invalid container name: ${name}`);

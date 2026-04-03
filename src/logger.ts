@@ -18,7 +18,7 @@ const threshold =
 
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
-    return `{\n      "type": "${err.constructor.name}",\n      "message": "${err.message}",\n      "stack":\n          ${err.stack}\n    }`;
+    return `{\n      "type": ${JSON.stringify(err.constructor.name)},\n      "message": ${JSON.stringify(err.message)},\n      "stack":\n          ${err.stack}\n    }`;
   }
   return JSON.stringify(err);
 }
