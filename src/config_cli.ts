@@ -179,5 +179,7 @@ export function applyCliOverrides(): void {
       process.env.MAX_CONCURRENT_CONTAINERS,
     ),
     idleTimeout: parseOptionalInt(process.env.IDLE_TIMEOUT),
+    mountAllowlistPath: MOUNT_ALLOWLIST_PATH,
+    senderAllowlistPath: SENDER_ALLOWLIST_PATH,
   });
 }

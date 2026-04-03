@@ -1,17 +1,18 @@
 /**
  * Mount Security Module for AgentLite
  *
- * Validates additional mounts against an allowlist stored OUTSIDE the project root.
+ * Validates additional mounts against an allowlist that lives OUTSIDE the project root.
  * This prevents container agents from modifying security configuration.
  *
- * Allowlist location: ~/.config/agentlite/mount-allowlist.json
+ * In SDK mode: pass mountAllowlist in AgentLiteOptions (in-memory, no file needed).
+ * In CLI mode: reads from a JSON file set via applyInternalConfig({ mountAllowlistPath }).
  */
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
-import { MOUNT_ALLOWLIST_PATH } from './config.js';
+import { MOUNT_ALLOWLIST, MOUNT_ALLOWLIST_PATH } from './config.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
 const logger = pino({
@@ -47,8 +48,8 @@ const DEFAULT_BLOCKED_PATTERNS = [
 ];
 
 /**
- * Load the mount allowlist from the external config location.
- * Returns null if the file doesn't exist or is invalid.
+ * Load the mount allowlist.
+ * Priority: in-memory object (SDK mode) → file path (CLI mode) → null (all mounts blocked).
  * Result is cached in memory for the lifetime of the process.
  */
 export function loadMountAllowlist(): MountAllowlist | null {
@@ -62,18 +63,25 @@ export function loadMountAllowlist(): MountAllowlist | null {
   }
 
   try {
-    if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
-      allowlistLoadError = `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`;
+    let allowlist: MountAllowlist;
+
+    if (MOUNT_ALLOWLIST !== null) {
+      // SDK mode: use the in-memory allowlist passed via options
+      allowlist = { ...MOUNT_ALLOWLIST };
+    } else if (MOUNT_ALLOWLIST_PATH && fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
+      // CLI mode: load from file
+      const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
+      allowlist = JSON.parse(content) as MountAllowlist;
+    } else {
+      allowlistLoadError = MOUNT_ALLOWLIST_PATH
+        ? `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`
+        : 'No mount allowlist configured';
       logger.warn(
-        { path: MOUNT_ALLOWLIST_PATH },
-        'Mount allowlist not found - additional mounts will be BLOCKED. ' +
-          'Create the file to enable additional mounts.',
+        { reason: allowlistLoadError },
+        'Mount allowlist not available - additional mounts will be BLOCKED.',
       );
       return null;
     }
-
-    const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
-    const allowlist = JSON.parse(content) as MountAllowlist;
 
     // Validate structure
     if (!Array.isArray(allowlist.allowedRoots)) {
@@ -97,7 +105,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     cachedAllowlist = allowlist;
     logger.info(
       {
-        path: MOUNT_ALLOWLIST_PATH,
+        source: MOUNT_ALLOWLIST !== null ? 'options' : MOUNT_ALLOWLIST_PATH,
         allowedRoots: allowlist.allowedRoots.length,
         blockedPatterns: allowlist.blockedPatterns.length,
       },
@@ -109,7 +117,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     allowlistLoadError = err instanceof Error ? err.message : String(err);
     logger.error(
       {
-        path: MOUNT_ALLOWLIST_PATH,
+        source: MOUNT_ALLOWLIST !== null ? 'options' : MOUNT_ALLOWLIST_PATH,
         error: allowlistLoadError,
       },
       'Failed to load mount allowlist - additional mounts will be BLOCKED',
@@ -240,7 +248,9 @@ export function validateMount(
   if (allowlist === null) {
     return {
       allowed: false,
-      reason: `No mount allowlist configured at ${MOUNT_ALLOWLIST_PATH}`,
+      reason: MOUNT_ALLOWLIST_PATH
+        ? `No mount allowlist configured at ${MOUNT_ALLOWLIST_PATH}`
+        : 'No mount allowlist configured — pass mountAllowlist in AgentLiteOptions or set a file path',
     };
   }
 
