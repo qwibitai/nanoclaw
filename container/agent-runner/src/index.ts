@@ -337,6 +337,7 @@ async function runQuery(
   tailscaleMcpServerPath: string,
   homeassistantMcpServerPath: string,
   ollamaMcpServerPath: string,
+  litellmMcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -415,7 +416,8 @@ async function runQuery(
         'mcp__unraidclaw__*',
         'mcp__tailscale__*',
         'mcp__homeassistant__*',
-        'mcp__ollama__*'
+        'mcp__ollama__*',
+        'mcp__litellm__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -462,6 +464,15 @@ async function runQuery(
           command: 'node',
           args: [ollamaMcpServerPath],
           env: {
+            OLLAMA_URL: sdkEnv.OLLAMA_URL ?? '',
+          },
+        },
+        litellm: {
+          command: 'node',
+          args: [litellmMcpServerPath],
+          env: {
+            LITELLM_URL: sdkEnv.LITELLM_URL ?? '',
+            LITELLM_MASTER_KEY: sdkEnv.LITELLM_MASTER_KEY ?? '',
             OLLAMA_URL: sdkEnv.OLLAMA_URL ?? '',
           },
         },
@@ -533,6 +544,7 @@ async function main(): Promise<void> {
   const tailscaleMcpServerPath = path.join(__dirname, 'tailscale-mcp-stdio.js');
   const homeassistantMcpServerPath = path.join(__dirname, 'homeassistant-mcp-stdio.js');
   const ollamaMcpServerPath = path.join(__dirname, 'ollama-mcp-stdio.js');
+  const litellmMcpServerPath = path.join(__dirname, 'litellm-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -557,7 +569,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, unraidclawMcpServerPath, tailscaleMcpServerPath, homeassistantMcpServerPath, ollamaMcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, unraidclawMcpServerPath, tailscaleMcpServerPath, homeassistantMcpServerPath, ollamaMcpServerPath, litellmMcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

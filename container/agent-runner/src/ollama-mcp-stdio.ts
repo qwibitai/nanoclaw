@@ -12,6 +12,25 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { syncOllamaToLiteLLM } from './litellm-mcp-stdio.js';
+
+const LITELLM_URL = (process.env.LITELLM_URL ?? '').replace(/\/$/, '');
+const LITELLM_MASTER_KEY = process.env.LITELLM_MASTER_KEY ?? '';
+
+/** Best-effort sync to LiteLLM after model changes. Logs failures, never throws. */
+async function trySyncToLiteLLM(): Promise<void> {
+  if (!LITELLM_URL || !LITELLM_MASTER_KEY) return;
+  try {
+    const result = await syncOllamaToLiteLLM(BASE, LITELLM_URL, LITELLM_MASTER_KEY);
+    process.stderr.write(
+      `[ollama-mcp] LiteLLM sync: ${result.added.length} added, ${result.removed.length} removed\n`,
+    );
+  } catch (e) {
+    process.stderr.write(
+      `[ollama-mcp] LiteLLM sync failed: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+  }
+}
 
 const BASE = (process.env.OLLAMA_URL ?? 'http://ollama:11434').replace(/\/$/, '');
 
@@ -74,7 +93,9 @@ mcpServer.tool(
   },
   async (args) => {
     try {
-      return ok(await apiPost('/api/pull', { model: args.model, stream: false }));
+      const result = await apiPost('/api/pull', { model: args.model, stream: false });
+      await trySyncToLiteLLM();
+      return ok(result);
     } catch (e) { return err(e); }
   },
 );
@@ -88,6 +109,7 @@ mcpServer.tool(
   async (args) => {
     try {
       await apiDelete('/api/delete', { model: args.model });
+      await trySyncToLiteLLM();
       return ok({ status: 'deleted', model: args.model });
     } catch (e) { return err(e); }
   },

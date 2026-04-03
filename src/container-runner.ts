@@ -401,6 +401,12 @@ function buildContainerArgs(
   if (process.env.OLLAMA_URL) {
     args.push('-e', `OLLAMA_URL=${process.env.OLLAMA_URL}`);
   }
+  if (process.env.LITELLM_URL) {
+    args.push('-e', `LITELLM_URL=${process.env.LITELLM_URL}`);
+  }
+  if (process.env.LITELLM_MASTER_KEY) {
+    args.push('-e', `LITELLM_MASTER_KEY=${process.env.LITELLM_MASTER_KEY}`);
+  }
   if (process.env.PAPERCLIP_URL) {
     args.push('-e', `PAPERCLIP_URL=${process.env.PAPERCLIP_URL}`);
   }
