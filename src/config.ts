@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 
+import { createProviderRegistry } from './agent/provider-registry.js';
 import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -8,9 +9,12 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'DEFAULT_AGENT_PROVIDER',
   'ONECLI_URL',
   'TZ',
 ]);
+
+export const COMPATIBILITY_AGENT_PROVIDER = 'claude-code';
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -63,6 +67,25 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+
+function resolveDefaultAgentProvider(): string {
+  const providerId =
+    process.env.DEFAULT_AGENT_PROVIDER ||
+    envConfig.DEFAULT_AGENT_PROVIDER ||
+    COMPATIBILITY_AGENT_PROVIDER;
+
+  try {
+    createProviderRegistry().getProvider(providerId);
+    return providerId;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Invalid DEFAULT_AGENT_PROVIDER "${providerId}": ${reason}`,
+    );
+  }
+}
+
+export const DEFAULT_AGENT_PROVIDER = resolveDefaultAgentProvider();
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

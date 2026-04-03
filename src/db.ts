@@ -2,7 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import {
+  ASSISTANT_NAME,
+  COMPATIBILITY_AGENT_PROVIDER,
+  DATA_DIR,
+  STORE_DIR,
+} from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -13,6 +18,103 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+
+function hasColumn(
+  database: Database.Database,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const columns = database
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
+
+function getTableSql(
+  database: Database.Database,
+  tableName: string,
+): string | undefined {
+  const row = database
+    .prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    )
+    .get(tableName) as { sql: string } | undefined;
+  return row?.sql;
+}
+
+function ensureRegisteredGroupProviderColumns(
+  database: Database.Database,
+): void {
+  if (!hasColumn(database, 'registered_groups', 'provider_id')) {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN provider_id TEXT`);
+  }
+
+  if (!hasColumn(database, 'registered_groups', 'provider_options')) {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN provider_options TEXT`,
+    );
+  }
+
+  database
+    .prepare(
+      `UPDATE registered_groups
+       SET provider_id = ?
+       WHERE provider_id IS NULL OR TRIM(provider_id) = ''`,
+    )
+    .run(COMPATIBILITY_AGENT_PROVIDER);
+}
+
+function migrateSessionsTable(database: Database.Database): void {
+  const sessionTableSql = getTableSql(database, 'sessions') || '';
+  const providerIdExists = hasColumn(database, 'sessions', 'provider_id');
+  const hasCompositePrimaryKey =
+    /PRIMARY KEY\s*\(\s*group_folder\s*,\s*provider_id\s*\)/i.test(
+      sessionTableSql,
+    );
+
+  if (providerIdExists && hasCompositePrimaryKey) {
+    database
+      .prepare(
+        `UPDATE sessions
+         SET provider_id = ?
+         WHERE provider_id IS NULL OR TRIM(provider_id) = ''`,
+      )
+      .run(COMPATIBILITY_AGENT_PROVIDER);
+    return;
+  }
+
+  database.exec(`ALTER TABLE sessions RENAME TO sessions_legacy`);
+  database.exec(`
+    CREATE TABLE sessions (
+      group_folder TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      PRIMARY KEY (group_folder, provider_id)
+    );
+  `);
+
+  if (providerIdExists) {
+    database.exec(`
+      INSERT INTO sessions (group_folder, provider_id, session_id)
+      SELECT
+        group_folder,
+        COALESCE(NULLIF(provider_id, ''), '${COMPATIBILITY_AGENT_PROVIDER}'),
+        session_id
+      FROM sessions_legacy;
+    `);
+  } else {
+    database.exec(`
+      INSERT INTO sessions (group_folder, provider_id, session_id)
+      SELECT
+        group_folder,
+        '${COMPATIBILITY_AGENT_PROVIDER}',
+        session_id
+      FROM sessions_legacy;
+    `);
+  }
+
+  database.exec(`DROP TABLE sessions_legacy`);
+}
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -70,8 +172,10 @@ function createSchema(database: Database.Database): void {
       value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
+      group_folder TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      PRIMARY KEY (group_folder, provider_id)
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
@@ -80,9 +184,15 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      provider_id TEXT NOT NULL DEFAULT '${COMPATIBILITY_AGENT_PROVIDER}',
+      provider_options TEXT,
+      requires_trigger INTEGER DEFAULT 1,
+      is_main INTEGER DEFAULT 0
     );
   `);
+
+  ensureRegisteredGroupProviderColumns(database);
+  migrateSessionsTable(database);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
@@ -146,6 +256,15 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Backfill legacy group rows into the compatibility provider namespace
+  database
+    .prepare(
+      `UPDATE registered_groups
+       SET provider_id = ?
+       WHERE provider_id IS NULL OR TRIM(provider_id) = ''`,
+    )
+    .run(COMPATIBILITY_AGENT_PROVIDER);
 }
 
 export function initDatabase(): void {
@@ -548,27 +667,46 @@ export function setRouterState(key: string, value: string): void {
 
 // --- Session accessors ---
 
-export function getSession(groupFolder: string): string | undefined {
+export function getSession(
+  groupFolder: string,
+  providerId: string = COMPATIBILITY_AGENT_PROVIDER,
+): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND provider_id = ?',
+    )
+    .get(groupFolder, providerId) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
-export function setSession(groupFolder: string, sessionId: string): void {
+export function setSession(
+  groupFolder: string,
+  sessionId: string,
+  providerId: string = COMPATIBILITY_AGENT_PROVIDER,
+): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    `INSERT OR REPLACE INTO sessions (group_folder, provider_id, session_id)
+     VALUES (?, ?, ?)`,
+  ).run(groupFolder, providerId, sessionId);
 }
 
-export function deleteSession(groupFolder: string): void {
-  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+export function deleteSession(
+  groupFolder: string,
+  providerId: string = COMPATIBILITY_AGENT_PROVIDER,
+): void {
+  db.prepare(
+    'DELETE FROM sessions WHERE group_folder = ? AND provider_id = ?',
+  ).run(groupFolder, providerId);
 }
 
-export function getAllSessions(): Record<string, string> {
+export function getAllSessions(
+  providerId: string = COMPATIBILITY_AGENT_PROVIDER,
+): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+    .prepare(
+      'SELECT group_folder, session_id FROM sessions WHERE provider_id = ?',
+    )
+    .all(providerId) as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
     result[row.group_folder] = row.session_id;
@@ -591,6 +729,8 @@ export function getRegisteredGroup(
         trigger_pattern: string;
         added_at: string;
         container_config: string | null;
+        provider_id: string | null;
+        provider_options: string | null;
         requires_trigger: number | null;
         is_main: number | null;
       }
@@ -612,6 +752,10 @@ export function getRegisteredGroup(
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
+    providerId: row.provider_id || COMPATIBILITY_AGENT_PROVIDER,
+    providerOptions: row.provider_options
+      ? JSON.parse(row.provider_options)
+      : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
@@ -623,8 +767,18 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (
+      jid,
+      name,
+      folder,
+      trigger_pattern,
+      added_at,
+      container_config,
+      provider_id,
+      provider_options,
+      requires_trigger,
+      is_main
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -632,6 +786,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.trigger,
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
+    group.providerId || COMPATIBILITY_AGENT_PROVIDER,
+    group.providerOptions ? JSON.stringify(group.providerOptions) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
   );
@@ -645,6 +801,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     trigger_pattern: string;
     added_at: string;
     container_config: string | null;
+    provider_id: string | null;
+    provider_options: string | null;
     requires_trigger: number | null;
     is_main: number | null;
   }>;
@@ -664,6 +822,10 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       added_at: row.added_at,
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
+        : undefined,
+      providerId: row.provider_id || COMPATIBILITY_AGENT_PROVIDER,
+      providerOptions: row.provider_options
+        ? JSON.parse(row.provider_options)
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,

@@ -37,6 +37,8 @@ export interface RegisteredGroup {
   folder: string;
   trigger: string;
   added_at: string;
+  providerId?: string; // Compatibility default is claude-code until provider selection is wired through runtime flows
+  providerOptions?: Record<string, unknown>;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)

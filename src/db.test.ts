@@ -3,14 +3,19 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteSession,
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getAllSessions,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -568,5 +573,91 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('registered group provider config', () => {
+  it('stores claude-code as the compatibility provider when providerId is omitted', () => {
+    // Arrange
+    setRegisteredGroup('legacy@g.us', {
+      name: 'Legacy Group',
+      folder: 'whatsapp_legacy-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    // Act
+    const group = getRegisteredGroup('legacy@g.us');
+
+    // Assert
+    expect(group).toMatchObject({
+      jid: 'legacy@g.us',
+      providerId: 'claude-code',
+    });
+    expect(group?.providerOptions).toBeUndefined();
+  });
+
+  it('round-trips explicit provider options', () => {
+    // Arrange
+    setRegisteredGroup('codex@g.us', {
+      name: 'Codex Group',
+      folder: 'whatsapp_codex-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5',
+        reasoning: 'high',
+      },
+    });
+
+    // Act
+    const groups = getAllRegisteredGroups();
+
+    // Assert
+    expect(groups['codex@g.us']).toMatchObject({
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5',
+        reasoning: 'high',
+      },
+    });
+  });
+});
+
+describe('provider-scoped sessions', () => {
+  it('stores sessions in the claude-code namespace by default', () => {
+    // Arrange
+    setSession('group-one', 'claude-session');
+
+    // Act
+    const sessionId = getSession('group-one');
+    const allSessions = getAllSessions();
+
+    // Assert
+    expect(sessionId).toBe('claude-session');
+    expect(getSession('group-one', 'claude-code')).toBe('claude-session');
+    expect(allSessions).toEqual({ 'group-one': 'claude-session' });
+  });
+
+  it('isolates session storage by provider', () => {
+    // Arrange
+    setSession('group-one', 'claude-session', 'claude-code');
+    setSession('group-one', 'codex-session', 'codex');
+
+    // Act
+    const claudeSession = getSession('group-one', 'claude-code');
+    const codexSession = getSession('group-one', 'codex');
+    deleteSession('group-one', 'codex');
+
+    // Assert
+    expect(claudeSession).toBe('claude-session');
+    expect(codexSession).toBe('codex-session');
+    expect(getAllSessions('codex')).toEqual({});
+    expect(getAllSessions('claude-code')).toEqual({
+      'group-one': 'claude-session',
+    });
+    expect(getSession('group-one', 'claude-code')).toBe('claude-session');
+    expect(getSession('group-one', 'codex')).toBeUndefined();
   });
 });
