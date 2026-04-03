@@ -1,0 +1,17 @@
+{
+  "id": "codex-cli",
+  "version": "0.1.0",
+  "name": "Codex CLI",
+  "description": "Installs the OpenAI Codex CLI for AI-native workflows.",
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "latest",
+      "description": "Version of @openai/codex to install."
+    }
+  },
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/node"
+  ]
+}
+

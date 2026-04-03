@@ -1,0 +1,16 @@
+{
+  "id": "claude-code",
+  "version": "0.1.0",
+  "name": "Claude Code",
+  "description": "Installs the Anthropic Claude Code CLI required by NanoClaw.",
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "latest",
+      "description": "Version of @anthropic-ai/claude-code to install."
+    }
+  },
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/node"
+  ]
+}

@@ -1,0 +1,5 @@
+.ai-native
+.git
+node_modules
+*.log
+.DS_Store
