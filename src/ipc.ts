@@ -173,6 +173,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    providerId?: RegisteredGroup['providerId'];
+    providerOptions?: RegisteredGroup['providerOptions'];
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -451,6 +453,9 @@ export async function processTaskIpc(
           trigger: data.trigger,
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
+          providerId: data.providerId ?? existingGroup?.providerId,
+          providerOptions:
+            data.providerOptions ?? existingGroup?.providerOptions,
           requiresTrigger: data.requiresTrigger,
           isMain: existingGroup?.isMain,
         });

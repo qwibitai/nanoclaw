@@ -21,6 +21,7 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import { seedGroupMemoryFiles } from './agent/memory.js';
+import { createSessionStore } from './agent/session-store.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -71,7 +72,6 @@ import { logger } from './logger.js';
 export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
-let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
@@ -80,6 +80,16 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 const onecli = new OneCLI({ url: ONECLI_URL });
+
+function createRuntimeSessionStore() {
+  return createSessionStore({
+    getSession,
+    setSession,
+    deleteSession,
+  });
+}
+
+let sessionStore = createRuntimeSessionStore();
 
 function getGroupProviderId(group: RegisteredGroup): string {
   return group.providerId || COMPATIBILITY_AGENT_PROVIDER;
@@ -114,12 +124,10 @@ function loadState(): void {
     lastAgentTimestamp = {};
   }
   registeredGroups = getAllRegisteredGroups();
-  sessions = {};
+  sessionStore = createRuntimeSessionStore();
   for (const group of Object.values(registeredGroups)) {
-    const sessionId = getSession(group.folder, getGroupProviderId(group));
-    if (sessionId) {
-      sessions[group.folder] = sessionId;
-    }
+    const providerId = getGroupProviderId(group);
+    sessionStore.hydrate(group.folder, providerId, getSession(group.folder, providerId));
   }
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
@@ -416,7 +424,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const providerId = getGroupProviderId(group);
-  const sessionId = sessions[group.folder];
+  const sessionId = sessionStore.get(group.folder, providerId);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -448,8 +456,7 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId, providerId);
+          sessionStore.set(group.folder, providerId, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -472,8 +479,7 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId, providerId);
+      sessionStore.set(group.folder, providerId, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -493,8 +499,7 @@ async function runAgent(
           { group: group.name, staleSessionId: sessionId, error: output.error },
           'Stale session detected — clearing for next retry',
         );
-        delete sessions[group.folder];
-        deleteSession(group.folder, providerId);
+        sessionStore.delete(group.folder, providerId);
       }
 
       logger.error(
@@ -509,6 +514,20 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
+}
+
+/** @internal - exported for testing */
+export function _loadStateForTest(): void {
+  loadState();
+}
+
+/** @internal - exported for testing */
+export async function _runAgentForTest(
+  group: RegisteredGroup,
+  prompt: string,
+  chatJid: string,
+): Promise<'success' | 'error'> {
+  return runAgent(group, prompt, chatJid);
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -766,7 +785,7 @@ async function main(): Promise<void> {
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
+    sessionStore,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),

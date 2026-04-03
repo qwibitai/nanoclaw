@@ -640,6 +640,7 @@ describe('schedule_task context_mode', () => {
 
 describe('register_group success', () => {
   it('main group can register a new group', async () => {
+    // Arrange
     await processTaskIpc(
       {
         type: 'register_group',
@@ -653,12 +654,90 @@ describe('register_group success', () => {
       deps,
     );
 
-    // Verify group was registered in DB
+    // Assert
     const group = getRegisteredGroup('new@g.us');
     expect(group).toBeDefined();
     expect(group!.name).toBe('New Group');
     expect(group!.folder).toBe('new-group');
     expect(group!.trigger).toBe('@Andy');
+  });
+
+  it('preserves provider configuration when registering a group over IPC', async () => {
+    // Arrange
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'codex@g.us',
+        name: 'Codex Group',
+        folder: 'codex-group',
+        trigger: '@Andy',
+        providerId: 'codex',
+        providerOptions: {
+          profile: 'gpt-5.4',
+        },
+      } as any,
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Act
+    const group = getRegisteredGroup('codex@g.us');
+
+    // Assert
+    expect(group).toMatchObject({
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5.4',
+      },
+    });
+  });
+
+  it('keeps the existing provider configuration when an IPC update omits it', async () => {
+    // Arrange
+    setRegisteredGroup('existing@g.us', {
+      name: 'Existing Group',
+      folder: 'existing-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5.4',
+      },
+    });
+    groups['existing@g.us'] = {
+      name: 'Existing Group',
+      folder: 'existing-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5.4',
+      },
+    };
+
+    // Act
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'existing@g.us',
+        name: 'Existing Group',
+        folder: 'existing-group',
+        trigger: '@Codex',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Assert
+    expect(getRegisteredGroup('existing@g.us')).toMatchObject({
+      trigger: '@Codex',
+      providerId: 'codex',
+      providerOptions: {
+        profile: 'gpt-5.4',
+      },
+    });
   });
 
   it('register_group rejects request with missing fields', async () => {
