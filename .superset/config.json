@@ -1,0 +1,9 @@
+{
+  "setup": [
+    "npm ci",
+    "[ ! -f .env ] && cp .env.example .env",
+    "fnm use --install-if-missing || nvm use"
+  ],
+  "teardown": [],
+  "run": []
+}

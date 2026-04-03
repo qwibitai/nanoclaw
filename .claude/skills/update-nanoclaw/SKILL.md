@@ -233,9 +233,3 @@ Tell the user:
 - Restart the service to apply changes:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
   - If running manually: restart `npm run dev`
-
-
-## Diagnostics
-
-1. Use the Read tool to read `.claude/skills/update-nanoclaw/diagnostics.md`.
-2. Follow every step in that file before finishing.
