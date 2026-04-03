@@ -16,6 +16,10 @@ import {
   ContainerOutput,
   runContainerAgent,
   setModelOptions,
+  setGroupModelOptions,
+  addGroupModelOptions,
+  deleteGroupModelOptions,
+  resetModelOptions,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -56,6 +60,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import type { ModelOptions } from './options.js';
 import { logger } from './logger.js';
 
 // --- Module state ---
@@ -93,8 +98,11 @@ export interface StartOptions {
   groups?: Map<string, RegisteredGroup>;
   /** Model/LLM configuration. If not provided, falls back to OneCLI gateway. */
   model?: {
+    model?: string;
     credentials?: () => Promise<Record<string, string>>;
   };
+  /** Per-group model options. Keyed by group folder name. */
+  groupModelOptions?: Map<string, ModelOptions>;
 }
 
 /**
@@ -109,9 +117,15 @@ export async function start(options: StartOptions = {}): Promise<void> {
   ensureRuntimeReady();
   await cleanupOrphans();
 
+  // Reset model state from any previous start() — prevents stale credentials/model
+  resetModelOptions();
+
   // Configure model credentials for container injection
   if (options.model) {
     setModelOptions(options.model);
+  }
+  if (options.groupModelOptions) {
+    setGroupModelOptions(options.groupModelOptions);
   }
   initDatabase();
   logger.info('Database initialized');
@@ -165,9 +179,18 @@ export async function registerChannel(channel: Channel): Promise<void> {
 }
 
 /** Register a group dynamically (after start). */
-export function registerGroup(jid: string, group: RegisteredGroup): void {
+export function registerGroup(
+  jid: string,
+  group: RegisteredGroup,
+  model?: ModelOptions,
+): void {
   setRegisteredGroup(jid, group);
   registeredGroups[jid] = group;
+  if (model) {
+    addGroupModelOptions(group.folder, model);
+  } else {
+    deleteGroupModelOptions(group.folder);
+  }
   ensureOneCLIAgent(jid, group);
   logger.info(
     { jid, name: group.name, folder: group.folder },

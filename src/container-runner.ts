@@ -26,6 +26,7 @@ import { logger } from './logger.js';
 import { spawnBox } from './box-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import type { ModelOptions } from './options.js';
 import { copyDirRecursive } from './utils.js';
 
 // Lazy OneCLI — dynamically imported so it's not a hard dependency
@@ -45,12 +46,45 @@ async function getOneCLI(): Promise<any> {
 // Model credential resolver — set via SDK, bypasses OneCLI when provided
 type CredentialResolver = () => Promise<Record<string, string>>;
 let _credentialResolver: CredentialResolver | null = null;
+let _globalModelId: string | undefined;
 
-/** Configure model options. Called by orchestrator during start(). */
+// Per-group model options (keyed by group folder)
+let _groupModelOptions: Map<string, ModelOptions> = new Map();
+
+/** Configure global model options. Called by orchestrator during start(). */
 export function setModelOptions(opts: {
+  model?: string;
   credentials?: CredentialResolver;
 }): void {
   _credentialResolver = opts.credentials ?? null;
+  _globalModelId = opts.model;
+}
+
+/** Configure per-group model options. Replaces all existing entries. */
+export function setGroupModelOptions(
+  options: Map<string, ModelOptions>,
+): void {
+  _groupModelOptions = new Map(options);
+}
+
+/** Add or update model options for a single group. */
+export function addGroupModelOptions(
+  folder: string,
+  options: ModelOptions,
+): void {
+  _groupModelOptions.set(folder, options);
+}
+
+/** Remove model options for a single group (on re-registration without model). */
+export function deleteGroupModelOptions(folder: string): void {
+  _groupModelOptions.delete(folder);
+}
+
+/** Reset all model state to defaults. Called on orchestrator start. */
+export function resetModelOptions(): void {
+  _credentialResolver = null;
+  _globalModelId = undefined;
+  _groupModelOptions = new Map();
 }
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -297,9 +331,12 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Build environment variables — use credential resolver if set, else OneCLI
+  // Build environment variables — per-group → global → OneCLI fallback
+  const groupModel = _groupModelOptions.get(group.folder);
   let credentialEnv: Record<string, string>;
-  if (_credentialResolver) {
+  if (groupModel?.credentials) {
+    credentialEnv = await groupModel.credentials();
+  } else if (_credentialResolver) {
     credentialEnv = await _credentialResolver();
   } else {
     credentialEnv = await extractOnecliEnv(containerName, agentIdentifier);
@@ -310,6 +347,12 @@ export async function runContainerAgent(
     AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
   };
+
+  // Inject model ID: per-group → global → omit
+  const modelId = groupModel?.model ?? _globalModelId;
+  if (modelId) {
+    boxEnv['CLAUDE_MODEL'] = modelId;
+  }
 
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();

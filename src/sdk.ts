@@ -24,7 +24,7 @@
 
 import { ASSISTANT_NAME, applyConfig } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
-import type { AgentLiteOptions, GroupOptions } from './options.js';
+import type { AgentLiteOptions, GroupOptions, ModelOptions } from './options.js';
 
 // Type-only re-exports (zero runtime cost — erased at compile time)
 export type {
@@ -38,6 +38,7 @@ export type { Channel, RegisteredGroup } from './types.js';
 export class AgentLite {
   private _channels: Channel[] = [];
   private _groups: Map<string, RegisteredGroup> = new Map();
+  private _groupModelOptions: Map<string, ModelOptions> = new Map();
   private _started = false;
   private _orchestrator: typeof import('./orchestrator.js') | null = null;
   private _options: AgentLiteOptions;
@@ -69,6 +70,7 @@ export class AgentLite {
       channels: this._channels,
       groups: this._groups,
       model: this._options.model,
+      groupModelOptions: this._groupModelOptions,
     });
   }
 
@@ -108,10 +110,16 @@ export class AgentLite {
         options.requiresTrigger ?? (options.isMain ? false : true),
     };
 
+    if (options.model) {
+      this._groupModelOptions.set(folder, options.model);
+    } else {
+      this._groupModelOptions.delete(folder);
+    }
+
     this._groups.set(jid, group);
 
     if (this._started && this._orchestrator) {
-      this._orchestrator.registerGroup(jid, group);
+      this._orchestrator.registerGroup(jid, group, options.model);
     }
   }
 
