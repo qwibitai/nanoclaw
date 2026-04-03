@@ -321,8 +321,9 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
     }
 
     // Handle balance payment — booking already in 'paid' status, now fully paid
-    if (booking.status === 'paid' && booking.balance > 0) {
-      console.log(`[webhook] Balance payment received for booking ${booking.id}`);
+    // Only if this is a DIFFERENT order (balance payment link), not a duplicate webhook for the original deposit
+    if (booking.status === 'paid' && booking.balance > 0 && orderId !== booking.squareOrderId) {
+      console.log(`[webhook] Balance payment received for booking ${booking.id} (balance order: ${orderId})`);
       updateBookingStatus(booking.id, 'confirmed');
       clearBalance(booking.id);
 
@@ -340,6 +341,10 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
       // Payment arrived after pending booking was expired — resurrect it
       console.log(`[webhook] Booking ${booking.id} was expired but payment received — reactivating`);
       // Fall through to normal confirmation flow below
+    } else if (booking.status === 'paid' && orderId === booking.squareOrderId) {
+      // Duplicate webhook for a deposit that was already processed — ignore
+      console.log(`[webhook] Booking ${booking.id} deposit already processed, ignoring duplicate`);
+      return;
     } else if (booking.status !== 'pending') {
       console.log(`[webhook] Booking ${booking.id} already processed (status: ${booking.status})`);
       return;
