@@ -129,6 +129,7 @@ export async function runCopilotQuery(
   const sessionConfig: SessionConfig = {
     model,
     streaming: true,
+    workingDirectory: '/workspace/group',
     mcpServers,
     onPermissionRequest: approveAll,
     ...(systemMessage ? { systemMessage: { content: systemMessage } } : {}),
