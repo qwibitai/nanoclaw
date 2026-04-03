@@ -2129,8 +2129,9 @@ async function main(): Promise<void> {
     chatJid: string,
     msg: NewMessage,
   ): Promise<void> {
-    const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
+    // Use resolveGroup to handle thread JIDs (threads resolve to parent group)
+    const resolved = resolveGroup(chatJid);
+    if (!resolved?.group.isMain) {
       logger.warn(
         { chatJid, sender: msg.sender },
         'Remote control rejected: not main group',
@@ -2138,7 +2139,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    const channel = findChannel(channels, chatJid);
+    // Use parent JID for channel lookup (channels own parent JIDs, not thread JIDs)
+    const parentJid = getParentJid(chatJid);
+    const channel = findChannel(channels, parentJid);
     if (!channel) return;
 
     if (command === '/remote-control') {
@@ -2173,10 +2176,16 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
+      // Remote control commands — intercept before storage.
+      // Strip trigger prefix first — channels like Discord prepend it to every
+      // message, so "/remote-control" arrives as "@Axie /remote-control".
       const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+      const rcGroup = resolveGroup(chatJid);
+      const rcAssistant = resolveAssistantName(rcGroup?.group.containerConfig);
+      const rcTrigger = buildTriggerPattern(rcAssistant);
+      const bareContent = trimmed.replace(rcTrigger, '').trim();
+      if (bareContent === '/remote-control' || bareContent === '/remote-control-end') {
+        handleRemoteControl(bareContent, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;

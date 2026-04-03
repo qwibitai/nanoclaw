@@ -1353,12 +1353,11 @@ export class DiscordChannel implements Channel {
       return jid;
     }
 
-    // No threadId hint — scan for any active thread redirect (legacy path).
-    for (const [key, threadJid] of this.createdThreadJid) {
-      if (key === jid || key.startsWith(`${jid}:`)) {
-        return threadJid;
-      }
-    }
+    // No threadId hint — send to parent channel. Scheduled tasks and other
+    // system-originated messages intentionally omit threadId, meaning "post to
+    // the channel, not a thread." A legacy scan used to grab any active thread
+    // redirect here, but that caused misrouting (e.g. a scheduled upstream
+    // check landing in an unrelated /remote-control thread).
     return jid;
   }
 }
