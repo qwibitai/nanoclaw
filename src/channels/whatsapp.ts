@@ -16,6 +16,8 @@ import {
   ASSISTANT_NAME,
   GROUPS_DIR,
   STORE_DIR,
+  WA_QUEUE_CAP,
+  WA_PRESENCE_INTERVAL_MS,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
@@ -130,7 +132,7 @@ export class WhatsAppChannel implements Channel {
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch(() => {});
+        this.sock.sendPresenceUpdate('available').catch((err: unknown) => { logger.debug({ err }, 'Presence update failed on connect'); });
 
         // Start periodic presence pings to reduce 428 keepalive disconnects
         this.startPresencePings();
@@ -323,7 +325,7 @@ export class WhatsAppChannel implements Channel {
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
       // Cap queue at 100 messages to prevent memory leak during extended disconnects
-      if (this.outgoingQueue.length > 100) {
+      if (this.outgoingQueue.length > WA_QUEUE_CAP) {
         const dropped = this.outgoingQueue.shift();
         logger.warn({ jid: dropped?.jid, queueSize: this.outgoingQueue.length }, 'Queue cap exceeded, dropped oldest message');
       }
@@ -394,9 +396,9 @@ export class WhatsAppChannel implements Channel {
     if (this.presenceTimer) return;
     this.presenceTimer = setInterval(() => {
       if (this.connected) {
-        this.sock.sendPresenceUpdate('available').catch(() => {});
+        this.sock.sendPresenceUpdate('available').catch((err: unknown) => { logger.debug({ err }, 'Periodic presence ping failed'); });
       }
-    }, 5 * 60 * 1000); // Every 5 minutes
+    }, WA_PRESENCE_INTERVAL_MS);
   }
 
   async disconnect(): Promise<void> {

@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import http from 'http';
 
 import { CircuitBreaker } from '../circuit-breaker.js';
+import { resilientFetch } from '../resilient-fetch.js';
 import {
   ASSISTANT_NAME,
   FB_APP_SECRET,
@@ -66,7 +67,7 @@ async function sendFacebookMessage(
   recipientId: string,
   text: string,
 ): Promise<void> {
-  const response = await fetch(`${GRAPH_API_BASE}/me/messages`, {
+  const response = await resilientFetch(`${GRAPH_API_BASE}/me/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -77,7 +78,7 @@ async function sendFacebookMessage(
       message: { text },
       messaging_type: 'RESPONSE',
     }),
-  });
+  }, { label: 'messenger-send' });
 
   if (!response.ok) {
     const body = await response.text();
@@ -90,7 +91,7 @@ async function sendTypingAction(
   action: 'typing_on' | 'typing_off',
 ): Promise<void> {
   try {
-    await fetch(`${GRAPH_API_BASE}/me/messages`, {
+    await resilientFetch(`${GRAPH_API_BASE}/me/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -100,7 +101,7 @@ async function sendTypingAction(
         recipient: { id: recipientId },
         sender_action: action,
       }),
-    });
+    }, { label: 'messenger-typing', retries: 0 });
   } catch (err) {
     logger.debug({ err }, 'Failed to send typing indicator');
   }

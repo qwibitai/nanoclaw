@@ -9,6 +9,7 @@ import http from 'http';
 import { z } from 'zod/v4';
 
 import { CircuitBreaker } from '../circuit-breaker.js';
+import { resilientFetch } from '../resilient-fetch.js';
 import {
   ASSISTANT_NAME,
   QUO_API_KEY,
@@ -247,7 +248,7 @@ export class QuoChannel implements Channel {
     for (const segment of segments) {
       try {
         await this.apiBreaker.call(async () => {
-          const response = await fetch(`${QUO_API_BASE}/messages`, {
+          const response = await resilientFetch(`${QUO_API_BASE}/messages`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -258,7 +259,7 @@ export class QuoChannel implements Channel {
               from: line.phoneId,
               to: [customerNumber],
             }),
-          });
+          }, { label: 'openphone-send' });
 
           if (!response.ok) {
             const body = await response.text();
@@ -421,9 +422,9 @@ export class QuoChannel implements Channel {
     url.searchParams.set('phoneNumberId', line.phoneId);
     url.searchParams.set('maxResults', '10');
 
-    const convRes = await fetch(url.toString(), {
+    const convRes = await resilientFetch(url.toString(), {
       headers: { Authorization: QUO_API_KEY },
-    });
+    }, { label: 'openphone-poll', retries: 1 });
 
     if (!convRes.ok) return;
 
@@ -484,9 +485,9 @@ export class QuoChannel implements Channel {
     });
     url.searchParams.set('maxResults', '5');
 
-    const msgRes = await fetch(url.toString(), {
+    const msgRes = await resilientFetch(url.toString(), {
       headers: { Authorization: QUO_API_KEY },
-    });
+    }, { label: 'openphone-messages', retries: 1 });
 
     if (!msgRes.ok) return;
 

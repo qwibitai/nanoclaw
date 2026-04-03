@@ -13,6 +13,7 @@ import {
   MAX_DAILY_SPEND_USD,
   STORE_DIR,
   TIMEZONE,
+  BOOKING_HEALTH_URL,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { expirePendingBookings } from './square-payments.js';
@@ -344,7 +345,7 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
 
   // Check 6: Booking service health (Sheridan Rentals API on port 3200)
   try {
-    const bookingRes = await fetch('http://localhost:3200/health', { signal: AbortSignal.timeout(5000) });
+    const bookingRes = await fetch(BOOKING_HEALTH_URL, { signal: AbortSignal.timeout(5000) });
     if (!bookingRes.ok) {
       if (status === 'ok') status = 'warning';
       issues.push(`Booking service unhealthy (HTTP ${bookingRes.status})`);

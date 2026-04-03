@@ -76,6 +76,18 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+// Cache fs.existsSync results for static paths (don't change at runtime).
+// Avoids repeated stat calls on every container spawn.
+const pathExistsCache = new Map<string, boolean>();
+function cachedExistsSync(p: string): boolean {
+  let result = pathExistsCache.get(p);
+  if (result === undefined) {
+    result = fs.existsSync(p);
+    pathExistsCache.set(p, result);
+  }
+  return result;
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -109,7 +121,7 @@ function buildVolumeMounts(
     // Global memory directory (read-only for non-main)
     // Apple Container only supports directory mounts, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
+    if (cachedExistsSync(globalDir)) {
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
@@ -120,7 +132,7 @@ function buildVolumeMounts(
     // Mount tools directory read-only so non-main groups can use skills
     // (all skills reference tools at /workspace/project/tools/...)
     const toolsDir = path.join(projectRoot, 'tools');
-    if (fs.existsSync(toolsDir)) {
+    if (cachedExistsSync(toolsDir)) {
       mounts.push({
         hostPath: toolsDir,
         containerPath: '/workspace/project/tools',
@@ -131,7 +143,7 @@ function buildVolumeMounts(
     // Mount store directory so non-main groups can access the database
     // (tools like track-conversion.ts and query-complaints.ts need store/messages.db)
     const storeDir = path.join(projectRoot, 'store');
-    if (fs.existsSync(storeDir)) {
+    if (cachedExistsSync(storeDir)) {
       mounts.push({
         hostPath: storeDir,
         containerPath: '/workspace/project/store',

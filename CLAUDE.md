@@ -115,3 +115,22 @@ container builder stop && container builder rm && container builder start
 ```
 
 Always verify after rebuild: `container run -i --rm --entrypoint wc nanoclaw-agent:latest -l /app/src/index.ts`
+
+## Project Rules
+
+- **Secrets never in process.env** — read from `.env` via `env.ts` only when needed, pipe to containers via stdin. Never `process.env.SECRET`.
+- **Container output uses nonce markers** — don't change the sentinel pattern in `container-runner.ts` without understanding the injection prevention.
+- **Per-group isolation is mandatory** — groups only see their own `groups/{name}/` folder. Never mount cross-group data.
+- **CLI mode preferred for tasks** — scheduled tasks use Claude Code CLI (free with Max). Only fall back to container API if `CLI_FALLBACK_ENABLED=true`.
+- **Test on VPS after deploy** — never mark VPS deployments done without `ssh nanoclaw` and verifying the service is running + responsive.
+- **Skills over features** — new capabilities should be container skills in `container/skills/`, not core code changes. Keep the core small.
+- **TypeScript strict mode** — all new code must pass `npm run typecheck`. No `any` types without justification.
+
+## Code Standards
+
+- **No bare `fetch()` in src/ or services/** — use `resilientFetch()` from `src/resilient-fetch.ts` for all external HTTP calls. It provides timeouts, retries with exponential backoff, and optional circuit breaker integration.
+- **Every external API integration must have a CircuitBreaker** — instantiate in the channel/service constructor. See `src/circuit-breaker.ts`.
+- **Never `.catch(() => {})`** — silent error swallowing makes debugging impossible. Minimum: `.catch(err => logger.debug({ err }, '<context>'))`.
+- **Hardcoded timeouts and intervals belong in `config.ts`** — with env var overrides and validation in `validateConfig()`.
+- **New config values require validation** — if it has a unit (ms, count, URL), add a check in `validateConfig()`.
+- **Test before commit** — `npm test` must pass. No shipping code that breaks existing tests.

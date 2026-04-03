@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MIN_SPAWN_COOLDOWN_MS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -13,7 +13,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 2;
 const BASE_RETRY_MS = 5000;
-const MIN_SPAWN_COOLDOWN_MS = 10000; // Minimum 10s between container spawns per group
+// MIN_SPAWN_COOLDOWN_MS imported from config.ts (default 3s, overridable via env)
 
 interface GroupState {
   active: boolean;

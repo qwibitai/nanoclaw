@@ -8,6 +8,9 @@ vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
+  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  WA_QUEUE_CAP: 100,
+  WA_PRESENCE_INTERVAL_MS: 300000,
 }));
 
 // Mock logger
@@ -17,6 +20,7 @@ vi.mock('../logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    fatal: vi.fn(),
   },
 }));
 

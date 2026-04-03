@@ -4,6 +4,7 @@
  */
 import { GROQ_API_KEY } from './config.js';
 import { logger } from './logger.js';
+import { resilientFetch } from './resilient-fetch.js';
 
 const GROQ_TRANSCRIPTION_URL =
   'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -38,13 +39,13 @@ export async function transcribeAudio(
     formData.append('file', blob, `voice.${ext}`);
     formData.append('model', WHISPER_MODEL);
 
-    const response = await fetch(GROQ_TRANSCRIPTION_URL, {
+    const response = await resilientFetch(GROQ_TRANSCRIPTION_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${GROQ_API_KEY}`,
       },
       body: formData,
-    });
+    }, { timeoutMs: 60_000, label: 'groq-whisper' });
 
     if (!response.ok) {
       const errorText = await response.text();

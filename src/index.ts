@@ -190,7 +190,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         routeOutbound(
           mainJid,
           `🚨 Agent error in *${group.name}* — ${outputSentToUser ? 'partial response sent, cursor advanced' : 'no response sent, will retry'}`,
-        ).catch(() => {});
+        ).catch((err: unknown) => { logger.debug({ err }, 'Failed to alert main group about error'); });
       }
     }
 
@@ -488,7 +488,7 @@ async function main(): Promise<void> {
     routeOutbound(
       groupJid,
       `Hey! I'm currently working on ${activeCount} other tasks. I'll get to your message as soon as one finishes — shouldn't be long!`,
-    ).catch(() => {});
+    ).catch((err: unknown) => { logger.debug({ err }, 'Failed to notify about queued message'); });
   });
   recoverPendingMessages();
   startMessageLoop();

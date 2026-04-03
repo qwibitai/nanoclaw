@@ -26,7 +26,7 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-export const POLL_INTERVAL = 2000;
+export const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || '500', 10);
 export const SCHEDULER_POLL_INTERVAL = 60000;
 export const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
@@ -56,7 +56,7 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
-export const IPC_POLL_INTERVAL = 1000;
+export const IPC_POLL_INTERVAL = parseInt(process.env.IPC_POLL_INTERVAL_MS || '250', 10);
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '300000', 10); // 5min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
@@ -96,6 +96,12 @@ export const QUO_WEBHOOK_PORT = parseInt(
   process.env.QUO_WEBHOOK_PORT || envConfig.QUO_WEBHOOK_PORT || '3100',
   10,
 );
+
+// --- Spawn & queue tuning ---
+export const MIN_SPAWN_COOLDOWN_MS = parseInt(process.env.MIN_SPAWN_COOLDOWN_MS || '3000', 10);
+export const WA_QUEUE_CAP = parseInt(process.env.WA_QUEUE_CAP || '100', 10);
+export const WA_PRESENCE_INTERVAL_MS = parseInt(process.env.WA_PRESENCE_INTERVAL_MS || '300000', 10);
+export const BOOKING_HEALTH_URL = process.env.BOOKING_HEALTH_URL || 'http://localhost:3200/health';
 
 // --- Model routing & budget ---
 // Scheduled/background tasks use Haiku for cost efficiency
@@ -205,6 +211,22 @@ export function validateConfig(): void {
     } else if (value < 30_000) {
       warnings.push(`${name} is ${value}ms (< 30s) — this is unusually short`);
     }
+  }
+
+  // -- Poll and cooldown intervals must be positive --
+  const intervals: [string, number][] = [
+    ['POLL_INTERVAL', POLL_INTERVAL],
+    ['IPC_POLL_INTERVAL', IPC_POLL_INTERVAL],
+    ['MIN_SPAWN_COOLDOWN_MS', MIN_SPAWN_COOLDOWN_MS],
+    ['WA_PRESENCE_INTERVAL_MS', WA_PRESENCE_INTERVAL_MS],
+  ];
+  for (const [name, value] of intervals) {
+    if (!Number.isFinite(value) || value <= 0) {
+      errors.push(`${name} must be a positive number, got ${value}`);
+    }
+  }
+  if (WA_QUEUE_CAP < 1) {
+    errors.push(`WA_QUEUE_CAP must be >= 1, got ${WA_QUEUE_CAP}`);
   }
 
   // -- MAX_CONCURRENT_CONTAINERS must be >= 1 --
