@@ -501,7 +501,7 @@ export function expirePendingBookings(): number {
   const d = getDb();
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const result = d.prepare(
-    `UPDATE bookings SET status = 'expired' WHERE status = 'pending' AND created_at < ?`,
+    `UPDATE bookings SET status = 'cancelled' WHERE status = 'pending' AND created_at < ?`,
   ).run(cutoff);
   if (result.changes > 0) {
     logger.info({ expired: result.changes }, 'Expired stale pending bookings');
@@ -556,6 +556,7 @@ export interface CheckoutResult {
   bookingId?: string;
   paymentUrl?: string;
   error?: string;
+  blockedDates?: string[];
 }
 
 // ── Main Checkout Handler ───────────────────────────────────────
@@ -617,21 +618,25 @@ export async function handleSquareCheckout(
         `SELECT id, dates FROM bookings WHERE equipment = ? AND status IN ('pending', 'paid', 'confirmed')`,
       ).all(eqKey) as Array<{ id: string; dates: string }>;
 
+      const blockedDates: string[] = [];
       for (const row of existing) {
         const bookedDates: string[] = JSON.parse(row.dates);
-        const overlap = datesArr.some((d) => bookedDates.includes(d));
-        if (overlap) {
-          logger.warn({ equipment: eqKey, dates: datesArr, conflictBooking: row.id }, 'Double-booking prevented (DB)');
-          logMissedBooking({
-            equipment: eqKey,
-            equipmentLabel: EQUIPMENT_CONFIG[eqKey]?.label || equipment,
-            dates: datesArr,
-            customer,
-            reason: 'DB overlap — dates already booked',
-            conflictBookingId: row.id,
-          });
-          return { success: false, error: 'Some of your selected dates are no longer available. Please go back and choose different dates.' };
+        for (const d of datesArr) {
+          if (bookedDates.includes(d) && !blockedDates.includes(d)) {
+            blockedDates.push(d);
+          }
         }
+      }
+      if (blockedDates.length > 0) {
+        logger.warn({ equipment: eqKey, dates: datesArr, blockedDates }, 'Double-booking prevented (DB)');
+        logMissedBooking({
+          equipment: eqKey,
+          equipmentLabel: EQUIPMENT_CONFIG[eqKey]?.label || equipment,
+          dates: datesArr,
+          customer,
+          reason: 'DB overlap — dates already booked',
+        });
+        return { success: false, error: 'Some of your selected dates are no longer available. Please go back and choose different dates.', blockedDates };
       }
     } catch (err) {
       logger.error({ error: err instanceof Error ? err.message : String(err) }, 'DB availability check failed');
@@ -1027,6 +1032,10 @@ export async function getAvailabilityBusySlots(
   startDate: string,
   endDate: string,
 ): Promise<{ start: string; end: string }[]> {
+  // Expire stale pending bookings before checking availability
+  // so abandoned checkouts don't ghost-block the calendar
+  expirePendingBookings();
+
   const busySlots: { start: string; end: string }[] = [];
 
   // ── Source 1: Google Calendar ──
@@ -1056,7 +1065,7 @@ export async function getAvailabilityBusySlots(
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT dates FROM bookings WHERE equipment = ? AND status = 'confirmed'`,
+      `SELECT dates FROM bookings WHERE equipment = ? AND status IN ('pending', 'paid', 'confirmed')`,
     ).all(equipmentKey) as { dates: string }[];
 
     for (const row of rows) {

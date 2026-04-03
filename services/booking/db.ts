@@ -181,13 +181,40 @@ export function expireStalePendingBookings(maxAgeMinutes = 30): number {
   return result.changes;
 }
 
+// ── Availability: DB Busy Dates ─────────────────────────────────────
+
+/** Return dates from active bookings (pending/paid/confirmed) for a date range. */
+export function getBookedDatesFromDb(
+  equipment: EquipmentKey,
+  startDate: string,
+  endDate: string,
+): { start: string; end: string }[] {
+  const rows = db.prepare(`
+    SELECT dates FROM bookings
+    WHERE equipment = ? AND status IN ('pending', 'paid', 'confirmed')
+  `).all(equipment) as Array<{ dates: string }>;
+
+  const slots: { start: string; end: string }[] = [];
+  for (const row of rows) {
+    let dates: string[];
+    try { dates = JSON.parse(row.dates); } catch { continue; }
+    for (const d of dates) {
+      if (d >= startDate && d <= endDate) {
+        slots.push({ start: `${d}T00:00:00Z`, end: `${d}T23:59:59Z` });
+      }
+    }
+  }
+  return slots;
+}
+
 // ── Double-Booking Prevention ───────────────────────────────────────
 
 export function hasOverlappingBooking(equipment: EquipmentKey, dates: string[]): boolean {
-  // Check if any non-cancelled booking overlaps with the requested dates
+  // Check if any active booking overlaps with the requested dates
+  // Must match the same statuses used in availability display
   const rows = db.prepare(`
     SELECT dates FROM bookings
-    WHERE equipment = ? AND status != 'cancelled'
+    WHERE equipment = ? AND status IN ('pending', 'paid', 'confirmed')
   `).all(equipment) as Array<{ dates: string }>;
 
   const requestedSet = new Set(dates);

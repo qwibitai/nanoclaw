@@ -18,7 +18,7 @@ import {
   initDb, generateBookingId, createBooking, getBooking,
   getBookingByOrderId, updateBookingStatus, setCalendarEventId,
   hasOverlappingBooking, cancelBooking, getActiveBookings, getBookingsByEmail,
-  expireStalePendingBookings,
+  expireStalePendingBookings, getBookedDatesFromDb,
 } from './db.js';
 import {
   sendOwnerNotification, sendCustomerConfirmation,
@@ -125,13 +125,24 @@ async function handleAvailability(req: http.IncomingMessage, res: http.ServerRes
     return;
   }
 
+  // Expire stale pending bookings before checking availability
+  expireStalePendingBookings(30);
+
   let busySlots: any[] = [];
   try {
     busySlots = await getBookedSlots(body.equipment, body.startDate, body.endDate);
   } catch (err: any) {
     console.error('[availability] Calendar check failed:', err.message);
-    // Return empty busy slots so the form still works
   }
+
+  // Merge DB bookings (pending/paid/confirmed) so calendar matches checkout
+  try {
+    const dbSlots = getBookedDatesFromDb(body.equipment, body.startDate, body.endDate);
+    busySlots = busySlots.concat(dbSlots);
+  } catch (err: any) {
+    console.error('[availability] DB check failed:', err.message);
+  }
+
   json(res, 200, {
     equipment: body.equipment,
     startDate: body.startDate,
@@ -272,10 +283,19 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
 
   try {
     const payload = JSON.parse(body);
-    if (payload.type !== 'payment.completed') return;
+    console.log(`[webhook] Received event: ${payload.type}`);
+
+    // Square sends payment.created and payment.updated — not payment.completed
+    if (!['payment.created', 'payment.updated'].includes(payload.type)) return;
 
     const payment = payload.data?.object?.payment;
     if (!payment) return;
+
+    // Only process completed payments
+    if (payment.status !== 'COMPLETED') {
+      console.log(`[webhook] Payment status is ${payment.status}, skipping`);
+      return;
+    }
 
     const orderId = payment.order_id;
     if (!orderId) return;
@@ -315,7 +335,11 @@ async function handleSquareWebhook(req: http.IncomingMessage, res: http.ServerRe
       return;
     }
 
-    if (booking.status !== 'pending') {
+    if (booking.status === 'cancelled') {
+      // Payment arrived after pending booking was expired — resurrect it
+      console.log(`[webhook] Booking ${booking.id} was expired but payment received — reactivating`);
+      // Fall through to normal confirmation flow below
+    } else if (booking.status !== 'pending') {
       console.log(`[webhook] Booking ${booking.id} already processed (status: ${booking.status})`);
       return;
     }
