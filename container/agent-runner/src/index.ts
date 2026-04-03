@@ -19,6 +19,8 @@ import type {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const SCRIPT_TIMEOUT_MS = 30_000;
+const DEFAULT_GROUP_WORKSPACE_DIR = '/workspace/group';
+const DEFAULT_GLOBAL_WORKSPACE_DIR = '/workspace/global';
 
 interface ScriptResult {
   wakeAgent: boolean;
@@ -118,16 +120,26 @@ function defaultMcpServerPath(): string {
   return path.join(__dirname, 'ipc-mcp-stdio.js');
 }
 
+function groupWorkspaceDir(): string {
+  return process.env.NANOCLAW_WORKSPACE_GROUP_DIR || DEFAULT_GROUP_WORKSPACE_DIR;
+}
+
+function globalWorkspaceDir(): string {
+  return (
+    process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || DEFAULT_GLOBAL_WORKSPACE_DIR
+  );
+}
+
 export async function* dispatchProviderInput(
   containerInput: ContainerInput,
   options: DispatchOptions = {},
 ): AsyncGenerator<ContainerOutput> {
   const registry = createContainerProviderRegistry(options.providers);
   const provider = registry.getProvider(containerInput.providerId);
-  const workspaceDir = '/workspace/group';
+  const workspaceDir = groupWorkspaceDir();
   const globalMemoryDir = containerInput.runtimeInput.isMain
     ? undefined
-    : '/workspace/global';
+    : globalWorkspaceDir();
   const preparedWorkspace = await provider.prepareWorkspace({
     providerHomeDir: provider.providerHomeDir,
     workspaceDir,

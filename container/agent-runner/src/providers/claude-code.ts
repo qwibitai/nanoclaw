@@ -17,6 +17,12 @@ const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
 const IPC_INPUT_DIR = path.join(IPC_DIR, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+const WORKSPACE_GROUP_DIR =
+  process.env.NANOCLAW_WORKSPACE_GROUP_DIR || '/workspace/group';
+const WORKSPACE_GLOBAL_DIR =
+  process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || '/workspace/global';
+const WORKSPACE_EXTRA_DIR =
+  process.env.NANOCLAW_WORKSPACE_EXTRA_DIR || '/workspace/extra';
 
 interface SessionEntry {
   sessionId: string;
@@ -111,7 +117,7 @@ function getSessionSummary(
 }
 
 function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input) => {
+  return async (input: unknown) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
     const sessionId = preCompact.session_id;
@@ -133,7 +139,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = path.join(WORKSPACE_GROUP_DIR, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -363,8 +369,14 @@ async function runQuery(
 
   let globalClaudeMd: string | undefined;
   if (!runtimeInput.isMain) {
-    const canonicalGlobalMemoryPath = '/workspace/global/AGENT.md';
-    const legacyGlobalMemoryPath = '/workspace/global/CLAUDE.md';
+    const canonicalGlobalMemoryPath = path.join(
+      WORKSPACE_GLOBAL_DIR,
+      'AGENT.md',
+    );
+    const legacyGlobalMemoryPath = path.join(
+      WORKSPACE_GLOBAL_DIR,
+      'CLAUDE.md',
+    );
 
     if (fs.existsSync(canonicalGlobalMemoryPath)) {
       globalClaudeMd = fs.readFileSync(canonicalGlobalMemoryPath, 'utf-8');
@@ -374,10 +386,9 @@ async function runQuery(
   }
 
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
+  if (fs.existsSync(WORKSPACE_EXTRA_DIR)) {
+    for (const entry of fs.readdirSync(WORKSPACE_EXTRA_DIR)) {
+      const fullPath = path.join(WORKSPACE_EXTRA_DIR, entry);
       if (fs.statSync(fullPath).isDirectory()) {
         extraDirs.push(fullPath);
       }
@@ -390,7 +401,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: WORKSPACE_GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -457,8 +468,10 @@ async function runQuery(
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
-      events.push({ type: 'session_started', sessionId: newSessionId });
-      log(`Session initialized: ${newSessionId}`);
+      if (newSessionId) {
+        events.push({ type: 'session_started', sessionId: newSessionId });
+        log(`Session initialized: ${newSessionId}`);
+      }
     }
 
     if (

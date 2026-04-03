@@ -35,7 +35,7 @@ const tempRoots: string[] = [];
 
 function createRuntimeWorkspace(): RuntimeWorkspace {
   const root = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'nanoclaw-agent-runner-memory-'),
+    path.join(os.tmpdir(), 'nanoclaw-agent-runner-claude-compat-'),
   );
   tempRoots.push(root);
 
@@ -69,10 +69,7 @@ function createWorkspaceEnv(runtimeWorkspace: RuntimeWorkspace): NodeJS.ProcessE
   };
 }
 
-function writeMockSdkLoader(
-  loaderPath: string,
-  compatibilityPath: string,
-): void {
+function writeMockSdkLoader(loaderPath: string): void {
   const source = `
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,20 +78,55 @@ const mockModuleSource = ${JSON.stringify(`
   import fs from 'node:fs';
   import path from 'node:path';
 
+  let callCount = 0;
+
+  function appendCapture(nextCapture) {
+    const capturePath = process.env.TEST_CAPTURE_PATH;
+    const captures = fs.existsSync(capturePath)
+      ? JSON.parse(fs.readFileSync(capturePath, 'utf-8'))
+      : [];
+    captures.push(nextCapture);
+    fs.writeFileSync(capturePath, JSON.stringify(captures));
+  }
+
   export async function* query({ options }) {
-    fs.writeFileSync(
-      process.env.TEST_CAPTURE_PATH,
-      JSON.stringify({
-        systemPrompt: options.systemPrompt ?? null,
-        cwd: options.cwd,
-      }),
+    callCount += 1;
+
+    appendCapture({
+      callCount,
+      resume: options.resume ?? null,
+      resumeSessionAt: options.resumeSessionAt ?? null,
+      allowedTools: options.allowedTools,
+      mcpServers: options.mcpServers,
+      settingSources: options.settingSources,
+    });
+
+    if (callCount === 1) {
+      const ipcInputPath = path.join(
+        process.env.NANOCLAW_IPC_DIR,
+        'input',
+        '0001.json',
+      );
+      fs.writeFileSync(
+        ipcInputPath,
+        JSON.stringify({ type: 'message', text: 'Follow up with the team.' }),
+      );
+
+      yield { type: 'system', subtype: 'init', session_id: 'session-123' };
+      yield { type: 'assistant', uuid: 'assistant-1' };
+      yield { type: 'result', subtype: 'success', result: 'first result' };
+      return;
+    }
+
+    const closeSentinel = path.join(
+      process.env.NANOCLAW_IPC_DIR,
+      'input',
+      '_close',
     );
-    fs.writeFileSync(${JSON.stringify(compatibilityPath)}, '# Provider Compatibility Edit\\n');
-    const closeSentinel = path.join(process.env.NANOCLAW_IPC_DIR, 'input', '_close');
-    fs.mkdirSync(path.dirname(closeSentinel), { recursive: true });
-    yield { type: 'system', subtype: 'init', session_id: 'session-123' };
-    yield { type: 'result', subtype: 'success', result: 'ok' };
     fs.writeFileSync(closeSentinel, '');
+
+    yield { type: 'assistant', uuid: 'assistant-2' };
+    yield { type: 'result', subtype: 'success', result: 'second result' };
   }
 `)};
 
@@ -159,7 +191,7 @@ function runRunner(
   });
 }
 
-describe.sequential('container agent runner global memory', () => {
+describe.sequential('claude-code container provider compatibility', () => {
   afterEach(() => {
     while (tempRoots.length > 0) {
       const root = tempRoots.pop();
@@ -169,26 +201,26 @@ describe.sequential('container agent runner global memory', () => {
     }
   });
 
-  it('uses canonical global AGENT.md for non-main runs and never syncs compatibility edits back', async () => {
+  it('preserves resume, resumeSessionAt, MCP wiring, and Claude team tools across follow-up queries', async () => {
     // Arrange
     const runtimeWorkspace = createRuntimeWorkspace();
-    const canonicalPath = path.join(runtimeWorkspace.globalDir, 'AGENT.md');
-    const compatibilityPath = path.join(
-      runtimeWorkspace.globalDir,
-      'CLAUDE.md',
-    );
-    fs.writeFileSync(canonicalPath, '# Canonical Global\n');
-    fs.writeFileSync(compatibilityPath, '# Legacy Compatibility\n');
-    writeMockSdkLoader(runtimeWorkspace.loaderPath, compatibilityPath);
+    writeMockSdkLoader(runtimeWorkspace.loaderPath);
     const env = createWorkspaceEnv(runtimeWorkspace);
 
     // Act
     const result = await runRunner(
-      ['--import', 'tsx', '--loader', runtimeWorkspace.loaderPath, runnerEntryPoint],
+      [
+        '--import',
+        'tsx',
+        '--loader',
+        runtimeWorkspace.loaderPath,
+        runnerEntryPoint,
+      ],
       {
         providerId: 'claude-code',
         runtimeInput: {
-          prompt: 'Use the shared context.',
+          prompt: 'Pick up the existing conversation.',
+          sessionId: 'legacy-session',
           groupFolder: 'test-group',
           chatJid: 'test@g.us',
           isMain: false,
@@ -200,24 +232,48 @@ describe.sequential('container agent runner global memory', () => {
         TEST_CAPTURE_PATH: runtimeWorkspace.capturePath,
       },
     );
-    const capturedQuery = JSON.parse(
+    const capturedCalls = JSON.parse(
       fs.readFileSync(runtimeWorkspace.capturePath, 'utf-8'),
-    ) as {
-      cwd: string;
-      systemPrompt: { append: string; preset: string; type: string } | null;
-    };
+    ) as Array<{
+      allowedTools: string[];
+      callCount: number;
+      mcpServers: {
+        nanoclaw: {
+          args: string[];
+          command: string;
+          env: Record<string, string>;
+        };
+      };
+      resume: string | null;
+      resumeSessionAt: string | null;
+      settingSources: string[];
+    }>;
 
     // Assert
     expect(result.code).toBe(0);
-    expect(capturedQuery.cwd).toBe(runtimeWorkspace.groupDir);
-    expect(capturedQuery.systemPrompt).toEqual({
-      type: 'preset',
-      preset: 'claude_code',
-      append: '# Canonical Global\n',
+    expect(capturedCalls).toHaveLength(2);
+    expect(capturedCalls[0]).toMatchObject({
+      callCount: 1,
+      resume: 'legacy-session',
+      resumeSessionAt: null,
+      settingSources: ['project', 'user'],
     });
-    expect(fs.readFileSync(canonicalPath, 'utf-8')).toBe('# Canonical Global\n');
-    expect(fs.readFileSync(compatibilityPath, 'utf-8')).toBe(
-      '# Provider Compatibility Edit\n',
+    expect(capturedCalls[1]).toMatchObject({
+      callCount: 2,
+      resume: 'session-123',
+      resumeSessionAt: 'assistant-1',
+    });
+    expect(capturedCalls[0].allowedTools).toEqual(
+      expect.arrayContaining(['TeamCreate', 'TeamDelete', 'mcp__nanoclaw__*']),
     );
+    expect(capturedCalls[0].mcpServers.nanoclaw).toEqual({
+      command: 'node',
+      args: [expect.stringContaining('ipc-mcp-stdio')],
+      env: {
+        NANOCLAW_CHAT_JID: 'test@g.us',
+        NANOCLAW_GROUP_FOLDER: 'test-group',
+        NANOCLAW_IS_MAIN: '0',
+      },
+    });
   });
 });
