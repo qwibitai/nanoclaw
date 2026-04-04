@@ -9,16 +9,20 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/sdk.d.ts",
       "import": "./dist/sdk.js",
-      "types": "./dist/sdk.d.ts"
+      "require": "./dist/sdk.cjs",
+      "default": "./dist/sdk.js"
     },
     "./channels/telegram": {
+      "types": "./dist/channels/telegram.d.ts",
       "import": "./dist/channels/telegram.js",
-      "types": "./dist/channels/telegram.d.ts"
+      "require": "./dist/channels/telegram.cjs",
+      "default": "./dist/channels/telegram.js"
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsup",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
@@ -61,6 +65,7 @@
     "globals": "^15.12.0",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.35.0",

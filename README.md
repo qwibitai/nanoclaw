@@ -5,12 +5,13 @@ An SDK for running Claude agents in isolated BoxLite VMs with messaging channel 
 ## SDK Usage
 
 ```typescript
-import { AgentLite, TelegramChannel } from '@boxlite-ai/agentlite';
+import { AgentLite } from '@boxlite-ai/agentlite';
+import { TelegramChannel } from '@boxlite-ai/agentlite/channels/telegram';
 
 const agent_lite = new AgentLite();
 await agent_lite.start();
 
-await agent_lite.registerChannel(new TelegramChannel(process.env.TELEGRAM_BOT_TOKEN));
+await agent_lite.registerChannel(new TelegramChannel({ token: process.env.TELEGRAM_BOT_TOKEN }));
 agent_lite.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
 ```
 
