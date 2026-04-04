@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Botler 360 SAS. All rights reserved.
+// See LICENSE.md for license terms.
+
 /**
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC

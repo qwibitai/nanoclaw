@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Botler 360 SAS. All rights reserved.
+# See LICENSE.md for license terms.
+
 """
 Chat Gateway - Cloud Run service that receives Google Chat webhook events
 and writes them to Firestore for NanoClaw agents to poll.

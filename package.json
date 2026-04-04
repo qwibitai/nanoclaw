@@ -42,6 +42,7 @@
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
   },
+  "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
     "node": ">=20"
   }

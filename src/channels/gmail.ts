@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Botler 360 SAS. All rights reserved.
+// See LICENSE.md for license terms.
+
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -18,12 +21,10 @@ import {
 } from '../types.js';
 
 // Firestore webhook signal polling config
-const GMAIL_WEBHOOK_ENABLED =
-  process.env.GMAIL_WEBHOOK_ENABLED === 'true';
+const GMAIL_WEBHOOK_ENABLED = process.env.GMAIL_WEBHOOK_ENABLED === 'true';
 const FIRESTORE_SIGNAL_POLL_MS = 5_000; // 5 seconds — lightweight Firestore check
 const GMAIL_WEBHOOK_FALLBACK_POLL_MS = 300_000; // 5 minutes when webhook is active
-const AGENT_NAME =
-  process.env.GOOGLE_CHAT_AGENT_NAME || 'nanoclaw';
+const AGENT_NAME = process.env.GOOGLE_CHAT_AGENT_NAME || 'nanoclaw';
 const SERVICE_ACCOUNT_PATH =
   process.env.GOOGLE_APPLICATION_CREDENTIALS ||
   path.join(os.homedir(), '.firebase-mcp', 'adp-service-account.json');
