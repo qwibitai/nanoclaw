@@ -24,6 +24,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { cleanupOldAudioAttachments } from './attachment-cleanup.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -520,6 +521,7 @@ function recoverPendingMessages(): void {
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
+  cleanupOldAudioAttachments();
 }
 
 async function main(): Promise<void> {
