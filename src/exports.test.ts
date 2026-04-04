@@ -37,15 +37,18 @@ describe('package exports', () => {
     });
 
     it('dist/channels/telegram.cjs exists', () => {
-      expect(
-        existsSync(path.join(distDir, 'channels', 'telegram.cjs')),
-      ).toBe(true);
+      expect(existsSync(path.join(distDir, 'channels', 'telegram.cjs'))).toBe(
+        true,
+      );
     });
 
     it('sdk.cjs exports AgentLite via require()', () => {
       const result = execFileSync(
         'node',
-        ['-e', 'const m = require("./dist/sdk.cjs"); console.log(JSON.stringify(Object.keys(m)))'],
+        [
+          '-e',
+          'const m = require("./dist/sdk.cjs"); console.log(JSON.stringify(Object.keys(m)))',
+        ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
       const keys = JSON.parse(result.trim());
@@ -55,7 +58,10 @@ describe('package exports', () => {
     it('channels/telegram.cjs exports TelegramChannel via require()', () => {
       const result = execFileSync(
         'node',
-        ['-e', 'const m = require("./dist/channels/telegram.cjs"); console.log(JSON.stringify(Object.keys(m)))'],
+        [
+          '-e',
+          'const m = require("./dist/channels/telegram.cjs"); console.log(JSON.stringify(Object.keys(m)))',
+        ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
       const keys = JSON.parse(result.trim());
@@ -65,7 +71,10 @@ describe('package exports', () => {
     it('CJS TelegramChannel accepts options object', () => {
       const result = execFileSync(
         'node',
-        ['-e', 'const { TelegramChannel } = require("./dist/channels/telegram.cjs"); const ch = new TelegramChannel({ token: "test" }); console.log(ch.name)'],
+        [
+          '-e',
+          'const { TelegramChannel } = require("./dist/channels/telegram.cjs"); const ch = new TelegramChannel({ token: "test" }); console.log(ch.name)',
+        ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
       expect(result.trim()).toBe('telegram');
