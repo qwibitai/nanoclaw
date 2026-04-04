@@ -72,8 +72,8 @@ export interface NewMessage {
 
 /**
  * チャンネルコールバック専用のメッセージ型。
- * NewMessage を拡張し、永続化されない Discord 固有のメタデータを付与する。
- * storeMessage には渡さず、onMessage コールバック内でのみ参照すること。
+ * NewMessage を拡張し、Discord 固有のメタデータを付与する。
+ * storeMessage に渡しても問題ないが、追加フィールドは DB 側で保存されない。
  */
 export interface InboundMessage extends NewMessage {
   place_type?: PlaceType;
@@ -122,7 +122,10 @@ export interface Channel {
 
 // チャネルが受信メッセージを配信するために使用するコールバック型。
 // InboundMessage は NewMessage のスーパーセットなので、既存ハンドラはそのまま使用できる。
-export type OnInboundMessage = (chatJid: string, message: InboundMessage) => void;
+export type OnInboundMessage = (
+  chatJid: string,
+  message: InboundMessage,
+) => void;
 
 // チャットのメタデータ検出用コールバック。
 // name はオプション — 名前をインラインで配信するチャネル（Telegram）はここに渡す。
