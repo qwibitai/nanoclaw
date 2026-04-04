@@ -9,6 +9,7 @@
 import http from 'http';
 import { getDashboardCSS } from './dashboard-css.js';
 import { getVaultViewHTML, getVaultViewJS } from './dashboard-vault-view.js';
+import { getMealsViewHTML, getMealsViewJS } from './dashboard-meals-view.js';
 
 const NAV_ITEMS = [
   { id: 'vault', label: 'Vault', icon: 'vault' },
@@ -74,7 +75,7 @@ function renderPage(): string {
       ${getVaultViewHTML()}
     </section>
     <section id="view-meals" class="view">
-      <div class="empty-state"><h3>Meal Plan</h3><p>Loading meal plan...</p></div>
+      ${getMealsViewHTML()}
     </section>
     <section id="view-tasks" class="view">
       <div class="empty-state"><h3>Scheduled Tasks</h3><p>Loading tasks...</p></div>
@@ -162,6 +163,10 @@ connectSSE();
 
 <script>
 ${getVaultViewJS()}
+</script>
+
+<script>
+${getMealsViewJS()}
 </script>
 
 </body>
