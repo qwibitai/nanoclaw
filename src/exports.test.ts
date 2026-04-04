@@ -24,10 +24,15 @@ describe('package exports', () => {
       expect(typeof mod.TelegramChannel).toBe('function');
     });
 
-    it('TelegramChannel accepts options object', async () => {
+    it('TelegramChannel accepts positional args', async () => {
       const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
       const mod = await import(telegramPath);
-      const channel = new mod.TelegramChannel({ token: 'test' });
+      const noopOpts = {
+        onMessage: () => {},
+        onChatMetadata: () => {},
+        registeredGroups: () => ({}),
+      };
+      const channel = new mod.TelegramChannel('test', noopOpts);
       expect(channel.name).toBe('telegram');
     });
   });
@@ -71,12 +76,12 @@ describe('package exports', () => {
       expect(keys).toContain('TelegramChannel');
     });
 
-    it('CJS TelegramChannel accepts options object', () => {
+    it('CJS TelegramChannel accepts positional args', () => {
       const result = execFileSync(
         'node',
         [
           '-e',
-          'const { TelegramChannel } = require("./dist/channels/telegram.cjs"); const ch = new TelegramChannel({ token: "test" }); console.log(ch.name)',
+          'const { TelegramChannel } = require("./dist/channels/telegram.cjs"); const opts = { onMessage(){}, onChatMetadata(){}, registeredGroups(){ return {} } }; const ch = new TelegramChannel("test", opts); console.log(ch.name)',
         ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );

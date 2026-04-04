@@ -55,7 +55,9 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { ChannelFactory, ChannelOpts } from './channels/registry.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { ChannelHandler } from './options.js';
 import { logger } from './logger.js';
 
 // --- Module state ---
@@ -87,15 +89,19 @@ async function getOneCLI(): Promise<any> {
 // --- Public API ---
 
 export interface StartOptions {
-  /** Pre-built channels to connect on startup. */
-  channels?: Channel[];
   /** Pre-registered groups. */
   groups?: Map<string, RegisteredGroup>;
   /** Model/LLM configuration. If not provided, falls back to OneCLI gateway. */
   model?: {
     credentials?: () => Promise<Record<string, string>>;
   };
+  /** Customize the default channel handler. Applied to all channels. */
+  channelHandler?: (builtin: ChannelHandler) => ChannelHandler;
 }
+
+let _channelHandlerCustomizer:
+  | ((defaults: ChannelHandler) => ChannelHandler)
+  | undefined;
 
 /**
  * Start the orchestrator.
@@ -132,14 +138,8 @@ export async function start(options: StartOptions = {}): Promise<void> {
 
   restoreRemoteControl();
 
-  // Connect pre-provided channels
-  if (options.channels) {
-    for (const channel of options.channels) {
-      injectChannelOpts(channel);
-      channels.push(channel);
-      await channel.connect();
-    }
-  }
+  // Store channel handler customizer
+  _channelHandlerCustomizer = options.channelHandler;
 
   if (channels.length > 0) {
     logger.info({ count: channels.length }, 'Initial channels connected');
@@ -156,12 +156,27 @@ export async function stop(): Promise<void> {
   for (const ch of channels) await ch.disconnect();
 }
 
-/** Register a channel dynamically (after start). */
-export async function registerChannel(channel: Channel): Promise<void> {
-  injectChannelOpts(channel);
+/** Register a channel via factory. Builds ChannelOpts, applies customizer, calls factory. */
+export async function registerChannelFactory(
+  name: string,
+  factory: ChannelFactory,
+): Promise<boolean> {
+  let handler = buildDefaultChannelHandler();
+  if (_channelHandlerCustomizer) {
+    handler = _channelHandlerCustomizer(handler);
+  }
+  const opts: ChannelOpts = handler;
+
+  const channel = factory(opts);
+  if (!channel) {
+    logger.warn({ channel: name }, 'Factory returned null, skipping');
+    return false;
+  }
+
   channels.push(channel);
   await channel.connect();
-  logger.info({ channel: channel.name }, 'Channel registered dynamically');
+  logger.info({ channel: channel.name }, 'Channel registered');
+  return true;
 }
 
 /** Register a group dynamically (after start). */
@@ -309,8 +324,8 @@ async function handleRemoteControl(
   }
 }
 
-/** Build channel callback opts for message storage + remote control. */
-function buildChannelOpts() {
+/** Build default channel handler with message storage + remote control. */
+export function buildDefaultChannelHandler(): ChannelHandler {
   return {
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Remote control commands — intercept before storage
@@ -342,16 +357,6 @@ function buildChannelOpts() {
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
-}
-
-/** Inject internal callbacks into a channel that supports _setOpts. */
-function injectChannelOpts(channel: Channel): void {
-  if (
-    '_setOpts' in channel &&
-    typeof (channel as any)._setOpts === 'function'
-  ) {
-    (channel as any)._setOpts(buildChannelOpts());
-  }
 }
 
 /** Copy default CLAUDE.md templates to group folders. */
