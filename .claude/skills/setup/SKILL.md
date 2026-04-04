@@ -70,6 +70,22 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
+### OpenClaw Migration Detection
+
+Check for an existing OpenClaw installation:
+
+```bash
+ls -d ~/.openclaw 2>/dev/null || ls -d ~/.clawdbot 2>/dev/null
+```
+
+If a directory is found, AskUserQuestion:
+
+1. **Migrate now** — "Import identity, credentials, and settings from OpenClaw before continuing setup."
+2. **Fresh start** — "Skip migration and set up NanoClaw from scratch."
+3. **Migrate later** — "Continue setup now, run `/migrate-from-openclaw` anytime later."
+
+If "Migrate now": invoke `/migrate-from-openclaw`, then return here and continue at step 2a (Timezone).
+
 ## 2a. Timezone
 
 Run `npx tsx setup/index.ts --step timezone` and parse the status block.
