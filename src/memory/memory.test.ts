@@ -537,33 +537,34 @@ describe('keyword-store', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('按 group_folder 隔离', async () => {
+  it('按 user_id 隔离（跨群共享用户记忆）', async () => {
     await storeFacts('group_a', [
       {
-        id: 'ga1',
-        content: 'Group A fact about TypeScript',
+        id: 'ua1',
+        content: 'User A fact about TypeScript',
         category: 'context',
         confidence: 0.8,
         source: 'test',
       },
-    ]);
+    ], 'user_a');
     await storeFacts('group_b', [
       {
-        id: 'gb1',
-        content: 'Group B fact about TypeScript',
+        id: 'ub1',
+        content: 'User B fact about TypeScript',
         category: 'context',
         confidence: 0.8,
         source: 'test',
       },
-    ]);
+    ], 'user_b');
 
-    const resultsA = keywordSearch('TypeScript', 'group_a', 5);
-    const resultsB = keywordSearch('TypeScript', 'group_b', 5);
+    // user_a 的记忆跨群可查
+    const resultsA = keywordSearch('TypeScript', 'group_a', 5, 'user_a');
+    const resultsB = keywordSearch('TypeScript', 'group_b', 5, 'user_b');
 
     expect(resultsA).toHaveLength(1);
-    expect(resultsA[0].id).toBe('ga1');
+    expect(resultsA[0].id).toBe('ua1');
     expect(resultsB).toHaveLength(1);
-    expect(resultsB[0].id).toBe('gb1');
+    expect(resultsB[0].id).toBe('ub1');
   });
 });
 

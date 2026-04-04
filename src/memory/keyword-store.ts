@@ -43,17 +43,19 @@ export function keywordSearch(
   query: string,
   groupFolder: string,
   topK: number = 10,
+  userId: string = '',
 ): KeywordResult[] {
   if (isFtsAvailable()) {
-    return searchFts(query, groupFolder, topK);
+    return searchFts(query, groupFolder, topK, userId);
   }
-  return searchLike(query, groupFolder, topK);
+  return searchLike(query, groupFolder, topK, userId);
 }
 
 function searchFts(
   query: string,
   groupFolder: string,
   topK: number,
+  userId: string = '',
 ): KeywordResult[] {
   const ftsQuery = buildFtsQuery(query);
   if (!ftsQuery) return [];
@@ -66,11 +68,11 @@ function searchFts(
         `SELECT m.id, m.content, m.category, m.created_at, fts.rank
          FROM memory_facts_fts fts
          JOIN memory_facts m ON fts.fact_id = m.id
-         WHERE fts.content MATCH ? AND m.group_folder = ?
+         WHERE fts.content MATCH ? AND m.user_id = ?
          ORDER BY fts.rank
          LIMIT ?`,
       )
-      .all(ftsQuery, groupFolder, topK) as Array<{
+      .all(ftsQuery, userId, topK) as Array<{
       id: string;
       content: string;
       category: string;
@@ -96,6 +98,7 @@ function searchLike(
   query: string,
   groupFolder: string,
   topK: number,
+  userId: string = '',
 ): KeywordResult[] {
   const tokens = extractTokens(query);
   if (tokens.length === 0) return [];
@@ -112,12 +115,12 @@ function searchLike(
     SELECT id, content, category, created_at,
            (${scoreParts.join(' + ')}) AS match_count
     FROM memory_facts
-    WHERE group_folder = @group AND (${likeClauses.join(' OR ')})
+    WHERE user_id = @uid AND (${likeClauses.join(' OR ')})
     ORDER BY match_count DESC
     LIMIT @topK`;
 
   const params: Record<string, string | number> = {
-    group: groupFolder,
+    uid: userId,
     topK,
   };
   for (let i = 0; i < tokens.length; i++) {

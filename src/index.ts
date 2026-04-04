@@ -804,7 +804,10 @@ async function main(): Promise<void> {
           deleteSession(group.folder);
           logger.info({ group: group.folder }, '/clear: session 已清除');
           const ch = findChannel(channels, chatJid);
-          ch?.sendMessage(chatJid, '✅ 对话已清除，下次消息将开始新 session。记忆保留。').catch((err) =>
+          ch?.sendMessage(
+            chatJid,
+            '✅ 对话已清除，下次消息将开始新 session。记忆保留。',
+          ).catch((err) =>
             logger.error({ err }, 'Failed to send /clear reply'),
           );
         }

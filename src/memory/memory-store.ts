@@ -12,9 +12,11 @@ import { logger } from '../logger.js';
 
 export class MemoryStore {
   private groupFolder: string;
+  private userId: string;
 
-  constructor(groupFolder: string) {
+  constructor(groupFolder: string, userId: string = '') {
     this.groupFolder = groupFolder;
+    this.userId = userId;
   }
 
   /**
@@ -27,7 +29,7 @@ export class MemoryStore {
 
     if (queryEmbedding) {
       try {
-        const facts = loadFacts(this.groupFolder);
+        const facts = loadFacts(this.groupFolder, this.userId);
         const scored: Array<{ fact: (typeof facts)[0]; score: number }> = [];
 
         for (const fact of facts) {
@@ -59,7 +61,7 @@ export class MemoryStore {
     // 2. 关键词检索
     let keywordResults: HybridResult[] = [];
     try {
-      const kwResults = keywordSearch(query, this.groupFolder, topK * 2);
+      const kwResults = keywordSearch(query, this.groupFolder, topK * 2, this.userId);
       keywordResults = kwResults.map((r) => ({
         id: r.id,
         content: r.content,
@@ -98,7 +100,7 @@ export class MemoryStore {
         confidence: metadata?.confidence ?? 0.5,
         source: metadata?.source || 'unknown',
       },
-    ]);
+    ], this.userId);
     return stored > 0 ? id : null;
   }
 }

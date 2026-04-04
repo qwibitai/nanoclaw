@@ -117,9 +117,9 @@ export function loadProfile(
   const db = getMemoryDb();
   const row = db
     .prepare(
-      'SELECT profile_json FROM memory_profiles WHERE group_folder = ? AND user_id = ?',
+      'SELECT profile_json FROM memory_profiles WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
     )
-    .get(groupFolder, userId) as { profile_json: string } | undefined;
+    .get(userId) as { profile_json: string } | undefined;
   if (!row) return null;
   try {
     return JSON.parse(row.profile_json);
@@ -156,10 +156,10 @@ export function loadFacts(
   const rows = db
     .prepare(
       `SELECT id, group_folder, content, category, confidence, source, embedding, created_at
-       FROM memory_facts WHERE group_folder = ? AND user_id = ?
+       FROM memory_facts WHERE user_id = ?
        ORDER BY confidence DESC`,
     )
-    .all(groupFolder, userId) as Array<{
+    .all(userId) as Array<{
     id: string;
     group_folder: string;
     content: string;
@@ -326,9 +326,9 @@ export function enforceMaxFacts(
 
   const rows = db
     .prepare(
-      'SELECT id, confidence, created_at FROM memory_facts WHERE group_folder = ? AND user_id = ?',
+      'SELECT id, confidence, created_at FROM memory_facts WHERE user_id = ?',
     )
-    .all(groupFolder, userId) as Array<{
+    .all(userId) as Array<{
     id: string;
     confidence: number;
     created_at: string;
