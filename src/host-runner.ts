@@ -42,7 +42,7 @@ function buildEnvironment(
   claudeHome: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     TZ: TIMEZONE,
     // Agent-runner workspace paths (replaces container mount points)
     NANOCLAW_IPC_DIR: ipcDir,
@@ -144,8 +144,18 @@ function setupDirectories(
   }
 
   // Copy agent-runner source into a per-group writable location
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  const agentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const agentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-src',
+  );
   if (fs.existsSync(agentRunnerSrc)) {
     const srcIndex = path.join(agentRunnerSrc, 'index.ts');
     const cachedIndex = path.join(agentRunnerDir, 'index.ts');
@@ -186,7 +196,12 @@ export async function runHostAgent(
 
   // Build the agent-runner in a temp directory then run it
   const agentRunnerPkg = path.join(projectRoot, 'container', 'agent-runner');
-  const buildDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-dist');
+  const buildDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-dist',
+  );
   fs.mkdirSync(buildDir, { recursive: true });
 
   // Compile agent-runner TypeScript

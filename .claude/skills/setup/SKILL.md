@@ -296,6 +296,10 @@ If the build fails, read the error output and fix it (usually a missing dependen
 
 ## 6. Mount Allowlist
 
+**If Host mode:** Skip this step. Host mode agents run directly on the host and already have access to the filesystem. Additional mount configuration is not needed.
+
+**If Docker or Apple Container:**
+
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
@@ -309,9 +313,13 @@ If service already running: unload first.
 
 Run `npx tsx setup/index.ts --step service` and parse the status block.
 
+The service setup is the same for all runtime modes (Docker, Apple Container, Host mode). The service runs `node dist/index.js`, which reads `HOST_MODE` from `.env` at startup and switches the agent runner accordingly. No Docker is needed at service level when using host mode.
+
+**If Host mode:** Verify that agent-runner dependencies are installed (`cd container/agent-runner && npm install`). The `DOCKER_GROUP_STALE` check below does not apply — skip it if using host mode.
+
 **If FALLBACK=wsl_no_systemd:** WSL without systemd detected. Tell user they can either enable systemd in WSL (`echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf` then restart WSL) or use the generated `start-nanoclaw.sh` wrapper.
 
-**If DOCKER_GROUP_STALE=true:** The user was added to the docker group after their session started — the systemd service can't reach the Docker socket. Ask user to run these two commands:
+**If DOCKER_GROUP_STALE=true (Docker only):** The user was added to the docker group after their session started — the systemd service can't reach the Docker socket. Ask user to run these two commands:
 
 1. Immediate fix: `sudo setfacl -m u:$(whoami):rw /var/run/docker.sock`
 2. Persistent fix (re-applies after every Docker restart):
@@ -338,7 +346,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Apple Container: check `.env` for credentials)
+- CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Host mode/Apple Container: check `.env` for credentials)
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
 - REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
@@ -347,9 +355,15 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), credential system not running (Docker: check `curl http://127.0.0.1:10254/api/health`; Apple Container: check `.env` credentials), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), credential system not running (Docker: check `curl http://127.0.0.1:10254/api/health`; Host mode/Apple Container: check `.env` credentials), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
+
+**Host mode agent fails:** Check `groups/main/logs/host-agent-*.log`. Common causes:
+- Agent-runner dependencies not installed → `cd container/agent-runner && npm install`
+- `claude` CLI not installed globally → `npm install -g @anthropic-ai/claude-code`
+- Credentials missing in `.env` → check `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set
+- TypeScript compilation error → check that `container/agent-runner/src/` compiles: `cd container/agent-runner && npx tsc --noEmit`
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
