@@ -31,7 +31,7 @@ export interface UnifiedSession {
   lastProvider: 'claude' | 'ollama';
 }
 
-const MAX_MESSAGES = 100;
+const MAX_MESSAGES = 500; // Safety net — token-aware compaction is the primary limit
 const SESSIONS_DIR = '/workspace/group/.sessions';
 
 function sessionPath(sessionId: string): string {
@@ -192,4 +192,63 @@ export function getContextSummary(
     lines.push(`${prefix}: ${text}`);
   }
   return lines.join('\n\n');
+}
+
+/** Estimate token count for a set of messages (~4 chars per token for English). */
+export function estimateTokens(messages: UnifiedMessage[]): number {
+  let chars = 0;
+  for (const msg of messages) {
+    chars += msg.content.length;
+    if (msg.toolCalls) {
+      chars += JSON.stringify(msg.toolCalls).length;
+    }
+  }
+  return Math.ceil(chars / 4);
+}
+
+/**
+ * Find the split point for compaction.
+ * Returns the index where messages should be split — everything before
+ * the split gets compacted, everything after is kept.
+ * Aims to keep recent messages that fit within `keepBudget` tokens.
+ */
+export function findCompactionSplitPoint(
+  messages: UnifiedMessage[],
+  keepBudget: number,
+): number {
+  // Walk backwards from end, accumulating tokens until we hit the budget
+  let total = 0;
+  for (let i = messages.length - 1; i >= 1; i--) {
+    // skip index 0 (system prompt)
+    const msgChars = messages[i].content.length;
+    const msgTokens = Math.ceil(msgChars / 4);
+    if (total + msgTokens > keepBudget) return i + 1;
+    total += msgTokens;
+  }
+  return 1; // compact everything except system prompt
+}
+
+/**
+ * Apply compaction: replace old messages with a summary, keep recent ones.
+ * Returns a new message array suitable for sending to Ollama.
+ */
+export function applyCompaction(
+  session: UnifiedSession,
+  splitPoint: number,
+  summary: string,
+): void {
+  const systemMsg =
+    session.messages[0]?.role === 'system' ? session.messages[0] : null;
+  const kept = session.messages.slice(splitPoint);
+
+  const summaryMsg: UnifiedMessage = {
+    role: 'system',
+    content: `[Earlier conversation summary, written by you before compaction:]\n\n${summary}`,
+    timestamp: new Date().toISOString(),
+    provider: 'ollama',
+  };
+
+  session.messages = systemMsg
+    ? [systemMsg, summaryMsg, ...kept]
+    : [summaryMsg, ...kept];
 }

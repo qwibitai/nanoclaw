@@ -324,21 +324,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks and model special tokens that leak through
       const text = raw
         .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-        .replace(/<\|(?:user|assistant|system|endoftext|im_start|im_end|end)[|>]*/g, '')
+        .replace(
+          /<\|(?:user|assistant|system|endoftext|im_start|im_end|end)[|>]*/g,
+          '',
+        )
         .trim();
       if (!text) return;
 
       if (result.isPartial) {
         // Streaming partial update
         if (result.isTooling) {
-          // Tool execution starting — flush any pending edit, show status, reset for new message
+          // Tool execution — flush any pending partial edit (preserving the
+          // streamed text), show tool usage as a new message, then reset
+          // so the next response starts fresh.
           if (editDebounceTimer) {
             clearTimeout(editDebounceTimer);
             editDebounceTimer = null;
+            await flushEdit();
           }
-          if (streamingMessageId && channel.editMessage) {
-            await channel.editMessage(chatJid, streamingMessageId, text);
-          }
+          // Send tool info as a separate message
+          await channel.sendMessage(chatJid, text);
           streamingMessageId = null;
         } else if (streamingMessageId && channel.editMessage) {
           // Edit existing message (debounced)
