@@ -112,6 +112,8 @@ Bucket the upstream changed files:
 - **Build/config** (`package.json`, `package-lock.json`, `tsconfig*.json`, `container/`, `launchd/`): review needed
 - **Other**: docs, tests, misc
 
+**Large drift check:** If the upstream commit count and age suggest the user has a lot of catching up to do, mention that `/migrate-nanoclaw` might be a better fit — it extracts customizations and reapplies them on clean upstream instead of merging. Offer it as an option but don't push.
+
 Present these buckets to the user and ask them to choose one path using AskUserQuestion:
 - A) **Full update**: merge all upstream changes
 - B) **Selective update**: cherry-pick specific upstream commits
