@@ -9,13 +9,15 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - only track base structure and canonical/compatibility memory files
 groups/*
 !groups/main/
 !groups/global/
 groups/main/*
 groups/global/*
+!groups/main/AGENT.md
 !groups/main/CLAUDE.md
+!groups/global/AGENT.md
 !groups/global/CLAUDE.md
 
 # Secrets

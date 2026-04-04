@@ -5,7 +5,8 @@
  * Input protocol:
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
  *   IPC:   Follow-up messages written as JSON files to $NANOCLAW_IPC_DIR/input/
- *          Defaults to /workspace/ipc/input when NANOCLAW_IPC_DIR is unset.
+ *          Defaults to $NANOCLAW_WORKSPACE_ROOT/ipc/input (or /workspace/ipc/input)
+ *          when NANOCLAW_IPC_DIR is unset.
  *          Files: {type:"message", text:"..."}.json — polled and consumed
  *          Sentinel: $NANOCLAW_IPC_DIR/input/_close — signals session end
  *
@@ -61,7 +62,12 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
+const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT || '/workspace';
+const GROUP_DIR = path.join(WORKSPACE_ROOT, 'group');
+const GLOBAL_DIR = path.join(WORKSPACE_ROOT, 'global');
+const EXTRA_DIR = path.join(WORKSPACE_ROOT, 'extra');
+const IPC_DIR =
+  process.env.NANOCLAW_IPC_DIR || path.join(WORKSPACE_ROOT, 'ipc');
 const IPC_INPUT_DIR = path.join(IPC_DIR, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
@@ -184,7 +190,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = path.join(GROUP_DIR, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -414,20 +420,24 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  if (!containerInput.isMain) {
+    const canonicalGlobalMemoryPath = path.join(GLOBAL_DIR, 'AGENT.md');
+    const legacyGlobalMemoryPath = path.join(GLOBAL_DIR, 'CLAUDE.md');
+
+    if (fs.existsSync(canonicalGlobalMemoryPath)) {
+      globalClaudeMd = fs.readFileSync(canonicalGlobalMemoryPath, 'utf-8');
+    } else if (fs.existsSync(legacyGlobalMemoryPath)) {
+      globalClaudeMd = fs.readFileSync(legacyGlobalMemoryPath, 'utf-8');
+    }
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
+  // Discover additional directories mounted at the configured workspace extra dir
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
+  if (fs.existsSync(EXTRA_DIR)) {
+    for (const entry of fs.readdirSync(EXTRA_DIR)) {
+      const fullPath = path.join(EXTRA_DIR, entry);
       if (fs.statSync(fullPath).isDirectory()) {
         extraDirs.push(fullPath);
       }
@@ -440,7 +450,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -484,6 +494,8 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_DIR: IPC_DIR,
+            NANOCLAW_WORKSPACE_ROOT: WORKSPACE_ROOT,
           },
         },
       },

@@ -7,6 +7,12 @@
 import fs from 'fs';
 import path from 'path';
 
+import {
+  DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
+  listManagedMemoryFiles,
+  seedGroupMemoryFiles,
+} from '../src/agent/memory.ts';
 import { STORE_DIR } from '../src/config.ts';
 import { initDatabase, setRegisteredGroup } from '../src/db.ts';
 import { isValidGroupFolder } from '../src/group-folder.ts';
@@ -112,35 +118,105 @@ export async function run(args: string[]): Promise<void> {
   logger.info('Wrote registration to SQLite');
 
   // Create group folders
-  fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), {
+  const groupDir = path.join(projectRoot, 'groups', parsed.folder);
+  fs.mkdirSync(path.join(groupDir, 'logs'), {
     recursive: true,
   });
 
-  // Create CLAUDE.md in the new group folder from template if it doesn't exist.
-  // The agent runs with CWD=/workspace/group and loads CLAUDE.md from there.
-  // Never overwrite an existing CLAUDE.md — users customize these extensively
-  // (persona, workspace structure, communication rules, family context, etc.)
-  // and a stock template replacement would destroy that work.
-  const groupClaudeMdPath = path.join(
-    projectRoot,
-    'groups',
-    parsed.folder,
-    'CLAUDE.md',
-  );
-  if (!fs.existsSync(groupClaudeMdPath)) {
-    const templatePath = parsed.isMain
-      ? path.join(projectRoot, 'groups', 'main', 'CLAUDE.md')
-      : path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
-    if (fs.existsSync(templatePath)) {
-      fs.copyFileSync(templatePath, groupClaudeMdPath);
-      logger.info(
-        { file: groupClaudeMdPath, template: templatePath },
-        'Created CLAUDE.md from template',
-      );
-    }
+  const globalDir = path.join(projectRoot, 'groups', 'global');
+  const globalSeededMemory = seedGroupMemoryFiles({
+    targetDir: globalDir,
+    templateDir: globalDir,
+    canonicalTemplateFingerprint: DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  });
+
+  if (globalSeededMemory.canonical.created) {
+    logger.info(
+      {
+        file: globalSeededMemory.canonical.path,
+        seededFrom: globalSeededMemory.canonical.seededFrom,
+      },
+      'Prepared canonical global memory before group registration',
+    );
   }
 
-  // Update assistant name in CLAUDE.md files if different from default
+  if (globalSeededMemory.compatibility.created) {
+    logger.info(
+      {
+        file: globalSeededMemory.compatibility.path,
+        seededFrom: globalSeededMemory.compatibility.seededFrom,
+      },
+      'Prepared compatibility global memory before group registration',
+    );
+  }
+
+  if (globalSeededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        canonicalPath: globalSeededMemory.migration.canonicalPath,
+        compatibilityPath: globalSeededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy global CLAUDE.md before group registration',
+    );
+  }
+
+  const templateDir = parsed.isMain
+    ? path.join(projectRoot, 'groups', 'main')
+    : path.join(projectRoot, 'groups', 'global');
+  const seededMemory = seedGroupMemoryFiles({
+    targetDir: groupDir,
+    templateDir,
+    canonicalTemplateFingerprint: parsed.isMain
+      ? DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT
+      : undefined,
+  });
+
+  if (seededMemory.canonical.created) {
+    logger.info(
+      {
+        file: seededMemory.canonical.path,
+        seededFrom: seededMemory.canonical.seededFrom,
+      },
+      'Created AGENT.md canonical memory',
+    );
+  }
+
+  if (seededMemory.compatibility.created) {
+    logger.info(
+      {
+        file: seededMemory.compatibility.path,
+        seededFrom: seededMemory.compatibility.seededFrom,
+      },
+      'Created CLAUDE.md compatibility memory',
+    );
+  }
+
+  if (seededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy CLAUDE.md into canonical AGENT.md during registration',
+    );
+  }
+
+  // Preserve customized memory files by only seeding missing files.
+  // Current runtime flows still read CLAUDE.md, so we materialize that as a
+  // compatibility file from the canonical AGENT.md when needed.
+  const groupClaudeMdPath = path.join(groupDir, 'CLAUDE.md');
+  const groupAgentMdPath = path.join(groupDir, 'AGENT.md');
+  logger.debug(
+    {
+      folder: parsed.folder,
+      agentExists: fs.existsSync(groupAgentMdPath),
+      claudeExists: fs.existsSync(groupClaudeMdPath),
+    },
+    'Group memory files ready',
+  );
+
+  // Update assistant name in canonical and compatibility memory files if
+  // different from the default.
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
     logger.info(
@@ -151,20 +227,17 @@ export async function run(args: string[]): Promise<void> {
     const groupsDir = path.join(projectRoot, 'groups');
     const mdFiles = fs
       .readdirSync(groupsDir)
-      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
-      .filter((f) => fs.existsSync(f));
+      .flatMap((entry) => listManagedMemoryFiles(path.join(groupsDir, entry)));
 
     for (const mdFile of mdFiles) {
-      if (fs.existsSync(mdFile)) {
-        let content = fs.readFileSync(mdFile, 'utf-8');
-        content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
-        content = content.replace(
-          /You are Andy/g,
-          `You are ${parsed.assistantName}`,
-        );
-        fs.writeFileSync(mdFile, content);
-        logger.info({ file: mdFile }, 'Updated CLAUDE.md');
-      }
+      let content = fs.readFileSync(mdFile, 'utf-8');
+      content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
+      content = content.replace(
+        /You are Andy/g,
+        `You are ${parsed.assistantName}`,
+      );
+      fs.writeFileSync(mdFile, content);
+      logger.info({ file: mdFile }, 'Updated memory file');
     }
 
     // Update .env
