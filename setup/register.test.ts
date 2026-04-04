@@ -600,6 +600,56 @@ describe('register run memory seeding', () => {
     );
   });
 
+  it('promotes legacy main CLAUDE.md after assistant-name rewrites changed the tracked template', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(
+      repoDir,
+      'main',
+      'AGENT.md',
+      readBundledMainTemplate()
+        .replace(/^# Andy$/m, '# Luna')
+        .replace(/You are Andy/g, 'You are Luna'),
+    );
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+      '--assistant-name',
+      'Luna',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+  });
+
   it('propagates a custom assistant name across managed AGENT.md and CLAUDE.md files', async () => {
     // Arrange
     const repoDir = createTempRepo();

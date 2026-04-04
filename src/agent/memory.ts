@@ -99,9 +99,31 @@ function normalizeMemoryContent(content: string): string {
   return content.replace(/\r\n/g, '\n');
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeManagedTemplateFingerprintContent(content: string): string {
+  const normalized = normalizeMemoryContent(content);
+  const assistantNameMatch = normalized.match(/^# ([^\n]+)$/m);
+  const assistantName = assistantNameMatch?.[1]?.trim();
+
+  if (!assistantName || assistantName === 'Andy') {
+    return normalized;
+  }
+
+  const escapedAssistantName = escapeRegExp(assistantName);
+  return normalized
+    .replace(new RegExp(`^# ${escapedAssistantName}$`, 'm'), '# Andy')
+    .replace(
+      new RegExp(`\\bYou are ${escapedAssistantName}\\b`, 'g'),
+      'You are Andy',
+    );
+}
+
 function fingerprintMemoryContent(content: string): string {
   return createHash('sha256')
-    .update(normalizeMemoryContent(content))
+    .update(normalizeManagedTemplateFingerprintContent(content))
     .digest('hex');
 }
 

@@ -325,6 +325,38 @@ describe('memory helper', () => {
     ).toBe('# Existing Main Memory\n\nKeep this control-room context.\n');
   });
 
+  it('treats assistant-name rewritten template content as stock canonical memory during migration', () => {
+    // Arrange
+    const groupDir = createTempDir();
+    tempDirs.push(groupDir);
+    const rewrittenMainTemplate = readBundledMainTemplate()
+      .replace(/^# Andy$/m, '# Luna')
+      .replace(/You are Andy/g, 'You are Luna');
+    const canonicalPath = writeMemoryFile(
+      groupDir,
+      CANONICAL_MEMORY_FILE,
+      rewrittenMainTemplate,
+    );
+    writeMemoryFile(
+      groupDir,
+      LEGACY_CLAUDE_MEMORY_FILE,
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+
+    // Act
+    const migration = finalizeLegacyCanonicalMemoryOnce({
+      targetDir: groupDir,
+      canonicalTemplateFingerprint: DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
+    });
+
+    // Assert
+    expect(migration.status).toBe('migrated');
+    expect(migration.reason).toBe('legacy-promoted');
+    expect(fs.readFileSync(canonicalPath, 'utf-8')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+  });
+
   it('emits a warning when compatibility sync-back is requested without canonical memory', () => {
     // Arrange
     const groupDir = createTempDir();
