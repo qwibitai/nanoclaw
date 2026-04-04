@@ -24,6 +24,27 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+function loadMcpConfig(
+  filePath: string,
+): Record<string, McpServerConfig> {
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const config = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return config.servers || {};
+  } catch (err) {
+    log(
+      `Failed to load MCP config from ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return {};
+  }
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -435,6 +456,21 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Load declarative MCP server configs (global + per-group, group wins on collision)
+  const globalMcpServers = loadMcpConfig('/workspace/global/mcp-servers.json');
+  const groupMcpServers = loadMcpConfig('/workspace/group/mcp-servers.json');
+  const additionalMcpServers: Record<string, McpServerConfig> = {
+    ...globalMcpServers,
+    ...groupMcpServers,
+  };
+  // Prevent overriding the built-in nanoclaw server
+  delete additionalMcpServers['nanoclaw'];
+  if (Object.keys(additionalMcpServers).length > 0) {
+    log(
+      `Additional MCP servers: ${Object.keys(additionalMcpServers).join(', ')}`,
+    );
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -469,6 +505,9 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        ...Object.keys(additionalMcpServers).map(
+          (name) => `mcp__${name}__*`,
+        ),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +523,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...additionalMcpServers,
       },
       hooks: {
         PreCompact: [
