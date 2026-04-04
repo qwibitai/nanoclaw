@@ -91,11 +91,7 @@ export interface AgentProvider {
   ): ProviderCheckResult[];
   prepareSession(ctx: PrepareSessionContext): PreparedSession;
   buildContainerSpec(ctx: BuildContainerSpecContext): ProviderContainerSpec;
-  serializeRuntimeInput(
-    ctx: RuntimeInvocationContext,
-  ): ProviderRuntimeInput;
-  startRemoteControl?(
-    ctx: RemoteControlContext,
-  ): Promise<RemoteControlResult>;
+  serializeRuntimeInput(ctx: RuntimeInvocationContext): ProviderRuntimeInput;
+  startRemoteControl?(ctx: RemoteControlContext): Promise<RemoteControlResult>;
   stopRemoteControl?(): Promise<void>;
 }

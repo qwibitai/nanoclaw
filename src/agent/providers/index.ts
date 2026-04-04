@@ -26,10 +26,7 @@ function createPreparedSession(
   };
 }
 
-function createRuntimeInput(
-  providerId: string,
-  ctx: RuntimeInvocationContext,
-) {
+function createRuntimeInput(providerId: string, ctx: RuntimeInvocationContext) {
   return {
     providerId,
     sessionId: ctx.sessionId,
