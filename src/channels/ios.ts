@@ -17,6 +17,7 @@ import {
   watchScheduledTasks,
   watchWorkFiles,
 } from './ios-data-api.js';
+import { handleMealPlanPage } from './meal-plan-page.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
 let WebSocketServer: any;
@@ -102,6 +103,11 @@ export class IosChannel implements Channel {
     // No CORS headers — FamBot is a native app making direct HTTP requests,
     // not a browser. Removing wildcard CORS prevents cross-origin exfiltration
     // from malicious websites on the home network.
+
+    // Public pages (no auth — Tailscale is the access layer)
+    if (handleMealPlanPage(req, res)) {
+      return;
+    }
 
     if (req.method === 'GET' && req.url === '/api/health') {
       const health = getPublicHealthStatus();
