@@ -73,7 +73,9 @@ import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
 
-function createTestOpts(overrides?: Partial<TelegramChannelOpts>): TelegramChannelOpts {
+function createTestOpts(
+  overrides?: Partial<TelegramChannelOpts>,
+): TelegramChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
@@ -195,7 +197,10 @@ describe('TelegramChannel', () => {
     });
 
     it('uses the provided token for bot initialization', async () => {
-      const channel = new TelegramChannel('specific-token-123', createTestOpts());
+      const channel = new TelegramChannel(
+        'specific-token-123',
+        createTestOpts(),
+      );
       await channel.connect();
 
       // The Grammy Bot mock receives the token as first constructor arg

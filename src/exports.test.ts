@@ -27,7 +27,11 @@ describe('package exports', () => {
     it('TelegramChannel accepts positional args', async () => {
       const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
       const mod = await import(telegramPath);
-      const noopOpts = { onMessage: () => {}, onChatMetadata: () => {}, registeredGroups: () => ({}) };
+      const noopOpts = {
+        onMessage: () => {},
+        onChatMetadata: () => {},
+        registeredGroups: () => ({}),
+      };
       const channel = new mod.TelegramChannel('test', noopOpts);
       expect(channel.name).toBe('telegram');
     });
