@@ -82,6 +82,11 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS account_rotate_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -697,6 +702,47 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Account rotate config accessors ---
+
+export function getRotateEnabled(): boolean {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('enabled') as { value: string } | undefined;
+  return row?.value === 'true';
+}
+
+export function setRotateEnabled(enabled: boolean): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('enabled', String(enabled));
+}
+
+export function getRotateIndex(): number {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('current_index') as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : 0;
+}
+
+export function setRotateIndex(index: number): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('current_index', String(index));
+}
+
+export function getLastRotateAt(): number | null {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('last_rotate_at') as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : null;
+}
+
+export function setLastRotateAt(ts: number): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('last_rotate_at', String(ts));
 }
 
 // --- JSON migration ---

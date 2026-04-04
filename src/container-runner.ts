@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -27,8 +27,126 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import {
+  getLastRotateAt,
+  getRotateEnabled,
+  getRotateIndex,
+  setLastRotateAt,
+  setRotateIndex,
+} from './db.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
+
+/**
+ * 检测容器输出中的 429/rate-limit 错误。
+ * 覆盖 Anthropic API 常见错误格式。
+ */
+export function detectRateLimit(text: string): boolean {
+  const patterns = [
+    /429/i,
+    /rate.?limit/i,
+    /overloaded/i,
+    /quota.?exceeded/i,
+    /too.?many.?requests/i,
+  ];
+  return patterns.some((p) => p.test(text));
+}
+
+// 全部耗尽后的 cooldown（10 分钟）
+const EXHAUSTED_COOLDOWN_MS = 10 * 60 * 1000;
+// 单次轮换防抖（60 秒）
+const ROTATE_DEBOUNCE_MS = 60 * 1000;
+
+/**
+ * 尝试轮换到下一个 Anthropic 账号。
+ * 返回 { success, newSecretName } 或 null（未开启/防抖/全部耗尽）。
+ */
+export function rotateAccount(agentId: string): {
+  success: boolean;
+  newSecretName: string;
+} | null {
+  // 1. 检查是否开启
+  if (!getRotateEnabled()) return null;
+
+  // 2. 防抖检查
+  const now = Date.now();
+  const lastRotate = getLastRotateAt();
+  if (lastRotate && now - lastRotate < ROTATE_DEBOUNCE_MS) {
+    logger.info('轮换防抖中，跳过');
+    return null;
+  }
+
+  // 3. 获取所有 secrets
+  let secrets: Array<{ id: string; name: string }>;
+  try {
+    secrets = JSON.parse(
+      execSync('onecli secrets list', { encoding: 'utf-8', timeout: 5000 }),
+    );
+  } catch (err) {
+    logger.error({ err }, 'rotateAccount: 无法获取 secrets 列表');
+    return null;
+  }
+
+  if (secrets.length < 2) {
+    logger.warn('只有一个 secret，无法轮换');
+    return null;
+  }
+
+  // 4. 计算下一个 index
+  const currentIndex = getRotateIndex();
+  const nextIndex = (currentIndex + 1) % secrets.length;
+
+  // 5. 检查是否轮换一圈（全部耗尽）
+  // 如果 cooldown 期间再次触发，已在上面 debounce 拦截
+  // 这里检查：如果 nextIndex 回到 0 且上次轮换在 cooldown 内，视为全部耗尽
+  if (nextIndex === 0 && lastRotate && now - lastRotate < EXHAUSTED_COOLDOWN_MS) {
+    logger.warn('所有账号配额已耗尽');
+    return { success: false, newSecretName: '' };
+  }
+
+  // 6. 获取 agents 列表并找到目标 agent
+  let agents: Array<{ id: string; identifier: string; isDefault?: boolean }>;
+  try {
+    agents = JSON.parse(
+      execSync('onecli agents list', { encoding: 'utf-8', timeout: 5000 }),
+    );
+  } catch (err) {
+    logger.error({ err }, 'rotateAccount: 无法获取 agents 列表');
+    return null;
+  }
+
+  const agent =
+    agents.find((a) => a.identifier === agentId) ||
+    agents.find((a) => 'isDefault' in a && a.isDefault);
+
+  if (!agent) {
+    logger.error({ agentId }, 'rotateAccount: 找不到 agent');
+    return null;
+  }
+
+  // 7. 切换 secret
+  const nextSecret = secrets[nextIndex];
+  try {
+    execSync(
+      `onecli agents set-secrets --id ${agent.id} --secret-ids ${nextSecret.id}`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+  } catch (err) {
+    logger.error({ err, secret: nextSecret.name }, 'rotateAccount: 切换失败');
+    return null;
+  }
+
+  // 8. 更新 DB
+  setRotateIndex(nextIndex);
+  setLastRotateAt(now);
+
+  logger.info(
+    { agent: agent.id, secret: nextSecret.name, index: nextIndex },
+    '账号已自动轮换',
+  );
+
+  return { success: true, newSecretName: nextSecret.name };
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';

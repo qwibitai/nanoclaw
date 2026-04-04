@@ -27,6 +27,8 @@ import {
 } from './channels/registry.js';
 import {
   ContainerOutput,
+  detectRateLimit,
+  rotateAccount,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -50,6 +52,8 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  getRotateEnabled,
+  setRotateEnabled,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -427,7 +431,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  // 轮换通知
+  if (output.rotatedTo) {
+    channel.sendMessage(chatJid, `🔄 账号已自动切换到 ${output.rotatedTo}`).catch(() => {});
+  }
+  if (output.allExhausted) {
+    channel.sendMessage(chatJid, '⚠️ 所有账号配额已耗尽，请等待恢复或添加新账号').catch(() => {});
+  }
+
+  if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -467,13 +479,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+interface RunAgentResult {
+  status: 'success' | 'error';
+  rotatedTo?: string; // 轮换到的新 secret 名称（用于通知用户）
+  allExhausted?: boolean; // 所有账号配额耗尽
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   latestUserMessage?: string,
-): Promise<'success' | 'error'> {
+  isRetry?: boolean,
+): Promise<RunAgentResult> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -566,17 +585,45 @@ async function runAgent(
         deleteSession(group.folder);
       }
 
+      // 429 检测 + 自动轮换
+      if (!isRetry && output.error && detectRateLimit(output.error)) {
+        const agentId = group.folder.toLowerCase().replace(/_/g, '-');
+        const rotateResult = rotateAccount(agentId);
+
+        if (rotateResult && !rotateResult.success) {
+          // 所有账号耗尽
+          logger.warn({ group: group.name }, '所有账号配额已耗尽');
+          return { status: 'error', allExhausted: true };
+        }
+
+        if (rotateResult && rotateResult.success) {
+          // 清除 session，用新 token 重试
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+          logger.info(
+            { group: group.name, newSecret: rotateResult.newSecretName },
+            '429 检测到，已轮换账号，重试中',
+          );
+          return runAgent(group, prompt, chatJid, onOutput, latestUserMessage, true).then(
+            (retryResult) => ({
+              ...retryResult,
+              rotatedTo: rotateResult.newSecretName,
+            }),
+          );
+        }
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return 'error';
+      return { status: 'error' };
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return { status: 'error' };
   }
 }
 
@@ -820,7 +867,15 @@ async function main(): Promise<void> {
         const arg = trimmed.slice('/account'.length).trim();
         const ch = findChannel(channels, chatJid);
         try {
-          if (!arg) {
+          if (arg === 'auto on') {
+            setRotateEnabled(true);
+            ch?.sendMessage(chatJid, '🔄 自动轮换已开启').catch(() => {});
+            logger.info('/account auto on');
+          } else if (arg === 'auto off') {
+            setRotateEnabled(false);
+            ch?.sendMessage(chatJid, '🔄 自动轮换已关闭').catch(() => {});
+            logger.info('/account auto off');
+          } else if (!arg) {
             // 列出所有 secrets
 
             const secrets = JSON.parse(
@@ -865,13 +920,14 @@ async function main(): Promise<void> {
               }
             }
 
+            const autoStatus = getRotateEnabled() ? '开启' : '关闭';
             const lines = secrets.map((s) => {
               const active = assignedSecretIds.includes(s.id) ? ' ← 当前' : '';
               return `• ${s.name} (${s.type})${active}`;
             });
             const reply =
               lines.length > 0
-                ? `📋 可用账号：\n${lines.join('\n')}\n\n切换：/account <name>`
+                ? `📋 可用账号：\n${lines.join('\n')}\n\n🔄 自动轮换: ${autoStatus}\n\n切换：/account <name>\n开关：/account auto on|off`
                 : '没有配置任何账号。用 onecli secrets create 添加。';
             ch?.sendMessage(chatJid, reply).catch(() => {});
           } else {
