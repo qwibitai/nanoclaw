@@ -30,6 +30,8 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  modelProvider?: 'claude' | 'ollama'; // Default: 'claude'
+  ollamaModel?: string; // e.g. 'glm-5:cloud', 'gemma4:31b'
 }
 
 export interface RegisteredGroup {

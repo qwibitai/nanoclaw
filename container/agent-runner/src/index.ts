@@ -23,8 +23,15 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  UnifiedSession,
+  createSession,
+  loadSession,
+  appendMessage,
+  saveSession,
+} from './unified-session.js';
 
-interface ContainerInput {
+export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
@@ -33,9 +40,12 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  modelProvider?: 'claude' | 'ollama';
+  ollamaModel?: string;
+  unifiedSessionId?: string;
 }
 
-interface ContainerOutput {
+export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
@@ -60,9 +70,9 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const IPC_POLL_MS = 500;
+export const IPC_INPUT_DIR = '/workspace/ipc/input';
+export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+export const IPC_POLL_MS = 500;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -102,7 +112,7 @@ class MessageStream {
   }
 }
 
-async function readStdin(): Promise<string> {
+export async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
@@ -117,13 +127,13 @@ async function readStdin(): Promise<string> {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-function writeOutput(output: ContainerOutput): void {
+export function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
 }
 
-function log(message: string): void {
+export function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
@@ -292,7 +302,7 @@ function formatTranscriptMarkdown(
 /**
  * Check for _close sentinel.
  */
-function shouldClose(): boolean {
+export function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
     try {
       fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
@@ -308,7 +318,7 @@ function shouldClose(): boolean {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+export function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -347,7 +357,7 @@ function drainIpcInput(): string[] {
  * Wait for a new IPC message or _close sentinel.
  * Returns the messages as a single string, or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+export function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -377,6 +387,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  unifiedSession: UnifiedSession,
   resumeAt?: string,
 ): Promise<{
   newSessionId?: string;
@@ -385,6 +396,13 @@ async function runQuery(
 }> {
   const stream = new MessageStream();
   stream.push(prompt);
+
+  // Write user message to unified session
+  appendMessage(unifiedSession, {
+    role: 'user',
+    content: prompt,
+    provider: 'claude',
+  });
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -402,6 +420,12 @@ async function runQuery(
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
+      // Also write piped IPC messages to unified session
+      appendMessage(unifiedSession, {
+        role: 'user',
+        content: text,
+        provider: 'claude',
+      });
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -501,6 +525,39 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+
+      // Write assistant message to unified session
+      const assistantMsg = message as {
+        uuid: string;
+        message?: {
+          content?: Array<{
+            type: string;
+            text?: string;
+            id?: string;
+            name?: string;
+            input?: Record<string, unknown>;
+          }>;
+        };
+      };
+      const content = assistantMsg.message?.content;
+      if (content) {
+        const textParts = content
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text || '');
+        const toolCalls = content
+          .filter((c) => c.type === 'tool_use')
+          .map((c) => ({
+            id: c.id || '',
+            name: c.name || '',
+            arguments: (c.input as Record<string, unknown>) || {},
+          }));
+        appendMessage(unifiedSession, {
+          role: 'assistant',
+          content: textParts.join(''),
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          provider: 'claude',
+        });
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -536,6 +593,9 @@ async function runQuery(
       });
     }
   }
+
+  // Save unified session after each query
+  saveSession(unifiedSession);
 
   ipcPolling = false;
   log(
@@ -600,45 +660,10 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
-async function main(): Promise<void> {
-  let containerInput: ContainerInput;
-
-  try {
-    const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
-    try {
-      fs.unlinkSync('/tmp/input.json');
-    } catch {
-      /* may not exist */
-    }
-    log(`Received input for group: ${containerInput.groupFolder}`);
-  } catch (err) {
-    writeOutput({
-      status: 'error',
-      result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    process.exit(1);
-  }
-
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
-
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
-
-  let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-
-  // Clean up stale _close sentinel from previous container runs
-  try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
-  } catch {
-    /* ignore */
-  }
-
-  // Build initial prompt (drain any pending IPC messages too)
+/** Prepare prompt from container input (handles scheduled tasks, pending IPC, scripts). */
+export async function preparePrompt(
+  containerInput: ContainerInput,
+): Promise<{ prompt: string; shouldRun: boolean }> {
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
@@ -659,17 +684,45 @@ async function main(): Promise<void> {
         ? 'wakeAgent=false'
         : 'script error/no output';
       log(`Script decided not to wake agent: ${reason}`);
-      writeOutput({
-        status: 'success',
-        result: null,
-      });
-      return;
+      writeOutput({ status: 'success', result: null });
+      return { prompt, shouldRun: false };
     }
 
-    // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
   }
+
+  return { prompt, shouldRun: true };
+}
+
+async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
+  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
+  // No real secrets exist in the container environment.
+  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+
+  let sessionId = containerInput.sessionId;
+  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // Clean up stale _close sentinel from previous container runs
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
+
+  const { prompt: initialPrompt, shouldRun } =
+    await preparePrompt(containerInput);
+  if (!shouldRun) return;
+  let prompt = initialPrompt;
+
+  // Load or create unified session for cross-provider history
+  const unifiedSession =
+    (containerInput.unifiedSessionId
+      ? loadSession(containerInput.unifiedSessionId)
+      : null) || createSession('claude');
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
@@ -685,6 +738,7 @@ async function main(): Promise<void> {
         mcpServerPath,
         containerInput,
         sdkEnv,
+        unifiedSession,
         resumeAt,
       );
       if (queryResult.newSessionId) {
@@ -727,6 +781,35 @@ async function main(): Promise<void> {
       error: errorMessage,
     });
     process.exit(1);
+  }
+}
+
+async function main(): Promise<void> {
+  let containerInput: ContainerInput;
+
+  try {
+    const stdinData = await readStdin();
+    containerInput = JSON.parse(stdinData);
+    try {
+      fs.unlinkSync('/tmp/input.json');
+    } catch {
+      /* may not exist */
+    }
+    log(`Received input for group: ${containerInput.groupFolder}`);
+  } catch (err) {
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    process.exit(1);
+  }
+
+  if (containerInput.modelProvider === 'ollama') {
+    const { runOllamaAgent } = await import('./ollama-runner.js');
+    await runOllamaAgent(containerInput);
+  } else {
+    await runClaudeAgent(containerInput);
   }
 }
 

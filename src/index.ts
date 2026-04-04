@@ -391,6 +391,13 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        // Trigger-based model override: @Elara routes to Ollama
+        modelProvider: /@elara\b/i.test(prompt)
+          ? 'ollama'
+          : group.containerConfig?.modelProvider,
+        ollamaModel: /@elara\b/i.test(prompt)
+          ? (group.containerConfig?.ollamaModel || 'glm-5:cloud')
+          : group.containerConfig?.ollamaModel,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -513,7 +520,14 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          // If @Elara trigger detected, close the active Claude container
+          // so a new container spawns with Ollama as the model provider.
+          const wantsOllama = /@elara\b/i.test(formatted);
+          if (wantsOllama) {
+            queue.closeStdin(chatJid);
+          }
+
+          if (!wantsOllama && queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',

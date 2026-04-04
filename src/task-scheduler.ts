@@ -181,6 +181,8 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
+        modelProvider: group.containerConfig?.modelProvider,
+        ollamaModel: group.containerConfig?.ollamaModel,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

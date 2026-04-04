@@ -43,6 +43,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  modelProvider?: 'claude' | 'ollama';
+  ollamaModel?: string;
 }
 
 export interface ContainerOutput {
@@ -236,6 +238,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  modelProvider?: 'claude' | 'ollama',
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -259,6 +262,20 @@ async function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Disable SELinux label confinement so bind-mounted host paths are readable.
+  // Without this, enforcing SELinux (e.g. Fedora) blocks container access to mounts.
+  args.push('--security-opt', 'label:disable');
+
+  // Ollama host URL for groups using Ollama as their model provider.
+  // Also set NO_PROXY so that Ollama traffic bypasses the OneCLI HTTPS proxy.
+  if (modelProvider === 'ollama') {
+    const ollamaHost =
+      process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
+    args.push('-e', `OLLAMA_HOST=${ollamaHost}`);
+    args.push('-e', 'no_proxy=host.docker.internal,localhost,127.0.0.1');
+    args.push('-e', 'NO_PROXY=host.docker.internal,localhost,127.0.0.1');
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -305,6 +322,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    input.modelProvider,
   );
 
   logger.debug(
