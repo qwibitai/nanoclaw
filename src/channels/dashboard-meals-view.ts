@@ -74,7 +74,7 @@ export function getMealsViewJS(): string {
     var shopEl = document.getElementById('meals-shopping');
 
     if (!data.plan && !data.ingredients) {
-      planEl.innerHTML = '<div class="empty-state"><h3>No meal plan yet</h3><p>Pickle will post one soon.</p></div>';
+      planEl.innerHTML = '<div class="empty-state"><h3>No meal plan yet</h3><p>Pickle is cooking up something. Check back Saturday morning.</p></div>';
       shopEl.innerHTML = '';
       return;
     }

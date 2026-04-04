@@ -69,7 +69,7 @@ export function getDashboardCSS(): string {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-family: 'SF Pro Rounded', ui-rounded, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -93,18 +93,18 @@ body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: var(--spacing-lg) 0;
+  padding: var(--spacing-xl) 0;
   flex-shrink: 0;
 }
 
 .sidebar-header {
   padding: 0 var(--spacing-lg) var(--spacing-xl);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
 }
 
 .sidebar-header h1 {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.3px;
 }
@@ -112,28 +112,28 @@ body {
 .sidebar-header .subtitle {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: var(--spacing-sm) var(--spacing-sm);
+  gap: 4px;
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-md) var(--spacing-md);
-  border-radius: var(--radius-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, color 0.2s;
   border: none;
   background: none;
   width: 100%;
@@ -169,10 +169,16 @@ body {
 .view {
   display: none;
   height: 100%;
+  animation: fadeIn 0.2s ease-out;
 }
 
 .view.active {
   display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* --- Bottom tab bar (mobile) --- */

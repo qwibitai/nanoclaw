@@ -8,7 +8,7 @@ export function getDevTasksViewHTML(): string {
 <div id="devtasks-container" style="display:flex;gap:0;height:100%;">
   <div id="devtasks-list" style="width:350px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:var(--spacing-lg) 0;"></div>
   <div id="devtasks-detail" style="flex:1;overflow-y:auto;padding:var(--spacing-xl);">
-    <div class="empty-state" id="devtasks-empty-detail"><h3>Select a task</h3><p>Choose a task from the list to see details.</p></div>
+    <div class="empty-state" id="devtasks-empty-detail"><h3>Pick a task</h3><p>Tap any task on the left to see the full picture.</p></div>
   </div>
 </div>
 
@@ -28,8 +28,10 @@ export function getDevTasksViewHTML(): string {
 }
 .dt-row {
   display:flex;align-items:flex-start;gap:var(--spacing-md);padding:var(--spacing-md) var(--spacing-lg);
-  cursor:pointer;transition:background 0.1s;border-left:3px solid transparent;
+  cursor:pointer;transition:background 0.15s;border-left:3px solid transparent;
+  border-bottom:1px solid var(--border);
 }
+.dt-row:last-child { border-bottom:none; }
 .dt-row:hover { background:var(--surface-hover); }
 .dt-row.selected { background:var(--accent-light);border-left-color:var(--accent); }
 .dt-row .dt-id { min-width:36px; }

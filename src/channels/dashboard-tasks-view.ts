@@ -95,12 +95,13 @@ export function getTasksViewJS(): string {
     });
 
     if (tasks.length === 0) {
-      el.innerHTML = '<div class="empty-state"><h3>No scheduled tasks</h3><p>Tasks will appear here when agents create them.</p></div>';
+      el.innerHTML = '<div class="empty-state"><h3>All clear</h3><p>Pip and Pickle have nothing scheduled right now.</p></div>';
       return;
     }
 
     var html = tasks.map(function(t) {
-      return '<div class="card" style="display:flex;flex-direction:column;gap:8px;">' +
+      var dimmed = t.status === 'completed' ? 'opacity:0.6;' : '';
+      return '<div class="card" style="display:flex;flex-direction:column;gap:8px;' + dimmed + '">' +
         '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
           '<span class="badge badge-' + esc(t.status) + '">' + esc(t.status) + '</span>' +
           '<span style="font-size:12px;color:var(--text-tertiary);">' + esc(t.schedule_type === 'cron' ? 'Recurring' : t.schedule_type === 'interval' ? 'Repeating' : 'One-time') + '</span>' +

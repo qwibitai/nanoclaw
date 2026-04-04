@@ -68,7 +68,7 @@ function renderPage(): string {
   <aside class="sidebar">
     <div class="sidebar-header">
       <h1>NanoClaw</h1>
-      <div class="subtitle"><span class="connection-dot"></span>Dashboard</div>
+      <div class="subtitle"><span class="connection-dot"></span>Live</div>
     </div>
     <nav>
       ${renderNavItems('sidebar')}
