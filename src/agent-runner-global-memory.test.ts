@@ -68,6 +68,7 @@ const mockModuleSource = ${JSON.stringify(`
       JSON.stringify({
         systemPrompt: options.systemPrompt ?? null,
         cwd: options.cwd,
+        mcpEnv: options.mcpServers?.nanoclaw?.env ?? null,
       }),
     );
     fs.writeFileSync(${JSON.stringify(compatibilityPath)}, '# Provider Compatibility Edit\\n');
@@ -188,6 +189,7 @@ describe.sequential('container agent runner global memory', () => {
       fs.readFileSync(runtimeWorkspace.capturePath, 'utf-8'),
     ) as {
       cwd: string;
+      mcpEnv: Record<string, string> | null;
       systemPrompt: { append: string; preset: string; type: string } | null;
     };
 
@@ -198,6 +200,10 @@ describe.sequential('container agent runner global memory', () => {
       type: 'preset',
       preset: 'claude_code',
       append: '# Canonical Global\n',
+    });
+    expect(capturedQuery.mcpEnv).toMatchObject({
+      NANOCLAW_IPC_DIR: runtimeWorkspace.ipcDir,
+      NANOCLAW_WORKSPACE_ROOT: runtimeWorkspace.root,
     });
     expect(fs.readFileSync(canonicalPath, 'utf-8')).toBe(
       '# Canonical Global\n',
