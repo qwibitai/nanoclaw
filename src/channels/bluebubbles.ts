@@ -54,11 +54,7 @@ export class BlueBubblesChannel implements Channel {
   private serverUrl: string;
   private password: string;
 
-  constructor(
-    opts: ChannelOpts,
-    serverUrl: string,
-    password: string,
-  ) {
+  constructor(opts: ChannelOpts, serverUrl: string, password: string) {
     this.opts = opts;
     this.serverUrl = serverUrl;
     this.password = password;
@@ -223,8 +219,7 @@ export class BlueBubblesChannel implements Channel {
       for (const chat of chats) {
         const jid = toJid(chat.guid);
         const isGroup = chat.guid.includes(';+;');
-        const name =
-          chat.displayName ?? chat.participants?.[0]?.address;
+        const name = chat.displayName ?? chat.participants?.[0]?.address;
         this.opts.onChatMetadata(jid, now, name, 'bluebubbles', isGroup);
       }
 
@@ -239,8 +234,7 @@ registerChannel('bluebubbles', (opts: ChannelOpts) => {
   const env = readEnvFile(['BLUEBUBBLES_SERVER_URL', 'BLUEBUBBLES_PASSWORD']);
   const serverUrl =
     process.env.BLUEBUBBLES_SERVER_URL ?? env.BLUEBUBBLES_SERVER_URL;
-  const password =
-    process.env.BLUEBUBBLES_PASSWORD ?? env.BLUEBUBBLES_PASSWORD;
+  const password = process.env.BLUEBUBBLES_PASSWORD ?? env.BLUEBUBBLES_PASSWORD;
 
   if (!serverUrl || !password) return null;
   return new BlueBubblesChannel(opts, serverUrl, password);

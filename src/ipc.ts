@@ -489,32 +489,35 @@ export async function processTaskIpc(
       }
 
       // Run the host-side script and write the result back
-      const responseDir = path.join(
-        DATA_DIR,
-        'ipc',
-        sourceGroup,
-        'responses',
-      );
+      const responseDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
       fs.mkdirSync(responseDir, { recursive: true });
       const responsePath = path.join(responseDir, `${requestId}.json`);
 
-      execFile('bash', [scriptPath, member], { timeout: 30_000 }, (err, stdout, stderr) => {
-        let responseData: object;
-        if (err) {
-          logger.error({ err, stderr }, 'family-screentime.sh failed');
-          responseData = { requestId, error: stderr || err.message };
-        } else {
-          try {
-            responseData = { requestId, result: JSON.parse(stdout) };
-          } catch {
-            responseData = { requestId, result: stdout.trim() };
+      execFile(
+        'bash',
+        [scriptPath, member],
+        { timeout: 30_000 },
+        (err, stdout, stderr) => {
+          let responseData: object;
+          if (err) {
+            logger.error({ err, stderr }, 'family-screentime.sh failed');
+            responseData = { requestId, error: stderr || err.message };
+          } else {
+            try {
+              responseData = { requestId, result: JSON.parse(stdout) };
+            } catch {
+              responseData = { requestId, result: stdout.trim() };
+            }
           }
-        }
-        const tempPath = `${responsePath}.tmp`;
-        fs.writeFileSync(tempPath, JSON.stringify(responseData, null, 2));
-        fs.renameSync(tempPath, responsePath);
-        logger.info({ requestId, member }, 'Family screentime response written');
-      });
+          const tempPath = `${responsePath}.tmp`;
+          fs.writeFileSync(tempPath, JSON.stringify(responseData, null, 2));
+          fs.renameSync(tempPath, responsePath);
+          logger.info(
+            { requestId, member },
+            'Family screentime response written',
+          );
+        },
+      );
       break;
     }
 
