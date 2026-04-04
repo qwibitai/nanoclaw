@@ -172,7 +172,7 @@ Every Saturday morning (automated), or whenever someone asks for a new plan:
    - Balance quick weeknight meals with one weekend project if Boris is cooking
 6. **Write** the plan to `current-plan.md`.
 7. **Generate** the ingredient list and write to `ingredients.md`.
-8. **Send a short summary** to the chat — one line per day (just the meal name), then a link using Telegram's markdown link format so it's tappable: `[Full plan & shopping list](http://fambots-mac-mini:3100/pickle/meal-plan)` — the hostname has no TLD so Telegram won't auto-link plain URLs.
+8. **Send a short summary** to the chat — one line per day (just the meal name), then a link using Telegram's markdown link format so it's tappable: `[Full plan and shopping list](http://fambots-mac-mini:3100/pickle/meal-plan)` — the hostname has no TLD so Telegram won't auto-link plain URLs. **Never use `&` in chat messages** — it gets HTML-encoded to `&amp;` and breaks Telegram's markdown parser. Use "and" instead.
 9. **Do NOT** send the full plan or full ingredient list in chat. The web page renders them beautifully and is the link the family uses at the shops.
 
 When someone asks to swap a meal ("swap Tuesday for pizza"), update `current-plan.md`, regenerate `ingredients.md`, and confirm briefly in chat ("Done — swapped Tuesday to pizza. The plan page is updated."). The web link always shows the latest version.
