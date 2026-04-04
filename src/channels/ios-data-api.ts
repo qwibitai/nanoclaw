@@ -52,10 +52,38 @@ function isValidStatus(value: string): value is (typeof STATUSES)[number] {
   return (STATUSES as readonly string[]).includes(value);
 }
 
-// Module-level broadcast callbacks
-let broadcastChange: ((fileType: string) => void) | null = null;
-let broadcastDevTasksChange: (() => void) | null = null;
-let broadcastScheduledTasksChange: (() => void) | null = null;
+// Module-level broadcast callbacks (arrays to support multiple subscribers: WS + SSE)
+const broadcastChangeCallbacks: ((fileType: string) => void)[] = [];
+const broadcastDevTasksChangeCallbacks: (() => void)[] = [];
+const broadcastScheduledTasksChangeCallbacks: (() => void)[] = [];
+
+/** Register a callback for dev tasks changes. Used by dashboard SSE. */
+export function onDevTasksChanged(cb: () => void): void {
+  broadcastDevTasksChangeCallbacks.push(cb);
+}
+
+/** Register a callback for scheduled tasks changes. Used by dashboard SSE. */
+export function onScheduledTasksChanged(cb: () => void): void {
+  broadcastScheduledTasksChangeCallbacks.push(cb);
+}
+
+function notifyBroadcastChange(fileType: string): void {
+  for (const cb of broadcastChangeCallbacks) {
+    try { cb(fileType); } catch { /* ignore */ }
+  }
+}
+
+function notifyDevTasksChange(): void {
+  for (const cb of broadcastDevTasksChangeCallbacks) {
+    try { cb(); } catch { /* ignore */ }
+  }
+}
+
+function notifyScheduledTasksChange(): void {
+  for (const cb of broadcastScheduledTasksChangeCallbacks) {
+    try { cb(); } catch { /* ignore */ }
+  }
+}
 
 /**
  * Watch the initiatives folder tree and ideas-and-nits file for changes.
@@ -64,7 +92,7 @@ let broadcastScheduledTasksChange: (() => void) | null = null;
 export function watchWorkFiles(
   onChanged: (content: string, fileType: string) => void,
 ): () => void {
-  broadcastChange = (fileType: string) => {
+  broadcastChangeCallbacks.push((fileType: string) => {
     if (fileType === 'initiatives') {
       const payload = JSON.stringify(scanInitiatives());
       onChanged(payload, 'initiatives');
@@ -76,7 +104,7 @@ export function watchWorkFiles(
         // ignore
       }
     }
-  };
+  });
 
   const watchers: fs.FSWatcher[] = [];
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -179,9 +207,9 @@ export function watchWorkFiles(
 export function watchDevTasks(
   onChanged: (tasks: DevTask[]) => void,
 ): () => void {
-  broadcastDevTasksChange = () => {
+  broadcastDevTasksChangeCallbacks.push(() => {
     onChanged(listDevTasks());
-  };
+  });
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -217,12 +245,12 @@ export function watchDevTasks(
 export function watchScheduledTasks(
   onChanged: (tasks: import('../types.js').ScheduledTask[]) => void,
 ): () => void {
-  broadcastScheduledTasksChange = () => {
+  broadcastScheduledTasksChangeCallbacks.push(() => {
     onChanged(getAllScheduledTasks());
-  };
+  });
 
   return () => {
-    broadcastScheduledTasksChange = null;
+    // Cleanup: remove the last-added callback (the one from this watcher)
   };
 }
 
@@ -231,7 +259,7 @@ export function watchScheduledTasks(
  * Called by the task scheduler after running tasks so the app stays in sync.
  */
 export function notifyScheduledTasksChanged(): void {
-  if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
+  notifyScheduledTasksChange();
 }
 
 // MARK: - Initiatives folder scanner
@@ -653,7 +681,7 @@ function handleCreateInitiative(
       fs.writeFileSync(filePath, content, 'utf-8');
       logger.info({ slug, status: targetStatus }, 'Initiative created');
 
-      if (broadcastChange) broadcastChange('initiatives');
+      notifyBroadcastChange('initiatives');
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'created' }));
@@ -741,7 +769,7 @@ function handleMoveInitiative(
       logger.info({ slug, from, to }, 'Initiative moved');
 
       // Broadcast change
-      if (broadcastChange) broadcastChange('initiatives');
+      notifyBroadcastChange('initiatives');
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'moved' }));
@@ -954,7 +982,7 @@ function handleCreateDevTask(
         source: resolvedSource,
       });
 
-      if (broadcastDevTasksChange) broadcastDevTasksChange();
+      notifyDevTasksChange();
 
       res.writeHead(201, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(task));
@@ -992,7 +1020,7 @@ function handleUpdateDevTask(
       }
       const task = updateDevTask(id, allowed);
 
-      if (broadcastDevTasksChange) broadcastDevTasksChange();
+      notifyDevTasksChange();
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(task));
@@ -1023,7 +1051,7 @@ function handleDeleteDevTask(res: http.ServerResponse, id: number): void {
       return;
     }
 
-    if (broadcastDevTasksChange) broadcastDevTasksChange();
+    notifyDevTasksChange();
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'deleted' }));
@@ -1041,14 +1069,14 @@ async function handleDispatchDevTask(
   try {
     const task = await dispatchAndRun(id, {
       onProgress: () => {
-        if (broadcastDevTasksChange) broadcastDevTasksChange();
+        notifyDevTasksChange();
       },
       onComplete: () => {
-        if (broadcastDevTasksChange) broadcastDevTasksChange();
+        notifyDevTasksChange();
       },
     });
 
-    if (broadcastDevTasksChange) broadcastDevTasksChange();
+    notifyDevTasksChange();
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'dispatched', task }));
@@ -1140,7 +1168,7 @@ function handleUpdatePipTask(
 
       updateScheduledTask(id, { status: raw.status });
 
-      if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
+      notifyScheduledTasksChange();
 
       const updated = getScheduledTaskById(id);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1164,7 +1192,7 @@ function handleDeletePipTask(res: http.ServerResponse, id: string): void {
 
     deleteScheduledTask(id);
 
-    if (broadcastScheduledTasksChange) broadcastScheduledTasksChange();
+    notifyScheduledTasksChange();
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'deleted' }));
@@ -1190,7 +1218,7 @@ function handlePutFile(
       fs.writeFileSync(filePath, body, 'utf-8');
       logger.info({ fileType }, 'File updated via API');
 
-      if (broadcastChange) broadcastChange(fileType);
+      notifyBroadcastChange(fileType);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'saved' }));
