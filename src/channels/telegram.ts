@@ -66,12 +66,59 @@ export function parseBotConfig(
  * Claude's output naturally matches Telegram's Markdown v1 format:
  *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
  */
+/**
+ * Convert markdown-style links [text](url) to HTML <a> tags,
+ * and escape HTML entities in the rest of the text.
+ */
+function markdownLinksToHtml(text: string): string | null {
+  if (!/\[([^\]]+)\]\(([^)]+)\)/.test(text)) return null;
+
+  // Split on markdown links, escape non-link parts, convert links to <a>
+  const parts: string[] = [];
+  let last = 0;
+  const re = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > last) {
+      parts.push(escapeHtml(text.slice(last, match.index)));
+    }
+    parts.push(`<a href="${escapeHtml(match[2])}">${escapeHtml(match[1])}</a>`);
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) {
+    parts.push(escapeHtml(text.slice(last)));
+  }
+  return parts.join('');
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 async function sendTelegramMessage(
   api: { sendMessage: Api['sendMessage'] },
   chatId: string | number,
   text: string,
   options: { message_thread_id?: number } = {},
 ): Promise<void> {
+  // If the message contains [text](url) links, send as HTML for reliable
+  // link rendering. Telegram Markdown V1 is too flaky with special chars.
+  const htmlText = markdownLinksToHtml(text);
+  if (htmlText) {
+    try {
+      await api.sendMessage(chatId, htmlText, {
+        ...options,
+        parse_mode: 'HTML',
+      });
+      return;
+    } catch (err) {
+      logger.debug({ err }, 'HTML send failed, trying Markdown');
+    }
+  }
+
   try {
     await api.sendMessage(chatId, text, {
       ...options,
