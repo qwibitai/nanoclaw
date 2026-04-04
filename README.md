@@ -187,6 +187,15 @@ Note: The model must support the Anthropic API format for best compatibility.
 
 Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
 
+**Can I run Codex instead of Claude?**
+
+Yes. Set `AGENT_ENGINE=codex` to opt into the Codex runtime.
+
+- If `OPENAI_API_KEY` is present in `.env`, NanoClaw uses the host-side OpenAI proxy and keeps the real key out of containers.
+- If `OPENAI_API_KEY` is absent, Codex uses the mounted `~/.codex` session-auth path instead.
+
+The rest of the system stays the same: containers still run isolated, and credentials remain host-side only.
+
 **Why isn't the setup working for me?**
 
 If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.

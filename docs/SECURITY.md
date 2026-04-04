@@ -70,9 +70,15 @@ Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent V
 
 **How it works:**
 1. Credentials are registered once with `onecli secrets create`, stored and managed by OneCLI
-2. When NanoClaw spawns a container, it calls `applyContainerConfig()` to route outbound HTTPS through the OneCLI gateway
-3. The gateway matches requests by host and path, injects the real credential, and forwards
-4. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+2. When NanoClaw spawns a container, it configures outbound routing through the credential gateway
+3. For Claude, the host starts a local proxy on `CREDENTIAL_PROXY_PORT` (default: 19001)
+4. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
+5. The SDK sends API requests to the proxy with the placeholder key
+6. The proxy strips placeholder auth, injects real credentials (`x-api-key`), and forwards to `api.anthropic.com`
+7. For Codex API-key mode, the host starts an OpenAI credential proxy on `OPENAI_PROXY_PORT` (default: 19002)
+8. If `OPENAI_API_KEY` is present, Codex containers receive `OPENAI_BASE_URL=http://host.docker.internal:<port>` and a placeholder key so the proxy can inject `Authorization: Bearer`
+9. If `OPENAI_API_KEY` is absent, Codex containers use the mounted `~/.codex` session-auth path instead of any API-key proxy
+10. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
 
 **Per-agent policies:**
 Each NanoClaw group gets its own OneCLI agent identity. This allows different credential policies per group (e.g. your sales agent vs. support agent). OneCLI supports rate limits, and time-bound access and approval flows are on the roadmap.
