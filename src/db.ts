@@ -108,6 +108,13 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add model column to scheduled_tasks if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -473,8 +480,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at, thread_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at, thread_id, model)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -489,6 +496,7 @@ export function createTask(
     task.status,
     task.created_at,
     task.thread_id ?? null,
+    task.model || null,
   );
 }
 
@@ -523,6 +531,7 @@ export function updateTask(
       | 'schedule_value'
       | 'next_run'
       | 'status'
+      | 'model'
     >
   >,
 ): void {
@@ -552,6 +561,10 @@ export function updateTask(
   if (updates.status !== undefined) {
     fields.push('status = ?');
     values.push(updates.status);
+  }
+  if (updates.model !== undefined) {
+    fields.push('model = ?');
+    values.push(updates.model || null);
   }
 
   if (fields.length === 0) return;

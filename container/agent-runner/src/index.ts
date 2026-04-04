@@ -35,6 +35,7 @@ interface ContainerInput {
   containerId?: string;
   secrets?: Record<string, string>;
   script?: string;
+  model?: string;
 }
 
 interface ContainerOutput {
@@ -533,6 +534,7 @@ async function runQuery(
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
         ],
       },
+      model: containerInput.model || undefined,
     },
   })) {
     messageCount++;

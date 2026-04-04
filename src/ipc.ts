@@ -26,6 +26,13 @@ import { formatMessages } from './router.js';
 import { triggerSchedulerCheck } from './task-scheduler.js';
 import { RegisteredGroup } from './types.js';
 
+const ALLOWED_TASK_MODELS = new Set([
+  'claude-haiku-4-5-20251001',
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
+]);
+
+
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
   sendAudio: (jid: string, audio: Buffer, mimetype?: string) => Promise<void>;
@@ -246,6 +253,7 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    model?: string | null;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -393,6 +401,16 @@ export async function processTaskIpc(
           );
         }
 
+        // Validate model if provided
+        let taskModel: string | null = null;
+        if (data.model) {
+          if (!ALLOWED_TASK_MODELS.has(data.model)) {
+            logger.warn({ model: data.model }, 'Invalid model value, ignoring');
+          } else {
+            taskModel = data.model;
+          }
+        }
+
         createTask({
           id: taskId,
           group_folder: targetFolder,
@@ -406,6 +424,7 @@ export async function processTaskIpc(
           status: 'active',
           created_at: new Date().toISOString(),
           thread_id: data.threadId || null,
+          model: taskModel,
         });
         logger.info(
           { taskId, sourceGroup, targetFolder, contextMode },
@@ -504,6 +523,15 @@ export async function processTaskIpc(
             | 'once';
         if (data.schedule_value !== undefined)
           updates.schedule_value = data.schedule_value;
+        if (data.model !== undefined) {
+          if (data.model === null || data.model === '') {
+            updates.model = null;
+          } else if (ALLOWED_TASK_MODELS.has(data.model)) {
+            updates.model = data.model;
+          } else {
+            logger.warn({ model: data.model }, 'Invalid model value in update_task, ignoring');
+          }
+        }
 
         // Recompute next_run if schedule changed
         if (data.schedule_type || data.schedule_value) {

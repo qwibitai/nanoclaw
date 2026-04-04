@@ -189,6 +189,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .describe(
         'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.',
       ),
+    model: z
+      .enum(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-6'])
+      .optional()
+      .describe(
+        'Model to use for this task. Defaults to claude-sonnet-4-6 if not specified. Use claude-haiku-4-5-20251001 for simple read/write tasks to save cost.',
+      ),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -265,6 +271,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       targetJid,
       createdBy: groupFolder,
       timestamp: new Date().toISOString(),
+      model: args.model || undefined,
     };
 
     writeIpcFile(TASKS_DIR, data);
@@ -442,6 +449,12 @@ server.tool(
       .describe(
         'New script for the task. Set to empty string to remove the script.',
       ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'New model override for the task. Pass empty string to remove the override and revert to default (claude-sonnet-4-6).',
+      ),
   },
   async (args) => {
     // Validate schedule_value if provided
@@ -493,6 +506,7 @@ server.tool(
       data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined)
       data.schedule_value = args.schedule_value;
+    if (args.model !== undefined) data.model = args.model;
 
     writeIpcFile(TASKS_DIR, data);
 
