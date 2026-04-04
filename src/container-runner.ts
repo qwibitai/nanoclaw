@@ -18,6 +18,7 @@ import {
   OPENAI_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -231,8 +232,8 @@ function buildVolumeMounts(
 }
 
 /**
- * Read Codex-specific secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
+ * Decide whether Codex should use the API-key proxy path or the mounted
+ * session-auth path.
  */
 function buildContainerArgs(
   mounts: VolumeMount[],
@@ -245,19 +246,20 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   if (engine === 'codex') {
-    // Codex engine: route OpenAI SDK requests through the OpenAI credential proxy.
-    // The proxy injects the real OPENAI_API_KEY so it never enters the container.
-    // Containers that use ~/.codex session auth (no API key) will ignore these
-    // env vars — the SDK falls back to the mounted auth file automatically.
-    //
-    // No /v1 suffix here: the OpenAI SDK appends /v1 to OPENAI_BASE_URL itself.
-    // Adding /v1 here would produce double-prefix (/v1/v1/...) when users set
-    // OPENAI_BASE_URL to a custom endpoint that already includes /v1.
-    args.push(
-      '-e',
-      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}`,
-    );
-    args.push('-e', 'OPENAI_API_KEY=placeholder');
+    const codexSecrets = readEnvFile(['OPENAI_API_KEY']);
+
+    // Only enable the OpenAI proxy path when an API key is actually configured.
+    // If no key is present, the container must use the mounted ~/.codex session
+    // auth path instead, so we deliberately do not inject any OpenAI env vars.
+    if (codexSecrets.OPENAI_API_KEY) {
+      // No /v1 suffix here: the OpenAI SDK appends /v1 to OPENAI_BASE_URL itself.
+      // Adding /v1 here would produce a double prefix when the SDK resolves it.
+      args.push(
+        '-e',
+        `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}`,
+      );
+      args.push('-e', 'OPENAI_API_KEY=placeholder');
+    }
   } else {
     // Claude engine: route Anthropic SDK requests through the Claude credential proxy.
     args.push(
@@ -314,7 +316,8 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const engine: 'claude' | 'codex' = process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+  const engine: 'claude' | 'codex' =
+    process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
   const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;

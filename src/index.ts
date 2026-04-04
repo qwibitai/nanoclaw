@@ -479,17 +479,22 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
-  // Start OpenAI credential proxy for Codex engine (only when AGENT_ENGINE=codex)
-  let openAIProxyServer: Awaited<ReturnType<typeof startOpenAIProxy>> | null = null;
+  // Start OpenAI credential proxy only for Codex API-key mode.
+  // Session-auth mode uses the mounted ~/.codex credentials directly.
+  let openAIProxyServer: Awaited<ReturnType<typeof startOpenAIProxy>> | null =
+    null;
   if (process.env.AGENT_ENGINE === 'codex') {
     const openaiSecrets = readEnvFile(['OPENAI_API_KEY']);
-    if (!openaiSecrets.OPENAI_API_KEY) {
-      logger.warn(
-        'AGENT_ENGINE=codex but OPENAI_API_KEY is not set in .env. ' +
-        'API requests will fail unless ~/.codex session auth is configured.',
+    if (openaiSecrets.OPENAI_API_KEY) {
+      openAIProxyServer = await startOpenAIProxy(
+        OPENAI_PROXY_PORT,
+        PROXY_BIND_HOST,
+      );
+    } else {
+      logger.info(
+        'AGENT_ENGINE=codex without OPENAI_API_KEY; using mounted ~/.codex session auth',
       );
     }
-    openAIProxyServer = await startOpenAIProxy(OPENAI_PROXY_PORT, PROXY_BIND_HOST);
   }
 
   // Graceful shutdown handlers

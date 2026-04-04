@@ -11,11 +11,25 @@ vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
+  CREDENTIAL_PROXY_PORT: 3001,
+  OPENAI_PROXY_PORT: 3002,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
+}));
+
+const mockEnv: Record<string, string> = {};
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn((keys: string[]) => {
+    const out: Record<string, string> = {};
+    for (const key of keys) {
+      if (mockEnv[key] !== undefined) {
+        out[key] = mockEnv[key];
+      }
+    }
+    return out;
+  }),
 }));
 
 // Mock logger
@@ -49,25 +63,6 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
-}));
-
-// Mock container-runtime
-vi.mock('./container-runtime.js', () => ({
-  CONTAINER_RUNTIME_BIN: 'docker',
-  hostGatewayArgs: () => [],
-  readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
-  stopContainer: vi.fn(),
-}));
-
-// Mock OneCLI SDK
-vi.mock('@onecli-sh/sdk', () => ({
-  OneCLI: class {
-    applyContainerConfig = vi.fn().mockResolvedValue(true);
-    createAgent = vi.fn().mockResolvedValue({ id: 'test' });
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
-  },
 }));
 
 // Create a controllable fake ChildProcess
@@ -106,6 +101,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { logger } from './logger.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -134,10 +130,14 @@ describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    delete process.env.AGENT_ENGINE;
+    vi.mocked(logger.debug).mockClear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    delete process.env.AGENT_ENGINE;
   });
 
   it('timeout after output resolves as success', async () => {
@@ -225,5 +225,72 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('codex session auth does not inject OpenAI proxy env vars when no key exists', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).not.toContain('OPENAI_API_KEY=placeholder');
+    expect(containerArgs).not.toContain(
+      'OPENAI_BASE_URL=http://host.docker.internal:3002',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('codex API-key mode injects OpenAI proxy env vars when a key exists', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+    mockEnv.OPENAI_API_KEY = 'sk-openai-real-key';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).toContain('OPENAI_API_KEY=placeholder');
+    expect(containerArgs).toContain(
+      'OPENAI_BASE_URL=http://host.docker.internal:3002',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
   });
 });
