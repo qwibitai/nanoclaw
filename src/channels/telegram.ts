@@ -12,6 +12,10 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+export interface TelegramChannelOptions {
+  token: string;
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -48,9 +52,9 @@ export class TelegramChannel implements Channel {
   private opts: TelegramChannelOpts;
   private botToken: string;
 
-  constructor(botToken: string, opts?: TelegramChannelOpts) {
-    this.botToken = botToken;
-    this.opts = opts ?? {
+  constructor({ token }: TelegramChannelOptions) {
+    this.botToken = token;
+    this.opts = {
       onMessage: () => {},
       onChatMetadata: () => {},
       registeredGroups: () => ({}),
@@ -309,5 +313,7 @@ registerChannel('telegram', (opts?: ChannelOpts) => {
     logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
     return null;
   }
-  return new TelegramChannel(token, opts);
+  const ch = new TelegramChannel({ token });
+  if (opts) ch._setOpts(opts);
+  return ch;
 });
