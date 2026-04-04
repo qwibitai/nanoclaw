@@ -68,6 +68,14 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+}
+
+/**
+ * チャンネルコールバック専用のメッセージ型。
+ * NewMessage を拡張し、永続化されない Discord 固有のメタデータを付与する。
+ * storeMessage には渡さず、onMessage コールバック内でのみ参照すること。
+ */
+export interface InboundMessage extends NewMessage {
   place_type?: PlaceType;
   actor_role?: ActorRole;
   is_thread?: boolean;
@@ -112,8 +120,9 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
 }
 
-// チャネルが受信メッセージを配信するために使用するコールバック型
-export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
+// チャネルが受信メッセージを配信するために使用するコールバック型。
+// InboundMessage は NewMessage のスーパーセットなので、既存ハンドラはそのまま使用できる。
+export type OnInboundMessage = (chatJid: string, message: InboundMessage) => void;
 
 // チャットのメタデータ検出用コールバック。
 // name はオプション — 名前をインラインで配信するチャネル（Telegram）はここに渡す。

@@ -12,6 +12,7 @@ import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
+  InboundMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
@@ -151,8 +152,10 @@ export class DiscordChannel implements Channel {
         return;
       }
 
-      // Deliver message — startMessageLoop() will pick it up
-      this.opts.onMessage(chatJid, {
+      // Deliver message — startMessageLoop() will pick it up.
+      // InboundMessage extends NewMessage with Discord-specific metadata
+      // (place_type, actor_role, is_thread) that is callback-only and not persisted.
+      const inbound: InboundMessage = {
         id: msgId,
         chat_jid: chatJid,
         sender,
@@ -163,7 +166,8 @@ export class DiscordChannel implements Channel {
         place_type: 'guild_text',
         actor_role: 'owner',
         is_thread: false,
-      });
+      };
+      this.opts.onMessage(chatJid, inbound);
 
       logger.info(
         { chatJid, chatName, sender: senderName },
