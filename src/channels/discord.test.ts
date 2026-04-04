@@ -272,6 +272,9 @@ describe('DiscordChannel', () => {
           sender_name: 'Alice',
           content: 'Hello everyone',
           is_from_me: false,
+          placeType: 'private_thread',
+          actorRole: 'owner',
+          isThread: false,
         }),
       );
     });

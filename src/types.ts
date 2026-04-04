@@ -32,6 +32,21 @@ export interface ContainerConfig {
   timeout?: number; // デフォルト: 300000 (5分)
 }
 
+// --- Discord 拡張型（VRC-AI-Bot 由来） ---
+
+/** メッセージの送信場所の種別 */
+export type PlaceType =
+  | 'guild_text'
+  | 'guild_announcement'
+  | 'chat_channel'
+  | 'admin_control_channel'
+  | 'public_thread'
+  | 'private_thread'
+  | 'forum_post_thread';
+
+/** ユーザーの権限ロール */
+export type ActorRole = 'owner' | 'admin' | 'user';
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
@@ -40,6 +55,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
   isMain?: boolean; // メインコントロールグループの場合は true（トリガー不要、特権あり）
+  channelMode?: 'chat' | 'url_watch' | 'admin_control';
+  chatBehavior?: 'ambient_room_chat' | 'directed_help_chat';
 }
 
 export interface NewMessage {
@@ -51,6 +68,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  placeType?: PlaceType;
+  actorRole?: ActorRole;
+  isThread?: boolean;
 }
 
 export interface ScheduledTask {
