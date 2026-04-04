@@ -11,6 +11,10 @@ import { getDashboardCSS } from './dashboard-css.js';
 import { getVaultViewHTML, getVaultViewJS } from './dashboard-vault-view.js';
 import { getMealsViewHTML, getMealsViewJS } from './dashboard-meals-view.js';
 import { getTasksViewHTML, getTasksViewJS } from './dashboard-tasks-view.js';
+import {
+  getDevTasksViewHTML,
+  getDevTasksViewJS,
+} from './dashboard-devtasks-view.js';
 
 const NAV_ITEMS = [
   { id: 'vault', label: 'Vault', icon: 'vault' },
@@ -82,7 +86,7 @@ function renderPage(): string {
       ${getTasksViewHTML()}
     </section>
     <section id="view-devtasks" class="view">
-      <div class="empty-state"><h3>Dev Tasks</h3><p>Loading dev tasks...</p></div>
+      ${getDevTasksViewHTML()}
     </section>
   </main>
 </div>
@@ -172,6 +176,10 @@ ${getMealsViewJS()}
 
 <script>
 ${getTasksViewJS()}
+</script>
+
+<script>
+${getDevTasksViewJS()}
 </script>
 
 </body>
