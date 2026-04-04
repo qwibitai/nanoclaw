@@ -77,18 +77,34 @@ Run `npx tsx setup/index.ts --step timezone` and parse the status block.
 - If NEEDS_USER_INPUT=true → The system timezone could not be autodetected (e.g. POSIX-style TZ like `IST-2`). AskUserQuestion: "What is your timezone?" with common options (America/New_York, Europe/London, Asia/Jerusalem, Asia/Tokyo) and an "Other" escape. Then re-run: `npx tsx setup/index.ts --step timezone -- --tz <their-answer>`.
 - If STATUS=success → Timezone is configured. Note RESOLVED_TZ for reference.
 
-## 3. Container Runtime
+## 3. Agent Runtime
 
 ### 3a. Choose runtime
 
 Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
-- PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → AskUserQuestion with two options:
-  1. **Docker (recommended)** — description: "Cross-platform, better credential management, well-tested."
-  2. **Apple Container (experimental)** — description: "Native macOS runtime. Requires advanced setup."
-  If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
-- PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
+AskUserQuestion with the applicable options:
+
+1. **Docker (recommended)** — description: "Runs agents in isolated Linux containers. Cross-platform, well-tested."
+2. **Host mode (no container)** — description: "Runs agents directly on the host as child processes. No Docker needed. Agents share the host environment (Node.js, Python/uv, system tools). Simpler setup, but no isolation."
+3. *(macOS + APPLE_CONTAINER=installed only)* **Apple Container (experimental)** — description: "Native macOS container runtime. Requires advanced setup."
+
+**If Host mode:**
+- Set `HOST_MODE=true` in `.env`:
+  ```bash
+  grep -q 'HOST_MODE' .env 2>/dev/null || echo 'HOST_MODE=true' >> .env
+  ```
+- Install agent-runner dependencies:
+  ```bash
+  cd container/agent-runner && npm install && cd ../..
+  ```
+- Ensure `claude` CLI is installed globally: `claude --version`. If not found, install with `npm install -g @anthropic-ai/claude-code`.
+- Skip steps 3a-docker, 3b, 3c (container build). Continue to step 4.
+
+**If Docker or Apple Container**, continue with the container setup below.
+
+- PLATFORM=linux + Docker chosen → Docker
+- PLATFORM=macos + Apple Container chosen → run `/convert-to-apple-container` now, then skip to 3c.
 
 ### 3a-docker. Install Docker
 
@@ -124,9 +140,32 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 ## 4. Credential System
 
-The credential system depends on the container runtime chosen in step 3.
+The credential system depends on the runtime chosen in step 3.
 
-### 4a. Docker → OneCLI
+### 4a-host. Host Mode → Direct Environment
+
+Host mode agents inherit the host environment, so credentials are set via `.env` (same as Apple Container).
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. Run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+For subscription: tell the user to run `claude setup-token` in another terminal. Stop and wait for the user to confirm they have completed this step successfully before proceeding.
+
+Once confirmed, add the token to `.env`:
+```bash
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+For API key: add to `.env`:
+```bash
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
+
+Skip to step 5.
+
+### 4b. Docker → OneCLI
 
 Install OneCLI and its CLI tool:
 
@@ -198,7 +237,7 @@ Ask them to let you know when done.
 
 **After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
 
-### 4b. Apple Container → Native Credential Proxy
+### 4c. Apple Container → Native Credential Proxy
 
 Apple Container is not compatible with OneCLI. The credential proxy code is already included in the apple-container branch — do NOT invoke `/use-native-credential-proxy` (it would conflict with already-applied code).
 

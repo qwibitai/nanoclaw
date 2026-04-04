@@ -8,6 +8,7 @@ import {
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
+  HOST_MODE,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
@@ -29,6 +30,7 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
+import { runHostAgent } from './host-runner.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -382,7 +384,8 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
+    const runAgent_ = HOST_MODE ? runHostAgent : runContainerAgent;
+    const output = await runAgent_(
       group,
       {
         prompt,
@@ -563,6 +566,10 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
+  if (HOST_MODE) {
+    logger.info('Host mode enabled — skipping container runtime check');
+    return;
+  }
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 }
