@@ -97,7 +97,17 @@ If part of your output is internal reasoning rather than something for the user,
 Here are the key findings from the research...
 ```
 
-Text inside `<internal>` tags is logged but not sent to the user. If you've already sent the key information via `send_message`, you can wrap the recap in `<internal>` to avoid sending it again.
+Text inside `<internal>` tags is logged but not sent to the user.
+
+### No Recaps — Hard Rule
+
+**Never send the same information twice.** This means:
+
+1. **One message per piece of information.** If you sent findings, a tally, or a summary via `send_message`, do NOT send another `send_message` restating, summarizing, or recapping what you just sent. The user already read it.
+2. **Final output after `send_message` must be `<internal>`.** If you already delivered the substantive content via `send_message`, wrap your entire final output in `<internal>` tags.
+3. **No "recap of the recap."** Sending a summary, then a summary of the summary, then a "we're all done here's what happened" is three messages that say the same thing. Send the content once and stop.
+
+**Self-check before every `send_message` call:** Does this message contain information the user hasn't seen yet? If not, don't send it.
 
 ### Thread titles
 

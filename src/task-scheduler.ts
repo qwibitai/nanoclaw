@@ -231,13 +231,28 @@ async function runTask(
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
   const TASK_CLOSE_DELAY_MS = 10000;
+  const TASK_KILL_DELAY_MS = 30000; // Backup: SIGTERM if _close didn't work
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
-      logger.debug({ taskId: task.id }, 'Closing task container after result');
+      logger.info({ taskId: task.id }, 'Closing task container after result (writing _close)');
       deps.queue.closeStdin(task.chat_jid);
+
+      // Backup: if _close doesn't cause the container to exit within 20s,
+      // SIGTERM it directly. This guards against IPC polling failures.
+      killTimer = setTimeout(() => {
+        const slot = deps.queue.getActiveSlot(task.chat_jid);
+        if (slot?.process && !slot.process.killed) {
+          logger.warn(
+            { taskId: task.id, containerName: slot.containerName },
+            'Task container did not exit after _close — sending SIGTERM',
+          );
+          slot.process.kill('SIGTERM');
+        }
+      }, TASK_KILL_DELAY_MS - TASK_CLOSE_DELAY_MS);
     }, TASK_CLOSE_DELAY_MS);
   };
 
@@ -260,7 +275,11 @@ async function runTask(
         script: task.script || undefined,
       },
       (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        // Use group.folder (the IPC mount source) not task.group_folder —
+        // they diverge when a task has group_folder≠chat_jid's group folder
+        // (e.g. personal task on main channel). closeStdin resolves IPC path
+        // from slot.groupFolder, so it MUST match the container's mount.
+        deps.onProcess(task.chat_jid, proc, containerName, group.folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -278,8 +297,6 @@ async function runTask(
       },
     );
 
-    if (closeTimer) clearTimeout(closeTimer);
-
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
@@ -292,9 +309,11 @@ async function runTask(
       'Task completed',
     );
   } catch (err) {
-    if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
+  } finally {
+    if (closeTimer) clearTimeout(closeTimer);
+    if (killTimer) clearTimeout(killTimer);
   }
 
   const durationMs = Date.now() - startTime;

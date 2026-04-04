@@ -23,6 +23,7 @@ import {
   RESIDENTIAL_PROXY_URL,
   TIMEZONE,
   WORKTREES_DIR,
+  WORKTREE_BUNDLE_DIR,
   WORKTREE_CACHE_DIR,
   escapeRegex,
 } from './config.js';
@@ -803,42 +804,163 @@ async function rescueWorktreeChanges(
       );
     }
 
-    // Skip repos without a remote (nothing to push to)
+    // Check if current HEAD has commits not on any remote branch.
+    // For repos without a remote, compare against nothing (all commits are unpushed).
     const remoteOutput = await execAsync('git remote', { cwd: wtPath });
-    if (!remoteOutput) return;
-
-    // Check if current HEAD has commits not on any remote branch
-    const unpushed = await execAsync('git log --oneline HEAD --not --remotes', {
-      cwd: wtPath,
-    });
+    const unpushed = remoteOutput
+      ? await execAsync('git log --oneline HEAD --not --remotes', {
+          cwd: wtPath,
+        })
+      : await execAsync('git log --oneline -1 HEAD', { cwd: wtPath });
     if (!unpushed) return;
 
-    // Push HEAD to a rescue branch without changing local branch pointer
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[:.]/g, '-')
-      .slice(0, 19);
-    const { safeFolderName, safeThreadId } = sanitizeRescueName(
-      groupFolder,
-      threadId,
-    );
-    const threadSuffix = safeThreadId ? `/${safeThreadId}` : '';
-    const branchName = `rescue/${safeFolderName}${threadSuffix}/${timestamp}`;
+    // Save a local git bundle as the reliable fallback.
+    // Wrapped in its own try/catch so a bundle failure (disk full, permissions)
+    // never prevents the remote push from being attempted.
+    try {
+      await saveRescueBundle(wtPath, groupFolder, repoName, threadId, !!remoteOutput);
+    } catch (bundleErr) {
+      logger.warn(
+        { group: groupFolder, threadId, repo: repoName, err: bundleErr },
+        'Local rescue bundle failed — falling through to remote push',
+      );
+    }
 
-    await execAsync(`git push origin HEAD:refs/heads/${branchName}`, {
-      cwd: wtPath,
-    });
+    // Attempt remote push (best-effort — local bundle is the safety net)
+    if (remoteOutput) {
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .slice(0, 19);
+      const { safeFolderName, safeThreadId } = sanitizeRescueName(
+        groupFolder,
+        threadId,
+      );
+      const threadSuffix = safeThreadId ? `/${safeThreadId}` : '';
+      const branchName = `rescue/${safeFolderName}${threadSuffix}/${timestamp}`;
 
-    logger.info(
-      { group: groupFolder, threadId, repo: repoName, branch: branchName },
-      'Rescued unpushed worktree changes to remote branch',
-    );
+      try {
+        await execAsync(`git push origin HEAD:refs/heads/${branchName}`, {
+          cwd: wtPath,
+        });
+        logger.info(
+          { group: groupFolder, threadId, repo: repoName, branch: branchName },
+          'Rescued unpushed worktree changes to remote branch',
+        );
+      } catch (pushErr) {
+        logger.warn(
+          { group: groupFolder, threadId, repo: repoName, err: pushErr },
+          'Remote rescue push failed — local bundle preserved',
+        );
+      }
+    }
   } catch (err) {
     logger.warn(
       { group: groupFolder, threadId, repo: repoName, err },
       'Failed to rescue worktree changes (work may be lost)',
     );
   }
+}
+
+/**
+ * Save a git bundle containing all commits not on any remote branch.
+ * Bundles are self-contained files that can restore the full commit graph
+ * without network access — the local counterpart to rescue branch pushes.
+ */
+/** Resolve the bundle file path and sanitized names for a rescue bundle. */
+function resolveRescueBundlePath(
+  groupFolder: string,
+  repoName: string,
+  threadId?: string,
+): { bundlePath: string; safeFolderName: string; safeThreadId: string | undefined } {
+  const { safeFolderName, safeThreadId } = sanitizeRescueName(
+    groupFolder,
+    threadId,
+  );
+  const threadSuffix = safeThreadId ? `-${safeThreadId}` : '';
+  const bundlePath = path.join(
+    WORKTREE_BUNDLE_DIR,
+    groupFolder,
+    repoName,
+    `rescue${threadSuffix}.bundle`,
+  );
+  return { bundlePath, safeFolderName, safeThreadId };
+}
+
+async function saveRescueBundle(
+  wtPath: string,
+  groupFolder: string,
+  repoName: string,
+  threadId?: string,
+  hasRemote?: boolean,
+): Promise<void> {
+  const { bundlePath } = resolveRescueBundlePath(groupFolder, repoName, threadId);
+  fs.mkdirSync(path.dirname(bundlePath), { recursive: true });
+
+  const revList = hasRemote ? 'HEAD --not --remotes' : 'HEAD';
+  await execAsync(`git bundle create "${bundlePath}" ${revList}`, {
+    cwd: wtPath,
+  });
+
+  logger.info(
+    { group: groupFolder, threadId, repo: repoName, bundlePath },
+    'Saved local rescue bundle',
+  );
+}
+
+/**
+ * Restore a local rescue bundle into a repo so it can be used as a worktree ref.
+ * Returns the ref name to use for worktree creation, or null if no bundle exists.
+ */
+async function restoreRescueBundle(
+  srcPath: string,
+  groupFolder: string,
+  repoName: string,
+  threadId?: string,
+): Promise<string | null> {
+  const { bundlePath, safeFolderName, safeThreadId } =
+    resolveRescueBundlePath(groupFolder, repoName, threadId);
+
+  if (!fs.existsSync(bundlePath)) return null;
+
+  try {
+    await execAsync(`git bundle verify "${bundlePath}"`, { cwd: srcPath });
+
+    // Fetch into a local ref so the commit is available for worktree creation.
+    // Uses sanitized names — raw groupFolder/threadId may contain chars invalid in git refs.
+    const refName = `refs/rescue-bundle/${safeFolderName}/${safeThreadId || 'main'}`;
+    await execAsync(`git fetch "${bundlePath}" HEAD:"${refName}"`, {
+      cwd: srcPath,
+    });
+
+    logger.info(
+      { group: groupFolder, threadId, repo: repoName, ref: refName },
+      'Restored worktree from local rescue bundle',
+    );
+    return refName;
+  } catch (err) {
+    logger.warn(
+      { group: groupFolder, threadId, repo: repoName, err },
+      'Failed to restore rescue bundle',
+    );
+    // Remove corrupt bundle so it doesn't block future attempts
+    try {
+      fs.unlinkSync(bundlePath);
+    } catch { /* ignore */ }
+    return null;
+  }
+}
+
+/** Remove a consumed rescue bundle after successful worktree creation. */
+function cleanupRescueBundle(
+  groupFolder: string,
+  repoName: string,
+  threadId?: string,
+): void {
+  const { bundlePath } = resolveRescueBundlePath(groupFolder, repoName, threadId);
+  try {
+    fs.unlinkSync(bundlePath);
+  } catch { /* ignore */ }
 }
 
 /** Sanitize a group folder name for use in rescue branch paths. */
@@ -1259,6 +1381,23 @@ export async function prepareThreadWorkspace(
           );
         }
 
+        // If no remote rescue branch, check for a local rescue bundle.
+        // Bundles are saved when the remote push fails — they capture tracked
+        // file edits that would otherwise be lost between sessions.
+        let restoredFromBundle = false;
+        if (!restoredFromRescue) {
+          const bundleRef = await restoreRescueBundle(
+            srcPath,
+            groupFolder,
+            path.basename(srcPath),
+            threadId,
+          );
+          if (bundleRef) {
+            ref = bundleRef;
+            restoredFromBundle = true;
+          }
+        }
+
         try {
           await execAsync(`git worktree add --detach "${wtPath}" "${ref}"`, {
             cwd: srcPath,
@@ -1295,6 +1434,9 @@ export async function prepareThreadWorkspace(
         // Clean up used rescue branches after successful worktree creation
         if (restoredFromRescue) {
           deleteRescueBranches(srcPath, groupFolder, threadId).catch(() => {});
+        }
+        if (restoredFromBundle) {
+          cleanupRescueBundle(groupFolder, path.basename(srcPath), threadId);
         }
       }),
     );
@@ -1504,6 +1646,7 @@ async function prepareAdditionalMountWorktree(
   // Check for rescue branches from previous sessions.
   // Need to fetch from the real remote first (local clone only has local refs).
   let restoredFromRescue = false;
+  let restoredFromBundle = false;
   if (groupFolder && threadId) {
     try {
       await execAsync('git fetch origin', { cwd: clonePath });
@@ -1529,6 +1672,20 @@ async function prepareAdditionalMountWorktree(
         'Restoring additional mount from rescue branch',
       );
     }
+
+    // If no remote rescue branch, check for a local rescue bundle
+    if (!restoredFromRescue) {
+      const bundleRef = await restoreRescueBundle(
+        clonePath,
+        groupFolder,
+        containerBasename,
+        threadId,
+      );
+      if (bundleRef) {
+        ref = bundleRef;
+        restoredFromBundle = true;
+      }
+    }
   }
 
   await execAsync(`git checkout --detach "${ref}"`, { cwd: clonePath });
@@ -1536,6 +1693,9 @@ async function prepareAdditionalMountWorktree(
   // Clean up used rescue branches after successful checkout
   if (restoredFromRescue && groupFolder && threadId) {
     deleteRescueBranches(clonePath, groupFolder, threadId).catch(() => {});
+  }
+  if (restoredFromBundle) {
+    cleanupRescueBundle(groupFolder, containerBasename, threadId);
   }
 
   return clonePath;

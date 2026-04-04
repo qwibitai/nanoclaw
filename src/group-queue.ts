@@ -229,6 +229,10 @@ export class GroupQueue {
 
     // Preempt if tasks pending
     if (state.pendingTasks.length > 0) {
+      logger.info(
+        { groupJid, threadKey, pendingTasks: state.pendingTasks.length },
+        'notifyIdle: preempting for pending tasks',
+      );
       this.closeStdin(groupJid, threadId);
       return;
     }
@@ -240,6 +244,10 @@ export class GroupQueue {
       (p) => p.threadKey === threadKey,
     );
     if (hasPendingSameThread) {
+      logger.info(
+        { groupJid, threadKey, pendingCount: state.pendingProcessJids.length },
+        'notifyIdle: preempting for pending same-thread messages',
+      );
       this.closeStdin(groupJid, threadId);
       return;
     }
@@ -252,6 +260,10 @@ export class GroupQueue {
       hasPendingOtherThread &&
       state.activeThreads.size >= MAX_THREADS_PER_GROUP
     ) {
+      logger.info(
+        { groupJid, threadKey, activeThreads: state.activeThreads.size },
+        'notifyIdle: preempting for pending other-thread messages (at limit)',
+      );
       this.closeStdin(groupJid, threadId);
     }
   }
@@ -277,6 +289,16 @@ export class GroupQueue {
     return state ? state.activeThreads.size > 0 : false;
   }
 
+  /** Get the active thread slot for a group (if any). */
+  getActiveSlot(
+    groupJid: string,
+    threadId?: string,
+  ): ThreadSlot | undefined {
+    const threadKey = this.resolveThreadKey(threadId);
+    const state = this.groups.get(groupJid);
+    return state?.activeThreads.get(threadKey);
+  }
+
   /** Check if a specific thread has an active container. */
   isThreadActive(groupJid: string, threadId: string | undefined): boolean {
     const threadKey = this.resolveThreadKey(threadId);
@@ -294,16 +316,6 @@ export class GroupQueue {
     const state = this.groups.get(groupJid);
     const slot = state?.activeThreads.get(threadKey);
     if (slot) slot.onActivity = fn;
-  }
-
-  /** Get the thread slot for a specific thread (if active). */
-  getThreadSlot(
-    groupJid: string,
-    threadId: string | undefined,
-  ): ThreadSlot | undefined {
-    const threadKey = this.resolveThreadKey(threadId);
-    const state = this.groups.get(groupJid);
-    return state?.activeThreads.get(threadKey);
   }
 
   /** Write a JSON payload to the IPC input directory using atomic rename. */
@@ -380,14 +392,28 @@ export class GroupQueue {
     const threadKey = this.resolveThreadKey(threadId);
     const state = this.getGroup(groupJid);
     const slot = state.activeThreads.get(threadKey);
-    if (!slot || !slot.groupFolder) return;
+    if (!slot || !slot.groupFolder) {
+      logger.debug(
+        { groupJid, threadKey, hasSlot: !!slot, groupFolder: slot?.groupFolder },
+        'closeStdin: no slot or groupFolder, skipping',
+      );
+      return;
+    }
 
     const inputDir = resolveGroupIpcInputPath(slot.groupFolder, threadKey);
+    const closePath = path.join(inputDir, '_close');
     try {
       // Dir already created by runContainerAgent before container launch
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
-    } catch {
-      // ignore
+      fs.writeFileSync(closePath, '');
+      logger.info(
+        { groupJid, threadKey, containerName: slot.containerName, path: closePath },
+        'closeStdin: wrote _close sentinel',
+      );
+    } catch (err) {
+      logger.warn(
+        { groupJid, threadKey, path: closePath, err },
+        'closeStdin: failed to write _close sentinel',
+      );
     }
   }
 
