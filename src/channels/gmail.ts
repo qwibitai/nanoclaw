@@ -12,7 +12,7 @@ import { OAuth2Client } from 'google-auth-library';
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { calculateBackoff } from '../backoff.js';
 import { logger } from '../logger.js';
-import { incCounter } from '../metrics.js';
+import { incCounter, observeHistogram } from '../metrics.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -461,30 +461,38 @@ export class GmailChannel implements Channel {
 
   private async checkFirestoreSignals(): Promise<void> {
     if (!this.firestore) return;
+    const start = Date.now();
 
-    const collectionPath = `gmail-notify/${AGENT_NAME}/signals`;
-    const snapshot = await this.firestore
-      .collection(collectionPath)
-      .where('processed', '==', false)
-      .limit(10)
-      .get();
+    try {
+      const collectionPath = `gmail-notify/${AGENT_NAME}/signals`;
+      const snapshot = await this.firestore
+        .collection(collectionPath)
+        .where('processed', '==', false)
+        .limit(10)
+        .get();
 
-    if (snapshot.empty) return;
+      if (snapshot.empty) return;
 
-    logger.info(
-      { count: snapshot.size, agent: AGENT_NAME },
-      'Gmail webhook signal(s) received, triggering poll',
-    );
+      logger.info(
+        { count: snapshot.size, agent: AGENT_NAME },
+        'Gmail webhook signal(s) received, triggering poll',
+      );
 
-    // Trigger an immediate Gmail API poll
-    await this.pollForMessages();
+      // Trigger an immediate Gmail API poll
+      await this.pollForMessages();
 
-    // Mark signals as processed
-    const batch = this.firestore.batch();
-    for (const doc of snapshot.docs) {
-      batch.update(doc.ref, { processed: true });
+      // Mark signals as processed
+      const batch = this.firestore.batch();
+      for (const doc of snapshot.docs) {
+        batch.update(doc.ref, { processed: true });
+      }
+      await batch.commit();
+    } finally {
+      observeHistogram(
+        'nanoclaw_firestore_signal_check_seconds',
+        (Date.now() - start) / 1000,
+      );
     }
-    await batch.commit();
   }
 
   // --- Private ---
@@ -495,6 +503,7 @@ export class GmailChannel implements Channel {
 
   private async pollForMessages(): Promise<void> {
     if (!this.gmail) return;
+    const start = Date.now();
 
     try {
       const query = this.buildQuery();
@@ -538,6 +547,11 @@ export class GmailChannel implements Channel {
           nextPollMs: backoffMs,
         },
         'Gmail poll failed',
+      );
+    } finally {
+      observeHistogram(
+        'nanoclaw_gmail_poll_duration_seconds',
+        (Date.now() - start) / 1000,
       );
     }
   }

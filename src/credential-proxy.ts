@@ -19,7 +19,12 @@ import path from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
-import { getMetricsText, incCounter, setGauge } from './metrics.js';
+import {
+  getMetricsText,
+  incCounter,
+  observeHistogram,
+  setGauge,
+} from './metrics.js';
 
 // Health endpoint dependencies (lazy-loaded to avoid circular imports)
 let _healthDeps: {
@@ -340,6 +345,7 @@ export function startCredentialProxy(
           }
         }
 
+        const requestStart = Date.now();
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
@@ -349,6 +355,10 @@ export function startCredentialProxy(
             headers,
           } as RequestOptions,
           (upRes) => {
+            observeHistogram(
+              'nanoclaw_api_request_duration_seconds',
+              (Date.now() - requestStart) / 1000,
+            );
             // Record upstream status for circuit breaker (only /messages)
             if (req.url?.includes('/messages')) {
               circuitBreakerRecord(upRes.statusCode!);

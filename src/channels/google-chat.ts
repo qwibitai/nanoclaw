@@ -12,6 +12,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { calculateBackoff } from '../backoff.js';
 import { GOOGLE_CHAT_POLL_MS } from '../constants.js';
 import { logger } from '../logger.js';
+import { observeHistogram } from '../metrics.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -200,6 +201,7 @@ export class GoogleChatChannel implements Channel {
 
   private async pollForMessages(): Promise<void> {
     if (!this.firestore) return;
+    const start = Date.now();
 
     try {
       const collectionPath = `chat-queue/${AGENT_NAME}/messages`;
@@ -241,6 +243,11 @@ export class GoogleChatChannel implements Channel {
           nextPollMs: backoffMs,
         },
         'Google Chat poll failed',
+      );
+    } finally {
+      observeHistogram(
+        'nanoclaw_gchat_poll_duration_seconds',
+        (Date.now() - start) / 1000,
       );
     }
   }

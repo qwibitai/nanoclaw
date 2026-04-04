@@ -25,7 +25,7 @@ import {
 } from './anti-spam.js';
 import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import { logger } from './logger.js';
-import { incCounter } from './metrics.js';
+import { incCounter, observeHistogram } from './metrics.js';
 import { Channel, RegisteredGroup } from './types.js';
 import {
   lastAgentTimestamp,
@@ -112,6 +112,7 @@ export async function processGroupMessages(
   let hadError = false;
   let outputSentToUser = false;
 
+  const containerStart = Date.now();
   const output = await runAgent(
     group,
     prompt,
@@ -187,6 +188,11 @@ export async function processGroupMessages(
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  observeHistogram(
+    'nanoclaw_container_duration_seconds',
+    (Date.now() - containerStart) / 1000,
+  );
 
   if (output === 'error' || hadError) {
     incCounter('nanoclaw_container_errors_total');
