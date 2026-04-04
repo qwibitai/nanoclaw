@@ -18,75 +18,108 @@
 ## チャンネル・グループ設計
 
 ### グループ登録フロー
-TODO: 現在の実装を元の内容に沿って補完
-> ⚠️ 現状はSQLiteで管理中。
+✅ **実装完了** — SQLiteの `registered_groups` テーブルで管理。
 
-**参考**: `/Users/shin/src/github.com/shin902/nanoclaw/src/channels/discord.ts`（145行目）
+- `src/db.ts` の `setRegisteredGroup()` が登録処理を担当
+- Discord チャンネルからの登録は `src/channels/discord.ts` で実装
+- 参考: `src/db.ts` L670 (登録フロー)
 
 ### トリガー
 
 全メッセージに反応（トリガーワード不要）。
 
 ### isMainフラグ
-TODO: 現在の実装を元の内容に沿って補完
+✅ **実装済み** — ただし設計を修正することを推奨
+
+現在の実装：
+- `RegisteredGroup` に `requires_trigger?: boolean` フラグ（デフォルト: `true`）
+- `requires_trigger: false` 時がメイングループと同義
+
+今後：
+- 明示的な `isMain?: boolean` フラグを追加予定（より読みやすく）
+- これは後方互換性を保ちながら段階的に導入可能
 
 ---
 
 ## ストレージ設計
 
-SQL
-TODO: 現在の実装を元の内容に沿って補完
+✅ **実装完了** — SQLiteで統一管理。
 
-### タスクファイル
-TODO: 現在の実装を元の内容に沿って補完
-> ⚠️ 現状はSQLiteで管理中。
+テーブル構成：
+- `chats` — チャット情報（JID、名前、最終メッセージ時刻）
+- `messages` — メッセージ本体（ID、内容、タイムスタンプ）
+- `sessions` — グループごとのセッション状態
+- `scheduled_tasks` — スケジュール付きタスク
+- `task_run_logs` — タスク実行ログ
+- `registered_groups` — 登録済みグループ情報
+
+参考: `src/db.ts` L1-80 (スキーマ定義)
+
+### タスク管理
+✅ **実装完了** — SQLiteで一元管理。
+
+- `scheduled_tasks` テーブルで定期実行を管理
+- `task_run_logs` で実行履歴を追跡
+- `context_mode`（isolated / shared）に対応
 
 ---
 
 ## Discordスラッシュコマンド
 
-| コマンド | 動作 |
-|---|---|
-| `/new` | セッションリセット（JSONLに `{"type":"session_reset"}` を書き込み、以降の会話構築で古い履歴を含めない） |
-| `/model` | プロバイダー切り替え（`config.json`の`model`フィールドを書き換え） |
-| `/compact` | ホストプロセスがClaude APIで会話を要約し、`{"type":"summary"}` をJSONLに書き込む |
+| コマンド | 動作 | 状態 |
+|---|---|---|
+| `/new` | セッションリセット — 古い履歴を破棄、新規開始 | 🔄 実装予定 |
+| `/model` | プロバイダー切り替え | 🔄 実装予定 |
+| `/compact` | 会話履歴を圧縮し、コンテキスト効率を改善 | ✅ 実装済み（[add-compact skill](/.claude/skills/add-compact/SKILL.md)） |
 
-> ⚠️ すべて未実装。
+注記：
+- `/compact` は NanoClaw が実装したカスタムコマンド（`src/session-commands.ts`）
+- API 呼び出し時に SDK の圧縮メカニズムを使用
+- 新しい `session_id` が返される（トランザクション保持）
 
 ---
 
 ## セッション引き継ぎ設計
-TODO: 現在の実装を元の内容に沿って補完
-> ⚠️ 現状はSQLite（`setSession()`）で管理中。
+✅ **実装完了** — SQLiteで管理。
+
+- `src/db.ts` の `setSession(groupFolder, sessionId)` で実装（L523）
+- グループごとの固有セッション ID を保存
+- Agent SDK の `/compact` でも `newSessionId` が返され、自動更新
+
+参考: `src/db.ts` L523-530 (実装)
 
 ---
 
 ## `/compact` 設計
 
-ホストプロセスが直接実行する（コンテナは使わない）。
-コスト削減のため、要約にはHaiku（`claude-haiku-4-5`）を使用する。
+✅ **実装済み** — NanoClaw カスタムコマンド。
+
+実装の詳細：
+- `src/session-commands.ts` が `/compact` をパース・認可
+- メッセージが直接処理されず、`container/agent-runner` に転送
+- SDK の圧縮メカニズムを活用（詳細はクローズドソース）
+- 会話は `conversations/` に Markdown でアーカイブ（PreCompactHook）
 
 ### フロー
 
 ```
-ユーザーが /compact を実行
+ユーザーが /compact を送信
+  ↓
+ホストプロセス (src/session-commands.ts):
+  1. コマンドをパース
+  2. 認可チェック（メイングループまたは admin）
+  3. 他の pending メッセージを先に処理
+  ↓
+agent-runner (container/agent-runner/src/index.ts):
+  1. Pre-compact 時に会話全体を conversations/ に保存
+  2. SDK query() 内部で圧縮実行（詳細は non-public）
+  3. 新しい session_id を受け取る
   ↓
 ホストプロセス:
-  1. JSONLから全イベントを読み出し
-  2. Claude API（Haiku）を直接呼び出して会話を要約
-  3. JSONLに要約イベントを書き込み:
-     {"type":"summary","content":"...","ts":...}
-  4. 以降のmessages配列構築時はsummaryを先頭に付け、
-     それ以降のイベントのみを含める
+  setSession(groupFolder, newSessionId) で DB を更新
 ```
 
-### 要約イベント形式
-
-```jsonl
-{"type":"summary","content":"ここまでの会話の要約: ...","ts":1742000000}
-```
-
-`buildMessagesArray()`はJSONLを後方から読み、`type:"summary"`が見つかったらそこを起点にする。`/new`の`type:"session_reset"`と同様のセマンティクス。
+参考: [add-compact skill](/.claude/skills/add-compact/SKILL.md) — 統合手順と詳細
 
 ---
 
