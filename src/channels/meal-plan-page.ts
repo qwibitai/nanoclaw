@@ -12,7 +12,45 @@ const PICKLE_GROUP = 'telegram_pickle';
 const PLAN_FILE = path.join(GROUPS_DIR, PICKLE_GROUP, 'current-plan.md');
 const INGREDIENTS_FILE = path.join(GROUPS_DIR, PICKLE_GROUP, 'ingredients.md');
 
-/** Handle GET /pickle/meal-plan. Returns true if matched. */
+// SSE clients waiting for file-change notifications
+const sseClients = new Set<http.ServerResponse>();
+let fileWatcherStarted = false;
+
+function startFileWatcher(): void {
+  if (fileWatcherStarted) return;
+  fileWatcherStarted = true;
+
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  const notify = () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      for (const client of sseClients) {
+        try {
+          client.write('data: updated\n\n');
+        } catch {
+          sseClients.delete(client);
+        }
+      }
+    }, 300);
+  };
+
+  for (const file of [PLAN_FILE, INGREDIENTS_FILE]) {
+    try {
+      fs.watch(file, notify);
+    } catch {
+      // File might not exist yet — watch the directory instead
+      try {
+        fs.watch(path.dirname(file), (_, filename) => {
+          if (filename === path.basename(file)) notify();
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+/** Handle GET /pickle/meal-plan and /pickle/meal-plan/events. Returns true if matched. */
 export function handleMealPlanPage(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -20,6 +58,21 @@ export function handleMealPlanPage(
   if (req.method !== 'GET') return false;
 
   const url = req.url?.split('?')[0] || '';
+
+  // SSE endpoint for live updates
+  if (url === '/pickle/meal-plan/events') {
+    startFileWatcher();
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write('data: connected\n\n');
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return true;
+  }
+
   if (url !== '/pickle/meal-plan') return false;
 
   const plan = readFileSafe(PLAN_FILE);
@@ -122,9 +175,7 @@ function parsePlan(md: string): {
     }
 
     // 📖 [Title](url) — recipe links
-    const recipeMatch = trimmed.match(
-      /^📖\s*\[([^\]]+)\]\(([^)]+)\)/,
-    );
+    const recipeMatch = trimmed.match(/^📖\s*\[([^\]]+)\]\(([^)]+)\)/);
     if (recipeMatch && currentMeal) {
       currentMeal.recipes.push({ title: recipeMatch[1], url: recipeMatch[2] });
       continue;
@@ -562,6 +613,34 @@ document.querySelectorAll('.ingredient-section li').forEach((li, i) => {
     saveChecked(checked);
   });
 });
+
+// Live updates via SSE — reload content when Pickle updates the plan
+(function() {
+  let es;
+  function connect() {
+    es = new EventSource('/pickle/meal-plan/events');
+    es.onmessage = function(e) {
+      if (e.data === 'updated') {
+        // Preserve active tab across reload
+        const active = document.querySelector('.tab.active');
+        if (active) location.hash = active.dataset.target;
+        location.reload();
+      }
+    };
+    es.onerror = function() {
+      es.close();
+      setTimeout(connect, 5000);
+    };
+  }
+  // Restore tab from hash after reload
+  if (location.hash) {
+    const tabName = location.hash.slice(1);
+    const tab = document.querySelector('.tab[data-target="' + tabName + '"]');
+    if (tab) tab.click();
+    history.replaceState(null, '', location.pathname);
+  }
+  connect();
+})();
 </script>
 
 </body>
