@@ -343,7 +343,7 @@ describe('register run memory seeding', () => {
       repoDir,
       'global',
       'CLAUDE.md',
-      '# Compatibility Global\n\nProvider-only edits that must not win.\n',
+      '# Canonical Global\n\nYou are Andy, a personal assistant.\n',
     );
 
     // Act
@@ -366,6 +366,48 @@ describe('register run memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'telegram_dev_team', 'CLAUDE.md')).toBe(
       '# Canonical Global\n\nYou are Andy, a personal assistant.\n',
+    );
+  });
+
+  it('promotes legacy global CLAUDE.md before seeding a new non-main group', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# New Canonical Template\n\nFresh install default.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'tg:-1009',
+      '--name',
+      'Operations',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'telegram_operations',
+      '--channel',
+      'telegram',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    expect(readGroupFile(repoDir, 'telegram_operations', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    expect(readGroupFile(repoDir, 'telegram_operations', 'CLAUDE.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
     );
   });
 
@@ -558,7 +600,9 @@ describe('register run memory seeding', () => {
 
     // Assert
     expect(
-      fs.existsSync(path.join(repoDir, 'groups', 'discord_general', 'AGENT.md')),
+      fs.existsSync(
+        path.join(repoDir, 'groups', 'discord_general', 'AGENT.md'),
+      ),
     ).toBe(false);
     expect(
       fs.existsSync(

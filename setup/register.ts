@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  finalizeLegacyCanonicalMemoryOnce,
   listManagedMemoryFiles,
   seedGroupMemoryFiles,
 } from '../src/agent/memory.ts';
@@ -120,6 +121,47 @@ export async function run(args: string[]): Promise<void> {
   fs.mkdirSync(path.join(groupDir, 'logs'), {
     recursive: true,
   });
+
+  const globalDir = path.join(projectRoot, 'groups', 'global');
+  if (!parsed.isMain) {
+    const globalSeededMemory = seedGroupMemoryFiles({
+      targetDir: globalDir,
+      templateDir: globalDir,
+    });
+
+    if (globalSeededMemory.canonical.created) {
+      logger.info(
+        {
+          file: globalSeededMemory.canonical.path,
+          seededFrom: globalSeededMemory.canonical.seededFrom,
+        },
+        'Prepared canonical global memory before group registration',
+      );
+    }
+
+    if (globalSeededMemory.compatibility.created) {
+      logger.info(
+        {
+          file: globalSeededMemory.compatibility.path,
+          seededFrom: globalSeededMemory.compatibility.seededFrom,
+        },
+        'Prepared compatibility global memory before group registration',
+      );
+    }
+
+    const globalMigration = finalizeLegacyCanonicalMemoryOnce({
+      targetDir: globalDir,
+    });
+    if (globalMigration.status === 'migrated') {
+      logger.info(
+        {
+          canonicalPath: globalMigration.canonicalPath,
+          compatibilityPath: globalMigration.compatibilityPath,
+        },
+        'Promoted legacy global CLAUDE.md before seeding a new group',
+      );
+    }
+  }
 
   const templateDir = parsed.isMain
     ? path.join(projectRoot, 'groups', 'main')
