@@ -75,12 +75,9 @@ export function handleMealPlanPage(
 
   if (url !== '/pickle/meal-plan') return false;
 
-  const plan = readFileSafe(PLAN_FILE);
-  const ingredients = readFileSafe(INGREDIENTS_FILE);
-  const html = renderPage(plan, ingredients);
-
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(html);
+  // Redirect to dashboard meals view
+  res.writeHead(302, { Location: '/dashboard#meals' });
+  res.end();
   return true;
 }
 
