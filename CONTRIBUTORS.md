@@ -20,3 +20,7 @@ Thanks to everyone who has contributed to NanoClaw!
 - [leonalfredbot-ship-it](https://github.com/leonalfredbot-ship-it) — Alfred-the-buttler
 - [moktamd](https://github.com/moktamd)
 - [gurixs-carson](https://github.com/gurixs-carson)
+- [MrBlaise](https://github.com/MrBlaise) — Balázs Rostás
+- [lbsnrs](https://github.com/lbsnrs) — Andreas Liebschner
+- [spencer-whitman](https://github.com/spencer-whitman)
+- [lazure-ocean](https://github.com/lazure-ocean) — Cyril Ionov
