@@ -31,6 +31,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   modelProvider?: 'claude' | 'ollama'; // Default: 'claude'
+  claudeModel?: string; // e.g. 'sonnet', 'opus', 'haiku', 'claude-opus-4-5'
   ollamaModel?: string; // e.g. 'glm-5:cloud', 'gemma4:31b'
 }
 

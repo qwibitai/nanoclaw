@@ -149,17 +149,22 @@ function createSchema(database: Database.Database): void {
 
   // Add reply context columns if they don't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
     database.exec(
       `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
     );
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`);
   } catch {
     /* columns already exist */
+  }
+
+  // Add unified_session_id column for cross-provider session tracking
+  try {
+    database.exec(
+      `ALTER TABLE sessions ADD COLUMN unified_session_id TEXT`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -592,6 +597,52 @@ export function getAllSessions(): Record<string, string> {
   const result: Record<string, string> = {};
   for (const row of rows) {
     result[row.group_folder] = row.session_id;
+  }
+  return result;
+}
+
+// --- Unified session accessors ---
+
+export function getUnifiedSessionId(
+  groupFolder: string,
+): string | undefined {
+  const row = db
+    .prepare('SELECT unified_session_id FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { unified_session_id: string | null } | undefined;
+  return row?.unified_session_id ?? undefined;
+}
+
+export function setUnifiedSessionId(
+  groupFolder: string,
+  unifiedSessionId: string,
+): void {
+  // Ensure the row exists (it may not if no SDK session has been set yet)
+  const existing = db
+    .prepare('SELECT group_folder FROM sessions WHERE group_folder = ?')
+    .get(groupFolder);
+  if (existing) {
+    db.prepare(
+      'UPDATE sessions SET unified_session_id = ? WHERE group_folder = ?',
+    ).run(unifiedSessionId, groupFolder);
+  } else {
+    db.prepare(
+      'INSERT INTO sessions (group_folder, session_id, unified_session_id) VALUES (?, ?, ?)',
+    ).run(groupFolder, '', unifiedSessionId);
+  }
+}
+
+export function getAllUnifiedSessionIds(): Record<string, string> {
+  const rows = db
+    .prepare(
+      'SELECT group_folder, unified_session_id FROM sessions WHERE unified_session_id IS NOT NULL',
+    )
+    .all() as Array<{
+    group_folder: string;
+    unified_session_id: string;
+  }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    result[row.group_folder] = row.unified_session_id;
   }
   return result;
 }

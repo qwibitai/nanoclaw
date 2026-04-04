@@ -33,6 +33,8 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getAllUnifiedSessionIds,
+  setUnifiedSessionId,
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
@@ -62,7 +64,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Channel, ContainerConfig, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -70,6 +72,7 @@ export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
+let unifiedSessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
@@ -108,6 +111,7 @@ function loadState(): void {
     lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
+  unifiedSessions = getAllUnifiedSessionIds();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
@@ -342,7 +346,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[group.folder] || undefined;
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -370,12 +374,16 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session IDs from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (output.unifiedSessionId) {
+          unifiedSessions[group.folder] = output.unifiedSessionId;
+          setUnifiedSessionId(group.folder, output.unifiedSessionId);
         }
         await onOutput(output);
       }
@@ -391,13 +399,10 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        // Trigger-based model override: @Elara routes to Ollama
-        modelProvider: /@elara\b/i.test(prompt)
-          ? 'ollama'
-          : group.containerConfig?.modelProvider,
-        ollamaModel: /@elara\b/i.test(prompt)
-          ? (group.containerConfig?.ollamaModel || 'glm-5:cloud')
-          : group.containerConfig?.ollamaModel,
+        modelProvider: group.containerConfig?.modelProvider,
+        claudeModel: group.containerConfig?.claudeModel,
+        ollamaModel: group.containerConfig?.ollamaModel,
+        unifiedSessionId: unifiedSessions[group.folder],
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -407,6 +412,10 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+    if (output.unifiedSessionId) {
+      unifiedSessions[group.folder] = output.unifiedSessionId;
+      setUnifiedSessionId(group.folder, output.unifiedSessionId);
     }
 
     if (output.status === 'error') {
@@ -520,14 +529,7 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          // If @Elara trigger detected, close the active Claude container
-          // so a new container spawns with Ollama as the model provider.
-          const wantsOllama = /@elara\b/i.test(formatted);
-          if (wantsOllama) {
-            queue.closeStdin(chatJid);
-          }
-
-          if (!wantsOllama && queue.sendMessage(chatJid, formatted)) {
+          if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -606,6 +608,81 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Handle /remote-control and /remote-control-end commands
+  async function handleModelSwitch(
+    command: string,
+    chatJid: string,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    // Parse: /model claude [model]  OR  /model ollama [model]
+    // Claude models: sonnet, opus, haiku, or full ID like claude-opus-4-5
+    // Ollama models: glm-5:cloud, gemma4:31b, etc.
+    const parts = command.trim().split(/\s+/);
+    const provider = parts[1]?.toLowerCase();
+
+    if (provider !== 'claude' && provider !== 'ollama') {
+      const current = group.containerConfig?.modelProvider || 'claude';
+      const claudeModel = group.containerConfig?.claudeModel || 'default';
+      const ollamaModel = group.containerConfig?.ollamaModel || '';
+      const display =
+        current === 'ollama'
+          ? `ollama/${ollamaModel}`
+          : `claude/${claudeModel}`;
+      await channel.sendMessage(
+        chatJid,
+        `Current model: ${display}\nUsage: /model claude [sonnet|opus|haiku]  or  /model ollama [model-name]`,
+      );
+      return;
+    }
+
+    const modelName = parts[2] || undefined;
+    const previousProvider = group.containerConfig?.modelProvider || 'claude';
+    const providerChanged = previousProvider !== provider;
+
+    // Close the active container and deactivate immediately so new messages
+    // don't get piped to the dying container. Next message spawns a fresh one.
+    queue.forceCloseAndDeactivate(chatJid);
+
+    // Only clear the SDK session when switching providers (Claude ↔ Ollama).
+    // Claude-to-Claude model changes preserve the SDK session since the SDK
+    // supports model changes within a session.
+    if (providerChanged) {
+      delete sessions[group.folder];
+      setSession(group.folder, '');
+    }
+
+    // Update the group's containerConfig
+    const updatedConfig: ContainerConfig = {
+      ...group.containerConfig,
+      modelProvider: provider,
+      claudeModel:
+        provider === 'claude'
+          ? modelName
+          : group.containerConfig?.claudeModel,
+      ollamaModel:
+        provider === 'ollama'
+          ? modelName || group.containerConfig?.ollamaModel || 'llama3.2'
+          : group.containerConfig?.ollamaModel,
+    };
+    group.containerConfig = updatedConfig;
+    setRegisteredGroup(chatJid, group);
+
+    const modelDisplay =
+      provider === 'ollama'
+        ? `ollama/${updatedConfig.ollamaModel}`
+        : `claude/${modelName || 'default'}`;
+    await channel.sendMessage(chatJid, `Switched to ${modelDisplay}`);
+
+    logger.info(
+      { chatJid, provider, modelName, group: group.name },
+      'Model provider switched',
+    );
+  }
+
   async function handleRemoteControl(
     command: string,
     chatJid: string,
@@ -650,11 +727,17 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
+      // Host-side commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+      if (/^\/model\s/i.test(trimmed) || trimmed === '/model') {
+        handleModelSwitch(trimmed, chatJid).catch((err) =>
+          logger.error({ err, chatJid }, 'Model switch command error'),
         );
         return;
       }
@@ -712,6 +795,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
+    getUnifiedSessions: () => unifiedSessions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),

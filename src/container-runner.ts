@@ -44,13 +44,16 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   modelProvider?: 'claude' | 'ollama';
+  claudeModel?: string;
   ollamaModel?: string;
+  unifiedSessionId?: string;
 }
 
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  unifiedSessionId?: string;
   error?: string;
 }
 

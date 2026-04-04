@@ -29,6 +29,7 @@ import {
   loadSession,
   appendMessage,
   saveSession,
+  getContextSummary,
 } from './unified-session.js';
 
 export interface ContainerInput {
@@ -41,6 +42,7 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   modelProvider?: 'claude' | 'ollama';
+  claudeModel?: string;
   ollamaModel?: string;
   unifiedSessionId?: string;
 }
@@ -49,6 +51,7 @@ export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  unifiedSessionId?: string;
   error?: string;
 }
 
@@ -463,6 +466,7 @@ async function runQuery(
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model: containerInput.claudeModel || undefined,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -590,6 +594,7 @@ async function runQuery(
         status: 'success',
         result: textResult || null,
         newSessionId,
+        unifiedSessionId: unifiedSession.id,
       });
     }
   }
@@ -723,6 +728,24 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
     (containerInput.unifiedSessionId
       ? loadSession(containerInput.unifiedSessionId)
       : null) || createSession('claude');
+  const previousProvider = unifiedSession.lastProvider;
+  unifiedSession.lastProvider = 'claude';
+
+  // If resuming from an Ollama session (no SDK session but unified history exists),
+  // inject conversation context so Claude has continuity.
+  if (
+    !sessionId &&
+    unifiedSession.messages.length > 0 &&
+    previousProvider !== 'claude'
+  ) {
+    const summary = getContextSummary(unifiedSession);
+    if (summary) {
+      log(
+        `Injecting conversation context from ${unifiedSession.lastProvider} session (${unifiedSession.messages.length} messages)`,
+      );
+      prompt = `[CONVERSATION CONTEXT - The following is a summary of the recent conversation with the user, which was handled by a different model. Continue naturally from where it left off.]\n\n${summary}\n\n[NEW MESSAGE]\n${prompt}`;
+    }
+  }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
@@ -757,7 +780,7 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, unifiedSessionId: unifiedSession.id });
 
       log('Query ended, waiting for next IPC message...');
 
@@ -778,6 +801,7 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
+      unifiedSessionId: unifiedSession.id,
       error: errorMessage,
     });
     process.exit(1);

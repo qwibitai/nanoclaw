@@ -103,18 +103,23 @@ async function connectMcpTools(
   }
 }
 
-function loadSystemPrompt(isMain: boolean): string {
+function loadSystemPrompt(_isMain: boolean): string {
   const parts: string[] = [];
 
+  // Load group-specific CLAUDE.md
   const groupMd = '/workspace/group/CLAUDE.md';
   if (fs.existsSync(groupMd)) {
     parts.push(fs.readFileSync(groupMd, 'utf-8'));
   }
 
-  if (!isMain) {
-    const globalMd = '/workspace/global/CLAUDE.md';
-    if (fs.existsSync(globalMd)) {
-      parts.push(fs.readFileSync(globalMd, 'utf-8'));
+  // Always load global CLAUDE.md for Ollama (unlike Claude SDK which handles
+  // it internally, Ollama needs it explicitly in the system prompt)
+  const globalMd = '/workspace/global/CLAUDE.md';
+  if (fs.existsSync(globalMd)) {
+    const globalContent = fs.readFileSync(globalMd, 'utf-8');
+    // Avoid duplicating if group and global are the same file
+    if (!parts.includes(globalContent)) {
+      parts.push(globalContent);
     }
   }
 
@@ -315,14 +320,20 @@ export async function runOllamaAgent(
       : null) || createSession('ollama');
   session.lastProvider = 'ollama';
 
-  // Add system prompt as first message if session is new
-  if (session.messages.length === 0) {
-    const systemPrompt = loadSystemPrompt(containerInput.isMain);
-    appendMessage(session, {
+  // Always refresh system prompt from CLAUDE.md at container start.
+  // This ensures identity is correct after provider switches or CLAUDE.md edits.
+  const systemPrompt = loadSystemPrompt(containerInput.isMain);
+  const existingIdx = session.messages.findIndex((m) => m.role === 'system');
+  if (existingIdx >= 0) {
+    session.messages[existingIdx].content = systemPrompt;
+    session.messages[existingIdx].timestamp = new Date().toISOString();
+  } else {
+    session.messages.unshift({
       role: 'system',
       content: systemPrompt,
       provider: 'ollama',
       model,
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -359,7 +370,7 @@ export async function runOllamaAgent(
       writeOutput({
         status: 'success',
         result,
-        newSessionId: session.id,
+        unifiedSessionId: session.id,
       });
 
       // Check if close was requested during tool execution
@@ -385,7 +396,7 @@ export async function runOllamaAgent(
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: session.id,
+      unifiedSessionId: session.id,
       error: errorMessage,
     });
     process.exit(1);

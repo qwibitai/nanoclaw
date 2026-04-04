@@ -65,6 +65,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
+  getUnifiedSessions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
@@ -154,6 +155,11 @@ async function runTask(
   const sessions = deps.getSessions();
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const unifiedSessions = deps.getUnifiedSessions();
+  const unifiedSessionId =
+    task.context_mode === 'group'
+      ? unifiedSessions[task.group_folder]
+      : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -182,7 +188,9 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
         modelProvider: group.containerConfig?.modelProvider,
+        claudeModel: group.containerConfig?.claudeModel,
         ollamaModel: group.containerConfig?.ollamaModel,
+        unifiedSessionId,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
