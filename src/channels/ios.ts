@@ -17,6 +17,7 @@ import {
   watchScheduledTasks,
   watchWorkFiles,
 } from './ios-data-api.js';
+import { handleDashboardPage } from './dashboard-page.js';
 import { handleMealPlanPage } from './meal-plan-page.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
@@ -105,6 +106,9 @@ export class IosChannel implements Channel {
     // from malicious websites on the home network.
 
     // Public pages (no auth — Tailscale is the access layer)
+    if (handleDashboardPage(req, res)) {
+      return;
+    }
     if (handleMealPlanPage(req, res)) {
       return;
     }
