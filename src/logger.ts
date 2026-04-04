@@ -4,6 +4,7 @@ const isDev = process.stdout.isTTY === true;
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
+  redact: ['sessionId', 'newSessionId', 'session_id'],
   ...(isDev
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : {}),

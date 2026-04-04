@@ -20,10 +20,14 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+import {
+  FIRESTORE_SIGNAL_POLL_MS,
+  GMAIL_WEBHOOK_FALLBACK_POLL_MS,
+  GMAIL_ALLOWLIST_CACHE_TTL_MS,
+} from '../constants.js';
+
 // Firestore webhook signal polling config
 const GMAIL_WEBHOOK_ENABLED = process.env.GMAIL_WEBHOOK_ENABLED === 'true';
-const FIRESTORE_SIGNAL_POLL_MS = 5_000; // 5 seconds — lightweight Firestore check
-const GMAIL_WEBHOOK_FALLBACK_POLL_MS = 300_000; // 5 minutes when webhook is active
 const AGENT_NAME = process.env.GOOGLE_CHAT_AGENT_NAME || 'nanoclaw';
 const SERVICE_ACCOUNT_PATH =
   process.env.GOOGLE_APPLICATION_CREDENTIALS ||
@@ -54,7 +58,7 @@ const GMAIL_ALLOWLIST_DEFAULTS: GmailSendAllowlistConfig = {
   cc_email: 'yacine@bestoftours.co.uk',
 };
 
-const GMAIL_ALLOWLIST_CACHE_TTL_MS = 60_000;
+// GMAIL_ALLOWLIST_CACHE_TTL_MS imported from constants.ts
 let _gmailAllowlistCache: GmailSendAllowlistConfig | null = null;
 let _gmailAllowlistCacheTs = 0;
 

@@ -430,6 +430,15 @@ export function deleteTask(id: string): void {
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
 }
 
+export function getActiveTaskCountForGroup(groupFolder: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM scheduled_tasks WHERE group_folder = ? AND status = 'active'`,
+    )
+    .get(groupFolder) as { count: number };
+  return row.count;
+}
+
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
   return db

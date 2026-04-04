@@ -570,7 +570,7 @@ export async function runContainerAgent(
         logLines.push(
           `=== Input Summary ===`,
           `Prompt length: ${input.prompt.length} chars`,
-          `Session ID: ${input.sessionId || 'new'}`,
+          `Session ID: ${input.sessionId ? input.sessionId.slice(0, 8) + '...' : 'new'}`,
           ``,
           `=== Mounts ===`,
           mounts

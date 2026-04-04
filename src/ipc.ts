@@ -4,8 +4,15 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { MAX_TASKS_PER_GROUP } from './constants.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getActiveTaskCountForGroup,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -245,6 +252,36 @@ export async function processTaskIpc(
             break;
           }
           nextRun = date.toISOString();
+        }
+
+        // Rate limit: cap active tasks per group
+        const activeCount = getActiveTaskCountForGroup(targetFolder);
+        if (activeCount >= MAX_TASKS_PER_GROUP) {
+          logger.warn(
+            { targetFolder, activeCount, limit: MAX_TASKS_PER_GROUP },
+            'Task rate limit exceeded for group, rejecting schedule_task',
+          );
+          // Write error response to IPC output if possible
+          const ipcOutputDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'input');
+          try {
+            fs.mkdirSync(ipcOutputDir, { recursive: true });
+            const errorFile = path.join(
+              ipcOutputDir,
+              `${Date.now()}-rate-limit.json`,
+            );
+            const tempPath = `${errorFile}.tmp`;
+            fs.writeFileSync(
+              tempPath,
+              JSON.stringify({
+                type: 'error',
+                error: `Task limit (${MAX_TASKS_PER_GROUP}) reached for group ${targetFolder}. Cancel existing tasks first.`,
+              }),
+            );
+            fs.renameSync(tempPath, errorFile);
+          } catch {
+            // best effort
+          }
+          break;
         }
 
         const taskId =

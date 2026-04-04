@@ -15,9 +15,12 @@ interface RemoteControlSession {
 
 let activeSession: RemoteControlSession | null = null;
 
+import {
+  REMOTE_CONTROL_URL_TIMEOUT_MS as URL_TIMEOUT_MS,
+  REMOTE_CONTROL_URL_POLL_MS as URL_POLL_MS,
+} from './constants.js';
+
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
-const URL_TIMEOUT_MS = 30_000;
-const URL_POLL_MS = 200;
 const STATE_FILE = path.join(DATA_DIR, 'remote-control.json');
 const STDOUT_FILE = path.join(DATA_DIR, 'remote-control.stdout');
 const STDERR_FILE = path.join(DATA_DIR, 'remote-control.stderr');

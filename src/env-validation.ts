@@ -146,9 +146,7 @@ export function validateEnv(): void {
   const issues = result.error.issues;
 
   // Check if ANTHROPIC_API_KEY is among the failures
-  const apiKeyMissing = issues.some(
-    (i) => i.path[0] === 'ANTHROPIC_API_KEY',
-  );
+  const apiKeyMissing = issues.some((i) => i.path[0] === 'ANTHROPIC_API_KEY');
 
   // Log each issue as a warning
   for (const issue of issues) {

@@ -2,10 +2,7 @@
  * Anti-spam: rate-limit error detection and per-JID notification cooldown.
  */
 
-// Cooldown: 4h between error notifications per JID
-const ERROR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
-// Entries older than 7 days are stale and safe to remove
-const STALE_ENTRY_MS = 7 * 24 * 60 * 60 * 1000;
+import { ERROR_COOLDOWN_MS, STALE_ENTRY_MS } from './constants.js';
 const lastErrorNotifiedAt: Record<string, number> = {};
 
 const RATE_LIMIT_PATTERNS = [

@@ -64,6 +64,7 @@ import {
   createTask,
   getTaskById,
   getAllTasks,
+  getActiveTaskCountForGroup,
   getTasksForGroup,
   updateTask,
   deleteTask,
@@ -73,6 +74,7 @@ import {
   setRegisteredGroup,
   getAllRegisteredGroups,
 } from '../db.js';
+import { MAX_TASKS_PER_GROUP } from '../constants.js';
 import { computeNextRun } from '../task-scheduler.js';
 import { processTaskIpc, IpcDeps } from '../ipc.js';
 import { RegisteredGroup, ScheduledTask } from '../types.js';
@@ -731,6 +733,141 @@ describe('IPC Tasks Integration', () => {
       );
 
       expect(getTaskById('ctx-group')!.context_mode).toBe('group');
+    });
+  });
+
+  // --- IPC task rate limiting ---
+
+  describe('IPC task rate limiting', () => {
+    beforeEach(() => {
+      setRegisteredGroup('main@s.whatsapp.net', {
+        name: 'Main',
+        folder: 'whatsapp_main',
+        trigger: '',
+        added_at: '2024-01-01T00:00:00.000Z',
+        isMain: true,
+      });
+    });
+
+    it(`creating ${MAX_TASKS_PER_GROUP} tasks succeeds`, async () => {
+      const deps = makeIpcDeps();
+
+      for (let i = 0; i < MAX_TASKS_PER_GROUP; i++) {
+        await processTaskIpc(
+          {
+            type: 'schedule_task',
+            taskId: `rate-task-${i}`,
+            prompt: `Task ${i}`,
+            schedule_type: 'interval',
+            schedule_value: '3600000',
+            targetJid: 'main@s.whatsapp.net',
+          },
+          'whatsapp_main',
+          true,
+          deps,
+        );
+      }
+
+      const count = getActiveTaskCountForGroup('whatsapp_main');
+      expect(count).toBe(MAX_TASKS_PER_GROUP);
+    });
+
+    it('creating one more task beyond the limit is rejected', async () => {
+      const deps = makeIpcDeps();
+
+      // Fill up to the limit
+      for (let i = 0; i < MAX_TASKS_PER_GROUP; i++) {
+        await processTaskIpc(
+          {
+            type: 'schedule_task',
+            taskId: `fill-task-${i}`,
+            prompt: `Fill task ${i}`,
+            schedule_type: 'interval',
+            schedule_value: '3600000',
+            targetJid: 'main@s.whatsapp.net',
+          },
+          'whatsapp_main',
+          true,
+          deps,
+        );
+      }
+
+      // Try one more
+      await processTaskIpc(
+        {
+          type: 'schedule_task',
+          taskId: 'over-limit-task',
+          prompt: 'Over limit',
+          schedule_type: 'interval',
+          schedule_value: '3600000',
+          targetJid: 'main@s.whatsapp.net',
+        },
+        'whatsapp_main',
+        true,
+        deps,
+      );
+
+      // Should not have been created
+      expect(getTaskById('over-limit-task')).toBeUndefined();
+      expect(getActiveTaskCountForGroup('whatsapp_main')).toBe(
+        MAX_TASKS_PER_GROUP,
+      );
+    });
+
+    it('after cancelling one task, can create again', async () => {
+      const deps = makeIpcDeps();
+
+      // Fill up to the limit
+      for (let i = 0; i < MAX_TASKS_PER_GROUP; i++) {
+        await processTaskIpc(
+          {
+            type: 'schedule_task',
+            taskId: `cancel-test-${i}`,
+            prompt: `Cancel test ${i}`,
+            schedule_type: 'interval',
+            schedule_value: '3600000',
+            targetJid: 'main@s.whatsapp.net',
+          },
+          'whatsapp_main',
+          true,
+          deps,
+        );
+      }
+
+      // Cancel one
+      await processTaskIpc(
+        {
+          type: 'cancel_task',
+          taskId: 'cancel-test-0',
+        },
+        'whatsapp_main',
+        true,
+        deps,
+      );
+
+      expect(getActiveTaskCountForGroup('whatsapp_main')).toBe(
+        MAX_TASKS_PER_GROUP - 1,
+      );
+
+      // Now we can create one more
+      await processTaskIpc(
+        {
+          type: 'schedule_task',
+          taskId: 'after-cancel-task',
+          prompt: 'After cancel',
+          schedule_type: 'interval',
+          schedule_value: '3600000',
+          targetJid: 'main@s.whatsapp.net',
+        },
+        'whatsapp_main',
+        true,
+        deps,
+      );
+
+      expect(getTaskById('after-cancel-task')).toBeDefined();
+      expect(getActiveTaskCountForGroup('whatsapp_main')).toBe(
+        MAX_TASKS_PER_GROUP,
+      );
     });
   });
 });

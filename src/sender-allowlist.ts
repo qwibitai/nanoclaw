@@ -20,8 +20,7 @@ const DEFAULT_CONFIG: SenderAllowlistConfig = {
   logDenied: true,
 };
 
-// In-memory cache with 5s TTL to avoid disk reads on every message
-const CACHE_TTL_MS = 5000;
+import { SENDER_ALLOWLIST_CACHE_TTL_MS as CACHE_TTL_MS } from './constants.js';
 let cachedConfig: SenderAllowlistConfig | null = null;
 let cacheTimestamp = 0;
 

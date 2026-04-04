@@ -11,8 +11,10 @@ interface QueuedTask {
   fn: () => Promise<void>;
 }
 
-const MAX_RETRIES = 5;
-const BASE_RETRY_MS = 5000;
+import {
+  GROUP_QUEUE_MAX_RETRIES as MAX_RETRIES,
+  GROUP_QUEUE_BASE_RETRY_MS as BASE_RETRY_MS,
+} from './constants.js';
 
 interface GroupState {
   active: boolean;

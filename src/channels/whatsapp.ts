@@ -28,7 +28,7 @@ import {
 } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
-const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+import { GROUP_SYNC_INTERVAL_MS } from '../constants.js';
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;

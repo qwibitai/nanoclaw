@@ -10,6 +10,7 @@ import { google } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
 
 import { calculateBackoff } from '../backoff.js';
+import { GOOGLE_CHAT_POLL_MS } from '../constants.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -66,7 +67,7 @@ export class GoogleChatChannel implements Channel {
   private lastDeliveredSpaceName = '';
   private spaceIdToName = new Map<string, string>();
 
-  constructor(opts: GoogleChatChannelOpts, pollIntervalMs = 5000) {
+  constructor(opts: GoogleChatChannelOpts, pollIntervalMs = GOOGLE_CHAT_POLL_MS) {
     this.opts = opts;
     this.pollIntervalMs = pollIntervalMs;
   }
