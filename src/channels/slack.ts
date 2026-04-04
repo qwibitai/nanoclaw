@@ -5,6 +5,7 @@ import { App, LogLevel } from '@slack/bolt';
 import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
 
 import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { transcribeAudio } from '../transcription.js';
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -26,6 +27,8 @@ const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 // Reconnection backoff: start at 5s, double each retry, cap at 5 minutes.
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 5 * 60 * 1000;
+
+const MAX_TRANSCRIPTION_SIZE = 25 * 1024 * 1024;
 
 // The message subtypes we process. Bolt delivers all subtypes via app.event('message');
 // we filter to regular messages (GenericMessageEvent, subtype undefined) and bot messages
@@ -158,10 +161,11 @@ export class SlackChannel implements Channel {
         fs.mkdirSync(attachDir, { recursive: true });
 
         const savedPaths: string[] = [];
+        let transcriptText: string | null = null;
+        let audioTranscribed = false;
+
         for (const file of genericMsg.files) {
           try {
-            // Download via Slack's files.sharedPublicURL workaround or direct API.
-            // Use the Bolt WebClient to fetch file content through the API.
             const downloadUrl = file.url_private_download || file.url_private;
             logger.debug(
               {
@@ -173,13 +177,13 @@ export class SlackChannel implements Channel {
               'Attempting Slack file download',
             );
 
-            // Slack file download: use Node https with manual redirect handling.
-            // First request with auth returns 302 to a signed URL; follow without auth.
             const fileBuffer = await this.downloadSlackFile(downloadUrl);
             if (!fileBuffer) {
               logger.warn({ file: file.name }, 'Slack file download failed');
               continue;
             }
+
+            // Save file to attachments (all files, including audio)
             const ts = Date.now();
             const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
             const filename = `${ts}-${safeName}`;
@@ -190,12 +194,33 @@ export class SlackChannel implements Channel {
               { file: file.name, path: hostPath, size: fileBuffer.length },
               'Slack attachment saved',
             );
+
+            // Transcribe first audio file
+            const isAudio = file.mimetype?.startsWith('audio/');
+            if (isAudio && !audioTranscribed) {
+              if (fileBuffer.length > MAX_TRANSCRIPTION_SIZE) {
+                content += '\n\n[Audio clip too large for transcription (max ~25 min)]';
+              } else {
+                const transcript = await transcribeAudio(fileBuffer, file.name);
+                if (transcript) {
+                  transcriptText = transcript;
+                } else {
+                  content += '\n\n[Audio clip — transcription unavailable]';
+                }
+              }
+              audioTranscribed = true;
+            }
           } catch (err) {
             logger.warn(
               { file: file.name, error: err },
               'Slack file download error',
             );
           }
+        }
+
+        // Prepend transcript before attachment paths
+        if (transcriptText) {
+          content = `[Voice: ${transcriptText}]\n${content}`;
         }
 
         if (savedPaths.length) {

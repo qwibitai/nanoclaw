@@ -24,7 +24,8 @@
     "@onecli-sh/sdk": "^0.2.0",
     "@slack/bolt": "^4.6.0",
     "better-sqlite3": "11.10.0",
-    "cron-parser": "5.5.0"
+    "cron-parser": "5.5.0",
+    "openai": "^6.33.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

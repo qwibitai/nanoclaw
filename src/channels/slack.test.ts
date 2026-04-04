@@ -1,14 +1,23 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'fs';
 
 // --- Mocks ---
 
 // Mock registry (registerChannel runs at import time)
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
+// Mock transcription
+const mockTranscribeAudio = vi.fn();
+vi.mock('../transcription.js', () => ({
+  transcribeAudio: (...args: any[]) => mockTranscribeAudio(...args),
+  isTranscriptionAvailable: vi.fn().mockReturnValue(true),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Jonesy',
   TRIGGER_PATTERN: /^@Jonesy\b/i,
+  GROUPS_DIR: '/tmp/test-groups',
 }));
 
 // Mock logger
@@ -117,6 +126,14 @@ function createMessageEvent(overrides: {
   threadTs?: string;
   subtype?: string;
   botId?: string;
+  files?: Array<{
+    id: string;
+    url_private_download?: string;
+    url_private: string;
+    name: string;
+    mimetype?: string;
+    size?: number;
+  }>;
 }) {
   return {
     channel: overrides.channel ?? 'C0123456789',
@@ -127,6 +144,7 @@ function createMessageEvent(overrides: {
     thread_ts: overrides.threadTs,
     subtype: overrides.subtype,
     bot_id: overrides.botId,
+    files: overrides.files,
   };
 }
 
@@ -847,6 +865,209 @@ describe('SlackChannel', () => {
       // Both channels from both pages stored
       expect(updateChatName).toHaveBeenCalledWith('slack:C001', 'general');
       expect(updateChatName).toHaveBeenCalledWith('slack:C002', 'random');
+    });
+  });
+
+  // --- Audio transcription ---
+
+  describe('audio transcription', () => {
+    beforeEach(() => {
+      vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
+      vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
+    });
+
+    it('transcribes audio files and prepends [Voice: ...] to content', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        Buffer.from('fake-audio-data'),
+      );
+      mockTranscribeAudio.mockResolvedValue('Hello from voice clip');
+
+      const event = createMessageEvent({
+        text: 'Check this out',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/audio.ogg',
+            name: 'audio.ogg',
+            mimetype: 'audio/ogg',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('[Voice: Hello from voice clip]'),
+        }),
+      );
+    });
+
+    it('still saves audio file to attachments alongside transcript', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        Buffer.from('fake-audio-data'),
+      );
+      mockTranscribeAudio.mockResolvedValue('Hello from voice clip');
+
+      const event = createMessageEvent({
+        text: '',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/audio.ogg',
+            name: 'audio.ogg',
+            mimetype: 'audio/ogg',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(fs.writeFileSync).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('[Voice: Hello from voice clip]'),
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('[Attached files'),
+        }),
+      );
+    });
+
+    it('falls back gracefully when transcription fails', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        Buffer.from('fake-audio-data'),
+      );
+      mockTranscribeAudio.mockResolvedValue(null);
+
+      const event = createMessageEvent({
+        text: 'voice note',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/audio.ogg',
+            name: 'audio.ogg',
+            mimetype: 'audio/ogg',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(fs.writeFileSync).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('[Audio clip'),
+        }),
+      );
+    });
+
+    it('does not transcribe non-audio files', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        Buffer.from('fake-pdf-data'),
+      );
+
+      const event = createMessageEvent({
+        text: 'here is a PDF',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/doc.pdf',
+            name: 'doc.pdf',
+            mimetype: 'application/pdf',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(mockTranscribeAudio).not.toHaveBeenCalled();
+    });
+
+    it('skips transcription for files over 25MB', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const largeBuffer = Buffer.alloc(26 * 1024 * 1024);
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        largeBuffer,
+      );
+
+      const event = createMessageEvent({
+        text: 'big audio',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/big.ogg',
+            name: 'big.ogg',
+            mimetype: 'audio/ogg',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(mockTranscribeAudio).not.toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'slack:C0123456789',
+        expect.objectContaining({
+          content: expect.stringContaining('too large'),
+        }),
+      );
+    });
+
+    it('only transcribes the first audio file when multiple are attached', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      vi.spyOn(channel as any, 'downloadSlackFile').mockResolvedValue(
+        Buffer.from('fake-audio-data'),
+      );
+      mockTranscribeAudio.mockResolvedValue('First clip transcript');
+
+      const event = createMessageEvent({
+        text: 'two clips',
+        files: [
+          {
+            id: 'F001',
+            url_private: 'https://files.slack.com/first.ogg',
+            name: 'first.ogg',
+            mimetype: 'audio/ogg',
+          },
+          {
+            id: 'F002',
+            url_private: 'https://files.slack.com/second.ogg',
+            name: 'second.ogg',
+            mimetype: 'audio/ogg',
+          },
+        ],
+      });
+      await triggerMessageEvent(event);
+
+      expect(mockTranscribeAudio).toHaveBeenCalledTimes(1);
+      expect(mockTranscribeAudio).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'first.ogg',
+      );
     });
   });
 
