@@ -55,8 +55,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
   isMain?: boolean; // メインコントロールグループの場合は true（トリガー不要、特権あり）
-  channelMode?: 'chat' | 'url_watch' | 'admin_control';
-  chatBehavior?: 'ambient_room_chat' | 'directed_help_chat';
+  channel_mode?: 'chat' | 'url_watch' | 'admin_control';
+  chat_behavior?: 'ambient_room_chat' | 'directed_help_chat';
 }
 
 export interface NewMessage {
@@ -68,9 +68,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  placeType?: PlaceType;
-  actorRole?: ActorRole;
-  isThread?: boolean;
+  place_type?: PlaceType;
+  actor_role?: ActorRole;
+  is_thread?: boolean;
 }
 
 export interface ScheduledTask {

@@ -15,8 +15,6 @@ import {
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
-  type PlaceType,
-  type ActorRole,
 } from '../types.js';
 
 export interface DiscordChannelOpts {
@@ -162,9 +160,9 @@ export class DiscordChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
-        placeType: 'private_thread' as PlaceType,
-        actorRole: 'owner' as ActorRole,
-        isThread: false,
+        place_type: 'guild_text',
+        actor_role: 'owner',
+        is_thread: false,
       });
 
       logger.info(
