@@ -99,7 +99,7 @@ interface RecipeLink {
   url: string;
 }
 
-function parsePlan(md: string): {
+export function parsePlan(md: string): {
   title: string;
   subtitle: string | null;
   days: {
@@ -192,7 +192,7 @@ function parsePlan(md: string): {
   return { title, subtitle, days };
 }
 
-function parseIngredients(md: string): {
+export function parseIngredients(md: string): {
   title: string;
   sections: { name: string; items: string[] }[];
 } {

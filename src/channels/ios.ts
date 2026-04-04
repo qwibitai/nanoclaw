@@ -17,6 +17,7 @@ import {
   watchScheduledTasks,
   watchWorkFiles,
 } from './ios-data-api.js';
+import { handleDashboardApi } from './dashboard-api.js';
 import { handleDashboardPage } from './dashboard-page.js';
 import { handleMealPlanPage } from './meal-plan-page.js';
 
@@ -107,6 +108,9 @@ export class IosChannel implements Channel {
 
     // Public pages (no auth — Tailscale is the access layer)
     if (handleDashboardPage(req, res)) {
+      return;
+    }
+    if (handleDashboardApi(req, res)) {
       return;
     }
     if (handleMealPlanPage(req, res)) {
