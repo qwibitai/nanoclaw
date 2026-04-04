@@ -12,6 +12,7 @@ import { OAuth2Client } from 'google-auth-library';
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
 import { calculateBackoff } from '../backoff.js';
 import { logger } from '../logger.js';
+import { incCounter } from '../metrics.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -572,9 +573,11 @@ export class GmailChannel implements Channel {
     if (senderEmail === this.userEmail) return;
 
     // Skip automated/marketing emails before spawning an agent
-    if (this.isAutomatedEmail(senderEmail, headers)) {
+    const filterReason = this.isAutomatedEmail(senderEmail, headers);
+    if (filterReason) {
+      incCounter('nanoclaw_emails_filtered_total', { reason: filterReason });
       logger.debug(
-        { messageId, from: senderEmail, subject },
+        { messageId, from: senderEmail, subject, reason: filterReason },
         'Skipping automated/marketing email',
       );
       return;
@@ -686,10 +689,14 @@ export class GmailChannel implements Channel {
     'activecampaign.com',
   ];
 
+  /**
+   * Check if an email is automated/marketing.
+   * Returns the filter reason string if filtered, or null if not filtered.
+   */
   private isAutomatedEmail(
     senderEmail: string,
     headers: Array<{ name?: string | null; value?: string | null }>,
-  ): boolean {
+  ): string | null {
     const email = senderEmail.toLowerCase();
     const getHeader = (name: string) =>
       headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
@@ -699,38 +706,38 @@ export class GmailChannel implements Channel {
     if (
       GmailChannel.NOREPLY_PREFIXES.some((prefix) => email.startsWith(prefix))
     ) {
-      return true;
+      return 'noreply';
     }
 
     // 2. Known marketing sender domains
     const domain = email.split('@')[1] || '';
     if (GmailChannel.MARKETING_DOMAINS.some((d) => domain.endsWith(d))) {
-      return true;
+      return 'marketing';
     }
 
     // 3. List-Unsubscribe header (strong newsletter signal)
     if (getHeader('List-Unsubscribe')) {
-      return true;
+      return 'newsletter';
     }
 
     // 4. Precedence: bulk or list (standard header for mailing lists)
     const precedence = getHeader('Precedence').toLowerCase();
     if (precedence === 'bulk' || precedence === 'list') {
-      return true;
+      return 'newsletter';
     }
 
     // 5. Auto-Submitted header (bounces, auto-replies)
     const autoSubmitted = getHeader('Auto-Submitted').toLowerCase();
     if (autoSubmitted && autoSubmitted !== 'no') {
-      return true;
+      return 'noreply';
     }
 
     // 6. X-Mailer or X-Campaign headers (bulk mailers)
     if (getHeader('X-Campaign-Id') || getHeader('X-Mailchimp-Id')) {
-      return true;
+      return 'marketing';
     }
 
-    return false;
+    return null;
   }
 
   private extractTextBody(

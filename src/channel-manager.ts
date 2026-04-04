@@ -20,6 +20,7 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import { logger } from './logger.js';
+import { incCounter } from './metrics.js';
 import { Channel, NewMessage } from './types.js';
 import { lastGchatReplyTarget, registeredGroups } from './state.js';
 
@@ -113,6 +114,12 @@ export async function initChannels(remoteControlPin: string): Promise<void> {
         );
         return;
       }
+
+      // Track received message metric
+      const ch = findChannel(channels, chatJid);
+      incCounter('nanoclaw_messages_received_total', {
+        channel: ch?.name ?? 'unknown',
+      });
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {

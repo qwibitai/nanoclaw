@@ -14,9 +14,11 @@ import { MOUNT_ALLOWLIST_PATH } from './config.js';
 import { logger } from './logger.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
-// Cache the allowlist in memory - only reloads on process restart
+// Cache the allowlist in memory with 60s TTL for hot-reload support
+const MOUNT_ALLOWLIST_CACHE_TTL_MS = 60_000;
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
+let cacheTimestamp = 0;
 
 /**
  * Default blocked patterns - paths that should never be mounted
@@ -47,18 +49,29 @@ const DEFAULT_BLOCKED_PATTERNS = [
  * Result is cached in memory for the lifetime of the process.
  */
 export function loadMountAllowlist(): MountAllowlist | null {
-  if (cachedAllowlist !== null) {
+  const now = Date.now();
+
+  // Return cache if TTL hasn't expired
+  if (cachedAllowlist !== null && now - cacheTimestamp < MOUNT_ALLOWLIST_CACHE_TTL_MS) {
     return cachedAllowlist;
   }
 
-  if (allowlistLoadError !== null) {
-    // Already tried and failed, don't spam logs
+  // If we previously had an error and TTL hasn't expired, don't retry
+  if (
+    allowlistLoadError !== null &&
+    cachedAllowlist === null &&
+    now - cacheTimestamp < MOUNT_ALLOWLIST_CACHE_TTL_MS
+  ) {
     return null;
   }
+
+  // Reset error state on retry
+  allowlistLoadError = null;
 
   try {
     if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
       allowlistLoadError = `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`;
+      cacheTimestamp = now;
       logger.warn(
         { path: MOUNT_ALLOWLIST_PATH },
         'Mount allowlist not found - additional mounts will be BLOCKED. ' +
@@ -90,6 +103,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     allowlist.blockedPatterns = mergedBlockedPatterns;
 
     cachedAllowlist = allowlist;
+    cacheTimestamp = now;
     logger.info(
       {
         path: MOUNT_ALLOWLIST_PATH,
@@ -102,6 +116,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     return cachedAllowlist;
   } catch (err) {
     allowlistLoadError = err instanceof Error ? err.message : String(err);
+    cacheTimestamp = now;
     logger.error(
       {
         path: MOUNT_ALLOWLIST_PATH,

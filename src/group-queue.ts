@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+import { setGauge } from './metrics.js';
 
 interface QueuedTask {
   id: string;
@@ -32,6 +33,10 @@ interface GroupState {
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
+
+  private updateActiveCountMetric(): void {
+    setGauge('nanoclaw_active_containers', this.activeCount);
+  }
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
@@ -205,6 +210,7 @@ export class GroupQueue {
     state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
+    this.updateActiveCountMetric();
 
     logger.debug(
       { groupJid, reason, activeCount: this.activeCount },
@@ -229,6 +235,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.updateActiveCountMetric();
       this.drainGroup(groupJid);
     }
   }
@@ -240,6 +247,7 @@ export class GroupQueue {
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
     this.activeCount++;
+    this.updateActiveCountMetric();
 
     logger.debug(
       { groupJid, taskId: task.id, activeCount: this.activeCount },
@@ -258,6 +266,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.updateActiveCountMetric();
       this.drainGroup(groupJid);
     }
   }

@@ -67,7 +67,10 @@ export class GoogleChatChannel implements Channel {
   private lastDeliveredSpaceName = '';
   private spaceIdToName = new Map<string, string>();
 
-  constructor(opts: GoogleChatChannelOpts, pollIntervalMs = GOOGLE_CHAT_POLL_MS) {
+  constructor(
+    opts: GoogleChatChannelOpts,
+    pollIntervalMs = GOOGLE_CHAT_POLL_MS,
+  ) {
     this.opts = opts;
     this.pollIntervalMs = pollIntervalMs;
   }

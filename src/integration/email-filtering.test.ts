@@ -152,7 +152,8 @@ function callFilter(
   headers: Array<{ name: string; value: string }> = [],
 ): boolean {
   const ch = new GmailChannel(makeOpts());
-  return (ch as any).isAutomatedEmail(senderEmail, headers);
+  // isAutomatedEmail returns a reason string or null; coerce to boolean
+  return !!(ch as any).isAutomatedEmail(senderEmail, headers);
 }
 
 /**

@@ -668,12 +668,13 @@ describe('GmailChannel', () => {
       headers: Array<{ name: string; value: string }> = [],
     ): boolean {
       const ch = new GmailChannel(makeOpts());
-      return (
+      // isAutomatedEmail returns a reason string or null; coerce to boolean for tests
+      return !!(
         ch as unknown as {
           isAutomatedEmail: (
             email: string,
             headers: Array<{ name?: string | null; value?: string | null }>,
-          ) => boolean;
+          ) => string | null;
         }
       ).isAutomatedEmail(senderEmail, headers);
     }

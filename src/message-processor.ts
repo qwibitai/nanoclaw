@@ -25,6 +25,7 @@ import {
 } from './anti-spam.js';
 import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import { logger } from './logger.js';
+import { incCounter } from './metrics.js';
 import { Channel, RegisteredGroup } from './types.js';
 import {
   lastAgentTimestamp,
@@ -84,6 +85,9 @@ export async function processGroupMessages(
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
+
+  incCounter('nanoclaw_messages_processed_total', { group: group.folder });
+  incCounter('nanoclaw_containers_spawned_total');
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -185,6 +189,7 @@ export async function processGroupMessages(
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    incCounter('nanoclaw_container_errors_total');
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
