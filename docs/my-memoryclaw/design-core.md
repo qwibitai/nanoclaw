@@ -15,7 +15,7 @@
 
 ---
 
-## チャンネル・グループ設計
+## NanoClaw から踏襲する実装済み設計
 
 ### グループ登録フロー
 ✅ **実装完了** — SQLiteの `registered_groups` テーブルで管理。
@@ -24,25 +24,7 @@
 - Discord チャンネルからの登録は `src/channels/discord.ts` で実装
 - 参考: `src/db.ts` L670 (登録フロー)
 
-### トリガー
-
-全メッセージに反応（トリガーワード不要）。
-
-### isMainフラグ
-✅ **実装済み** — ただし設計を修正することを推奨
-
-現在の実装：
-- `RegisteredGroup` に `requires_trigger?: boolean` フラグ（デフォルト: `true`）
-- `requires_trigger: false` 時がメイングループと同義
-
-今後：
-- 明示的な `isMain?: boolean` フラグを追加予定（より読みやすく）
-- これは後方互換性を保ちながら段階的に導入可能
-
----
-
-## ストレージ設計
-
+### ストレージ設計（SQLite）
 ✅ **実装完了** — SQLiteで統一管理。
 
 テーブル構成：
@@ -55,31 +37,14 @@
 
 参考: `src/db.ts` L1-80 (スキーマ定義)
 
-### タスク管理
+#### タスク管理
 ✅ **実装完了** — SQLiteで一元管理。
 
 - `scheduled_tasks` テーブルで定期実行を管理
 - `task_run_logs` で実行履歴を追跡
 - `context_mode`（isolated / shared）に対応
 
----
-
-## Discordスラッシュコマンド
-
-| コマンド | 動作 | 状態 |
-|---|---|---|
-| `/new` | セッションリセット — 古い履歴を破棄、新規開始 | 🔄 実装予定 |
-| `/model` | プロバイダー切り替え | 🔄 実装予定 |
-| `/compact` | 会話履歴を圧縮し、コンテキスト効率を改善 | ✅ 実装済み（[add-compact skill](/.claude/skills/add-compact/SKILL.md)） |
-
-注記：
-- `/compact` は NanoClaw が実装したカスタムコマンド（`src/session-commands.ts`）
-- API 呼び出し時に SDK の圧縮メカニズムを使用
-- 新しい `session_id` が返される（トランザクション保持）
-
----
-
-## セッション引き継ぎ設計
+### セッション引き継ぎ設計
 ✅ **実装完了** — SQLiteで管理。
 
 - `src/db.ts` の `setSession(groupFolder, sessionId)` で実装（L523）
@@ -88,10 +53,7 @@
 
 参考: `src/db.ts` L523-530 (実装)
 
----
-
-## `/compact` 設計
-
+### `/compact` コマンド
 ✅ **実装済み** — NanoClaw カスタムコマンド。
 
 実装の詳細：
@@ -100,8 +62,7 @@
 - SDK の圧縮メカニズムを活用（詳細はクローズドソース）
 - 会話は `conversations/` に Markdown でアーカイブ（PreCompactHook）
 
-### フロー
-
+フロー：
 ```
 ユーザーが /compact を送信
   ↓
@@ -120,6 +81,34 @@ agent-runner (container/agent-runner/src/index.ts):
 ```
 
 参考: [add-compact skill](/.claude/skills/add-compact/SKILL.md) — 統合手順と詳細
+
+---
+
+## 実装予定の機能
+
+### トリガー設計
+
+全メッセージに反応（トリガーワード不要）。
+
+### isMainフラグ
+✅ **実装済み** — ただし設計を修正することを推奨
+
+現在の実装：
+- `RegisteredGroup` に `requires_trigger?: boolean` フラグ（デフォルト: `true`）
+- `requires_trigger: false` 時がメイングループと同義
+
+今後：
+- 明示的な `isMain?: boolean` フラグを追加予定（より読みやすく）
+- これは後方互換性を保ちながら段階的に導入可能
+
+### Discordスラッシュコマンド
+
+| コマンド | 動作 | 状態 |
+|---|---|---|
+| `/new` | セッションリセット — 古い履歴を破棄、新規開始 | 🔄 実装予定 |
+| `/model` | プロバイダー切り替え | 🔄 実装予定 |
+
+
 
 ---
 
