@@ -47,6 +47,8 @@ export interface ContainerInput {
   containerId?: string;
   secrets?: Record<string, string>;
   script?: string;
+  /** Optional model override (e.g. claude-haiku-4-5-20251001). Passed to agent via CLAUDE_MODEL env var. */
+  model?: string;
 }
 
 export interface ContainerOutput {
@@ -249,6 +251,9 @@ async function readSecrets(): Promise<Record<string, string>> {
     'X_ACCESS_TOKEN_SECRET',
     // Voice generation
     'POCKET_TTS_URL',
+    // SSH remote access
+    'SSH_KEY_PATH',
+    'SSH_ALLOWED_HOSTS',
   ]);
 
   // OAuth token from credentials file (auto-refreshing) or .env fallback

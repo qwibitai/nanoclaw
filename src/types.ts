@@ -73,6 +73,8 @@ export interface ScheduledTask {
   /** Google Chat thread name. Stored on gchat-msg-* tasks so outbound
    *  messages can be tagged with the same thread for scoped history. */
   thread_id?: string | null;
+  /** Optional model override for this task. Validated against ALLOWED_TASK_MODELS. */
+  model?: string | null;
 }
 
 export interface TaskRunLog {

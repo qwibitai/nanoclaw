@@ -322,6 +322,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         containerId,
         script: task.script || undefined,
+        model: task.model || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(
