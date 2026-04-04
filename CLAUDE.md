@@ -1,10 +1,12 @@
 # NanoClaw
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
+Personal AI assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to provider runtimes running in containers (Linux VMs). Each group has isolated filesystem and memory.
+
+AGENT.md is the canonical group memory file. Bundled `container/skills/` content is synced only for `claude-code` in v1.
 
 ## Key Files
 
@@ -18,8 +20,9 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+| `groups/{name}/AGENT.md` | Canonical per-group memory (isolated) |
+| `groups/{name}/CLAUDE.md` | Claude compatibility memory rendered from `AGENT.md` |
+| `container/skills/` | Skills loaded inside Claude provider containers (browser, status, formatting) |
 
 ## Secrets / Credentials / Proxy (OneCLI)
 

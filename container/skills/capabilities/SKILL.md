@@ -7,6 +7,10 @@ description: Show what this NanoClaw instance can do — installed skills, avail
 
 Generate a structured read-only report of what this NanoClaw instance can do.
 
+These bundled container skills are Claude-only in NanoClaw v1. If the active provider is Codex, report bundled container skills, remote control, and agent teams as unsupported.
+
+Claude-only in NanoClaw v1 means the `Installed Skills` section below only applies when the Claude compatibility layer is mounted.
+
 **Main-channel check:** Only the main channel has `/workspace/project` mounted. Run:
 
 ```bash
@@ -64,7 +68,8 @@ which agent-browser 2>/dev/null && echo "agent-browser: available" || echo "agen
 ### 5. Group info
 
 ```bash
-ls /workspace/group/CLAUDE.md 2>/dev/null && echo "Group memory: yes" || echo "Group memory: no"
+ls /workspace/group/AGENT.md 2>/dev/null && echo "Canonical group memory: yes" || echo "Canonical group memory: no"
+ls /workspace/group/CLAUDE.md 2>/dev/null && echo "Claude compatibility memory: yes" || echo "Claude compatibility memory: no"
 ls /workspace/extra/ 2>/dev/null && echo "Extra mounts: $(ls /workspace/extra/ 2>/dev/null | wc -l | tr -d ' ')" || echo "Extra mounts: none"
 ```
 

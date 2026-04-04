@@ -1,9 +1,19 @@
 # NanoClaw Debug Checklist
 
+## Provider Session Paths
+
+Use the active provider when looking up session state:
+
+- `claude-code` → `data/sessions/<group>/claude-code/`
+- `codex` → `data/sessions/<group>/codex/`
+- Generic pattern: `data/sessions/<group>/<providerId>/`
+
+Legacy Claude installs may still expose `data/sessions/<group>/.claude/` during migration.
+
 ## Known Issues (2026-02-08)
 
 ### 1. [FIXED] Resume branches from stale tree position
-When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
+When Claude agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
 
 ### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
 Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
@@ -65,8 +75,8 @@ grep 'groupCount' logs/nanoclaw.log | tail -3
 ## Session Transcript Branching
 
 ```bash
-# Check for concurrent CLI processes in session debug logs
-ls -la data/sessions/<group>/.claude/debug/
+# Check for concurrent Claude CLI processes in session debug logs
+ls -la data/sessions/<group>/claude-code/debug/
 
 # Count unique SDK processes that handled messages
 # Each .txt file = one CLI subprocess. Multiple = concurrent queries.
@@ -74,7 +84,7 @@ ls -la data/sessions/<group>/.claude/debug/
 # Check parentUuid branching in transcript
 python3 -c "
 import json, sys
-lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
+lines = open('data/sessions/<group>/claude-code/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
 for i, line in enumerate(lines):
   try:
     d = json.loads(line)

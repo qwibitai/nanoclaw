@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  NanoClaw —— 您的专属 Claude 助手，在容器中安全运行。它轻巧易懂，并能根据您的个人需求灵活定制。
+  NanoClaw —— 您的专属 AI 助手，在容器中安全运行。它轻巧易懂，并能根据您的个人需求灵活定制。
 </p>
 
 <p align="center">
@@ -14,8 +14,6 @@
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 通过 Claude Code，NanoClaw 可以动态重写自身代码，根据您的需求定制功能。
-
-**新功能：** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。可轻松组建智能体团队，在您的聊天中高效协作。
 
 ## 我为什么创建这个项目
 
@@ -49,18 +47,26 @@ claude
 
 **技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Telegram）。相反，他们应该贡献像 `/add-telegram` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造您的 fork。最终，您得到的是只做您需要事情的整洁代码。
 
-**最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着您直接运行的就是 Claude Code。Claude Code 高度强大，其编码和问题解决能力使其能够修改和扩展 NanoClaw，为每个用户量身定制。
+**提供商可选:** NanoClaw 的核心编排层是提供商中立的。v1 内置了同一套核心运行时上的 `claude-code` 与 `codex`。
 
 ## 功能支持
 
 - **多渠道消息** - 通过 WhatsApp、Telegram、Discord、Slack 或 Gmail 与您的助手对话。使用 `/add-whatsapp` 或 `/add-telegram` 等技能添加渠道，可同时运行一个或多个。
-- **隔离的群组上下文** - 每个群组都拥有独立的 `CLAUDE.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
+- **隔离的群组上下文** - 每个群组都拥有作为正本的 `AGENT.md` 记忆文件，以及面向 Claude 兼容层的 `CLAUDE.md`。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
-- **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
+- **计划任务** - 运行当前提供商的周期性作业，并可以给您回发消息
 - **网络访问** - 搜索和抓取网页内容
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
-- **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
+- **智能体集群（Agent Swarms）** - 在 NanoClaw v1 中仅由 `claude-code` 提供，用于协作完成复杂任务
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等更多功能
+
+## Provider Model
+
+`AGENT.md` 是规范的记忆文件，`CLAUDE.md` 则是给 `claude-code` 使用的兼容文件。只有主聊天可以写入共享的全局记忆。
+
+NanoClaw 会按群组选择提供商。会话状态会隔离在 `data/sessions/<group>/claude-code/` 或 `data/sessions/<group>/codex/` 这样的提供商作用域目录中。
+
+内置容器技能和 agent teams 在 NanoClaw v1 中仍然只支持 Claude。`codex` 保留聊天、调度和记忆能力，但会把 remote control、agent teams 和 provider skills 明确报告为不支持。
 
 ## 使用方法
 
@@ -108,7 +114,7 @@ claude
 - `/add-signal` - 添加 Signal 作为渠道
 
 **会话管理**
-- `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
+- `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何以提供商无关的方式调用各运行时的压缩能力。
 
 ## 系统要求
 
@@ -120,7 +126,7 @@ claude
 ## 架构
 
 ```
-渠道 --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+渠道 --> SQLite --> 轮询循环 --> 容器 (provider runner) --> 响应
 ```
 
 单一 Node.js 进程。渠道通过技能添加，启动时自注册 — 编排器连接具有凭据的渠道。智能体在具有文件系统隔离的 Linux 容器中执行。每个群组的消息队列带有并发控制。通过文件系统进行 IPC。
@@ -135,8 +141,9 @@ claude
 - `src/group-queue.ts` - 带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
-- `src/db.ts` - SQLite 操作（消息、群组、会话、状态）
-- `groups/*/CLAUDE.md` - 各群组的记忆
+- `src/db.ts` - SQLite 操作（消息、群组、提供商作用域会话、状态）
+- `groups/*/AGENT.md` - 规范的群组记忆
+- `groups/*/CLAUDE.md` - 从 `AGENT.md` 渲染出的 Claude 兼容记忆
 
 ## FAQ
 

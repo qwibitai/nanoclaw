@@ -80,7 +80,9 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 
 #### 4. Container skills (agent runtime)
 
-Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. They are synced into each group's `.claude/skills/` directory when a container starts.
+Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. In v1, the `claude-code` provider syncs them into the active group's `.claude/skills/` directory when a compatible container starts.
+
+Container skills remain Claude-only in v1. Codex does not load bundled provider skills or agent teams yet.
 
 **Location:** `container/skills/<name>/`
 

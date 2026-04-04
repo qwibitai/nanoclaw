@@ -42,14 +42,17 @@ private_key, .secret
 
 **Read-Only Project Root:**
 
-The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
+The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, provider session home) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
 
 ### 3. Session Isolation
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
+Each group has isolated provider session state at `data/sessions/{group}/{providerId}/`:
 - Groups cannot see other groups' conversation history
+- Providers cannot see other providers' session state for the same group
 - Session data includes full message history and file contents read
 - Prevents cross-group information disclosure
+
+Legacy Claude state may still appear under `data/sessions/{group}/.claude/` during migration.
 
 ### 4. IPC Authorization
 
@@ -63,6 +66,8 @@ Messages and task operations are verified against group identity:
 | Schedule task for others | ✓ | ✗ |
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
+
+Providers can choose their own in-container home directory, but they cannot widen NanoClaw mount allowlists or IPC policy.
 
 ### 5. Credential Isolation (OneCLI Agent Vault)
 

@@ -21,7 +21,7 @@
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. NanoClaw agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
 
 ## Quick Start
 
@@ -62,19 +62,27 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
+**Provider choice.** NanoClaw's orchestration layer is provider-neutral. v1 ships with built-in `claude-code` and `codex` providers on the same core runtime.
 
 ## What It Supports
 
 - **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
+- **Isolated group context** - Each group has its own canonical `AGENT.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Scheduled tasks** - Recurring jobs that run the active provider and can message you back
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
 - **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
+- **Agent Swarms** - Available with `claude-code` in v1 for teams of specialized agents on complex tasks
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+
+## Provider Model
+
+AGENT.md is the canonical memory file. CLAUDE.md remains a compatibility file for the `claude-code` provider. Only the main chat can write shared global memory.
+
+NanoClaw's core runtime chooses a provider per group. Session state is isolated under provider-scoped directories such as `data/sessions/<group>/claude-code/` and `data/sessions/<group>/codex/`.
+
+Bundled container skills and agent teams are Claude-only in NanoClaw v1. Codex keeps chat, scheduling, and memory support but reports remote control, agent teams, and provider skills as unsupported.
 
 ## Usage
 
@@ -131,10 +139,10 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channels --> SQLite --> Polling loop --> Container (provider runner) --> Response
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem. Core orchestration stays provider-neutral while `claude-code` and `codex` own their runtime-specific behavior.
 
 For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
 
@@ -146,8 +154,9 @@ Key files:
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+- `src/db.ts` - SQLite operations (messages, groups, provider-scoped sessions, state)
+- `groups/*/AGENT.md` - Canonical per-group memory
+- `groups/*/CLAUDE.md` - Claude compatibility memory rendered from `AGENT.md`
 
 ## FAQ
 
