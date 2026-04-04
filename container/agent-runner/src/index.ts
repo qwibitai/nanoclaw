@@ -534,6 +534,14 @@ async function runQuery(
         result: textResult || null,
         newSessionId,
       });
+      // End the stream after each result to prevent deadlock: without this,
+      // the SDK waits for more messages from the open stream, but the host
+      // can't write _close until it receives the idle signal (result: null)
+      // emitted after runQuery() returns — creating a circular dependency.
+      // Subsequent piped messages are handled by waitForIpcMessage() in the
+      // outer loop.
+      ipcPolling = false;
+      stream.end();
     }
   }
 
