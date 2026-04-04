@@ -5,10 +5,12 @@ import asyncio
 import json
 import logging
 import os
+import time
+from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -22,6 +24,29 @@ from .workspace import WorkspaceClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Rate limiting: max requests per IP per window
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 120  # per window (Gmail can burst)
+_request_counts: dict[str, list[float]] = defaultdict(list)
+
+
+def check_rate_limit(client_ip: str) -> bool:
+    """Returns True if request is allowed, False if rate limited."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+    # Clean old entries
+    _request_counts[client_ip] = [t for t in _request_counts[client_ip] if t > window_start]
+    if len(_request_counts[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+    _request_counts[client_ip].append(now)
+    # Cap dict size to prevent unbounded memory growth
+    if len(_request_counts) > 10000:
+        oldest = sorted(_request_counts.keys(), key=lambda k: _request_counts[k][-1] if _request_counts[k] else 0)
+        for k in oldest[:5000]:
+            del _request_counts[k]
+    return True
+
 
 app = FastAPI(title="Botti Voice")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
@@ -47,6 +72,10 @@ async def root(request: Request):
 @app.post("/webhook/gmail")
 async def webhook_gmail(request: Request):
     """Receive Gmail push notifications from Pub/Sub."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limited: {client_ip} on /webhook/gmail")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     try:
         body = await request.json()
         message = body.get("message", {})
@@ -114,6 +143,10 @@ async def startup_gmail_watches():
 @app.post("/webhook/chat")
 async def webhook_chat(request: Request):
     """Receive Google Chat push notifications from Pub/Sub (via Workspace Events API)."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limited: {client_ip} on /webhook/chat")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     try:
         body = await request.json()
         message = body.get("message", {})
@@ -169,6 +202,10 @@ async def startup_chat_accounts():
 @app.post("/webhook/calendar")
 async def webhook_calendar(request: Request):
     """Receive Google Calendar push notifications (direct HTTP from Calendar API)."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limited: {client_ip} on /webhook/calendar")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     try:
         channel_token = request.headers.get("X-Goog-Channel-Token", "")
         resource_state = request.headers.get("X-Goog-Resource-State", "")

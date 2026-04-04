@@ -3,3 +3,6 @@ uvicorn[standard]==0.34.2
 google-cloud-firestore==2.20.1
 google-auth==2.40.1
 google-api-python-client==2.166.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0

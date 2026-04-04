@@ -1,25 +1,52 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
-  ci:
+  build-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: '22'
+          cache: 'npm'
+
       - run: npm ci
 
-      - name: Format check
-        run: npm run format:check
+      - name: Build
+        run: npm run build
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Lint (format check)
+        run: npx prettier --check "src/**/*.ts"
 
-      - name: Tests
-        run: npx vitest run
+      - name: Unit + Integration tests
+        run: npx vitest run --exclude 'src/e2e/**'
+
+      # E2E tests skipped in CI (need Docker with nanoclaw-agent image)
+      # They run locally via: npx vitest run src/e2e/
+
+  python-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: |
+          pip install -r botti-voice/requirements.txt
+          pip install -r chat-gateway/requirements.txt
+          pip install ruff
+
+      - name: Lint Python
+        run: ruff check botti-voice/ chat-gateway/

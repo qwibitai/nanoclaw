@@ -14,9 +14,11 @@ import json
 import os
 import time
 import logging
+from collections import defaultdict
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from google.cloud import firestore
 from google.auth import default
 
@@ -37,6 +39,30 @@ _map_loaded_at: float = 0
 # Yacine presence cache: space_name -> (is_present, timestamp)
 _yacine_cache: dict[str, tuple[bool, float]] = {}
 CACHE_TTL = 3600  # 1 hour
+
+# Rate limiting: in-memory per-IP request tracking
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_CHAT = 60  # requests per window for chat endpoints
+RATE_LIMIT_MAX_ADMIN = 10  # requests per window for admin endpoints
+_rate_counts: dict[str, list[float]] = defaultdict(list)
+
+
+def check_rate_limit(client_ip: str, max_requests: int = RATE_LIMIT_MAX_CHAT) -> bool:
+    """Returns True if request is allowed, False if rate limited."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+    key = f"{client_ip}:{max_requests}"
+    _rate_counts[key] = [t for t in _rate_counts[key] if t > window_start]
+    if len(_rate_counts[key]) >= max_requests:
+        return False
+    _rate_counts[key].append(now)
+    # Cap dict size to prevent unbounded memory growth
+    if len(_rate_counts) > 10000:
+        oldest = sorted(_rate_counts.keys(), key=lambda k: _rate_counts[k][-1] if _rate_counts[k] else 0)
+        for k in oldest[:5000]:
+            del _rate_counts[k]
+    return True
+
 
 app = FastAPI()
 db = firestore.Client()
@@ -90,6 +116,10 @@ async def startup():
 # Main endpoint — single Chat App posts here
 @app.post("/chat")
 async def handle_chat_event(request: Request) -> dict[str, Any]:
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip, RATE_LIMIT_MAX_CHAT):
+        logger.warning(f"Rate limited: {client_ip} on /chat")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     body = await request.json()
 
     # Verify token
@@ -176,6 +206,10 @@ async def handle_chat_event(request: Request) -> dict[str, Any]:
 # Legacy per-agent endpoint (still works)
 @app.post("/{agent_name}")
 async def handle_agent_event(agent_name: str, request: Request) -> dict[str, Any]:
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip, RATE_LIMIT_MAX_CHAT):
+        logger.warning(f"Rate limited: {client_ip} on /{agent_name}")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     if agent_name not in VALID_AGENTS:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}")
 
@@ -226,6 +260,10 @@ async def handle_agent_event(agent_name: str, request: Request) -> dict[str, Any
 # Admin: update space mapping
 @app.post("/admin/map-space")
 async def map_space(request: Request) -> dict[str, str]:
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip, RATE_LIMIT_MAX_ADMIN):
+        logger.warning(f"Rate limited: {client_ip} on /admin/map-space")
+        return JSONResponse(status_code=429, content={"status": "rate_limited", "detail": "Too many requests. Try again later."})
     if not ADMIN_API_KEY:
         raise HTTPException(status_code=503, detail="Admin endpoint disabled (ADMIN_API_KEY not configured)")
     auth = request.headers.get("Authorization", "")

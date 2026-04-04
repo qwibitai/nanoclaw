@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import Optional
 from dotenv import load_dotenv
 from google.genai import types
 
@@ -26,7 +27,7 @@ VOICE_PREAMBLE = """Tu es en mode vocal.
 - Pas de markdown en vocal — tu parles, tu ne rédiges pas."""
 
 
-def load_agent_memory(agent_name: str) -> str | None:
+def load_agent_memory(agent_name: str) -> Optional[str]:
     """Load CLAUDE.md for the given agent from NanoClaw group folder."""
     path = NANOCLAW_MEMORY_PATHS.get(agent_name)
     if not path:

@@ -7,7 +7,12 @@
  * - nanoclaw-agent:latest image must be built
  * - Tests are skipped gracefully if Docker is unavailable
  */
-import { execFileSync, execSync, spawn, type ChildProcess } from 'child_process';
+import {
+  execFileSync,
+  execSync,
+  spawn,
+  type ChildProcess,
+} from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -64,7 +69,14 @@ function cleanupTestContainers(): void {
   try {
     const output = execFileSync(
       DOCKER_BIN,
-      ['ps', '-a', '--filter', `name=${TEST_PREFIX}-`, '--format', '{{.Names}}'],
+      [
+        'ps',
+        '-a',
+        '--filter',
+        `name=${TEST_PREFIX}-`,
+        '--format',
+        '{{.Names}}',
+      ],
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 15_000 },
     ).trim();
     const containers = output
@@ -107,7 +119,12 @@ function spawnContainer(
   extraArgs: string[] = [],
   stdinData?: string,
   timeoutMs = 30_000,
-): Promise<{ code: number | null; stdout: string; stderr: string; proc: ChildProcess }> {
+): Promise<{
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  proc: ChildProcess;
+}> {
   return new Promise((resolve) => {
     const args = [
       'run',
@@ -116,8 +133,10 @@ function spawnContainer(
       '--name',
       name,
       // Provide dummy env vars the entrypoint/agent-runner expects
-      '-e', 'ANTHROPIC_API_KEY=placeholder',
-      '-e', 'TZ=UTC',
+      '-e',
+      'ANTHROPIC_API_KEY=placeholder',
+      '-e',
+      'TZ=UTC',
       ...extraArgs,
       CONTAINER_IMAGE,
     ];
@@ -127,8 +146,12 @@ function spawnContainer(
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
 
     if (stdinData !== undefined) {
       proc.stdin.write(stdinData);
@@ -139,8 +162,13 @@ function spawnContainer(
 
     const timer = setTimeout(() => {
       try {
-        execFileSync(DOCKER_BIN, ['rm', '-f', name], { stdio: 'pipe', timeout: 10_000 });
-      } catch { /* ignore */ }
+        execFileSync(DOCKER_BIN, ['rm', '-f', name], {
+          stdio: 'pipe',
+          timeout: 10_000,
+        });
+      } catch {
+        /* ignore */
+      }
     }, timeoutMs);
 
     proc.on('close', (code) => {
@@ -171,9 +199,12 @@ function spawnShellContainer(
       '--rm',
       '--name',
       name,
-      '--entrypoint', '/bin/bash',
-      '-e', 'ANTHROPIC_API_KEY=placeholder',
-      '-e', 'TZ=UTC',
+      '--entrypoint',
+      '/bin/bash',
+      '-e',
+      'ANTHROPIC_API_KEY=placeholder',
+      '-e',
+      'TZ=UTC',
       ...extraArgs,
       CONTAINER_IMAGE,
       '-c',
@@ -185,14 +216,23 @@ function spawnShellContainer(
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.stdin.end();
 
     const timer = setTimeout(() => {
       try {
-        execFileSync(DOCKER_BIN, ['rm', '-f', name], { stdio: 'pipe', timeout: 10_000 });
-      } catch { /* ignore */ }
+        execFileSync(DOCKER_BIN, ['rm', '-f', name], {
+          stdio: 'pipe',
+          timeout: 10_000,
+        });
+      } catch {
+        /* ignore */
+      }
     }, timeoutMs);
 
     proc.on('close', (code) => {
@@ -227,7 +267,10 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
   describe('Container basics', () => {
     it('container spawns and runs a shell command', async () => {
       const name = containerName('spawn');
-      const { code, stdout } = await spawnShellContainer(name, 'echo "hello from container"');
+      const { code, stdout } = await spawnShellContainer(
+        name,
+        'echo "hello from container"',
+      );
       expect(code).toBe(0);
       expect(stdout.trim()).toBe('hello from container');
     }, 30_000);
@@ -243,19 +286,33 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       );
       // The entrypoint is overridden, so we pass data via a different approach
       // Use docker run with -i and pipe stdin
-      const result = await new Promise<{ code: number | null; stdout: string }>((resolve) => {
-        const proc = spawn(DOCKER_BIN, [
-          'run', '-i', '--rm', '--name', containerName('stdin2'),
-          '--entrypoint', '/bin/bash',
-          CONTAINER_IMAGE,
-          '-c', 'cat',
-        ], { stdio: ['pipe', 'pipe', 'pipe'] });
-        let out = '';
-        proc.stdout.on('data', (d) => { out += d.toString(); });
-        proc.stdin.write(input);
-        proc.stdin.end();
-        proc.on('close', (c) => resolve({ code: c, stdout: out }));
-      });
+      const result = await new Promise<{ code: number | null; stdout: string }>(
+        (resolve) => {
+          const proc = spawn(
+            DOCKER_BIN,
+            [
+              'run',
+              '-i',
+              '--rm',
+              '--name',
+              containerName('stdin2'),
+              '--entrypoint',
+              '/bin/bash',
+              CONTAINER_IMAGE,
+              '-c',
+              'cat',
+            ],
+            { stdio: ['pipe', 'pipe', 'pipe'] },
+          );
+          let out = '';
+          proc.stdout.on('data', (d) => {
+            out += d.toString();
+          });
+          proc.stdin.write(input);
+          proc.stdin.end();
+          proc.on('close', (c) => resolve({ code: c, stdout: out }));
+        },
+      );
       expect(result.code).toBe(0);
       expect(result.stdout.trim()).toBe(input);
     }, 30_000);
@@ -273,19 +330,36 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       // but the node process will fail (no real API key). Instead, test that
       // /tmp/input.json contains our input by using a two-step approach.
       const input = makeInput('test prompt');
-      const { code, stdout } = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const { code, stdout } = await new Promise<{
+        code: number | null;
+        stdout: string;
+        stderr: string;
+      }>((resolve) => {
         const args = [
-          'run', '-i', '--rm', '--name', name,
-          '--entrypoint', '/bin/bash',
-          '-e', 'ANTHROPIC_API_KEY=placeholder',
+          'run',
+          '-i',
+          '--rm',
+          '--name',
+          name,
+          '--entrypoint',
+          '/bin/bash',
+          '-e',
+          'ANTHROPIC_API_KEY=placeholder',
           CONTAINER_IMAGE,
-          '-c', 'cat > /tmp/input.json && cat /tmp/input.json',
+          '-c',
+          'cat > /tmp/input.json && cat /tmp/input.json',
         ];
-        const proc = spawn(DOCKER_BIN, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+        const proc = spawn(DOCKER_BIN, args, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
         let stdout = '';
         let stderr = '';
-        proc.stdout.on('data', (d) => { stdout += d.toString(); });
-        proc.stderr.on('data', (d) => { stderr += d.toString(); });
+        proc.stdout.on('data', (d) => {
+          stdout += d.toString();
+        });
+        proc.stderr.on('data', (d) => {
+          stderr += d.toString();
+        });
         proc.stdin.write(input);
         proc.stdin.end();
         proc.on('close', (code) => resolve({ code, stdout, stderr }));
@@ -301,12 +375,22 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       const start = Date.now();
 
       // Start a container that sleeps forever
-      const proc = spawn(DOCKER_BIN, [
-        'run', '-i', '--rm', '--name', name,
-        '--entrypoint', '/bin/bash',
-        CONTAINER_IMAGE,
-        '-c', 'sleep 300',
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(
+        DOCKER_BIN,
+        [
+          'run',
+          '-i',
+          '--rm',
+          '--name',
+          name,
+          '--entrypoint',
+          '/bin/bash',
+          CONTAINER_IMAGE,
+          '-c',
+          'sleep 300',
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
 
       // Wait a bit then stop it (simulating timeout)
       await new Promise((r) => setTimeout(r, 2000));
@@ -345,7 +429,9 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       expect(startIdx).toBeGreaterThanOrEqual(0);
       expect(endIdx).toBeGreaterThan(startIdx);
 
-      const jsonStr = stdout.slice(startIdx + OUTPUT_START_MARKER.length, endIdx).trim();
+      const jsonStr = stdout
+        .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+        .trim();
       const parsed = JSON.parse(jsonStr);
       expect(parsed.status).toBe('success');
       expect(parsed.result).toBe('hello world');
@@ -377,7 +463,9 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
         if (startIdx === -1) break;
         const endIdx = stdout.indexOf(OUTPUT_END_MARKER, startIdx);
         if (endIdx === -1) break;
-        const jsonStr = stdout.slice(startIdx + OUTPUT_START_MARKER.length, endIdx).trim();
+        const jsonStr = stdout
+          .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+          .trim();
         results.push(JSON.parse(jsonStr));
         searchFrom = endIdx + OUTPUT_END_MARKER.length;
       }
@@ -406,12 +494,16 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       // We check stdout for the exit code since we redirected stderr
       expect(code).toBe(0); // bash itself succeeds
       // The file should not exist on host
-      expect(fs.existsSync(path.join(projectRoot, 'should-not-exist'))).toBe(false);
+      expect(fs.existsSync(path.join(projectRoot, 'should-not-exist'))).toBe(
+        false,
+      );
     }, 30_000);
 
     it('group mount is writable', async () => {
       const name = containerName('rw-group');
-      const tmpGroup = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-e2e-group-'));
+      const tmpGroup = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanoclaw-e2e-group-'),
+      );
 
       try {
         const { code, stdout } = await spawnShellContainer(
@@ -448,8 +540,10 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
           name,
           'cat /workspace/project/.env 2>/dev/null; echo "SIZE:$(wc -c < /workspace/project/.env 2>/dev/null || echo 0)"',
           [
-            '-v', `${projectRoot}:/workspace/project:ro`,
-            '-v', '/dev/null:/workspace/project/.env:ro',
+            '-v',
+            `${projectRoot}:/workspace/project:ro`,
+            '-v',
+            '/dev/null:/workspace/project/.env:ro',
           ],
         );
 
@@ -488,7 +582,9 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
 
     it('ipc directories are writable', async () => {
       const name = containerName('ipc-write');
-      const tmpIpc = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-e2e-ipc-'));
+      const tmpIpc = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanoclaw-e2e-ipc-'),
+      );
       // Create subdirs like container-runner does
       fs.mkdirSync(path.join(tmpIpc, 'messages'), { recursive: true });
       fs.mkdirSync(path.join(tmpIpc, 'tasks'), { recursive: true });
@@ -503,8 +599,12 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
 
         expect(code).toBe(0);
         expect(stdout.trim()).toBe('ok');
-        expect(fs.existsSync(path.join(tmpIpc, 'messages', 'test.json'))).toBe(true);
-        expect(fs.existsSync(path.join(tmpIpc, 'tasks', 'test.json'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpIpc, 'messages', 'test.json'))).toBe(
+          true,
+        );
+        expect(fs.existsSync(path.join(tmpIpc, 'tasks', 'test.json'))).toBe(
+          true,
+        );
       } finally {
         fs.rmSync(tmpIpc, { recursive: true, force: true });
       }
@@ -567,12 +667,22 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       const name = containerName('orphan');
 
       // Start a long-running container in the background
-      const proc = spawn(DOCKER_BIN, [
-        'run', '-i', '--rm', '--name', name,
-        '--entrypoint', '/bin/bash',
-        CONTAINER_IMAGE,
-        '-c', 'sleep 300',
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(
+        DOCKER_BIN,
+        [
+          'run',
+          '-i',
+          '--rm',
+          '--name',
+          name,
+          '--entrypoint',
+          '/bin/bash',
+          CONTAINER_IMAGE,
+          '-c',
+          'sleep 300',
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
 
       // Wait for it to start
       await new Promise((r) => setTimeout(r, 2000));
@@ -605,7 +715,9 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
             stdio: 'pipe',
             timeout: 15_000,
           });
-        } catch { /* already stopped */ }
+        } catch {
+          /* already stopped */
+        }
       }
 
       // Verify container is gone
@@ -626,12 +738,22 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
       const otherName = `nanoclaw-other-test-${Date.now()}`;
 
       // Start a container with a different prefix
-      const proc = spawn(DOCKER_BIN, [
-        'run', '-i', '--rm', '--name', otherName,
-        '--entrypoint', '/bin/bash',
-        CONTAINER_IMAGE,
-        '-c', 'sleep 300',
-      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(
+        DOCKER_BIN,
+        [
+          'run',
+          '-i',
+          '--rm',
+          '--name',
+          otherName,
+          '--entrypoint',
+          '/bin/bash',
+          CONTAINER_IMAGE,
+          '-c',
+          'sleep 300',
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
 
       await new Promise((r) => setTimeout(r, 2000));
 
@@ -659,8 +781,13 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
 
       // Cleanup
       try {
-        execFileSync(DOCKER_BIN, ['rm', '-f', otherName], { stdio: 'pipe', timeout: 15_000 });
-      } catch { /* ignore */ }
+        execFileSync(DOCKER_BIN, ['rm', '-f', otherName], {
+          stdio: 'pipe',
+          timeout: 15_000,
+        });
+      } catch {
+        /* ignore */
+      }
       await new Promise<void>((resolve) => {
         proc.on('close', () => resolve());
       });
@@ -705,11 +832,10 @@ describe.skipIf(!canRun)('Container E2E Tests', () => {
 
     it('timezone env var is respected', async () => {
       const name = containerName('tz');
-      const { code, stdout } = await spawnShellContainer(
-        name,
-        'echo $TZ',
-        ['-e', 'TZ=America/Bogota'],
-      );
+      const { code, stdout } = await spawnShellContainer(name, 'echo $TZ', [
+        '-e',
+        'TZ=America/Bogota',
+      ]);
       expect(code).toBe(0);
       expect(stdout.trim()).toBe('America/Bogota');
     }, 30_000);
