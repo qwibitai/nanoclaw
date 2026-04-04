@@ -40,12 +40,14 @@ export interface SeedCompatibilityMemoryResult {
 export interface SeedGroupMemoryFilesResult {
   canonical: SeedCanonicalMemoryResult;
   compatibility: SeedCompatibilityMemoryResult;
+  migration: FinalizeLegacyCanonicalMemoryResult | null;
 }
 
 export interface SeedGroupMemoryFilesOptions {
   targetDir: string;
   templateDir?: string;
   compatibilityFileName?: string;
+  canonicalTemplateFingerprint?: string;
 }
 
 export interface GlobalMemoryPolicy {
@@ -90,6 +92,8 @@ const LEGACY_CANONICAL_MEMORY_MARKER_FILE =
   '.canonical-memory-migration-v1.json';
 export const DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT =
   '44f4028d333e5b940485b12749dc8030460c6181105c12d71f7866589f7f1334';
+export const DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT =
+  'b7cee3ed414fa4d9e97c5a3bf3b754c608a874d817a7d6a09a6aa9c66e309616';
 
 function normalizeMemoryContent(content: string): string {
   return content.replace(/\r\n/g, '\n');
@@ -267,10 +271,18 @@ export function seedGroupMemoryFiles(
 ): SeedGroupMemoryFilesResult {
   const canonical = seedCanonicalMemory(options);
   const compatibility = seedCompatibilityMemory(options);
+  const migration = options.canonicalTemplateFingerprint
+    ? finalizeLegacyCanonicalMemoryOnce({
+        targetDir: options.targetDir,
+        compatibilityFileName: options.compatibilityFileName,
+        canonicalTemplateFingerprint: options.canonicalTemplateFingerprint,
+      })
+    : null;
 
   return {
     canonical,
     compatibility,
+    migration,
   };
 }
 

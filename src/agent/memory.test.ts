@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CANONICAL_MEMORY_FILE,
   DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
   finalizeLegacyCanonicalMemoryOnce,
   LEGACY_CLAUDE_MEMORY_FILE,
   getGlobalMemoryPolicy,
@@ -31,6 +32,13 @@ function writeMemoryFile(
 function readBundledGlobalTemplate(): string {
   return fs.readFileSync(
     path.resolve(process.cwd(), 'groups', 'global', CANONICAL_MEMORY_FILE),
+    'utf-8',
+  );
+}
+
+function readBundledMainTemplate(): string {
+  return fs.readFileSync(
+    path.resolve(process.cwd(), 'groups', 'main', CANONICAL_MEMORY_FILE),
     'utf-8',
   );
 }
@@ -287,6 +295,34 @@ describe('memory helper', () => {
     );
     expect(secondMigration.status).toBe('skipped');
     expect(secondMigration.reason).toBe('already-finalized');
+  });
+
+  it('promotes legacy CLAUDE.md when a tracked main template already created AGENT.md', () => {
+    // Arrange
+    const groupDir = createTempDir();
+    tempDirs.push(groupDir);
+    writeMemoryFile(groupDir, CANONICAL_MEMORY_FILE, readBundledMainTemplate());
+    writeMemoryFile(
+      groupDir,
+      LEGACY_CLAUDE_MEMORY_FILE,
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+
+    // Act
+    const seeded = seedGroupMemoryFiles({
+      targetDir: groupDir,
+      templateDir: groupDir,
+      canonicalTemplateFingerprint: DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
+    });
+
+    // Assert
+    expect(seeded.canonical.created).toBe(false);
+    expect(seeded.compatibility.created).toBe(false);
+    expect(seeded.migration?.status).toBe('migrated');
+    expect(seeded.migration?.reason).toBe('legacy-promoted');
+    expect(
+      fs.readFileSync(path.join(groupDir, CANONICAL_MEMORY_FILE), 'utf-8'),
+    ).toBe('# Existing Main Memory\n\nKeep this control-room context.\n');
   });
 
   it('emits a warning when compatibility sync-back is requested without canonical memory', () => {

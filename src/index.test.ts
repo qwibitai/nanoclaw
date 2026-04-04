@@ -113,6 +113,13 @@ function readBundledGlobalTemplate(): string {
   );
 }
 
+function readBundledMainTemplate(): string {
+  return fs.readFileSync(
+    path.join(ORIGINAL_CWD, 'groups', 'main', 'AGENT.md'),
+    'utf-8',
+  );
+}
+
 function createTempRepo(): string {
   const repoDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'nanoclaw-index-test-'),
@@ -270,6 +277,37 @@ describe('startup group registration memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'discord_main', 'CLAUDE.md')).toBe(
       '# Custom Compatibility\n\nPreserve this too.\n',
+    );
+  });
+
+  it('promotes legacy main CLAUDE.md during runtime registration for groups/main', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    const group: RegisteredGroup = {
+      name: 'Control',
+      folder: 'main',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      isMain: true,
+    };
+
+    // Act
+    const { _registerGroupForTest } = await loadIndexModule(repoDir);
+    _registerGroupForTest('dc:main', group);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
     );
   });
 

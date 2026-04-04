@@ -288,6 +288,13 @@ describe('register run memory seeding', () => {
     );
   }
 
+  function readBundledMainTemplate(): string {
+    return fs.readFileSync(
+      path.join(originalCwd, 'groups', 'main', 'AGENT.md'),
+      'utf-8',
+    );
+  }
+
   function createTempRepo(): string {
     const repoDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-register-test-'),
@@ -413,6 +420,41 @@ describe('register run memory seeding', () => {
     );
   });
 
+  it('promotes legacy global CLAUDE.md even when registering the main group', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'global', 'AGENT.md', readBundledGlobalTemplate());
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+      '--assistant-name',
+      'Luna',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+  });
+
   it('seeds AGENT.md from an existing group CLAUDE.md without overwriting the user file', async () => {
     // Arrange
     const repoDir = createTempRepo();
@@ -514,6 +556,47 @@ describe('register run memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'whatsapp_casa', 'CLAUDE.md')).toBe(
       '# Casa Claude\n\nCompatibility notes stay custom.\n',
+    );
+  });
+
+  it('promotes legacy main CLAUDE.md when registering an upgraded groups/main folder', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
     );
   });
 

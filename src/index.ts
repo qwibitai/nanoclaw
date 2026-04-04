@@ -21,7 +21,7 @@ import {
 } from './channels/registry.js';
 import {
   DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
-  finalizeLegacyCanonicalMemoryOnce,
+  DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
   seedGroupMemoryFiles,
 } from './agent/memory.js';
 import {
@@ -167,6 +167,9 @@ function ensureGroupMemoryFilesReady(
   const seededMemory = seedGroupMemoryFiles({
     targetDir: groupDir,
     templateDir: path.join(GROUPS_DIR, group.isMain ? 'main' : 'global'),
+    canonicalTemplateFingerprint: group.isMain
+      ? DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT
+      : undefined,
   });
 
   for (const file of [seededMemory.canonical, seededMemory.compatibility]) {
@@ -180,6 +183,17 @@ function ensureGroupMemoryFilesReady(
       logMessage,
     );
   }
+
+  if (seededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        folder: group.folder,
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy CLAUDE.md into canonical AGENT.md during group recovery',
+    );
+  }
 }
 
 function ensureSharedMemoryTemplatesReady(): void {
@@ -187,6 +201,7 @@ function ensureSharedMemoryTemplatesReady(): void {
   const seededMemory = seedGroupMemoryFiles({
     targetDir: globalDir,
     templateDir: globalDir,
+    canonicalTemplateFingerprint: DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
   });
 
   for (const file of [seededMemory.canonical, seededMemory.compatibility]) {
@@ -200,15 +215,11 @@ function ensureSharedMemoryTemplatesReady(): void {
     );
   }
 
-  const migration = finalizeLegacyCanonicalMemoryOnce({
-    targetDir: globalDir,
-    canonicalTemplateFingerprint: DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
-  });
-  if (migration.status === 'migrated') {
+  if (seededMemory.migration?.status === 'migrated') {
     logger.info(
       {
-        canonicalPath: migration.canonicalPath,
-        compatibilityPath: migration.compatibilityPath,
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
       },
       'Promoted legacy global CLAUDE.md into canonical AGENT.md',
     );
