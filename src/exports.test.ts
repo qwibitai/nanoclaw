@@ -11,19 +11,22 @@ describe('package exports', () => {
 
   describe('ESM', () => {
     it('exports AgentLite from root', async () => {
-      const mod = await import('../dist/sdk.js');
+      const sdkPath = path.resolve(distDir, 'sdk.js');
+      const mod = await import(sdkPath);
       expect(mod.AgentLite).toBeDefined();
       expect(typeof mod.AgentLite).toBe('function');
     });
 
     it('exports TelegramChannel from channels/telegram', async () => {
-      const mod = await import('../dist/channels/telegram.js');
+      const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
+      const mod = await import(telegramPath);
       expect(mod.TelegramChannel).toBeDefined();
       expect(typeof mod.TelegramChannel).toBe('function');
     });
 
     it('TelegramChannel accepts options object', async () => {
-      const mod = await import('../dist/channels/telegram.js');
+      const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
+      const mod = await import(telegramPath);
       const channel = new mod.TelegramChannel({ token: 'test' });
       expect(channel.name).toBe('telegram');
     });
