@@ -41,17 +41,43 @@ function readFileSafe(filePath: string): string | null {
 
 // --- Markdown → HTML (minimal, purpose-built) ---
 
+interface RecipeLink {
+  title: string;
+  url: string;
+}
+
 function parsePlan(md: string): {
   title: string;
   subtitle: string | null;
-  days: { name: string; meals: { label: string; desc: string; details: string[] }[] }[];
+  days: {
+    name: string;
+    meals: {
+      label: string;
+      desc: string;
+      details: string[];
+      recipes: RecipeLink[];
+    }[];
+  }[];
 } {
   const lines = md.split('\n');
   let title = '';
   let subtitle: string | null = null;
-  const days: { name: string; meals: { label: string; desc: string; details: string[] }[] }[] = [];
+  const days: {
+    name: string;
+    meals: {
+      label: string;
+      desc: string;
+      details: string[];
+      recipes: RecipeLink[];
+    }[];
+  }[] = [];
   let currentDay: (typeof days)[number] | null = null;
-  let currentMeal: { label: string; desc: string; details: string[] } | null = null;
+  let currentMeal: {
+    label: string;
+    desc: string;
+    details: string[];
+    recipes: RecipeLink[];
+  } | null = null;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -63,7 +89,12 @@ function parsePlan(md: string): {
     }
 
     // Italic subtitle like *School holidays — no school lunches*
-    if (trimmed.startsWith('*') && trimmed.endsWith('*') && !trimmed.startsWith('*Dinner') && !trimmed.startsWith('*School lunch')) {
+    if (
+      trimmed.startsWith('*') &&
+      trimmed.endsWith('*') &&
+      !trimmed.startsWith('*Dinner') &&
+      !trimmed.startsWith('*School lunch')
+    ) {
       subtitle = trimmed.replace(/^\*/, '').replace(/\*$/, '');
       continue;
     }
@@ -80,8 +111,22 @@ function parsePlan(md: string): {
     // *Dinner:* or *School lunch:*
     const mealMatch = trimmed.match(/^\*([^*]+):\*\s*(.*)/);
     if (mealMatch && currentDay) {
-      currentMeal = { label: mealMatch[1], desc: mealMatch[2], details: [] };
+      currentMeal = {
+        label: mealMatch[1],
+        desc: mealMatch[2],
+        details: [],
+        recipes: [],
+      };
       currentDay.meals.push(currentMeal);
+      continue;
+    }
+
+    // 📖 [Title](url) — recipe links
+    const recipeMatch = trimmed.match(
+      /^📖\s*\[([^\]]+)\]\(([^)]+)\)/,
+    );
+    if (recipeMatch && currentMeal) {
+      currentMeal.recipes.push({ title: recipeMatch[1], url: recipeMatch[2] });
       continue;
     }
 
@@ -96,7 +141,10 @@ function parsePlan(md: string): {
   return { title, subtitle, days };
 }
 
-function parseIngredients(md: string): { title: string; sections: { name: string; items: string[] }[] } {
+function parseIngredients(md: string): {
+  title: string;
+  sections: { name: string; items: string[] }[];
+} {
   const lines = md.split('\n');
   let title = '';
   const sections: { name: string; items: string[] }[] = [];
@@ -116,7 +164,10 @@ function parseIngredients(md: string): { title: string; sections: { name: string
       continue;
     }
 
-    if ((trimmed.startsWith('•') || trimmed.startsWith('-')) && currentSection) {
+    if (
+      (trimmed.startsWith('•') || trimmed.startsWith('-')) &&
+      currentSection
+    ) {
       currentSection.items.push(trimmed.replace(/^[•-]\s*/, ''));
       continue;
     }
@@ -127,10 +178,17 @@ function parseIngredients(md: string): { title: string; sections: { name: string
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-function renderPage(planMd: string | null, ingredientsMd: string | null): string {
+function renderPage(
+  planMd: string | null,
+  ingredientsMd: string | null,
+): string {
   const plan = planMd ? parsePlan(planMd) : null;
   const ingredients = ingredientsMd ? parseIngredients(ingredientsMd) : null;
 
@@ -146,7 +204,10 @@ function renderPage(planMd: string | null, ingredientsMd: string | null): string
             const detailsHtml = meal.details.length
               ? `<ul>${meal.details.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>`
               : '';
-            return `<div class="meal"><span class="meal-label">${esc(meal.label)}</span><span class="meal-name">${esc(meal.desc)}</span>${detailsHtml}</div>`;
+            const recipesHtml = meal.recipes.length
+              ? `<div class="recipes">${meal.recipes.map((r) => `<a href="${esc(r.url)}" class="recipe-link" target="_blank" rel="noopener">📖 ${esc(r.title)}</a>`).join('')}</div>`
+              : '';
+            return `<div class="meal"><span class="meal-label">${esc(meal.label)}</span><span class="meal-name">${esc(meal.desc)}</span>${detailsHtml}${recipesHtml}</div>`;
           })
           .join('');
         return `<div class="day-card"><h3>${esc(dayName)}${badge}</h3>${mealsHtml}</div>`;
@@ -164,16 +225,19 @@ function renderPage(planMd: string | null, ingredientsMd: string | null): string
   if (ingredients && ingredients.sections.length > 0) {
     const sectionsHtml = ingredients.sections
       .map((section) => {
-        const items = section.items.map((item) => `<li>${esc(item)}</li>`).join('');
+        const items = section.items
+          .map((item) => `<li>${esc(item)}</li>`)
+          .join('');
         return `<div class="ingredient-section"><h4>${esc(section.name)}</h4><ul>${items}</ul></div>`;
       })
       .join('');
     ingredientsHtml = `<section id="ingredients"><h2>Shopping List</h2>${sectionsHtml}</section>`;
   }
 
-  const emptyState = !plan && !ingredients
-    ? '<div class="empty"><p>No meal plan yet.</p><p>Pickle will post one soon.</p></div>'
-    : '';
+  const emptyState =
+    !plan && !ingredients
+      ? '<div class="empty"><p>No meal plan yet.</p><p>Pickle will post one soon.</p></div>'
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -350,6 +414,29 @@ section h2 {
   left: 4px;
   color: var(--border);
   font-weight: bold;
+}
+
+/* --- Recipe links --- */
+
+.recipes {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recipe-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  background: var(--accent-light);
+  padding: 4px 10px;
+  border-radius: 8px;
+  transition: opacity 0.2s;
+}
+
+.recipe-link:hover {
+  opacity: 0.8;
 }
 
 /* --- Shopping list --- */

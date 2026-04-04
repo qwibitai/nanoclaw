@@ -76,6 +76,7 @@ The active meal plan. Format:
 ## Monday
 *Dinner:* Chicken stir fry
 • chicken thigh, broccoli, capsicum, soy-ginger sauce, jasmine rice
+📖 [Ginger-Scallion Chicken Stir-Fry](https://cooking.nytimes.com/recipes/...)
 
 *School lunch:* Ham & cheese wraps
 • wholemeal wraps, ham, cheese, cucumber, apple
@@ -87,6 +88,10 @@ The active meal plan. Format:
 Day-by-day, with dinners and school lunches (on school days). Updated in place when meals are swapped or changed. This is the source of truth — if someone asks "what's for dinner Tuesday," read this file.
 
 When proposing a new plan, write it to this file AND send a formatted summary to the chat. The chat message should be scannable — meal names bold, components underneath.
+
+### Recipe links
+
+For each dinner, search NYT Cooking (`cooking.nytimes.com`) for a close-enough recipe and include up to **2 links** using the `📖` format shown above. These are optional inspiration — the family has an NYT Cooking subscription. Pick recipes that match the meal concept, not necessarily the exact name. Don't include recipe links for school lunches.
 
 ### `ingredients.md` — Shopping list
 
