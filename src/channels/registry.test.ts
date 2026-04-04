@@ -20,21 +20,21 @@ describe('channel registry', () => {
   });
 
   it('registerChannel and getChannelFactory round-trip', () => {
-    const factory = () => null;
+    const factory = (_opts: any) => null;
     registerChannel('test-channel', factory);
     expect(getChannelFactory('test-channel')).toBe(factory);
   });
 
   it('getRegisteredChannelNames includes registered channels', () => {
-    registerChannel('another-channel', () => null);
+    registerChannel('another-channel', (_opts: any) => null);
     const names = getRegisteredChannelNames();
     expect(names).toContain('test-channel');
     expect(names).toContain('another-channel');
   });
 
   it('later registration overwrites earlier one', () => {
-    const factory1 = () => null;
-    const factory2 = () => null;
+    const factory1 = (_opts: any) => null;
+    const factory2 = (_opts: any) => null;
     registerChannel('overwrite-test', factory1);
     registerChannel('overwrite-test', factory2);
     expect(getChannelFactory('overwrite-test')).toBe(factory2);

@@ -17,7 +17,9 @@
  * });
  * await agent.start();
  *
- * await agent.registerChannel(new TelegramChannel({ token: '123:ABC' }));
+ * await agent.registerChannelFactory('telegram', (opts) =>
+ *   new TelegramChannel({ token: '123:ABC', channelOptions: opts })
+ * );
  * agent.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
  * ```
  */
@@ -25,6 +27,7 @@
 import { ASSISTANT_NAME, applyConfig } from './config.js';
 import { Channel, RegisteredGroup } from './types.js';
 import type { AgentLiteOptions, GroupOptions } from './options.js';
+import type { ChannelFactory } from './channels/registry.js';
 
 // Type-only re-exports (zero runtime cost — erased at compile time)
 export type {
@@ -32,6 +35,7 @@ export type {
   ModelOptions,
   CredentialResolver,
   GroupOptions,
+  ChannelHandler,
 } from './options.js';
 export type {
   Channel,
@@ -41,9 +45,9 @@ export type {
   MountAllowlist,
   AllowedRoot,
 } from './types.js';
+export type { ChannelOpts, ChannelFactory } from './channels/registry.js';
 
 export class AgentLite {
-  private _channels: Channel[] = [];
   private _groups: Map<string, RegisteredGroup> = new Map();
   private _started = false;
   private _orchestrator: typeof import('./orchestrator.js') | null = null;
@@ -57,7 +61,7 @@ export class AgentLite {
    * Start the orchestrator.
    * Initializes BoxLite runtime, database, and message processing loop.
    * This is when native modules are loaded — not at import time.
-   * Call this first, then registerChannel/registerGroup dynamically.
+   * Call this first, then registerChannelFactory/registerGroup dynamically.
    */
   async start(): Promise<void> {
     if (this._started) throw new Error('AgentLite already started');
@@ -73,23 +77,25 @@ export class AgentLite {
     this._orchestrator = orchestrator;
 
     await orchestrator.start({
-      channels: this._channels,
       groups: this._groups,
       model: this._options.model,
+      channelHandler: this._options.channelHandler,
     });
   }
 
   /**
-   * Register a messaging channel (Telegram, Slack, etc.).
-   * Can be called before or after start().
-   * If called after start(), the channel is connected immediately.
+   * Register a channel factory. Must be called after start().
+   * The factory receives ChannelOpts (callbacks) and returns a Channel.
+   * Returns true if the factory produced a channel, false if it returned null.
    */
-  async registerChannel(channel: Channel): Promise<void> {
-    this._channels.push(channel);
-
-    if (this._started && this._orchestrator) {
-      await this._orchestrator.registerChannel(channel);
+  async registerChannelFactory(
+    name: string,
+    factory: ChannelFactory,
+  ): Promise<boolean> {
+    if (!this._started || !this._orchestrator) {
+      throw new Error('Cannot register channels before start()');
     }
+    return this._orchestrator.registerChannelFactory(name, factory);
   }
 
   /**

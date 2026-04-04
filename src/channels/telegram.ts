@@ -5,21 +5,12 @@ import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnChatMetadata,
-  OnInboundMessage,
-  RegisteredGroup,
-} from '../types.js';
+import { Channel } from '../types.js';
 
 export interface TelegramChannelOptions {
   token: string;
-}
-
-export interface TelegramChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Channel callbacks for message handling. Passed by the factory from ChannelOpts. */
+  channelOptions?: ChannelOpts;
 }
 
 /**
@@ -49,21 +40,16 @@ export class TelegramChannel implements Channel {
   name = 'telegram';
 
   private bot: Bot | null = null;
-  private opts: TelegramChannelOpts;
+  private opts: ChannelOpts;
   private botToken: string;
 
-  constructor({ token }: TelegramChannelOptions) {
+  constructor({ token, channelOptions }: TelegramChannelOptions) {
     this.botToken = token;
-    this.opts = {
+    this.opts = channelOptions ?? {
       onMessage: () => {},
       onChatMetadata: () => {},
       registeredGroups: () => ({}),
     };
-  }
-
-  /** @internal Inject callbacks (used by SDK to wire up message storage) */
-  _setOpts(opts: TelegramChannelOpts): void {
-    this.opts = opts;
   }
 
   async connect(): Promise<void> {
@@ -305,7 +291,7 @@ export class TelegramChannel implements Channel {
   }
 }
 
-registerChannel('telegram', (opts?: ChannelOpts) => {
+registerChannel('telegram', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
@@ -313,7 +299,5 @@ registerChannel('telegram', (opts?: ChannelOpts) => {
     logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
     return null;
   }
-  const ch = new TelegramChannel({ token });
-  if (opts) ch._setOpts(opts);
-  return ch;
+  return new TelegramChannel({ token, channelOptions: opts });
 });

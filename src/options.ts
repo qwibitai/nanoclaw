@@ -5,13 +5,34 @@
  * so the API surface is easy to review and doesn't pull in runtime logic.
  */
 
-import type { ContainerConfig, MountAllowlist } from './types.js';
+import type {
+  ContainerConfig,
+  MountAllowlist,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from './types.js';
 export type {
   ContainerConfig,
   AdditionalMount,
   MountAllowlist,
   AllowedRoot,
 } from './types.js';
+
+/**
+ * Channel callback shape — controls how inbound messages are processed.
+ *
+ * The built-in handler stores messages in the database, intercepts remote
+ * control commands, and enforces the sender allowlist. When wrapping via
+ * `AgentLiteOptions.channelHandler`, you **must** call the built-in
+ * callbacks (e.g. `builtin.onMessage`) or messages will not be stored
+ * and the agent will never see them.
+ */
+export interface ChannelHandler {
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
+}
 
 /** Resolves credentials to env vars injected into agent containers.
  *  Called once per container spawn. Return a map like { ANTHROPIC_API_KEY: 'sk-...' }. */
@@ -35,6 +56,23 @@ export interface AgentLiteOptions {
   /** Mount allowlist for container security. Defines which host paths can be mounted.
    *  If not provided, all additional mounts are blocked. */
   mountAllowlist?: MountAllowlist;
+  /**
+   * Wrap the built-in channel handler to add custom logic (logging, filtering, etc.).
+   * Applied to all channels. You **must** call `builtin.onMessage` / `builtin.onChatMetadata`
+   * inside your wrapper — omitting them breaks message storage and delivery.
+   *
+   * @example
+   * ```ts
+   * channelHandler: (builtin) => ({
+   *   ...builtin,
+   *   onMessage: (jid, msg) => {
+   *     console.log(`[${jid}] ${msg.content}`);
+   *     builtin.onMessage(jid, msg); // required — stores the message
+   *   },
+   * })
+   * ```
+   */
+  channelHandler?: (builtin: ChannelHandler) => ChannelHandler;
 }
 
 /** Simplified group options for SDK registration. */

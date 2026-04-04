@@ -49,16 +49,15 @@ async function main(): Promise<void> {
   let registered = 0;
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
-    const channel = factory();
-    if (!channel) {
+    const success = await agent.registerChannelFactory(channelName, factory);
+    if (success) {
+      registered++;
+    } else {
       logger.warn(
         { channel: channelName },
         'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
       );
-      continue;
     }
-    await agent.registerChannel(channel);
-    registered++;
   }
 
   if (registered === 0) {
