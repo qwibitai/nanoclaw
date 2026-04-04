@@ -477,3 +477,8 @@ Show summary:
 - Any customizations that needed manual adjustment
 
 Offer to pop the stash if one was created in preflight: `git stash pop`
+
+## Diagnostics
+
+1. Use the Read tool to read `.claude/skills/migrate-nanoclaw/diagnostics.md`.
+2. Follow every step in that file before finishing.
