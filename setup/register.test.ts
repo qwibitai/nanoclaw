@@ -39,6 +39,8 @@ function createTestDb(): Database.Database {
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
+    provider_id TEXT,
+    provider_options TEXT,
     requires_trigger INTEGER DEFAULT 1,
     is_main INTEGER DEFAULT 0
   )`);
@@ -328,6 +330,21 @@ describe('register run memory seeding', () => {
     );
   }
 
+  function readRegisteredProviderId(repoDir: string, jid: string): string {
+    const db = new Database(path.join(repoDir, 'store', 'messages.db'), {
+      readonly: true,
+    });
+
+    try {
+      const row = db
+        .prepare('SELECT provider_id FROM registered_groups WHERE jid = ?')
+        .get(jid) as { provider_id: string };
+      return row.provider_id;
+    } finally {
+      db.close();
+    }
+  }
+
   async function runRegister(repoDir: string, args: string[]): Promise<void> {
     process.chdir(repoDir);
     vi.resetModules();
@@ -556,6 +573,102 @@ describe('register run memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'whatsapp_casa', 'CLAUDE.md')).toBe(
       '# Casa Claude\n\nCompatibility notes stay custom.\n',
+    );
+  });
+
+  it('defaults provider_id from DEFAULT_AGENT_PROVIDER when --provider is omitted', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+    fs.writeFileSync(
+      path.join(repoDir, '.env'),
+      'DEFAULT_AGENT_PROVIDER=codex\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'tg:-1002',
+      '--name',
+      'Builders',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'telegram_builders',
+      '--channel',
+      'telegram',
+    ]);
+
+    // Assert
+    expect(readRegisteredProviderId(repoDir, 'tg:-1002')).toBe('codex');
+  });
+
+  it('updates provider_id on re-registration without overwriting existing memory files', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+
+    await runRegister(repoDir, [
+      '--jid',
+      'wa:g-2',
+      '--name',
+      'Planning',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'whatsapp_planning',
+      '--channel',
+      'whatsapp',
+      '--provider',
+      'claude-code',
+    ]);
+
+    writeGroupFile(
+      repoDir,
+      'whatsapp_planning',
+      'AGENT.md',
+      '# Planning\n\nKeep the project brief here.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'whatsapp_planning',
+      'CLAUDE.md',
+      '# Planning Claude\n\nProvider compatibility stays customized.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'wa:g-2',
+      '--name',
+      'Planning',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'whatsapp_planning',
+      '--channel',
+      'whatsapp',
+      '--provider',
+      'codex',
+    ]);
+
+    // Assert
+    expect(readRegisteredProviderId(repoDir, 'wa:g-2')).toBe('codex');
+    expect(readGroupFile(repoDir, 'whatsapp_planning', 'AGENT.md')).toBe(
+      '# Planning\n\nKeep the project brief here.\n',
+    );
+    expect(readGroupFile(repoDir, 'whatsapp_planning', 'CLAUDE.md')).toBe(
+      '# Planning Claude\n\nProvider compatibility stays customized.\n',
     );
   });
 

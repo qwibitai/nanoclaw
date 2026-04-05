@@ -1,5 +1,6 @@
 import path from 'path';
 
+import { readEnvFile } from '../../../env.js';
 import type {
   AgentProvider,
   ProviderRuntimeInput,
@@ -24,6 +25,14 @@ function createRuntimeInput(
   };
 }
 
+function hasConfiguredCredential(
+  env: NodeJS.ProcessEnv,
+  envFileKeys: Record<string, string>,
+  key: string,
+): boolean {
+  return Boolean(env[key]?.trim() || envFileKeys[key]?.trim());
+}
+
 export function createCodexProvider(): AgentProvider {
   return {
     id: PROVIDER_ID,
@@ -35,8 +44,30 @@ export function createCodexProvider(): AgentProvider {
       agentTeams: false,
       providerSkills: false,
     },
-    validateHost() {
-      return [];
+    validateHost(env) {
+      const envFileKeys = readEnvFile(['OPENAI_API_KEY', 'CODEX_API_KEY']);
+      const hasCredential =
+        hasConfiguredCredential(env, envFileKeys, 'OPENAI_API_KEY') ||
+        hasConfiguredCredential(env, envFileKeys, 'CODEX_API_KEY');
+
+      if (hasCredential) {
+        return [
+          {
+            status: 'ok',
+            code: 'auth_configured',
+            message:
+              'Codex credentials are configured via OPENAI_API_KEY or CODEX_API_KEY.',
+          },
+        ];
+      }
+
+      return [
+        {
+          status: 'error',
+          code: 'auth_missing',
+          message: 'Codex requires OPENAI_API_KEY or CODEX_API_KEY.',
+        },
+      ];
     },
     prepareSession(ctx) {
       const providerStateDir = path.join(

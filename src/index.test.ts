@@ -4,9 +4,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { AgentProvider } from './agent/provider-types.js';
 import type { NewMessage, RegisteredGroup } from './types.js';
 
 const {
+  customProviderRegistryState,
+  startClaudeProviderRemoteControl,
   deleteSession,
   ensureAgent,
   findChannel,
@@ -14,6 +17,8 @@ const {
   getChannelFactory,
   getRegisteredChannelNames,
   getSession,
+  providerHookStartRemoteControl,
+  providerRegistryGetProvider,
   restoreRemoteControl,
   runContainerAgent,
   setRegisteredGroup,
@@ -23,6 +28,10 @@ const {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } = vi.hoisted(() => ({
+  customProviderRegistryState: {
+    provider: undefined as AgentProvider | undefined,
+  },
+  startClaudeProviderRemoteControl: vi.fn(),
   deleteSession: vi.fn(),
   ensureAgent: vi
     .fn()
@@ -30,8 +39,10 @@ const {
   findChannel: vi.fn(),
   getAllRegisteredGroups: vi.fn(() => ({})),
   getChannelFactory: vi.fn(),
-  getRegisteredChannelNames: vi.fn((): string[] => []),
+  providerHookStartRemoteControl: vi.fn(),
+  providerRegistryGetProvider: vi.fn(),
   restoreRemoteControl: vi.fn(),
+  getRegisteredChannelNames: vi.fn((): string[] => []),
   getSession: vi.fn(
     (_groupFolder: string, _providerId?: string) =>
       undefined as string | undefined,
@@ -52,6 +63,41 @@ vi.mock('@onecli-sh/sdk', () => ({
 }));
 
 vi.mock('./channels/index.js', () => ({}));
+
+vi.mock('./agent/provider-registry.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('./agent/provider-registry.js')
+  >('./agent/provider-registry.js');
+
+  return {
+    ...actual,
+    createProviderRegistry: (
+      ...args: Parameters<typeof actual.createProviderRegistry>
+    ) => {
+      if (!customProviderRegistryState.provider) {
+        return actual.createProviderRegistry(...args);
+      }
+
+      providerRegistryGetProvider.mockImplementation((providerId: string) => {
+        if (providerId !== customProviderRegistryState.provider?.id) {
+          throw new Error(`Unexpected provider lookup: ${providerId}`);
+        }
+
+        return customProviderRegistryState.provider;
+      });
+
+      return {
+        getProvider: providerRegistryGetProvider,
+        listProviders: vi.fn(() => [customProviderRegistryState.provider]),
+        register: vi.fn(),
+      };
+    },
+  };
+});
+
+vi.mock('./agent/providers/claude-code/remote-control.js', () => ({
+  startRemoteControl: startClaudeProviderRemoteControl,
+}));
 
 vi.mock('./channels/registry.js', () => ({
   getChannelFactory,
@@ -195,10 +241,14 @@ async function loadIndexModule(repoDir: string) {
 }
 
 function resetIndexRuntimeMocks(): void {
+  customProviderRegistryState.provider = undefined;
   findChannel.mockReset();
   getChannelFactory.mockReset();
   getRegisteredChannelNames.mockReset();
   getRegisteredChannelNames.mockReturnValue([]);
+  providerHookStartRemoteControl.mockReset();
+  providerRegistryGetProvider.mockReset();
+  startClaudeProviderRemoteControl.mockReset();
   restoreRemoteControl.mockReset();
   startRemoteControl.mockReset();
   stopRemoteControl.mockReset();
@@ -648,6 +698,172 @@ describe('provider-scoped remote control commands', () => {
 
     // Assert
     expect(startRemoteControl).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects /remote-control from a non-main group on the real command path', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    const workerGroup: RegisteredGroup = {
+      name: 'Workers',
+      folder: 'workers',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      isMain: false,
+      providerId: 'claude-code',
+    };
+    const sendMessage = vi.fn(async () => {});
+    const channel = {
+      name: 'test',
+      connect: vi.fn(async () => {}),
+      sendMessage,
+      isConnected: vi.fn(() => true),
+      ownsJid: vi.fn((jid: string) => jid === 'workers@g.us'),
+      disconnect: vi.fn(async () => {}),
+    };
+    let channelOpts:
+      | {
+          onMessage: (chatJid: string, msg: NewMessage) => void;
+        }
+      | undefined;
+    getAllRegisteredGroups.mockReturnValue({ 'workers@g.us': workerGroup });
+    getRegisteredChannelNames.mockReturnValue(['test']);
+    getChannelFactory.mockImplementation(
+      () =>
+        (opts: { onMessage: (chatJid: string, msg: NewMessage) => void }) => {
+          channelOpts = opts;
+          return channel;
+        },
+    );
+    findChannel.mockImplementation((_channels: unknown[], jid: string) =>
+      jid === 'workers@g.us' ? channel : undefined,
+    );
+    startClaudeProviderRemoteControl.mockResolvedValue({
+      ok: true,
+      url: 'https://claude.ai/code?bridge=should-not-run',
+    });
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(() => 0 as any);
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => undefined);
+    process.argv[1] = INDEX_MODULE_PATH;
+
+    // Act
+    await loadIndexModule(repoDir);
+    expect(channelOpts).toBeDefined();
+    channelOpts?.onMessage('workers@g.us', {
+      id: 'msg-2',
+      chat_jid: 'workers@g.us',
+      sender: 'alice',
+      sender_name: 'Alice',
+      content: '/remote-control',
+      timestamp: '2026-04-03T00:00:00.000Z',
+    });
+
+    // Assert
+    expect(findChannel).not.toHaveBeenCalled();
+    expect(startClaudeProviderRemoteControl).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('delegates Claude /remote-control through the provider hook on the real command path', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    const mainGroup: RegisteredGroup = {
+      name: 'Main',
+      folder: 'main',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      isMain: true,
+      providerId: 'claude-code',
+    };
+    const sendMessage = vi.fn(async () => {});
+    const channel = {
+      name: 'test',
+      connect: vi.fn(async () => {}),
+      sendMessage,
+      isConnected: vi.fn(() => true),
+      ownsJid: vi.fn((jid: string) => jid === 'main@g.us'),
+      disconnect: vi.fn(async () => {}),
+    };
+    let channelOpts:
+      | {
+          onMessage: (chatJid: string, msg: NewMessage) => void;
+        }
+      | undefined;
+    getAllRegisteredGroups.mockReturnValue({ 'main@g.us': mainGroup });
+    getRegisteredChannelNames.mockReturnValue(['test']);
+    getChannelFactory.mockImplementation(
+      () =>
+        (opts: { onMessage: (chatJid: string, msg: NewMessage) => void }) => {
+          channelOpts = opts;
+          return channel;
+        },
+    );
+    findChannel.mockImplementation((_channels: unknown[], jid: string) =>
+      jid === 'main@g.us' ? channel : undefined,
+    );
+    const claudeProvider: AgentProvider = {
+      id: 'claude-code',
+      displayName: 'Claude Code',
+      capabilities: {
+        persistentSessions: true,
+        projectMemory: true,
+        remoteControl: true,
+        agentTeams: true,
+        providerSkills: true,
+      },
+      validateHost: vi.fn(() => []),
+      prepareSession: vi.fn(() => ({
+        providerStateDir: path.join(
+          repoDir,
+          'data',
+          'sessions',
+          'main',
+          'claude-code',
+        ),
+        files: [],
+      })),
+      buildContainerSpec: vi.fn(() => ({
+        mounts: [],
+        env: {},
+      })),
+      serializeRuntimeInput: vi.fn(),
+      startRemoteControl: providerHookStartRemoteControl.mockResolvedValue({
+        status: 'started',
+        url: 'https://claude.ai/code?bridge=delegated',
+      }),
+    };
+    customProviderRegistryState.provider = claudeProvider;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(() => 0 as any);
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => undefined);
+    process.argv[1] = INDEX_MODULE_PATH;
+
+    // Act
+    await loadIndexModule(repoDir);
+    expect(channelOpts).toBeDefined();
+    channelOpts?.onMessage('main@g.us', {
+      id: 'msg-3',
+      chat_jid: 'main@g.us',
+      sender: 'alice',
+      sender_name: 'Alice',
+      content: '/remote-control',
+      timestamp: '2026-04-03T00:00:00.000Z',
+    });
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(
+        'main@g.us',
+        'https://claude.ai/code?bridge=delegated',
+      );
+    });
+
+    // Assert
+    expect(providerRegistryGetProvider).toHaveBeenCalledWith('claude-code');
+    expect(providerHookStartRemoteControl).toHaveBeenCalledWith({
+      groupFolder: 'main',
+      projectRoot: repoDir,
+      env: process.env,
+      sender: 'alice',
+      chatJid: 'main@g.us',
+    });
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { readEnvFile } from '../../../env.js';
+import { startRemoteControl as startClaudeRemoteControl } from './remote-control.js';
 import type {
   AgentProvider,
   PreparedSession,
@@ -78,6 +80,14 @@ function resolveProviderStateDir(
   };
 }
 
+function hasConfiguredCredential(
+  env: NodeJS.ProcessEnv,
+  envFileKeys: Record<string, string>,
+  key: string,
+): boolean {
+  return Boolean(env[key]?.trim() || envFileKeys[key]?.trim());
+}
+
 export function createClaudeCodeProvider(): AgentProvider {
   return {
     id: PROVIDER_ID,
@@ -89,8 +99,34 @@ export function createClaudeCodeProvider(): AgentProvider {
       agentTeams: true,
       providerSkills: true,
     },
-    validateHost() {
-      return [];
+    validateHost(env) {
+      const envFileKeys = readEnvFile([
+        'CLAUDE_CODE_OAUTH_TOKEN',
+        'ANTHROPIC_API_KEY',
+      ]);
+      const hasCredential =
+        hasConfiguredCredential(env, envFileKeys, 'CLAUDE_CODE_OAUTH_TOKEN') ||
+        hasConfiguredCredential(env, envFileKeys, 'ANTHROPIC_API_KEY');
+
+      if (hasCredential) {
+        return [
+          {
+            status: 'ok',
+            code: 'auth_configured',
+            message:
+              'Claude Code credentials are configured via CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.',
+          },
+        ];
+      }
+
+      return [
+        {
+          status: 'error',
+          code: 'auth_missing',
+          message:
+            'Claude Code requires CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.',
+        },
+      ];
     },
     prepareSession(ctx) {
       const sessionRoot = resolveProviderStateDir(ctx.dataDir, ctx.groupFolder);
@@ -136,6 +172,26 @@ export function createClaudeCodeProvider(): AgentProvider {
     },
     serializeRuntimeInput(ctx) {
       return createRuntimeInput(ctx);
+    },
+    async startRemoteControl(ctx) {
+      const result = await startClaudeRemoteControl(
+        ctx.sender,
+        ctx.chatJid,
+        ctx.projectRoot,
+        PROVIDER_ID,
+      );
+
+      if (result.ok) {
+        return {
+          status: 'started',
+          url: result.url,
+        };
+      }
+
+      return {
+        status: 'error',
+        message: result.error,
+      };
     },
   };
 }

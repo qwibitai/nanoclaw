@@ -58,11 +58,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import {
-  restoreRemoteControl,
-  startRemoteControl,
-  stopRemoteControl,
-} from './remote-control.js';
+import { restoreRemoteControl, stopRemoteControl } from './remote-control.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -99,33 +95,6 @@ const providerRegistry = createProviderRegistry();
 
 function getGroupProviderId(group: RegisteredGroup): string {
   return group.providerId || COMPATIBILITY_AGENT_PROVIDER;
-}
-
-async function getUnsupportedRemoteControlMessage(
-  group: RegisteredGroup,
-): Promise<string | null> {
-  const provider = providerRegistry.getProvider(getGroupProviderId(group));
-
-  if (provider.capabilities.remoteControl) {
-    return null;
-  }
-
-  if (provider.startRemoteControl) {
-    const result = await provider.startRemoteControl({
-      groupFolder: group.folder,
-      projectRoot: process.cwd(),
-      env: process.env,
-    });
-
-    if (result.status === 'unsupported') {
-      return (
-        result.message ||
-        `${provider.displayName} does not support remote control in NanoClaw v1.`
-      );
-    }
-  }
-
-  return `${provider.displayName} does not support remote control in NanoClaw v1.`;
 }
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
@@ -780,28 +749,44 @@ async function main(): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
-    const unsupportedMessage = await getUnsupportedRemoteControlMessage(group);
-    if (unsupportedMessage) {
-      await channel.sendMessage(chatJid, unsupportedMessage);
-      return;
-    }
+    const providerId = getGroupProviderId(group);
+    const provider = providerRegistry.getProvider(providerId);
 
     if (command === '/remote-control') {
-      const result = await startRemoteControl(
-        msg.sender,
+      if (
+        !provider.capabilities.remoteControl ||
+        !provider.startRemoteControl
+      ) {
+        await channel.sendMessage(
+          chatJid,
+          `${provider.displayName} does not support remote control in NanoClaw v1.`,
+        );
+        return;
+      }
+
+      const result = await provider.startRemoteControl({
+        groupFolder: group.folder,
+        projectRoot: process.cwd(),
+        env: process.env,
+        sender: msg.sender,
         chatJid,
-        process.cwd(),
-      );
-      if (result.ok) {
+      });
+      if (result.status === 'started' && result.url) {
         await channel.sendMessage(chatJid, result.url);
+      } else if (result.status === 'unsupported') {
+        await channel.sendMessage(
+          chatJid,
+          result.message ||
+            `${provider.displayName} does not support remote control in NanoClaw v1.`,
+        );
       } else {
         await channel.sendMessage(
           chatJid,
-          `Remote Control failed: ${result.error}`,
+          `Remote Control failed: ${result.message || 'unknown error'}`,
         );
       }
     } else {
-      const result = stopRemoteControl();
+      const result = stopRemoteControl(chatJid, providerId);
       if (result.ok) {
         await channel.sendMessage(chatJid, 'Remote Control session ended.');
       } else {

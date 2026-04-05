@@ -11,6 +11,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
+import { createProviderRegistry } from '../src/agent/provider-registry.js';
 import { STORE_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
@@ -97,14 +98,20 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   // 3. Check credentials
-  let credentials = 'missing';
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ONECLI_URL)=/m.test(envContent)) {
-      credentials = 'configured';
-    }
-  }
+  const providers = createProviderRegistry().listProviders().map((provider) => {
+    const checks = provider.validateHost(process.env, projectRoot);
+    const ready = checks.every((check) => check.status !== 'error');
+
+    return {
+      id: provider.id,
+      displayName: provider.displayName,
+      ready,
+      capabilities: provider.capabilities,
+      checks,
+    };
+  });
+  const anyProviderReady = providers.some((provider) => provider.ready);
+  const credentials = anyProviderReady ? 'configured' : 'missing';
 
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
@@ -168,7 +175,7 @@ export async function run(_args: string[]): Promise<void> {
   // Determine overall status
   const status =
     service === 'running' &&
-    credentials !== 'missing' &&
+    anyProviderReady &&
     anyChannelConfigured &&
     registeredGroups > 0
       ? 'success'
@@ -184,6 +191,8 @@ export async function run(_args: string[]): Promise<void> {
     CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
+    PROVIDER_READINESS: anyProviderReady ? 'configured' : 'missing',
+    PROVIDERS: JSON.stringify(providers),
     STATUS: status,
     LOG: 'logs/setup.log',
   });

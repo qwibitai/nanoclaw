@@ -90,10 +90,12 @@ export interface RemoteControlContext {
   groupFolder: string;
   projectRoot: string;
   env: NodeJS.ProcessEnv;
+  sender: string;
+  chatJid: string;
 }
 
 export interface RemoteControlResult {
-  status: 'started' | 'unsupported';
+  status: 'started' | 'unsupported' | 'error';
   url?: string;
   message?: string;
 }

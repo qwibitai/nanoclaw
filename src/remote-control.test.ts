@@ -1,11 +1,6 @@
 import fs from 'fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock config before importing the module under test
-vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/nanoclaw-rc-test',
-}));
-
 // Mock child_process
 const spawnMock = vi.fn();
 vi.mock('child_process', () => ({
@@ -33,7 +28,8 @@ function createMockProcess(pid = 12345) {
 }
 
 describe('remote-control', () => {
-  const STATE_FILE = _getStateFilePath();
+  const originalDataDir = process.env.NANOCLAW_DATA_DIR;
+  let stateFile: string;
   let readFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let writeFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let unlinkSyncSpy: ReturnType<typeof vi.spyOn>;
@@ -45,6 +41,8 @@ describe('remote-control', () => {
   let stdoutFileContent: string;
 
   beforeEach(() => {
+    process.env.NANOCLAW_DATA_DIR = '/tmp/nanoclaw-rc-test';
+    stateFile = _getStateFilePath();
     _resetForTesting();
     spawnMock.mockReset();
     stdoutFileContent = '';
@@ -73,6 +71,11 @@ describe('remote-control', () => {
   });
 
   afterEach(() => {
+    if (originalDataDir === undefined) {
+      delete process.env.NANOCLAW_DATA_DIR;
+    } else {
+      process.env.NANOCLAW_DATA_DIR = originalDataDir;
+    }
     _resetForTesting();
     vi.restoreAllMocks();
   });
@@ -132,17 +135,19 @@ describe('remote-control', () => {
       expect(closeSyncSpy).toHaveBeenCalledTimes(2);
     });
 
-    it('saves state to disk after capturing URL', async () => {
+    it('saves provider ownership state to disk after capturing URL', async () => {
       const proc = createMockProcess(99999);
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_save\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', 'claude-code');
 
       expect(writeFileSyncSpy).toHaveBeenCalledWith(
-        STATE_FILE,
-        expect.stringContaining('"pid":99999'),
+        stateFile,
+        expect.stringMatching(
+          /"pid":99999.*"startedInChat":"tg:123".*"providerId":"claude-code"/,
+        ),
       );
     });
 
@@ -262,7 +267,7 @@ describe('remote-control', () => {
       const result = stopRemoteControl();
       expect(result).toEqual({ ok: true });
       expect(killSpy).toHaveBeenCalledWith(55555, 'SIGTERM');
-      expect(unlinkSyncSpy).toHaveBeenCalledWith(STATE_FILE);
+      expect(unlinkSyncSpy).toHaveBeenCalledWith(stateFile);
       expect(getActiveSession()).toBeNull();
     });
 
@@ -271,6 +276,25 @@ describe('remote-control', () => {
       expect(result).toEqual({
         ok: false,
         error: 'No active Remote Control session',
+      });
+    });
+
+    it('rejects stop requests from a different provider owner', async () => {
+      // Arrange
+      const proc = createMockProcess(55555);
+      spawnMock.mockReturnValue(proc);
+      stdoutFileContent = 'https://claude.ai/code?bridge=env_stop\n';
+      vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
+      await startRemoteControl('user1', 'tg:123', '/project', 'claude-code');
+
+      // Act
+      const result = stopRemoteControl('tg:123', 'codex');
+
+      // Assert
+      expect(result).toEqual({
+        ok: false,
+        error:
+          'Remote Control session is owned by tg:123 on provider claude-code.',
       });
     });
   });
@@ -285,6 +309,7 @@ describe('remote-control', () => {
         startedBy: 'user1',
         startedInChat: 'tg:123',
         startedAt: '2026-01-01T00:00:00.000Z',
+        providerId: 'claude-code',
       };
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
@@ -298,6 +323,7 @@ describe('remote-control', () => {
       expect(active).not.toBeNull();
       expect(active!.pid).toBe(77777);
       expect(active!.url).toBe('https://claude.ai/code?bridge=env_restored');
+      expect(active!.providerId).toBe('claude-code');
     });
 
     it('clears state if process is dead', () => {
@@ -365,6 +391,43 @@ describe('remote-control', () => {
       expect(killSpy).toHaveBeenCalledWith(77777, 'SIGTERM');
       expect(unlinkSyncSpy).toHaveBeenCalled();
       expect(getActiveSession()).toBeNull();
+    });
+
+    it('rejects stop requests after restore when the owner chat and provider do not match', () => {
+      // Arrange
+      const session = {
+        pid: 77777,
+        url: 'https://claude.ai/code?bridge=env_restored',
+        startedBy: 'user1',
+        startedInChat: 'tg:123',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        providerId: 'claude-code',
+      };
+      readFileSyncSpy.mockImplementation(((p: string) => {
+        if (p.endsWith('remote-control.json')) return JSON.stringify(session);
+        return '';
+      }) as any);
+      const killSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((() => true) as any);
+      restoreRemoteControl();
+
+      // Act
+      const result = stopRemoteControl('tg:999', 'codex');
+
+      // Assert
+      expect(result).toEqual({
+        ok: false,
+        error:
+          'Remote Control session is owned by tg:123 on provider claude-code.',
+      });
+      expect(killSpy).not.toHaveBeenCalledWith(77777, 'SIGTERM');
+      expect(getActiveSession()).toEqual(
+        expect.objectContaining({
+          startedInChat: 'tg:123',
+          providerId: 'claude-code',
+        }),
+      );
     });
 
     it('startRemoteControl returns restored URL without spawning', () => {
