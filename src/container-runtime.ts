@@ -7,13 +7,14 @@ import os from 'os';
 
 import { logger } from './logger.js';
 
-/** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+/** The container runtime binary name. Override via CONTAINER_RUNTIME_BIN env var (e.g. 'podman'). */
+export const CONTAINER_RUNTIME_BIN = process.env.CONTAINER_RUNTIME_BIN || 'docker';
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
+  // On Linux, Docker requires an explicit --add-host for host.docker.internal.
+  // Podman resolves host.containers.internal automatically — no flag needed.
+  if (os.platform() === 'linux' && CONTAINER_RUNTIME_BIN !== 'podman') {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
   return [];
@@ -82,7 +83,7 @@ export function cleanupOrphans(): void {
       `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
-    const orphans = output.trim().split('\n').filter(Boolean);
+    const orphans = output.trim().split('\n').filter(Boolean).filter(n => n !== 'nanoclaw-host');
     for (const name of orphans) {
       try {
         stopContainer(name);

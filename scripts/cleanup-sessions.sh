@@ -15,7 +15,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# When running inside the orchestrator container, HOST_PROJECT_ROOT points to
+# the bind-mounted project directory on the host. Fall back to the script's parent.
+PROJECT_ROOT="${HOST_PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 
 STORE_DB="$PROJECT_ROOT/store/messages.db"
 SESSIONS_DIR="$PROJECT_ROOT/data/sessions"

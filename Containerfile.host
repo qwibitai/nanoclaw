@@ -1,0 +1,46 @@
+# NanoClaw Host Orchestrator Container
+#
+# Runs the NanoClaw Node.js orchestrator in an isolated Podman container.
+# npm install and TypeScript compilation happen here — never on your host machine.
+#
+# Build:  podman build -f Containerfile.host -t nanoclaw-host .
+# Run:    ./run-in-podman.sh
+
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+# npm ci + tsc run in this stage. Nothing from this stage touches the host.
+FROM node:22-slim AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+COPY setup/ ./setup/
+COPY scripts/ ./scripts/
+RUN npm run build
+
+# ── Stage 2: Runtime ────────────────────────────────────────────────────────
+# Only production deps + compiled output. Podman CLI added to spawn agent containers.
+FROM node:22-slim AS runtime
+
+# Install Podman CLI so the orchestrator can spawn agent containers via socket passthrough.
+# ca-certificates is needed for HTTPS to messaging APIs (Telegram, Slack, etc.).
+RUN apt-get update && apt-get install -y \
+    podman \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install production dependencies only
+COPY package*.json ./
+# Remove the husky prepare script — husky is a devDependency not installed here
+RUN npm pkg delete scripts.prepare && npm ci --omit=dev
+
+# Copy compiled TypeScript output from builder stage
+COPY --from=builder /app/dist ./dist
+COPY scripts/ ./scripts/
+
+# Runtime data (groups/, store/, data/, logs/, .env) is bind-mounted at startup.
+# The container image contains no user data or secrets.
+
+ENTRYPOINT ["node", "/app/dist/index.js"]

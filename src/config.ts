@@ -20,8 +20,11 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+// Absolute paths needed for container mounts.
+// When the orchestrator itself runs inside a container, HOST_PROJECT_ROOT must be
+// set to the project's path on the *host* (e.g. /mnt/d/sc/git/nanoclaw) so that
+// bind-mount paths passed to the container runtime resolve correctly.
+const PROJECT_ROOT = process.env.HOST_PROJECT_ROOT || process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
