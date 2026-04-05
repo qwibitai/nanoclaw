@@ -440,6 +440,8 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
   let lastFinalText: string | null = null;
+  let streamingTextBuffer = '';
+  let completedTurnsText = '';
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
@@ -521,6 +523,7 @@ async function runQuery(
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
+      includePartialMessages: true,
       settingSources: ['project', 'user'],
       mcpServers: {
         nanoclaw: {
@@ -571,21 +574,36 @@ async function runQuery(
       );
     }
 
-    if (message.type === 'assistant') {
-      // Emit partial output so the channel can stream text to the user
-      const content = (message as { message?: { content?: unknown } }).message?.content;
-      if (Array.isArray(content)) {
-        const textParts = content
-          .filter((c: { type?: string }) => c.type === 'text')
-          .map((c: { text?: string }) => c.text || '')
-          .join('');
-        const visible = textParts
+    if (message.type === 'stream_event') {
+      // Streaming text delta — emit full accumulated text as partial
+      const event = (message as { event: { type: string; delta?: { type?: string; text?: string } } }).event;
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+        streamingTextBuffer += event.delta.text;
+        // Combine completed turns + current turn's buffer
+        const fullText = completedTurnsText
+          ? completedTurnsText + '\n\n' + streamingTextBuffer
+          : streamingTextBuffer;
+        const visible = fullText
           .replace(/<internal>[\s\S]*?<\/internal>/g, '')
           .trim();
         if (visible) {
           writeOutput({ status: 'success', result: visible, partial: true, newSessionId });
         }
       }
+      // Reset current-turn buffer when a new message starts
+      if (event.type === 'message_start') {
+        streamingTextBuffer = '';
+      }
+    }
+
+    if (message.type === 'assistant') {
+      // Complete assistant turn — move current buffer to completed turns
+      if (streamingTextBuffer) {
+        completedTurnsText = completedTurnsText
+          ? completedTurnsText + '\n\n' + streamingTextBuffer
+          : streamingTextBuffer;
+      }
+      streamingTextBuffer = '';
     }
 
     if (message.type === 'result') {

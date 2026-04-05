@@ -1,11 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Tests for duplicate output suppression in the host-side onOutput callback.
+ * Tests for duplicate output suppression and streaming logic in the
+ * host-side onOutput callback.
  *
  * processGroupMessages is a non-exported function with heavy dependencies,
- * so we test the dedup pattern in isolation — the same logic used in
- * src/index.ts to prevent duplicate sendMessage calls.
+ * so we test the dedup/streaming pattern in isolation — the same logic
+ * used in src/index.ts.
  */
 
 describe('host-side output dedup', () => {
@@ -21,12 +22,13 @@ describe('host-side output dedup', () => {
     let lastSentText: string | null = null;
 
     for (const result of results) {
-      if (result.result && !result.partial) {
+      if (result.result) {
         const raw =
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        if (result.partial) continue; // partials handled in streaming tests
         if (text && text !== lastSentText) {
           sendMessage(text);
           lastSentText = text;
@@ -117,5 +119,543 @@ describe('host-side output dedup', () => {
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledWith('Answer');
+  });
+});
+
+describe('streaming output', () => {
+  const EDIT_THROTTLE_MS = 1500;
+
+  interface StreamChannel {
+    sendStreamMessage: (jid: string, text: string) => number | null;
+    editMessage: (jid: string, messageId: number, text: string) => void;
+    sendMessage: (jid: string, text: string) => void;
+  }
+
+  /**
+   * Replicates the streaming logic from processGroupMessages onOutput callback.
+   * Processes results sequentially, forwarding partials to sendStreamMessage/editMessage
+   * and finals to editMessage (if streaming) or sendMessage (fallback).
+   */
+  function simulateStreamingOutput(
+    results: Array<{ result: string | null; partial?: boolean; time?: number }>,
+    channel: StreamChannel,
+  ): { outputSentToUser: boolean } {
+    let lastSentText: string | null = null;
+    let streamMessageId: number | null = null;
+    let lastEditTime = 0;
+    let streamingFailed = false;
+    let outputSentToUser = false;
+
+    for (const result of results) {
+      if (!result.result) continue;
+
+      const raw =
+        typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result);
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const now = result.time ?? lastEditTime + EDIT_THROTTLE_MS + 1;
+
+      if (result.partial) {
+        if (!text || streamingFailed) continue;
+
+        if (streamMessageId === null) {
+          const resolvedId = channel.sendStreamMessage('jid', text);
+          if (resolvedId === null) {
+            streamingFailed = true;
+            continue;
+          }
+          streamMessageId = resolvedId;
+          lastEditTime = now;
+          lastSentText = text;
+        } else {
+          if (now - lastEditTime < EDIT_THROTTLE_MS) continue;
+          if (text === lastSentText) continue;
+          if (text.length > 4000) {
+            streamingFailed = true;
+            continue;
+          }
+          try {
+            channel.editMessage('jid', streamMessageId, text);
+            lastEditTime = now;
+            lastSentText = text;
+          } catch {
+            streamingFailed = true;
+            continue;
+          }
+        }
+        continue;
+      }
+
+      // Final result
+      if (streamMessageId !== null) {
+        if (text && text !== lastSentText) {
+          if (!streamingFailed && text.length <= 4096) {
+            channel.editMessage('jid', streamMessageId, text);
+          } else {
+            channel.sendMessage('jid', text);
+          }
+        }
+        outputSentToUser = true;
+        lastSentText = text;
+      } else if (text && text !== lastSentText) {
+        channel.sendMessage('jid', text);
+        outputSentToUser = true;
+        lastSentText = text;
+      }
+      // Reset streaming state for next IPC query
+      streamMessageId = null;
+      lastEditTime = 0;
+      streamingFailed = false;
+      lastSentText = null;
+    }
+
+    return { outputSentToUser };
+  }
+
+  function makeChannel(overrides?: Partial<StreamChannel>): StreamChannel {
+    return {
+      sendStreamMessage: vi.fn(() => 42),
+      editMessage: vi.fn(() => {}),
+      sendMessage: vi.fn(() => {}),
+      ...overrides,
+    };
+  }
+
+  it('uses partial text directly (agent-runner accumulates)', () => {
+    const channel = makeChannel();
+
+    // Agent-runner sends pre-accumulated text in each partial
+    simulateStreamingOutput(
+      [
+        { result: 'Looking into it...', partial: true, time: 0 },
+        {
+          result: 'Looking into it...\n\nHere is the answer.',
+          partial: true,
+          time: 2000,
+        },
+        {
+          result: 'Looking into it...\n\nHere is the answer.',
+          partial: false,
+          time: 4000,
+        },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.sendStreamMessage).toHaveBeenCalledWith(
+      'jid',
+      'Looking into it...',
+    );
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'jid',
+      42,
+      'Looking into it...\n\nHere is the answer.',
+    );
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('throttles edits within EDIT_THROTTLE_MS', () => {
+    const channel = makeChannel();
+
+    // Agent-runner sends growing text; host throttles edits
+    simulateStreamingOutput(
+      [
+        { result: 'Hello', partial: true, time: 0 },
+        { result: 'Hello w', partial: true, time: 500 },     // throttled
+        { result: 'Hello wor', partial: true, time: 1000 },  // throttled
+        { result: 'Hello world', partial: true, time: 2000 }, // sent
+        { result: 'Hello world!', partial: false, time: 4000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
+    expect(channel.editMessage).toHaveBeenCalledWith('jid', 42, 'Hello world');
+    expect(channel.editMessage).toHaveBeenCalledWith('jid', 42, 'Hello world!');
+  });
+
+  it('falls back to sendMessage when sendStreamMessage returns null', () => {
+    const channel = makeChannel({
+      sendStreamMessage: vi.fn(() => null),
+    });
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'partial', partial: true },
+        { result: 'Final answer', partial: false },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Final answer');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('marks outputSentToUser when final text matches accumulated', () => {
+    const channel = makeChannel();
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'Complete text', partial: true, time: 0 },
+        { result: 'Complete text', partial: false, time: 2000 },
+      ],
+      channel,
+    );
+
+    expect(outputSentToUser).toBe(true);
+    // Accumulated text already displayed via sendStreamMessage — no extra edit
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('stops streaming when text exceeds 4000 chars', () => {
+    const channel = makeChannel();
+    const longText = 'x'.repeat(4001);
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'Short', partial: true, time: 0 },
+        { result: longText, partial: true, time: 2000 }, // > 4000 triggers streamingFailed
+        { result: 'Final result', partial: false, time: 4000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Final result');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('skips partial chunks with empty text after internal tag stripping', () => {
+    const channel = makeChannel();
+
+    simulateStreamingOutput(
+      [
+        { result: '<internal>thinking</internal>', partial: true },
+        { result: '<internal>more thinking</internal>Answer', partial: false },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Answer');
+  });
+
+  it('resets streaming state between IPC queries (consecutive finals)', () => {
+    const channel = makeChannel();
+
+    // Simulate two consecutive IPC queries through the same onOutput callback
+    simulateStreamingOutput(
+      [
+        // First query
+        { result: 'First answer', partial: true, time: 0 },
+        { result: 'First answer', partial: false, time: 1000 },
+        // Second query — must NOT reuse streamMessageId from first query
+        { result: 'Second answer', partial: true, time: 5000 },
+        { result: 'Second answer', partial: false, time: 6000 },
+      ],
+      channel,
+    );
+
+    // Each query should create its own streaming message
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(2);
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('creates new streaming message for each IPC query', () => {
+    const channel = makeChannel();
+
+    simulateStreamingOutput(
+      [
+        // First query
+        { result: 'First response', partial: true, time: 0 },
+        { result: 'First response', partial: false, time: 1000 },
+        // Second query — independent streaming message
+        { result: 'Second response', partial: true, time: 5000 },
+        { result: 'Second response', partial: false, time: 6000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(2);
+    expect(channel.sendStreamMessage).toHaveBeenNthCalledWith(
+      1,
+      'jid',
+      'First response',
+    );
+    expect(channel.sendStreamMessage).toHaveBeenNthCalledWith(
+      2,
+      'jid',
+      'Second response',
+    );
+    expect(channel.editMessage).not.toHaveBeenCalled();
+  });
+
+  it('edits streaming message with final text when different', () => {
+    const channel = makeChannel();
+
+    simulateStreamingOutput(
+      [
+        { result: 'Partial preview', partial: true, time: 0 },
+        { result: 'Complete final response', partial: false, time: 2000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'jid',
+      42,
+      'Complete final response',
+    );
+  });
+
+  it('falls back to sendMessage when editMessage fails during partial', () => {
+    let editCallCount = 0;
+    const channel = makeChannel({
+      editMessage: vi.fn(() => {
+        editCallCount++;
+        if (editCallCount === 1) throw new Error('Telegram edit failed');
+      }),
+    });
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'First chunk', partial: true, time: 0 },
+        { result: 'Second chunk', partial: true, time: 2000 }, // edit fails
+        { result: 'Third chunk', partial: true, time: 4000 }, // skipped (streamingFailed)
+        { result: 'Complete response', partial: false, time: 6000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    // First edit attempt fails → streamingFailed
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    // Final uses sendMessage because streamingFailed
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Complete response');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('no-ops when final has no text and streaming was active', () => {
+    const channel = makeChannel();
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'Streamed text', partial: true, time: 0 },
+        { result: '<internal>done</internal>', partial: false, time: 2000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    // Final text is empty after stripping — but streaming was active so outputSentToUser
+    expect(outputSentToUser).toBe(true);
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Tests for agent-runner stream event processing pattern.
+ *
+ * The agent-runner accumulates text deltas from SDK stream events
+ * and emits them as partial output. This tests the same logic
+ * used in container/agent-runner/src/index.ts.
+ */
+describe('agent-runner streaming buffer', () => {
+  type StreamEvent = {
+    type: string;
+    event: {
+      type: string;
+      delta?: { type?: string; text?: string };
+    };
+  };
+
+  type AssistantMessage = {
+    type: 'assistant';
+    message?: { content?: Array<{ type: string; text?: string }> };
+  };
+
+  type SDKMessage = StreamEvent | AssistantMessage | { type: string };
+
+  /**
+   * Replicates the stream_event + assistant message processing logic
+   * from the agent-runner's runQuery function.
+   */
+  function simulateAgentRunner(
+    messages: SDKMessage[],
+    writeOutput: (output: { result: string; partial: true }) => void,
+  ) {
+    let streamingTextBuffer = '';
+    let completedTurnsText = '';
+
+    for (const message of messages) {
+      if (message.type === 'stream_event') {
+        const event = (message as StreamEvent).event;
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta?.type === 'text_delta' &&
+          event.delta.text
+        ) {
+          streamingTextBuffer += event.delta.text;
+          const fullText = completedTurnsText
+            ? completedTurnsText + '\n\n' + streamingTextBuffer
+            : streamingTextBuffer;
+          const visible = fullText
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+          if (visible) {
+            writeOutput({ result: visible, partial: true });
+          }
+        }
+        if (event.type === 'message_start') {
+          streamingTextBuffer = '';
+        }
+      }
+
+      if (message.type === 'assistant') {
+        if (streamingTextBuffer) {
+          completedTurnsText = completedTurnsText
+            ? completedTurnsText + '\n\n' + streamingTextBuffer
+            : streamingTextBuffer;
+        }
+        streamingTextBuffer = '';
+      }
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let writeOutputMock: any;
+  const writeOutput = (output: { result: string; partial: true }) =>
+    writeOutputMock(output);
+
+  beforeEach(() => {
+    writeOutputMock = vi.fn();
+  });
+
+  it('accumulates text deltas into partial output', () => {
+    simulateAgentRunner(
+      [
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } },
+        },
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+        },
+      ],
+      writeOutput,
+    );
+
+    expect(writeOutputMock).toHaveBeenCalledTimes(2);
+    expect(writeOutputMock).toHaveBeenNthCalledWith(1, {
+      result: 'Hello',
+      partial: true,
+    });
+    expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
+      result: 'Hello world',
+      partial: true,
+    });
+  });
+
+  it('resets buffer on message_start', () => {
+    simulateAgentRunner(
+      [
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'First turn' } },
+        },
+        {
+          type: 'stream_event',
+          event: { type: 'message_start' },
+        },
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Second turn' } },
+        },
+      ],
+      writeOutput,
+    );
+
+    expect(writeOutputMock).toHaveBeenCalledTimes(2);
+    // Second emission should NOT include "First turn"
+    expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
+      result: 'Second turn',
+      partial: true,
+    });
+  });
+
+  it('accumulates across turns via completedTurnsText', () => {
+    simulateAgentRunner(
+      [
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn 1 text' } },
+        },
+        { type: 'assistant' },
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn 2 text' } },
+        },
+      ],
+      writeOutput,
+    );
+
+    expect(writeOutputMock).toHaveBeenCalledTimes(2);
+    // Second turn includes completed turn 1
+    expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
+      result: 'Turn 1 text\n\nTurn 2 text',
+      partial: true,
+    });
+  });
+
+  it('strips complete internal tags from accumulated buffer', () => {
+    simulateAgentRunner(
+      [
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '<internal>thinking</internal>' } },
+        },
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Answer' } },
+        },
+      ],
+      writeOutput,
+    );
+
+    // First delta is all internal — stripped, no visible text, no output
+    expect(writeOutputMock).toHaveBeenCalledTimes(1);
+    expect(writeOutputMock).toHaveBeenCalledWith({
+      result: 'Answer',
+      partial: true,
+    });
+  });
+
+  it('ignores non-text deltas', () => {
+    simulateAgentRunner(
+      [
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'input_json_delta', text: '{"key": "value"}' },
+          },
+        },
+      ],
+      writeOutput,
+    );
+
+    expect(writeOutputMock).not.toHaveBeenCalled();
   });
 });
