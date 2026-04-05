@@ -36,6 +36,7 @@ export class GroupQueue {
     null;
   private shuttingDown = false;
   onMaxRetriesExceeded?: (groupJid: string) => void;
+  advanceCursorFn?: (groupJid: string) => void;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -229,6 +230,7 @@ export class GroupQueue {
         const success = await this.processMessagesFn(groupJid);
         if (success) {
           state.retryCount = 0;
+          this.advanceCursorFn?.(groupJid);
         } else {
           this.scheduleRetry(groupJid, state);
         }

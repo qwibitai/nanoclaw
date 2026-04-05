@@ -645,8 +645,8 @@ async function startMessageLoop(): Promise<void> {
               'Piped messages to active container',
             );
             // Don't advance cursor here — the agent process may crash before
-            // reading the piped input. processGroupMessages will advance the
-            // cursor after successful processing, preventing message loss.
+            // reading the piped input. Cursor is advanced via advanceCursorFn
+            // on successful container exit.
 
             // Show typing indicator while the container processes the piped message
             // Skip if agent sent a response recently — prevents typing reappearing on Telegram
@@ -758,6 +758,20 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    // Advance cursor for all groups before killing containers so piped
+    // messages are not re-delivered on restart (Issue #10).
+    for (const chatJid of Object.keys(registeredGroups)) {
+      const pending = getMessagesSince(
+        chatJid,
+        getOrRecoverCursor(chatJid),
+        ASSISTANT_NAME,
+        MAX_MESSAGES_PER_PROMPT,
+      );
+      if (pending.length > 0) {
+        lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
+      }
+    }
+    saveState();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -935,6 +949,18 @@ async function main(): Promise<void> {
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.advanceCursorFn = (chatJid) => {
+    const pending = getMessagesSince(
+      chatJid,
+      getOrRecoverCursor(chatJid),
+      ASSISTANT_NAME,
+      MAX_MESSAGES_PER_PROMPT,
+    );
+    if (pending.length > 0) {
+      lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
+      saveState();
+    }
+  };
   queue.onMaxRetriesExceeded = (groupJid) => {
     const ch = findChannel(channels, groupJid);
     if (ch) {

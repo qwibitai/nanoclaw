@@ -570,6 +570,37 @@ describe('GroupQueue', () => {
 
   // --- getStatus ---
 
+  // --- advanceCursorFn on successful container exit (Issue #10) ---
+
+  it('calls advanceCursorFn on successful container exit', async () => {
+    const advanceCursor = vi.fn();
+    queue.advanceCursorFn = advanceCursor;
+
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledWith('group1@g.us');
+    expect(advanceCursor).toHaveBeenCalledOnce();
+    expect(advanceCursor).toHaveBeenCalledWith('group1@g.us');
+  });
+
+  it('does not call advanceCursorFn on failed container exit', async () => {
+    const advanceCursor = vi.fn();
+    queue.advanceCursorFn = advanceCursor;
+
+    const processMessages = vi.fn(async () => false);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalled();
+    expect(advanceCursor).not.toHaveBeenCalled();
+  });
+
   it('getStatus returns 0 active containers initially', () => {
     expect(queue.getStatus()).toEqual({ activeContainers: 0 });
   });
