@@ -38,7 +38,7 @@ interface ContainerInput {
 interface ContainerOutput {
   status: 'success' | 'error' | 'progress';
   result: string | null;
-  newSessionId?: string | null;
+  newSessionId?: string;
   error?: string;
 }
 
@@ -379,7 +379,7 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{
-  newSessionId?: string | null;
+  newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
 }> {
@@ -506,8 +506,11 @@ async function runQuery(
     // 工具调用进度输出 — 让宿主机能显示进度卡片
     if (message.type === 'assistant') {
       const msg = message as Record<string, unknown>;
-      const content = msg.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
-      log(`[assistant] keys=${Object.keys(msg).join(',')}, hasContent=${!!content}, contentLen=${Array.isArray(content) ? content.length : 'N/A'}, contentTypes=${Array.isArray(content) ? content.map(b => b.type).join(',') : 'N/A'}`);
+      const innerMsg = msg.message as Record<string, unknown> | undefined;
+      const innerContent = innerMsg?.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
+      const outerContent = msg.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
+      const content = innerContent || outerContent;  // SDK 嵌套在 message.content 里
+      log(`[assistant] innerKeys=${innerMsg ? Object.keys(innerMsg).join(',') : 'N/A'}, contentTypes=${Array.isArray(content) ? content.map(b => b.type).join(',') : 'none'}`);
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === 'tool_use' && block.name) {
@@ -527,7 +530,7 @@ async function runQuery(
             writeOutput({
               status: 'progress',
               result: `${emoji} ${block.name}: ${shortInput}`,
-              newSessionId: null,
+              newSessionId: undefined,
             });
           }
         }
