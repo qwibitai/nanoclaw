@@ -170,7 +170,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // メイン以外のグループについては、トリガーが必要かつ存在するか確認
+  // 非特権グループ（chat/thread）については、トリガーが必要かつ存在するか確認
   if (!isPrivileged && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
