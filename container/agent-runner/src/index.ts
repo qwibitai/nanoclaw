@@ -16,11 +16,12 @@ import type {
   ProviderRuntimeInput,
 } from './provider-types.js';
 
+const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT || '/workspace';
+const GROUP_DIR = path.join(WORKSPACE_ROOT, 'group');
+const GLOBAL_DIR = path.join(WORKSPACE_ROOT, 'global');
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const SCRIPT_TIMEOUT_MS = 30_000;
-const DEFAULT_GROUP_WORKSPACE_DIR = '/workspace/group';
-const DEFAULT_GLOBAL_WORKSPACE_DIR = '/workspace/global';
 
 interface ScriptResult {
   wakeAgent: boolean;
@@ -120,26 +121,16 @@ function defaultMcpServerPath(): string {
   return path.join(__dirname, 'ipc-mcp-stdio.js');
 }
 
-function groupWorkspaceDir(): string {
-  return process.env.NANOCLAW_WORKSPACE_GROUP_DIR || DEFAULT_GROUP_WORKSPACE_DIR;
-}
-
-function globalWorkspaceDir(): string {
-  return (
-    process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || DEFAULT_GLOBAL_WORKSPACE_DIR
-  );
-}
-
 export async function* dispatchProviderInput(
   containerInput: ContainerInput,
   options: DispatchOptions = {},
 ): AsyncGenerator<ContainerOutput> {
   const registry = createContainerProviderRegistry(options.providers);
   const provider = registry.getProvider(containerInput.providerId);
-  const workspaceDir = groupWorkspaceDir();
+  const workspaceDir = GROUP_DIR;
   const globalMemoryDir = containerInput.runtimeInput.isMain
     ? undefined
-    : globalWorkspaceDir();
+    : GLOBAL_DIR;
   const preparedWorkspace = await provider.prepareWorkspace({
     providerHomeDir: provider.providerHomeDir,
     workspaceDir,
@@ -150,7 +141,11 @@ export async function* dispatchProviderInput(
 
   materializeWorkspaceFiles(
     provider.id,
-    [workspaceDir, provider.providerHomeDir, ...(globalMemoryDir ? [globalMemoryDir] : [])],
+    [
+      workspaceDir,
+      provider.providerHomeDir,
+      ...(globalMemoryDir ? [globalMemoryDir] : []),
+    ],
     preparedWorkspace.files,
   );
 
@@ -313,8 +308,7 @@ export async function main(): Promise<void> {
       writeOutput(output);
     }
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     log(`Agent error: ${errorMessage}`);
     writeOutput({
       status: 'error',

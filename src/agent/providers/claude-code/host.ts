@@ -103,8 +103,12 @@ export function createClaudeCodeProvider(): AgentProvider {
             targetPath: path.join(ctx.groupDir, 'CLAUDE.md'),
           },
           {
-            targetPath: path.join(sessionRoot.providerStateDir, 'settings.json'),
+            targetPath: path.join(
+              sessionRoot.providerStateDir,
+              'settings.json',
+            ),
             content: `${CLAUDE_SETTINGS}\n`,
+            onlyIfMissing: true,
           },
         ],
         directorySyncs: [

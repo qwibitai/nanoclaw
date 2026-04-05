@@ -6,9 +6,7 @@ export class AgentProviderRegistry {
 
   register(provider: AgentProvider): void {
     if (this.providers.has(provider.id)) {
-      throw new Error(
-        `Agent provider "${provider.id}" is already registered.`,
-      );
+      throw new Error(`Agent provider "${provider.id}" is already registered.`);
     }
 
     this.providers.set(provider.id, provider);

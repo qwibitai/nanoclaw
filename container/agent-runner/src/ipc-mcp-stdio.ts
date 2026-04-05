@@ -11,7 +11,9 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
-const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
+const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT || '/workspace';
+const IPC_DIR =
+  process.env.NANOCLAW_IPC_DIR || path.join(WORKSPACE_ROOT, 'ipc');
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 

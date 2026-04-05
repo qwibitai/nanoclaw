@@ -20,7 +20,11 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import { seedGroupMemoryFiles } from './agent/memory.js';
+import {
+  DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
+  seedGroupMemoryFiles,
+} from './agent/memory.js';
 import { createSessionStore } from './agent/session-store.js';
 import {
   ContainerOutput,
@@ -127,7 +131,11 @@ function loadState(): void {
   sessionStore = createRuntimeSessionStore();
   for (const group of Object.values(registeredGroups)) {
     const providerId = getGroupProviderId(group);
-    sessionStore.hydrate(group.folder, providerId, getSession(group.folder, providerId));
+    sessionStore.hydrate(
+      group.folder,
+      providerId,
+      getSession(group.folder, providerId),
+    );
   }
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
@@ -182,6 +190,9 @@ function ensureGroupMemoryFilesReady(
   const seededMemory = seedGroupMemoryFiles({
     targetDir: groupDir,
     templateDir: path.join(GROUPS_DIR, group.isMain ? 'main' : 'global'),
+    canonicalTemplateFingerprint: group.isMain
+      ? DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT
+      : undefined,
   });
 
   for (const file of [seededMemory.canonical, seededMemory.compatibility]) {
@@ -195,11 +206,54 @@ function ensureGroupMemoryFilesReady(
       logMessage,
     );
   }
+
+  if (seededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        folder: group.folder,
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy CLAUDE.md into canonical AGENT.md during group recovery',
+    );
+  }
+}
+
+function ensureSharedMemoryTemplatesReady(): void {
+  const globalDir = path.join(GROUPS_DIR, 'global');
+  const seededMemory = seedGroupMemoryFiles({
+    targetDir: globalDir,
+    templateDir: globalDir,
+    canonicalTemplateFingerprint: DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  });
+
+  for (const file of [seededMemory.canonical, seededMemory.compatibility]) {
+    if (!file.created) {
+      continue;
+    }
+
+    logger.info(
+      { file: file.path, seededFrom: file.seededFrom },
+      'Created shared memory file during startup preparation',
+    );
+  }
+
+  if (seededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy global CLAUDE.md into canonical AGENT.md',
+    );
+  }
 }
 
 function restoreRegisteredGroupsOnStartup(
   groups: Record<string, RegisteredGroup>,
 ): void {
+  ensureSharedMemoryTemplatesReady();
+
   for (const [jid, group] of Object.entries(groups)) {
     let groupDir: string;
     try {

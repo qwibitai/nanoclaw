@@ -13,16 +13,15 @@ import type {
   ProviderRuntimeInput,
 } from '../provider-types.js';
 
-const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
+const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT || '/workspace';
+const GROUP_DIR = path.join(WORKSPACE_ROOT, 'group');
+const GLOBAL_DIR = path.join(WORKSPACE_ROOT, 'global');
+const EXTRA_DIR = path.join(WORKSPACE_ROOT, 'extra');
+const IPC_DIR =
+  process.env.NANOCLAW_IPC_DIR || path.join(WORKSPACE_ROOT, 'ipc');
 const IPC_INPUT_DIR = path.join(IPC_DIR, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-const WORKSPACE_GROUP_DIR =
-  process.env.NANOCLAW_WORKSPACE_GROUP_DIR || '/workspace/group';
-const WORKSPACE_GLOBAL_DIR =
-  process.env.NANOCLAW_WORKSPACE_GLOBAL_DIR || '/workspace/global';
-const WORKSPACE_EXTRA_DIR =
-  process.env.NANOCLAW_WORKSPACE_EXTRA_DIR || '/workspace/extra';
 
 interface SessionEntry {
   sessionId: string;
@@ -139,7 +138,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = path.join(WORKSPACE_GROUP_DIR, 'conversations');
+      const conversationsDir = path.join(GROUP_DIR, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -295,7 +294,9 @@ function drainIpcInput(): string[] {
 
     return messages;
   } catch (error) {
-    log(`IPC drain error: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `IPC drain error: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return [];
   }
 }
@@ -369,14 +370,8 @@ async function runQuery(
 
   let globalClaudeMd: string | undefined;
   if (!runtimeInput.isMain) {
-    const canonicalGlobalMemoryPath = path.join(
-      WORKSPACE_GLOBAL_DIR,
-      'AGENT.md',
-    );
-    const legacyGlobalMemoryPath = path.join(
-      WORKSPACE_GLOBAL_DIR,
-      'CLAUDE.md',
-    );
+    const canonicalGlobalMemoryPath = path.join(GLOBAL_DIR, 'AGENT.md');
+    const legacyGlobalMemoryPath = path.join(GLOBAL_DIR, 'CLAUDE.md');
 
     if (fs.existsSync(canonicalGlobalMemoryPath)) {
       globalClaudeMd = fs.readFileSync(canonicalGlobalMemoryPath, 'utf-8');
@@ -386,9 +381,9 @@ async function runQuery(
   }
 
   const extraDirs: string[] = [];
-  if (fs.existsSync(WORKSPACE_EXTRA_DIR)) {
-    for (const entry of fs.readdirSync(WORKSPACE_EXTRA_DIR)) {
-      const fullPath = path.join(WORKSPACE_EXTRA_DIR, entry);
+  if (fs.existsSync(EXTRA_DIR)) {
+    for (const entry of fs.readdirSync(EXTRA_DIR)) {
+      const fullPath = path.join(EXTRA_DIR, entry);
       if (fs.statSync(fullPath).isDirectory()) {
         extraDirs.push(fullPath);
       }
@@ -401,7 +396,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: WORKSPACE_GROUP_DIR,
+      cwd: GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -445,6 +440,8 @@ async function runQuery(
             NANOCLAW_CHAT_JID: runtimeInput.chatJid,
             NANOCLAW_GROUP_FOLDER: runtimeInput.groupFolder,
             NANOCLAW_IS_MAIN: runtimeInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_DIR: IPC_DIR,
+            NANOCLAW_WORKSPACE_ROOT: WORKSPACE_ROOT,
           },
         },
       },
@@ -553,7 +550,9 @@ export const claudeCodeProvider: ContainerAgentProvider = {
 
     const pending = drainIpcInput();
     if (pending.length > 0) {
-      log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+      log(
+        `Draining ${pending.length} pending IPC messages into initial prompt`,
+      );
       prompt += `\n${pending.join('\n')}`;
     }
 

@@ -52,9 +52,7 @@ describe('ci workflow', () => {
 
     // Assert
     expect(scripts.build).toBe('tsc');
-    expect(scripts.test).toBe(
-      'npm run build && node --test test/*.test.js',
-    );
+    expect(scripts.test).toBe('npm run build && node --test test/*.test.js');
   });
 
   it('keeps a real smoke test around the built runner entrypoint', () => {

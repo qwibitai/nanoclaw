@@ -162,10 +162,10 @@ async function runTask(
 
   // For group context mode, use the group's current session
   const providerId = getGroupProviderId(group);
-  const sessionId =
-    task.context_mode === 'group'
-      ? deps.sessionStore.get(task.group_folder, providerId)
-      : undefined;
+  const shouldPersistSession = task.context_mode === 'group';
+  const sessionId = shouldPersistSession
+    ? deps.sessionStore.get(task.group_folder, providerId)
+    : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -197,7 +197,7 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.newSessionId) {
+        if (shouldPersistSession && streamedOutput.newSessionId) {
           deps.sessionStore.set(
             task.group_folder,
             providerId,
@@ -212,7 +212,8 @@ async function runTask(
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          scheduleClose(); // Close promptly even when result is null
+          // (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -225,7 +226,7 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else {
-      if (output.newSessionId) {
+      if (shouldPersistSession && output.newSessionId) {
         deps.sessionStore.set(
           task.group_folder,
           providerId,
@@ -233,7 +234,8 @@ async function runTask(
         );
       }
       if (output.result) {
-        // Result was already forwarded to the user via the streaming callback above
+        // Result was already forwarded to the user via the
+        // streaming callback above
         result = output.result;
       }
     }

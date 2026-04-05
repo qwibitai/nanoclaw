@@ -16,6 +16,7 @@ export interface ProviderFileMaterialization {
   sourcePath?: string;
   targetPath: string;
   content?: string;
+  onlyIfMissing?: boolean;
 }
 
 export interface ProviderDirectorySync {
@@ -37,6 +38,7 @@ export interface PreparedSession {
   allowedStateRoots?: string[];
   files: ProviderFileMaterialization[];
   directorySyncs?: ProviderDirectorySync[];
+  fallbackProviderStateDirs?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -106,11 +108,7 @@ export interface AgentProvider {
   ): ProviderCheckResult[];
   prepareSession(ctx: PrepareSessionContext): PreparedSession;
   buildContainerSpec(ctx: BuildContainerSpecContext): ProviderContainerSpec;
-  serializeRuntimeInput(
-    ctx: RuntimeInvocationContext,
-  ): ProviderRuntimeInput;
-  startRemoteControl?(
-    ctx: RemoteControlContext,
-  ): Promise<RemoteControlResult>;
+  serializeRuntimeInput(ctx: RuntimeInvocationContext): ProviderRuntimeInput;
+  startRemoteControl?(ctx: RemoteControlContext): Promise<RemoteControlResult>;
   stopRemoteControl?(): Promise<void>;
 }
