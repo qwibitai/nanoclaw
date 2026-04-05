@@ -1,9 +1,9 @@
 ---
-name: add-wiki
-description: Add a persistent wiki knowledge base to a NanoClaw group. Based on Karpathy's LLM Wiki pattern. Triggers on "add wiki", "wiki", "knowledge base", "llm wiki".
+name: add-karpathy-llm-wiki
+description: Add a persistent wiki knowledge base to a NanoClaw group. Based on Karpathy's LLM Wiki pattern. Triggers on "add wiki", "wiki", "knowledge base", "llm wiki", "karpathy wiki".
 ---
 
-# Add Wiki
+# Add Karpathy LLM Wiki
 
 Set up a persistent wiki knowledge base on NanoClaw, based on Karpathy's LLM Wiki pattern.
 
