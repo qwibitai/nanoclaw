@@ -122,7 +122,10 @@ export async function getMemoryBlock(
           memories = searchMemoriesVecAllGroups(embedding, TOP_K);
           if (memories.length === 0) memories = fetchRecent();
         } catch (err) {
-          logger.warn({ err }, 'vec_memories search failed, falling back to recent');
+          logger.warn(
+            { err },
+            'vec_memories search failed, falling back to recent',
+          );
           memories = fetchRecent();
         }
       } else {
@@ -160,7 +163,10 @@ export async function searchMemoriesSemantic(
     try {
       results = searchMemoriesVec(groupFolder, embedding, limit);
     } catch (err) {
-      logger.warn({ err }, 'vec_memories search failed, falling back to keyword');
+      logger.warn(
+        { err },
+        'vec_memories search failed, falling back to keyword',
+      );
       results = fallback(groupFolder, query, limit);
     }
   }

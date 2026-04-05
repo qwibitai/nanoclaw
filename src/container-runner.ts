@@ -50,6 +50,11 @@ import YAML from 'yaml';
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
+// Claude Code derives the projects directory name from cwd by replacing / with -.
+// Container cwd is /workspace/group → projects/-workspace-group/.
+// If Claude Code changes this convention, update here.
+const CLAUDE_CODE_PROJECTS_DIR = '-workspace-group';
+
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const PROGRESS_START_MARKER = '---NANOCLAW_PROGRESS_START---';
@@ -2008,6 +2013,12 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access.
   // Thread sessions get their own subdirectory under the group.
+  const groupBaseSessionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    '.claude',
+  );
   const groupSessionsDir = threadId
     ? path.join(
         DATA_DIR,
@@ -2017,9 +2028,22 @@ function buildVolumeMounts(
         threadId,
         '.claude',
       )
-    : path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+    : groupBaseSessionsDir;
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
+
+  // Share auto-memory across all threads in a group. Claude Code writes to
+  // .claude/projects/{PROJECTS_DIR_NAME}/memory/ based on cwd (/workspace/group).
+  // Without sharing, each thread gets isolated memory lost when the thread ends.
+  // A nested bind mount overlays the thread's memory path with the group-level
+  // dir (symlinks break inside containers — target path doesn't exist).
+  const groupMemoryDir = path.join(
+    groupBaseSessionsDir,
+    'projects',
+    CLAUDE_CODE_PROJECTS_DIR,
+    'memory',
+  );
+  fs.mkdirSync(groupMemoryDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   const requiredEnv: Record<string, string> = {
     // Enable agent swarms (subagent orchestration)
@@ -2205,6 +2229,17 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+  // Overlay the thread's memory path with the shared group memory dir.
+  // ORDERING: this MUST come after the parent /home/node/.claude mount above —
+  // Docker gives precedence to more-specific paths, so this overlays the memory
+  // subdirectory while leaving the rest of the session dir thread-scoped.
+  if (threadId) {
+    mounts.push({
+      hostPath: groupMemoryDir,
+      containerPath: `/home/node/.claude/projects/${CLAUDE_CODE_PROJECTS_DIR}/memory`,
+      readonly: false,
+    });
+  }
 
   // Consolidated gws credentials — one file per account at ~/.config/gws/accounts/{name}.json.
   // Each file has all Google scopes (Gmail, Calendar, Drive, Docs, Sheets, Slides).

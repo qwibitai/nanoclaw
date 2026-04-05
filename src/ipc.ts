@@ -1476,13 +1476,17 @@ function processQueryIpc(
       }
       const limit = data.limit ?? 6;
       const query: string = data.query;
-      searchMemoriesSemantic(sourceGroup, query, limit, searchMemoriesKeyword)
-        .then((memories) => {
-          writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
-            status: 'ok',
-            memories,
-          });
+      searchMemoriesSemantic(
+        sourceGroup,
+        query,
+        limit,
+        searchMemoriesKeyword,
+      ).then((memories) => {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'ok',
+          memories,
         });
+      });
       break;
     }
 
