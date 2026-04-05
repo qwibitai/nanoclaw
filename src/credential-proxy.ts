@@ -34,6 +34,20 @@ export function startCredentialProxy(
     'ANTHROPIC_BASE_URL',
   ]);
 
+  // Fall back to process.env for credentials not found in .env.
+  // Needed when nanoclaw is launched via sops-run.sh which injects
+  // secrets into the process environment rather than writing them to .env.
+  for (const key of [
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+  ] as const) {
+    if (!secrets[key] && process.env[key]) {
+      secrets[key] = process.env[key];
+    }
+  }
+
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
@@ -121,5 +135,6 @@ export function startCredentialProxy(
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
   const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const apiKey = secrets.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  return apiKey ? 'api-key' : 'oauth';
 }

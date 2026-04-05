@@ -310,14 +310,18 @@ function buildContainerArgs(
     try {
       const key = fs.readFileSync(composioKeyFile, 'utf-8').trim();
       if (key) args.push('-e', `COMPOSIO_API_KEY=${key}`);
-    } catch { /* not configured, skip */ }
+    } catch {
+      /* not configured, skip */
+    }
   }
   const composioUrlFile = path.join(os.homedir(), '.composio', 'mcp.url');
   if (fs.existsSync(composioUrlFile)) {
     try {
       const url = fs.readFileSync(composioUrlFile, 'utf-8').trim();
       if (url) args.push('-e', `COMPOSIO_MCP_URL=${url}`);
-    } catch { /* not configured, skip */ }
+    } catch {
+      /* not configured, skip */
+    }
   }
 
   for (const mount of mounts) {

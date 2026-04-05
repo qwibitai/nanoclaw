@@ -59,7 +59,9 @@ describe('GmailChannel', () => {
 
     it('defaults to unread query when no filter configured', () => {
       const ch = new GmailChannel(makeOpts());
-      const query = (ch as unknown as { buildQuery: () => string }).buildQuery();
+      const query = (
+        ch as unknown as { buildQuery: () => string }
+      ).buildQuery();
       expect(query).toBe('is:unread category:primary');
     });
 
