@@ -904,6 +904,28 @@ async function main(): Promise<void> {
         return;
       }
 
+      // /help 指令 — 列出所有可用命令
+      if (trimmed === '/help') {
+        const ch = findChannel(channels, chatJid);
+        const help = [
+          '可用命令：',
+          '',
+          '/help — 显示此帮助',
+          '/clear — 清除当前 session，开始新对话（记忆保留）',
+          '/account — 列出所有 Anthropic 账号及当前绑定',
+          '/account <name> — 切换到指定账号',
+          '/account auto on|off — 开关自动轮换（429 时自动切换）',
+          '/trigger — 开启 @触发模式（群聊需 @机器人才响应）',
+          '/notrigger — 关闭 @触发模式（群聊中所有消息都响应）',
+          '/remote-control — 启动 Claude Code 远程控制会话',
+          '/remote-control-end — 结束远程控制会话',
+        ].join('\n');
+        ch?.sendMessage(chatJid, help).catch((err) =>
+          logger.error({ err }, '/help reply failed'),
+        );
+        return;
+      }
+
       // /clear 指令 — 清除 session，开始新对话（对齐 Claude Code /clear）
       if (trimmed === '/clear') {
         const group = registeredGroups[chatJid];
