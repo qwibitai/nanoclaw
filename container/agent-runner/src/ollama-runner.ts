@@ -666,7 +666,6 @@ export async function runOllamaAgent(
     (containerInput.unifiedSessionId
       ? loadSession(containerInput.unifiedSessionId)
       : null) || createSession('ollama');
-  const previousProvider = session.lastProvider;
   session.lastProvider = 'ollama';
 
   // Always refresh system prompt from CLAUDE.md at container start.
@@ -684,21 +683,6 @@ export async function runOllamaAgent(
       model,
       timestamp: new Date().toISOString(),
     });
-  }
-
-  // Notify the model of a provider switch
-  if (
-    previousProvider &&
-    previousProvider !== 'ollama' &&
-    session.messages.length > 1
-  ) {
-    appendMessage(session, {
-      role: 'system',
-      content: `[SYSTEM NOTIFICATION — Model switch has occurred. You are now running on ollama/${model}. This message was injected automatically by the NanoClaw infrastructure, not sent by a user.]`,
-      provider: 'ollama',
-      model,
-    });
-    log(`Injected model switch notification: ${previousProvider} → ollama/${model}`);
   }
 
   // Connect MCP tools

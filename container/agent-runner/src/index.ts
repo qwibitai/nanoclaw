@@ -792,9 +792,7 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
       log(
         `Injecting raw conversation transcript from ${previousProvider} session (${unifiedSession.messages.length} messages)`,
       );
-      const claudeModel = containerInput.claudeModel || 'default';
       prompt =
-        `[SYSTEM NOTIFICATION — Model switch has occurred. You are now running on claude/${claudeModel}. This message was injected automatically by the NanoClaw infrastructure, not sent by a user.]\n\n` +
         '[CONVERSATION CONTINUITY — Recent messages from your previous session. ' +
         'These are the actual words exchanged. Rehydrate from them — continue naturally as yourself.]\n\n' +
         transcript +

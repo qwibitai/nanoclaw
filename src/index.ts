@@ -85,6 +85,8 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let unifiedSessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+// Pending model switch notification to inject into the next prompt
+const pendingModelNotification: Record<string, string> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -518,11 +520,22 @@ async function runAgent(
       }
     : undefined;
 
+  // Inject pending model switch notification into the prompt
+  let finalPrompt = prompt;
+  if (pendingModelNotification[chatJid]) {
+    logger.info(
+      { group: group.name, notification: pendingModelNotification[chatJid].slice(0, 80) },
+      'Injecting model switch notification',
+    );
+    finalPrompt = `${pendingModelNotification[chatJid]}\n\n${prompt}`;
+    delete pendingModelNotification[chatJid];
+  }
+
   try {
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: finalPrompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -765,10 +778,7 @@ async function main(): Promise<void> {
     group.containerConfig = updatedConfig;
     setRegisteredGroup(chatJid, group);
 
-    await channel.sendMessage(
-      chatJid,
-      `Thinking display: ${arg}`,
-    );
+    await channel.sendMessage(chatJid, `Thinking display: ${arg}`);
 
     logger.info(
       { chatJid, showThinking, group: group.name },
@@ -841,6 +851,11 @@ async function main(): Promise<void> {
       provider === 'ollama'
         ? `ollama/${updatedConfig.ollamaModel}`
         : `claude/${modelName || 'default'}`;
+
+    // Queue a notification for the next prompt so the agent knows about the switch
+    pendingModelNotification[chatJid] =
+      `[SYSTEM NOTIFICATION — Model switch has occurred. You are now running on ${modelDisplay}. This message was injected automatically by the NanoClaw infrastructure, not sent by a user.]`;
+
     await channel.sendMessage(chatJid, `Switched to ${modelDisplay}`);
 
     logger.info(

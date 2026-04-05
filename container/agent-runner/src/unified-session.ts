@@ -99,7 +99,15 @@ export function extractUserText(prompt: string): string {
         return sender ? `${sender}: ${content}` : content;
       })
       .filter(Boolean);
-    if (texts.length > 0) return texts.join('\n');
+    if (texts.length > 0) {
+      // Preserve any prefix text before the XML (e.g., system notifications)
+      const xmlStart = prompt.indexOf('<context');
+      const prefix =
+        xmlStart > 0 ? prompt.slice(0, xmlStart).trim() : '';
+      return prefix
+        ? `${prefix}\n\n${texts.join('\n')}`
+        : texts.join('\n');
+    }
   }
   // If no XML found, return as-is (plain text prompt)
   return prompt;
