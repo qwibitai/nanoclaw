@@ -39,7 +39,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため
+  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため、
   // ホスト・コンテナは常にセットで更新する運用）。
   groupType: GroupType;
   isScheduledTask?: boolean;
