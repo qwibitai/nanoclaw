@@ -148,7 +148,7 @@ describe('task scheduler', () => {
             void fn();
           },
         ),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       onProcess: () => {},
       sendMessage,
@@ -211,7 +211,7 @@ describe('task scheduler', () => {
         ),
         closeStdin: vi.fn(),
         notifyIdle: vi.fn(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       onProcess: () => {},
       sendMessage: vi.fn(async () => {}),
@@ -314,7 +314,11 @@ describe('task scheduler', () => {
       ) => {
         if (onOutput) {
           await onOutput({ result: 'Hello', status: 'success', partial: true });
-          await onOutput({ result: 'Hello world', status: 'success', partial: true });
+          await onOutput({
+            result: 'Hello world',
+            status: 'success',
+            partial: true,
+          });
           await onOutput({ result: 'Hello world!', status: 'success' });
         }
         return { result: 'Hello world!', status: 'success' as const };
@@ -358,7 +362,11 @@ describe('task scheduler', () => {
         onOutput?: (output: ContainerOutput) => Promise<void>,
       ) => {
         if (onOutput) {
-          await onOutput({ result: 'Partial', status: 'success', partial: true });
+          await onOutput({
+            result: 'Partial',
+            status: 'success',
+            partial: true,
+          });
           await onOutput({ result: 'Final text', status: 'success' });
         }
         return { result: 'Final text', status: 'success' as const };
@@ -429,51 +437,6 @@ describe('task scheduler', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Answer');
-  });
-
-  it('split result does not trigger scheduleClose or notifyIdle', async () => {
-    const mock = await getRunHostAgentMock();
-    mock.mockImplementation(
-      async (
-        _group: RegisteredGroup,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        _input: any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        _onProcess: any,
-        onOutput?: (output: ContainerOutput) => Promise<void>,
-      ) => {
-        if (onOutput) {
-          // Split final (mid-conversation)
-          await onOutput({ result: 'Part 1', status: 'success', split: true });
-          // True final
-          await onOutput({ result: 'Part 2', status: 'success' });
-        }
-        return { result: 'Part 2', status: 'success' as const };
-      },
-    );
-
-    createTask({
-      id: 'split-task',
-      group_folder: 'test-group',
-      chat_jid: 'tg:999',
-      prompt: 'say hello',
-      schedule_type: 'once',
-      schedule_value: '2026-01-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: new Date(Date.now() - 60_000).toISOString(),
-      status: 'active',
-      created_at: '2026-01-01T00:00:00.000Z',
-    });
-
-    const deps = makeDeps();
-    startSchedulerLoop(deps);
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Both parts should be sent
-    expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Part 1');
-    expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Part 2');
-    // notifyIdle should only be called once (for the true final, not the split)
-    expect(deps.queue.notifyIdle).toHaveBeenCalledTimes(1);
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {

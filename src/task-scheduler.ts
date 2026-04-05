@@ -95,7 +95,7 @@ async function runTask(
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
@@ -210,7 +210,9 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           const raw = streamedOutput.result;
-          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          const text = raw
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
           const isHeartbeatOk = text === HEARTBEAT_OK_MARKER;
 
           if (task.silent || isHeartbeatOk) {
@@ -244,7 +246,7 @@ async function runTask(
                 await deps.editMessage!(task.chat_jid, streamMessageId, text);
                 lastEditTime = now;
                 lastSentText = text;
-              // eslint-disable-next-line no-catch-all/no-catch-all
+                // eslint-disable-next-line no-catch-all/no-catch-all
               } catch {
                 streamingFailed = true;
               }
@@ -253,27 +255,6 @@ async function runTask(
           }
 
           // --- Final result ---
-          if (streamedOutput.split) {
-            // Mid-conversation split: send message, reset streaming, but don't close
-            if (streamMessageId !== null) {
-              if (text && text !== lastSentText) {
-                if (!streamingFailed && text.length <= 4096 && deps.editMessage) {
-                  await deps.editMessage(task.chat_jid, streamMessageId, text);
-                } else {
-                  await deps.sendMessage(task.chat_jid, text);
-                }
-              }
-              lastSentText = text;
-            } else if (text && text !== lastSentText) {
-              await deps.sendMessage(task.chat_jid, text);
-              lastSentText = text;
-            }
-            streamMessageId = null;
-            lastEditTime = 0;
-            streamingFailed = false;
-            return;
-          }
-
           if (streamMessageId !== null) {
             if (text && text !== lastSentText) {
               if (!streamingFailed && text.length <= 4096 && deps.editMessage) {
@@ -294,7 +275,10 @@ async function runTask(
           scheduleClose();
         }
 
-        if (streamedOutput.status === 'success' && !streamedOutput.partial && !streamedOutput.split) {
+        if (
+          streamedOutput.status === 'success' &&
+          !streamedOutput.partial
+        ) {
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose();
         }
@@ -317,7 +301,7 @@ async function runTask(
       { taskId: task.id, durationMs: Date.now() - startTime },
       'Task completed',
     );
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
@@ -372,7 +356,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           runTask(currentTask, deps),
         );
       }
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
     }

@@ -64,8 +64,6 @@ interface ContainerOutput {
   error?: string;
   /** true = streaming chunk (not final); omit or false = final result */
   partial?: boolean;
-  /** true = mid-conversation split on blank line */
-  split?: boolean;
   /** Cumulative token usage from the SDK result message */
   usage?: { inputTokens: number; outputTokens: number; numTurns: number };
 }
@@ -586,40 +584,6 @@ async function runQuery(
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
         streamingTextBuffer += event.delta.text;
 
-        // Split on double newline: emit text before \n\n as a split final
-        const splitIdx = streamingTextBuffer.indexOf('\n\n');
-        if (splitIdx !== -1) {
-          const beforeSplit = streamingTextBuffer.slice(0, splitIdx);
-          const afterSplit = streamingTextBuffer.slice(splitIdx + 2);
-
-          const fullText = completedTurnsText
-            ? completedTurnsText + '\n\n' + beforeSplit
-            : beforeSplit;
-          const visible = fullText
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
-
-          if (visible) {
-            writeOutput({ status: 'success', result: visible, partial: false, split: true, newSessionId });
-          }
-
-          // Already sent — reset completedTurnsText
-          completedTurnsText = '';
-          streamingTextBuffer = afterSplit;
-
-          // Emit remainder as a new partial if present
-          if (afterSplit.trim()) {
-            const remainderVisible = afterSplit
-              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-              .trim();
-            if (remainderVisible) {
-              writeOutput({ status: 'success', result: remainderVisible, partial: true, newSessionId });
-            }
-          }
-          return;
-        }
-
-        // No split — normal partial emission
         const fullText = completedTurnsText
           ? completedTurnsText + '\n\n' + streamingTextBuffer
           : streamingTextBuffer;
