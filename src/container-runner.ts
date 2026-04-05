@@ -377,6 +377,35 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Inject GitHub token for gh CLI / git push via HTTPS
+  let ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (!ghToken) {
+    try {
+      ghToken = execSync('gh auth token 2>/dev/null', { encoding: 'utf-8' }).trim();
+    } catch { /* gh not installed or not logged in */ }
+  }
+  if (ghToken) {
+    args.push('-e', `GH_TOKEN=${ghToken}`);
+    args.push('-e', `GITHUB_TOKEN=${ghToken}`);
+  }
+
+  // 飞书 Tenant Access Token — 预取后注入容器，供飞书文档工具使用
+  const feishuAppId = process.env.FEISHU_APP_ID;
+  const feishuAppSecret = process.env.FEISHU_APP_SECRET;
+  if (feishuAppId && feishuAppSecret) {
+    try {
+      const resp = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: feishuAppId, app_secret: feishuAppSecret }),
+      });
+      const data = await resp.json() as { tenant_access_token?: string };
+      if (data.tenant_access_token) {
+        args.push('-e', `FEISHU_TENANT_TOKEN=${data.tenant_access_token}`);
+      }
+    } catch { /* 非致命 — 飞书文档工具不可用 */ }
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
