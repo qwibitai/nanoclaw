@@ -18,6 +18,7 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { syncSkills } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
 // Re-export shared types and helpers from container-runner
@@ -171,17 +172,10 @@ function setupDirectories(
     );
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(projectRoot, 'container', 'skills');
+  // Sync built-in skills, then group-specific skills (group wins on collision)
   const skillsDst = path.join(claudeHome, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
-  }
+  syncSkills(path.join(projectRoot, 'container', 'skills'), skillsDst);
+  syncSkills(path.join(groupDir, 'skills'), skillsDst);
 
   // Copy agent-runner source into a per-group writable location
   const agentRunnerSrc = path.join(
