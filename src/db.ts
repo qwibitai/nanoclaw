@@ -157,6 +157,15 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Add agent_runner column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN agent_runner TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -609,6 +618,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        agent_runner: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -619,15 +629,19 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  const baseConfig = row.container_config
+    ? JSON.parse(row.container_config)
+    : null;
+  const containerConfig = row.agent_runner
+    ? { ...(baseConfig ?? {}), agentRunner: row.agent_runner as import('./types.js').AgentRunner }
+    : baseConfig ?? undefined;
   return {
     jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
@@ -638,21 +652,26 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
-  // containerConfig (including agentRunner, additionalMounts, timeout) is
-  // serialised to JSON and stored in the container_config column so per-group
-  // runner selection and other settings survive restarts without a schema change.
+  // agentRunner is stored in its own column for clarity and queryability.
+  // The remaining containerConfig fields (additionalMounts, timeout, etc.)
+  // are serialised to the container_config JSON blob.
+  const { agentRunner, ...restConfig } = group.containerConfig ?? {};
+  const configJson =
+    Object.keys(restConfig).length > 0 ? JSON.stringify(restConfig) : null;
+
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, agent_runner)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
     group.folder,
     group.trigger,
     group.added_at,
-    group.containerConfig ? JSON.stringify(group.containerConfig) : null,
+    configJson,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    agentRunner ?? null,
   );
 }
 
@@ -666,6 +685,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    agent_runner: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -676,14 +696,18 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    const baseConfig = row.container_config
+      ? JSON.parse(row.container_config)
+      : null;
+    const containerConfig = row.agent_runner
+      ? { ...(baseConfig ?? {}), agentRunner: row.agent_runner as import('./types.js').AgentRunner }
+      : baseConfig ?? undefined;
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
+      containerConfig,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
