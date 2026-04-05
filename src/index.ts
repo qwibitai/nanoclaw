@@ -392,6 +392,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     .reverse()
     .find((m) => !m.is_bot_message && !m.is_from_me);
   const latestUserMessage = lastUserMsg?.content;
+  const memorySenderId = lastUserMsg?.sender || '';
 
   const output = await runAgent(
     group,
@@ -400,7 +401,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     async (result) => {
       // 进度消息 — 转发给 channel 显示进度卡片
       if (result.status === 'progress' && result.result) {
-        await channel.sendMessage(chatJid, result.result);
+        const payload = result.detail
+          ? JSON.stringify({ title: result.result, detail: result.detail })
+          : result.result;
+        await channel.sendMessage(chatJid, payload);
         return;
       }
 
@@ -432,6 +436,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
     },
     latestUserMessage,
+    memorySenderId,
   );
 
   await channel.setTyping?.(chatJid, false);
@@ -483,7 +488,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         is_bot_message: true,
       })),
     ];
-    getMemoryQueue().add(group.folder, memoryMessages, sessions[group.folder]);
+    getMemoryQueue().add(group.folder, memoryMessages, sessions[group.folder], memorySenderId);
   }
 
   return true;
@@ -501,6 +506,7 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   latestUserMessage?: string,
+  memorySenderId?: string,
   isRetry?: boolean,
 ): Promise<RunAgentResult> {
   const isMain = group.isMain === true;
@@ -510,7 +516,7 @@ async function runAgent(
   if (isMemoryEnabled()) {
     try {
       const groupDir = resolveGroupFolderPath(group.folder);
-      await injectMemory(group.folder, groupDir, latestUserMessage);
+      await injectMemory(group.folder, groupDir, latestUserMessage, memorySenderId);
     } catch (err) {
       logger.warn({ err, group: group.name }, '记忆注入失败，继续启动容器');
     }
@@ -620,6 +626,7 @@ async function runAgent(
             chatJid,
             onOutput,
             latestUserMessage,
+            memorySenderId,
             true,
           ).then((retryResult) => ({
             ...retryResult,

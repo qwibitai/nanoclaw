@@ -100,6 +100,7 @@ export class MemoryUpdater {
     groupFolder: string,
     messages: ConversationMessage[],
     sessionId?: string,
+    userId: string = '',
   ): Promise<boolean> {
     const config = getMemoryConfig();
     if (!config.enabled) return false;
@@ -172,6 +173,7 @@ export class MemoryUpdater {
         updateData,
         groupFolder,
         sessionId,
+        userId,
       );
       return true;
     } catch (err) {
@@ -219,6 +221,7 @@ export class MemoryUpdater {
     updateData: LlmUpdateResponse,
     groupFolder: string,
     sessionId?: string,
+    userId: string = '',
   ): Promise<void> {
     const config = getMemoryConfig();
     const now = new Date().toISOString();
@@ -267,7 +270,7 @@ export class MemoryUpdater {
       saveProfile(groupFolder, {
         user: currentMemory.user as Record<string, unknown>,
         history: currentMemory.history as Record<string, unknown>,
-      });
+      }, userId);
     }
 
     // 删除被否定的 facts
@@ -307,10 +310,10 @@ export class MemoryUpdater {
     }
 
     if (factsToStore.length > 0) {
-      await storeFacts(groupFolder, factsToStore);
+      await storeFacts(groupFolder, factsToStore, userId);
     }
 
     // 超限清理
-    enforceMaxFacts(groupFolder);
+    enforceMaxFacts(groupFolder, undefined, userId);
   }
 }

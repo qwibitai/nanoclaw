@@ -14,6 +14,7 @@ interface QueueEntry {
   groupFolder: string;
   messages: ConversationMessage[];
   sessionId?: string;
+  userId: string;
   timestamp: number;
 }
 
@@ -30,16 +31,20 @@ export class MemoryUpdateQueue {
     groupFolder: string,
     messages: ConversationMessage[],
     sessionId?: string,
+    userId: string = '',
   ): void {
     const config = getMemoryConfig();
     if (!config.enabled) return;
 
-    // 同 groupFolder 覆盖
-    this.queue = this.queue.filter((e) => e.groupFolder !== groupFolder);
+    // 同 groupFolder + userId 覆盖
+    this.queue = this.queue.filter(
+      (e) => !(e.groupFolder === groupFolder && e.userId === userId),
+    );
     this.queue.push({
       groupFolder,
       messages,
       sessionId,
+      userId,
       timestamp: Date.now(),
     });
 
@@ -89,6 +94,7 @@ export class MemoryUpdateQueue {
             entry.groupFolder,
             entry.messages,
             entry.sessionId,
+            entry.userId,
           );
           if (success) {
             logger.info({ groupFolder: entry.groupFolder }, '记忆更新成功');

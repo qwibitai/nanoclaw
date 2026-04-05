@@ -3,8 +3,13 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
-RUN apt-get update && apt-get install -y \
+# Use USTC mirror for faster package downloads in China
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true
+
+# Install system dependencies for Chromium (with retries for unstable networks)
+RUN for i in 1 2 3 4 5; do \
+      apt-get update && apt-get install -y -o Acquire::Retries=5 --fix-missing \
     chromium \
     fonts-liberation \
     fonts-noto-cjk \
@@ -24,7 +29,8 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
-    && rm -rf /var/lib/apt/lists/*
+      && break || echo "Retry $i..."; sleep 5; \
+    done && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

@@ -40,6 +40,10 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** progress 消息的子类型 */
+  progressType?: 'tool_use' | 'tool_result' | 'thinking';
+  /** 可折叠面板的展开内容（markdown 格式） */
+  detail?: string;
 }
 
 interface SessionEntry {
@@ -507,33 +511,111 @@ async function runQuery(
     if (message.type === 'assistant') {
       const msg = message as Record<string, unknown>;
       const innerMsg = msg.message as Record<string, unknown> | undefined;
-      const innerContent = innerMsg?.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
-      const outerContent = msg.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
-      const content = innerContent || outerContent;  // SDK 嵌套在 message.content 里
+      const innerContent = innerMsg?.content as Array<{ type: string; name?: string; input?: unknown; text?: string }> | undefined;
+      const outerContent = msg.content as Array<{ type: string; name?: string; input?: unknown; text?: string }> | undefined;
+      const content = innerContent || outerContent;
       log(`[assistant] innerKeys=${innerMsg ? Object.keys(innerMsg).join(',') : 'N/A'}, contentTypes=${Array.isArray(content) ? content.map(b => b.type).join(',') : 'none'}`);
       if (Array.isArray(content)) {
         for (const block of content) {
+          // 工具调用 — 提取工具名、输入摘要、详情
           if (block.type === 'tool_use' && block.name) {
+            const input = block.input as Record<string, unknown> | null;
             const emoji = block.name === 'Bash' ? '🔧' :
                           block.name === 'Read' ? '📖' :
                           block.name === 'Write' || block.name === 'Edit' ? '✏️' :
+                          block.name === 'Grep' ? '🔍' :
+                          block.name === 'Glob' ? '📋' :
                           block.name === 'WebSearch' ? '🌐' :
                           block.name === 'WebFetch' ? '🌐' :
                           block.name === 'ListDir' ? '📋' : '⚙️';
-            const inputStr = typeof block.input === 'object' && block.input !== null
-              ? (block.input as Record<string, unknown>).command as string ||
-                (block.input as Record<string, unknown>).file_path as string ||
-                (block.input as Record<string, unknown>).query as string ||
-                block.name
+            const inputStr = input
+              ? (input.command as string || input.file_path as string || input.query as string || input.pattern as string || block.name)
               : block.name;
             const shortInput = typeof inputStr === 'string' ? inputStr.slice(0, 60) : block.name;
+
+            let detail: string | undefined;
+            if (input) {
+              if (block.name === 'Edit' && input.old_string && input.new_string) {
+                const file = (input.file_path as string || '').split('/').pop() || 'file';
+                detail = `**${file}**\n\`\`\`diff\n- ${(input.old_string as string).slice(0, 300)}\n+ ${(input.new_string as string).slice(0, 300)}\n\`\`\``;
+              } else if (block.name === 'Bash' && input.command) {
+                detail = `\`\`\`bash\n${(input.command as string).slice(0, 500)}\n\`\`\``;
+              } else if (block.name === 'Write' && input.file_path) {
+                const c = (input.content as string || '').slice(0, 300);
+                detail = `**${input.file_path}**\n\`\`\`\n${c}${c.length >= 300 ? '\n...' : ''}\n\`\`\``;
+              }
+            }
+
             writeOutput({
               status: 'progress',
               result: `${emoji} ${block.name}: ${shortInput}`,
+              progressType: 'tool_use',
+              detail,
               newSessionId: undefined,
             });
           }
+
+          // 推理文本
+          if (block.type === 'text' && block.text) {
+            const trimmed = block.text.trim();
+            if (trimmed.length > 5) {
+              const short = trimmed.slice(0, 80) + (trimmed.length > 80 ? '...' : '');
+              writeOutput({
+                status: 'progress',
+                result: `💭 ${short}`,
+                progressType: 'thinking',
+                detail: trimmed.length > 80 ? trimmed : undefined,
+                newSessionId: undefined,
+              });
+            }
+          }
         }
+      }
+    }
+
+    // 工具执行结果 — 从 user 消息的 content 中提取 tool_result
+    if (message.type === 'user') {
+      const userMsg = message as { message?: { content?: unknown[] } };
+      const content = userMsg.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const b = block as { type?: string; content?: unknown };
+          if (b.type === 'tool_result' && b.content) {
+            let resultText = '';
+            if (typeof b.content === 'string') {
+              resultText = b.content;
+            } else if (Array.isArray(b.content)) {
+              resultText = (b.content as Array<{ type?: string; text?: string }>)
+                .filter(c => c.type === 'text' && c.text)
+                .map(c => c.text!)
+                .join('\n');
+            }
+            if (resultText && resultText.trim().length > 0) {
+              const short = resultText.trim().slice(0, 60) + (resultText.trim().length > 60 ? '...' : '');
+              writeOutput({
+                status: 'progress',
+                result: `✅ 结果: ${short}`,
+                progressType: 'tool_result',
+                detail: resultText.trim().length > 60 ? resultText.trim().slice(0, 1000) : undefined,
+                newSessionId: undefined,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 工具调用摘要
+    if (message.type === 'tool_use_summary') {
+      const summary = (message as { summary?: string }).summary;
+      if (summary) {
+        writeOutput({
+          status: 'progress',
+          result: `📊 ${summary.slice(0, 80)}`,
+          progressType: 'tool_result',
+          detail: summary.length > 80 ? summary : undefined,
+          newSessionId: undefined,
+        });
       }
     }
 

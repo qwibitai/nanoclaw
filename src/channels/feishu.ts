@@ -1,5 +1,6 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 
+import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage } from '../types.js';
@@ -12,7 +13,10 @@ const JID_PREFIX = 'fs:';
 const TYPING_EMOJI = 'OnIt'; // 飞书内置 emoji key
 const CARD_THRESHOLD = 500;
 const MD_PATTERN = /```|^##\s|^\|.*\|/m;
-const PROGRESS_EMOJI_PATTERN = /^[🔧📖✏️🔍🌐📋⚙️]/;
+const PROGRESS_EMOJI_PATTERN = /^[🔧📖✏️🔍🌐📋⚙️⏳💭✅📊]/;
+const PROGRESS_JSON_PATTERN = /^\{"title":"[🔧📖✏️🔍🌐📋⚙️⏳💭✅📊]/;
+const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+const THINKING_PHRASES = ['思考中', '分析中', '处理中', '推理中'];
 
 // ---- 工具函数 ----
 
@@ -45,10 +49,70 @@ function buildCard(
   return JSON.stringify(card);
 }
 
-/** 构建进度卡片（黄色标题 + 步骤列表） */
-function buildProgressCard(steps: string[]): string {
-  const content = steps.join('\n');
-  return buildCard(content, '⏳ 处理中...', 'yellow');
+interface ProgressStep {
+  title: string;
+  detail?: string;
+}
+
+/** 构建进度卡片（schema 2.0 + collapsible_panel） */
+function buildProgressCard(steps: ProgressStep[], frame: number = 0): string {
+  const spinner = SPINNER_FRAMES[frame % SPINNER_FRAMES.length];
+  const phrase = THINKING_PHRASES[Math.floor(frame / SPINNER_FRAMES.length) % THINKING_PHRASES.length];
+
+  const elements = steps.map((step) => {
+    if (step.detail) {
+      return {
+        tag: 'collapsible_panel',
+        expanded: false,
+        background_color: 'grey',
+        header: {
+          title: { tag: 'markdown', content: step.title },
+          vertical_align: 'center',
+        },
+        vertical_spacing: '2px',
+        padding: '4px 8px 4px 8px',
+        elements: [{ tag: 'markdown', content: step.detail }],
+      };
+    }
+    return { tag: 'markdown', content: step.title };
+  });
+
+  return JSON.stringify({
+    schema: '2.0',
+    header: {
+      template: 'yellow',
+      title: { tag: 'plain_text', content: `${spinner} ${phrase}...` },
+    },
+    body: { elements },
+  });
+}
+
+/** 构建完成卡片（schema 2.0 + collapsible_panel） */
+function buildCompletedCard(steps: ProgressStep[]): string {
+  const elements = steps.map((step) => {
+    if (step.detail) {
+      return {
+        tag: 'collapsible_panel',
+        expanded: false,
+        background_color: 'grey',
+        header: {
+          title: { tag: 'markdown', content: step.title },
+          vertical_align: 'center',
+        },
+        elements: [{ tag: 'markdown', content: step.detail }],
+      };
+    }
+    return { tag: 'markdown', content: step.title };
+  });
+
+  return JSON.stringify({
+    schema: '2.0',
+    header: {
+      template: 'green',
+      title: { tag: 'plain_text', content: '✅ 已完成' },
+    },
+    body: { elements },
+  });
 }
 
 // ---- 飞书 Channel 实现 ----
@@ -63,6 +127,9 @@ export class FeishuChannel implements Channel {
   private appId: string;
   private appSecret: string;
 
+  // 机器人自身的 open_id，用于识别 @机器人 mention
+  private botOpenId: string | null = null;
+
   // 记录 jid → { messageId, reactionId }，用于移除 typing indicator
   private typingReactions = new Map<
     string,
@@ -72,7 +139,7 @@ export class FeishuChannel implements Channel {
   // 进度卡片状态：每个 chat 一张进度卡片，持续更新
   private progressCards = new Map<
     string,
-    { messageId: string; steps: string[] }
+    { messageId: string; steps: ProgressStep[]; frame: number }
   >();
 
   constructor(appId: string, appSecret: string, opts: ChannelOpts) {
@@ -109,7 +176,25 @@ export class FeishuChannel implements Channel {
       }
     ).start({ eventDispatcher: dispatcher });
     this.connected = true;
-    logger.info('飞书 WebSocket 已连接');
+
+    // 获取机器人自身 open_id，用于将 @机器人 替换为 @ASSISTANT_NAME 以匹配触发词
+    try {
+      const tokenResp = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
+      });
+      const tokenData = await tokenResp.json() as { tenant_access_token?: string };
+      if (tokenData.tenant_access_token) {
+        const botResp = await fetch('https://open.feishu.cn/open-apis/bot/v3/info', {
+          headers: { Authorization: `Bearer ${tokenData.tenant_access_token}` },
+        });
+        const botData = await botResp.json() as { bot?: { open_id?: string } };
+        this.botOpenId = botData?.bot?.open_id ?? null;
+      }
+    } catch { /* 非致命 */ }
+
+    logger.info({ botOpenId: this.botOpenId }, '飞书 WebSocket 已连接');
   }
 
   async disconnect(): Promise<void> {
@@ -132,73 +217,45 @@ export class FeishuChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     const chatId = chatIdFromJid(jid);
 
-    // ---- 进度消息聚合 ----
-    // 如果是进度消息（工具调用 emoji 开头），聚合到同一张卡片
-    if (PROGRESS_EMOJI_PATTERN.test(text)) {
-      try {
-        const existing = this.progressCards.get(jid);
-        if (existing) {
-          // 更新已有进度卡片
-          existing.steps.push(text);
-          // 只保留最近 8 条进度
-          if (existing.steps.length > 8) existing.steps.shift();
+    // 进度消息 → 聚合到进度卡片（支持 JSON 格式含 detail，或纯文本 emoji 开头）
+    const isProgressJson = PROGRESS_JSON_PATTERN.test(text);
+    const isProgressEmoji = PROGRESS_EMOJI_PATTERN.test(text);
+    if (isProgressJson || isProgressEmoji) {
+      let title = text;
+      let detail: string | undefined;
+      if (isProgressJson) {
+        try {
+          const parsed = JSON.parse(text) as { title?: string; detail?: string };
+          if (parsed.title) { title = parsed.title; detail = parsed.detail; }
+        } catch { /* 降级为纯文本 */ }
+      }
+
+      const existing = this.progressCards.get(jid);
+      if (existing) {
+        existing.steps.push({ title, detail });
+        if (existing.steps.length > 12) existing.steps.shift();
+        existing.frame++;
+        try {
           await this.client.im.message.patch({
             path: { message_id: existing.messageId },
-            data: {
-              content: buildProgressCard(existing.steps),
-            },
+            data: { content: buildProgressCard(existing.steps, existing.frame) },
           });
-          logger.debug(
-            { jid, steps: existing.steps.length },
-            '飞书进度卡片已更新',
-          );
-        } else {
-          // 创建新进度卡片
-          const resp = await this.client.im.message.create({
-            data: {
-              receive_id: chatId,
-              msg_type: 'interactive',
-              content: buildProgressCard([text]),
-            },
-            params: { receive_id_type: 'chat_id' },
-          });
-          const msgId = resp?.data?.message_id;
-          if (msgId) {
-            this.progressCards.set(jid, { messageId: msgId, steps: [text] });
-            logger.debug({ jid, messageId: msgId }, '飞书进度卡片已创建');
-          }
+        } catch (err) {
+          logger.debug({ err }, '飞书进度卡片更新失败（非致命）');
         }
-      } catch (err) {
-        logger.debug({ err }, '飞书进度卡片操作失败（非致命，降级为普通消息）');
-        // 降级：发普通消息
-        await this.sendPlainOrCard(chatId, text);
       }
       return;
     }
 
-    // ---- 正式回复：进度卡片标题改为「✅ 已完成」----
+    // 正式回复到达：将进度卡片标记为「✅ 已完成」
     const progressEntry = this.progressCards.get(jid);
     if (progressEntry) {
       this.progressCards.delete(jid);
       try {
         await this.client.im.message.patch({
           path: { message_id: progressEntry.messageId },
-          data: {
-            content: JSON.stringify({
-              elements: [
-                { tag: 'markdown', content: progressEntry.steps.join('\n') },
-              ],
-              header: {
-                template: 'green',
-                title: { tag: 'plain_text', content: '✅ 已完成' },
-              },
-            }),
-          },
+          data: { content: buildCompletedCard(progressEntry.steps) },
         });
-        logger.debug(
-          { jid, messageId: progressEntry.messageId },
-          '飞书进度卡片已标记完成',
-        );
       } catch (err) {
         logger.debug({ err }, '飞书进度卡片更新失败（非致命）');
       }
@@ -236,54 +293,50 @@ export class FeishuChannel implements Channel {
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const chatId = chatIdFromJid(jid);
     try {
       if (isTyping) {
+        // 添加 emoji reaction 到用户消息
         const lastMsgId = this.getLastMessageId(jid);
-        if (!lastMsgId) {
-          logger.info({ jid }, '飞书 setTyping(true): 无 lastMsgId，跳过');
-          return;
+        if (lastMsgId) {
+          const resp = await this.client.im.messageReaction.create({
+            data: { reaction_type: { emoji_type: TYPING_EMOJI } },
+            path: { message_id: lastMsgId },
+          });
+          const reactionId = resp?.data?.reaction_id;
+          if (reactionId) {
+            this.typingReactions.set(jid, { messageId: lastMsgId, reactionId });
+          }
         }
-        logger.info({ jid, lastMsgId }, '飞书 setTyping(true): 添加 reaction');
-        const resp = await this.client.im.messageReaction.create({
-          data: { reaction_type: { emoji_type: TYPING_EMOJI } },
-          path: { message_id: lastMsgId },
-        });
-        const reactionId = resp?.data?.reaction_id;
-        if (reactionId) {
-          this.typingReactions.set(jid, { messageId: lastMsgId, reactionId });
-          logger.info(
-            { jid, lastMsgId, reactionId },
-            '飞书 setTyping(true): reaction 已保存',
-          );
-        } else {
-          logger.info(
-            { jid, resp: JSON.stringify(resp?.data) },
-            '飞书 setTyping(true): 未获得 reactionId',
-          );
+
+        // 发送"处理中"进度卡片
+        if (!this.progressCards.has(jid)) {
+          const initialSteps: ProgressStep[] = [{ title: '⏳ 正在思考...' }];
+          const resp = await this.client.im.message.create({
+            data: {
+              receive_id: chatId,
+              msg_type: 'interactive',
+              content: buildProgressCard(initialSteps, 0),
+            },
+            params: { receive_id_type: 'chat_id' },
+          });
+          const msgId = resp?.data?.message_id;
+          if (msgId) {
+            this.progressCards.set(jid, { messageId: msgId, steps: initialSteps, frame: 0 });
+          }
         }
       } else {
+        // 移除 emoji reaction
         const entry = this.typingReactions.get(jid);
-        logger.info(
-          {
-            jid,
-            hasEntry: !!entry,
-            entry: entry ? JSON.stringify(entry) : null,
-          },
-          '飞书 setTyping(false): 移除 reaction',
-        );
         if (entry) {
           await this.client.im.messageReaction.delete({
-            path: {
-              message_id: entry.messageId,
-              reaction_id: entry.reactionId,
-            },
+            path: { message_id: entry.messageId, reaction_id: entry.reactionId },
           });
           this.typingReactions.delete(jid);
-          logger.info({ jid }, '飞书 setTyping(false): reaction 已移除');
         }
       }
     } catch (err) {
-      logger.info({ err, jid, isTyping }, '飞书 typing indicator 操作失败');
+      logger.debug({ err, jid, isTyping }, '飞书 typing indicator 操作失败');
     }
   }
 
@@ -382,10 +435,11 @@ export class FeishuChannel implements Channel {
 
     if (!text.trim()) return;
 
-    // 替换 @mention 标记为名称
+    // 替换 @mention 标记为名称；@机器人 → @ASSISTANT_NAME（匹配触发词）
     if (message.mentions) {
       for (const m of message.mentions) {
-        text = text.replace(m.key, `@${m.name}`);
+        const isBotMention = this.botOpenId && m.id.open_id === this.botOpenId;
+        text = text.replace(m.key, isBotMention ? `@${ASSISTANT_NAME}` : `@${m.name}`);
       }
     }
 

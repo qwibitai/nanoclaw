@@ -28,12 +28,13 @@ export async function injectMemory(
   groupFolder: string,
   groupDir: string,
   latestUserMessage?: string,
+  userId: string = '',
 ): Promise<void> {
   const config = getMemoryConfig();
   if (!config.injectionEnabled) return;
 
-  const profile = loadProfile(groupFolder);
-  const allFacts = loadFacts(groupFolder);
+  const profile = loadProfile(groupFolder, userId);
+  const allFacts = loadFacts(groupFolder, userId);
 
   // 没有记忆数据时不操作
   if (!profile && allFacts.length === 0) return;
@@ -49,7 +50,7 @@ export async function injectMemory(
   if (latestUserMessage && allFacts.length > 0) {
     // R15.1: 双路召回 top-K
     try {
-      const store = new MemoryStore(groupFolder);
+      const store = new MemoryStore(groupFolder, userId);
       const recalled = await store.recall(latestUserMessage);
       factsForInjection = recalled.map((r) => ({
         id: r.id,

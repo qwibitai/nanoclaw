@@ -172,6 +172,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string | null;
   error?: string;
+  progressType?: 'tool_use' | 'tool_result' | 'thinking';
+  detail?: string;
 }
 
 interface VolumeMount {
