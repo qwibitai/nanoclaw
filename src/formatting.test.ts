@@ -365,7 +365,9 @@ describe('extractImages', () => {
   it('extracts image tag without caption', () => {
     const result = extractImages('<image path="/tmp/photo.png" />');
     expect(result.cleanText).toBe('');
-    expect(result.images).toEqual([{ path: '/tmp/photo.png', caption: undefined }]);
+    expect(result.images).toEqual([
+      { path: '/tmp/photo.png', caption: undefined },
+    ]);
   });
 
   it('extracts multiple image tags', () => {

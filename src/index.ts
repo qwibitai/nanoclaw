@@ -382,11 +382,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           if (cleanText && cleanText !== lastSentText) {
             try {
               if (!streamingFailed && cleanText.length <= 4096) {
-                await channel.editMessage!(
-                  chatJid,
-                  streamMessageId,
-                  cleanText,
-                );
+                await channel.editMessage!(chatJid, streamMessageId, cleanText);
               } else {
                 await channel.sendMessage(chatJid, cleanText);
               }
