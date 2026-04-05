@@ -41,7 +41,12 @@ Create a `container/skills/wiki/SKILL.md` tailored to this user's wiki. This is 
 
 ### 3c. Group CLAUDE.md
 
-Add a wiki section to the group's CLAUDE.md that activates the wiki behavior and points to the container skill. It should concisely explain the system and have an index of the key files and folders.
+Edit the group's CLAUDE.md to add a wiki section. This is critical — it's what turns the agent into a wiki maintainer. It should:
+
+- Explain the wiki system concisely: what it is, the three layers (sources, wiki, schema), the three operations (ingest, query, lint)
+- Index the key files and folders (`wiki/`, `sources/`, `wiki/index.md`, `wiki/log.md`)
+- Point to the container skill for detailed workflow
+- **Ingest discipline:** Be very explicit that when the user provides multiple files or points at a folder with many files, the agent MUST process them one at a time. For each file: read it, discuss takeaways, create/update all wiki pages (summary, entities, concepts, cross-references, index, log), and completely finish with that file before moving to the next. Never batch-read all files and then process them together — this produces shallow, generic pages instead of the deep integration the pattern requires.
 
 ## Step 4: Source handling capabilities
 
@@ -66,7 +71,32 @@ AskUserQuestion: "Want periodic wiki health checks?"
 2. **Monthly**
 3. **Skip** — lint manually
 
-If yes, schedule via `mcp__nanoclaw__schedule_task` with a prompt based on the pattern's Lint operation.
+If yes, create a NanoClaw scheduled task that runs in the wiki group. This is NOT a Claude Code cron job — it's a NanoClaw group task that runs in the agent container. Insert it into the SQLite database:
+
+```bash
+npx tsx -e "
+const Database = require('better-sqlite3');
+const { CronExpressionParser } = require('cron-parser');
+const db = new Database('store/messages.db');
+const interval = CronExpressionParser.parse('<cron-expr>', { tz: process.env.TZ || 'UTC' });
+const nextRun = interval.next().toISOString();
+db.prepare('INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+  'wiki-lint',
+  '<group_folder>',
+  '<chat_jid>',
+  'Run a wiki lint pass per the wiki container skill. Check for contradictions, orphan pages, stale content, missing cross-references, and gaps. Report findings and offer to fix issues.',
+  'cron',
+  '<cron-expr>',
+  'group',
+  nextRun,
+  'active',
+  new Date().toISOString()
+);
+db.close();
+"
+```
+
+Use the group's `folder` and `chat_jid` from the registered groups table. Cron expressions: `0 10 * * 0` (weekly Sunday 10am) or `0 10 1 * *` (monthly 1st at 10am).
 
 ## Step 6: Build and restart
 
