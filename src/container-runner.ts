@@ -54,6 +54,8 @@ export interface ContainerOutput {
   error?: string;
   /** true = streaming chunk (not final); omit or false = final result */
   partial?: boolean;
+  /** true = mid-conversation split on blank line. Don't trigger idle/response-sent. */
+  split?: boolean;
   /** Cumulative token usage from the SDK result message */
   usage?: { inputTokens: number; outputTokens: number; numTurns: number };
 }
@@ -401,6 +403,7 @@ export async function runContainerAgent(
                 ),
               ),
             );
+          // eslint-disable-next-line no-catch-all/no-catch-all
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -448,6 +451,7 @@ export async function runContainerAgent(
       );
       try {
         stopContainer(containerName);
+      // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.warn(
           { group: group.name, containerName, err },
@@ -651,6 +655,7 @@ export async function runContainerAgent(
         );
 
         resolve(output);
+      // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.error(
           {

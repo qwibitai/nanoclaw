@@ -349,6 +349,7 @@ describe('GroupQueue', () => {
     // Register a process so closeStdin has a groupFolder
     queue.registerProcess(
       'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any,
       'container-1',
       'test-group',
@@ -389,6 +390,7 @@ describe('GroupQueue', () => {
     // Register process and mark idle
     queue.registerProcess(
       'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any,
       'container-1',
       'test-group',
@@ -428,6 +430,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any,
       'container-1',
       'test-group',
@@ -469,6 +472,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any,
       'container-1',
       'test-group',
@@ -502,6 +506,7 @@ describe('GroupQueue', () => {
     // Register process and enqueue a task (no idle yet — no preemption)
     queue.registerProcess(
       'group1@g.us',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any,
       'container-1',
       'test-group',

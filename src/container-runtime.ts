@@ -86,6 +86,7 @@ export function cleanupOrphans(): void {
     for (const name of orphans) {
       try {
         stopContainer(name);
+      // eslint-disable-next-line no-catch-all/no-catch-all
       } catch {
         /* already stopped */
       }
@@ -96,6 +97,7 @@ export function cleanupOrphans(): void {
         'Stopped orphaned containers',
       );
     }
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
   }

@@ -605,6 +605,7 @@ describe('schedule_task context_mode', () => {
         prompt: 'bad context',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         context_mode: 'bogus' as any,
         targetJid: 'other@g.us',
       },

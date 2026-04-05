@@ -114,6 +114,7 @@ function loadState(): void {
   const agentTs = getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
@@ -156,6 +157,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     logger.warn(
       { jid, folder: group.folder, err },
@@ -350,6 +352,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               await channel.editMessage!(chatJid, streamMessageId, text);
               lastEditTime = now;
               lastSentText = text;
+            // eslint-disable-next-line no-catch-all/no-catch-all
             } catch (err) {
               logger.warn(
                 { group: group.name, error: err },
@@ -365,6 +368,51 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // --- Final result ---
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
 
+        if (result.split) {
+          // Mid-conversation split: send/edit message, reset streaming, but
+          // do NOT call markResponseSent, notifyIdle, or stop typing.
+          if (streamMessageId !== null) {
+            if (text && text !== lastSentText) {
+              try {
+                if (!streamingFailed && text.length <= 4096) {
+                  await channel.editMessage!(chatJid, streamMessageId, text);
+                } else {
+                  await channel.sendMessage(chatJid, text);
+                }
+              // eslint-disable-next-line no-catch-all/no-catch-all
+              } catch (err) {
+                logger.error(
+                  { group: group.name, error: err },
+                  'Failed to send split message, queuing for retry',
+                );
+                enqueueOutbox(chatJid, text);
+              }
+            }
+            outputSentToUser = true;
+            lastSentText = text;
+          } else if (text && text !== lastSentText) {
+            try {
+              await channel.sendMessage(chatJid, text);
+            // eslint-disable-next-line no-catch-all/no-catch-all
+            } catch (err) {
+              logger.error(
+                { group: group.name, error: err },
+                'Failed to send split message, queuing for retry',
+              );
+              enqueueOutbox(chatJid, text);
+            }
+            outputSentToUser = true;
+            lastSentText = text;
+          }
+          // Reset streaming state for next segment — but NOT queue state
+          streamMessageId = null;
+          lastEditTime = 0;
+          streamingFailed = false;
+          lastSentText = null;
+          resetIdleTimer();
+          return;
+        }
+
         if (streamMessageId !== null) {
           // Streaming was active — accumulated text already displayed.
           clearInterval(typingKeepalive);
@@ -375,6 +423,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               } else {
                 await channel.sendMessage(chatJid, text);
               }
+            // eslint-disable-next-line no-catch-all/no-catch-all
             } catch (err) {
               logger.error(
                 { group: group.name, error: err },
@@ -391,6 +440,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           clearInterval(typingKeepalive);
           try {
             await channel.sendMessage(chatJid, text);
+          // eslint-disable-next-line no-catch-all/no-catch-all
           } catch (err) {
             logger.error(
               { group: group.name, error: err },
@@ -414,7 +464,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         resetIdleTimer();
       }
 
-      if (result.status === 'success' && !result.partial) {
+      if (result.status === 'success' && !result.partial && !result.split) {
         queue.notifyIdle(chatJid);
       }
 
@@ -557,6 +607,7 @@ async function runAgent(
     }
 
     return 'success';
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
@@ -666,6 +717,7 @@ async function startMessageLoop(): Promise<void> {
           }
         }
       }
+    // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }
@@ -722,6 +774,7 @@ async function recoverOutbox(): Promise<void> {
         { id: msg.id, chatJid: msg.chatJid },
         'Outbox message delivered',
       );
+    // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       incrementOutboxAttempts(msg.id);
       logger.error(
@@ -909,6 +962,21 @@ async function main(): Promise<void> {
       }
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
+    },
+    sendStreamMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendStreamMessage) return null;
+      return channel.sendStreamMessage(jid, text);
+    },
+    editMessage: async (jid, messageId, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.editMessage) return;
+      await channel.editMessage(jid, messageId, text);
+    },
+    setTyping: async (jid, isTyping) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.setTyping) return;
+      await channel.setTyping(jid, isTyping);
     },
   });
   startIpcWatcher({

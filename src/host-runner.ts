@@ -50,6 +50,7 @@ function findClaudePath(): string {
   }
   try {
     cachedClaudePath = execSync('which claude', { encoding: 'utf8' }).trim();
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     cachedClaudePath = '';
   }
@@ -57,7 +58,7 @@ function findClaudePath(): string {
 }
 
 function buildEnvironment(
-  group: RegisteredGroup,
+  _group: RegisteredGroup,
   input: ContainerInput,
   ipcDir: string,
   groupDir: string,
@@ -103,7 +104,7 @@ function buildEnvironment(
 
 function setupDirectories(
   group: RegisteredGroup,
-  input: ContainerInput,
+  _input: ContainerInput,
 ): {
   groupDir: string;
   ipcDir: string;
@@ -142,6 +143,7 @@ function setupDirectories(
         // Remove stale symlink
         if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
         fs.symlinkSync(hostPath, linkPath);
+      // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.warn(
           { hostPath, linkPath, err },
@@ -215,7 +217,7 @@ export async function runHostAgent(
   const startTime = Date.now();
   const projectRoot = process.cwd();
 
-  const { groupDir, ipcDir, globalDir, extraDir, claudeHome, agentRunnerDir } =
+  const { groupDir, ipcDir, globalDir, extraDir, claudeHome } =
     setupDirectories(group, input);
 
   const env = buildEnvironment(
@@ -257,6 +259,7 @@ export async function runHostAgent(
           PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
         },
       });
+    // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ err }, 'Failed to compile agent-runner');
       return {
@@ -347,6 +350,7 @@ export async function runHostAgent(
                 ),
               ),
             );
+          // eslint-disable-next-line no-catch-all/no-catch-all
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -498,6 +502,7 @@ export async function runHostAgent(
           'Host agent completed',
         );
         resolve(output);
+      // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.error(
           { group: group.name, stdout, stderr, error: err },

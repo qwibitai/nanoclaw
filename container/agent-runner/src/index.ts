@@ -64,6 +64,8 @@ interface ContainerOutput {
   error?: string;
   /** true = streaming chunk (not final); omit or false = final result */
   partial?: boolean;
+  /** true = mid-conversation split on blank line */
+  split?: boolean;
   /** Cumulative token usage from the SDK result message */
   usage?: { inputTokens: number; outputTokens: number; numTurns: number };
 }
@@ -583,7 +585,41 @@ async function runQuery(
       const event = (message as { event: { type: string; delta?: { type?: string; text?: string } } }).event;
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
         streamingTextBuffer += event.delta.text;
-        // Combine completed turns + current turn's buffer
+
+        // Split on double newline: emit text before \n\n as a split final
+        const splitIdx = streamingTextBuffer.indexOf('\n\n');
+        if (splitIdx !== -1) {
+          const beforeSplit = streamingTextBuffer.slice(0, splitIdx);
+          const afterSplit = streamingTextBuffer.slice(splitIdx + 2);
+
+          const fullText = completedTurnsText
+            ? completedTurnsText + '\n\n' + beforeSplit
+            : beforeSplit;
+          const visible = fullText
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+
+          if (visible) {
+            writeOutput({ status: 'success', result: visible, partial: false, split: true, newSessionId });
+          }
+
+          // Already sent — reset completedTurnsText
+          completedTurnsText = '';
+          streamingTextBuffer = afterSplit;
+
+          // Emit remainder as a new partial if present
+          if (afterSplit.trim()) {
+            const remainderVisible = afterSplit
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (remainderVisible) {
+              writeOutput({ status: 'success', result: remainderVisible, partial: true, newSessionId });
+            }
+          }
+          return;
+        }
+
+        // No split — normal partial emission
         const fullText = completedTurnsText
           ? completedTurnsText + '\n\n' + streamingTextBuffer
           : streamingTextBuffer;
@@ -594,9 +630,11 @@ async function runQuery(
           writeOutput({ status: 'success', result: visible, partial: true, newSessionId });
         }
       }
-      // Reset current-turn buffer when a new message starts
+      // Reset buffers when a new message starts — only the final turn's
+      // text appears in the SDK result, so don't accumulate across turns.
       if (event.type === 'message_start') {
         streamingTextBuffer = '';
+        completedTurnsText = '';
       }
     }
 
@@ -639,6 +677,9 @@ async function runQuery(
           usage,
         });
       }
+      // Reset streaming buffers for next user turn within the same runQuery
+      completedTurnsText = '';
+      streamingTextBuffer = '';
     }
   }
 

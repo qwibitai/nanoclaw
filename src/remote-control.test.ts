@@ -9,6 +9,7 @@ vi.mock('./config.js', () => ({
 // Mock child_process
 const spawnMock = vi.fn();
 vi.mock('child_process', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   spawn: (...args: any[]) => spawnMock(...args),
 }));
 
@@ -52,11 +53,13 @@ describe('remote-control', () => {
     // Default fs mocks
     _mkdirSyncSpy = vi
       .spyOn(fs, 'mkdirSync')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .mockImplementation(() => undefined as any);
     writeFileSyncSpy = vi
       .spyOn(fs, 'writeFileSync')
       .mockImplementation(() => {});
     unlinkSyncSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     openSyncSpy = vi.spyOn(fs, 'openSync').mockReturnValue(42 as any);
     closeSyncSpy = vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
 
@@ -69,6 +72,7 @@ describe('remote-control', () => {
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       }
       return '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any);
   });
 
@@ -87,6 +91,7 @@ describe('remote-control', () => {
       // Simulate URL appearing in stdout file on first poll
       stdoutFileContent =
         'Session URL: https://claude.ai/code?bridge=env_abc123\n';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       const result = await startRemoteControl('user1', 'tg:123', '/project');
@@ -107,6 +112,7 @@ describe('remote-control', () => {
       const proc = createMockProcess();
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_test\n';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
@@ -123,6 +129,7 @@ describe('remote-control', () => {
       const proc = createMockProcess();
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_test\n';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
@@ -136,6 +143,7 @@ describe('remote-control', () => {
       const proc = createMockProcess(99999);
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_save\n';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
@@ -150,6 +158,7 @@ describe('remote-control', () => {
       const proc = createMockProcess();
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_existing\n';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
@@ -171,16 +180,19 @@ describe('remote-control', () => {
       // First start: process alive, URL found
       const killSpy = vi
         .spyOn(process, 'kill')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .mockImplementation((() => true) as any);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_first\n';
       await startRemoteControl('user1', 'tg:123', '/project');
 
       // Old process (11111) is dead, new process (22222) is alive
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       killSpy.mockImplementation(((pid: number, sig: any) => {
         if (pid === 11111 && (sig === 0 || sig === undefined)) {
           throw new Error('ESRCH');
         }
         return true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
 
       stdoutFileContent = 'https://claude.ai/code?bridge=env_second\n';
@@ -201,6 +213,7 @@ describe('remote-control', () => {
       // Process is dead (poll will detect this)
       vi.spyOn(process, 'kill').mockImplementation((() => {
         throw new Error('ESRCH');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
 
       const result = await startRemoteControl('user1', 'tg:123', '/project');
@@ -215,6 +228,7 @@ describe('remote-control', () => {
       const proc = createMockProcess(44444);
       spawnMock.mockReturnValue(proc);
       stdoutFileContent = 'no url here';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       const promise = startRemoteControl('user1', 'tg:123', '/project');
@@ -255,6 +269,7 @@ describe('remote-control', () => {
       stdoutFileContent = 'https://claude.ai/code?bridge=env_stop\n';
       const killSpy = vi
         .spyOn(process, 'kill')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .mockImplementation((() => true) as any);
 
       await startRemoteControl('user1', 'tg:123', '/project');
@@ -289,7 +304,9 @@ describe('remote-control', () => {
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
         return '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       restoreRemoteControl();
@@ -311,9 +328,11 @@ describe('remote-control', () => {
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
         return '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
       vi.spyOn(process, 'kill').mockImplementation((() => {
         throw new Error('ESRCH');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
 
       restoreRemoteControl();
@@ -332,6 +351,7 @@ describe('remote-control', () => {
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return 'not json{{{';
         return '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
 
       restoreRemoteControl();
@@ -352,9 +372,11 @@ describe('remote-control', () => {
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
         return '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
       const killSpy = vi
         .spyOn(process, 'kill')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .mockImplementation((() => true) as any);
 
       restoreRemoteControl();
@@ -378,7 +400,9 @@ describe('remote-control', () => {
       readFileSyncSpy.mockImplementation(((p: string) => {
         if (p.endsWith('remote-control.json')) return JSON.stringify(session);
         return '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
       restoreRemoteControl();

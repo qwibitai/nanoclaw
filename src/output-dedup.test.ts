@@ -179,6 +179,7 @@ describe('streaming output', () => {
             channel.editMessage('jid', streamMessageId, text);
             lastEditTime = now;
             lastSentText = text;
+          // eslint-disable-next-line no-catch-all/no-catch-all
           } catch {
             streamingFailed = true;
             continue;
@@ -522,6 +523,7 @@ describe('agent-runner streaming buffer', () => {
         }
         if (event.type === 'message_start') {
           streamingTextBuffer = '';
+          completedTurnsText = '';
         }
       }
 
@@ -538,8 +540,11 @@ describe('agent-runner streaming buffer', () => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let writeOutputMock: any;
-  const writeOutput = (output: { result: string; partial: true }) =>
-    writeOutputMock(output);
+  const writeOutput = (output: {
+    result: string;
+    partial: boolean;
+    split?: boolean;
+  }) => writeOutputMock(output);
 
   beforeEach(() => {
     writeOutputMock = vi.fn();
@@ -610,7 +615,8 @@ describe('agent-runner streaming buffer', () => {
     });
   });
 
-  it('accumulates across turns via completedTurnsText', () => {
+  it('does not leak early turn text after message_start', () => {
+    // Realistic SDK event order: assistant (turn complete) → message_start (new turn)
     simulateAgentRunner(
       [
         {
@@ -623,6 +629,10 @@ describe('agent-runner streaming buffer', () => {
         { type: 'assistant' },
         {
           type: 'stream_event',
+          event: { type: 'message_start' },
+        },
+        {
+          type: 'stream_event',
           event: {
             type: 'content_block_delta',
             delta: { type: 'text_delta', text: 'Turn 2 text' },
@@ -633,9 +643,9 @@ describe('agent-runner streaming buffer', () => {
     );
 
     expect(writeOutputMock).toHaveBeenCalledTimes(2);
-    // Second turn includes completed turn 1
+    // Turn 2 should NOT include Turn 1 text — it was cleared by message_start
     expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
-      result: 'Turn 1 text\n\nTurn 2 text',
+      result: 'Turn 2 text',
       partial: true,
     });
   });
@@ -687,5 +697,415 @@ describe('agent-runner streaming buffer', () => {
     );
 
     expect(writeOutputMock).not.toHaveBeenCalled();
+  });
+
+  it('resets buffers after result so follow-up query starts clean', () => {
+    // Extended simulator that handles result messages and returns buffer state
+    type ResultMessage = { type: 'result'; result?: string; subtype?: string };
+    type ExtMessage = SDKMessage | ResultMessage;
+
+    function simulateAgentRunnerWithResult(
+      messages: ExtMessage[],
+      onOutput: (output: { result: string; partial: boolean }) => void,
+    ) {
+      let streamingTextBuffer = '';
+      let completedTurnsText = '';
+      let lastFinalText: string | null = null;
+
+      for (const message of messages) {
+        if (message.type === 'stream_event') {
+          const event = (message as StreamEvent).event;
+          if (
+            event.type === 'content_block_delta' &&
+            event.delta?.type === 'text_delta' &&
+            event.delta.text
+          ) {
+            streamingTextBuffer += event.delta.text;
+            const fullText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+            const visible = fullText
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (visible) {
+              onOutput({ result: visible, partial: true });
+            }
+          }
+          if (event.type === 'message_start') {
+            streamingTextBuffer = '';
+          }
+        }
+
+        if (message.type === 'assistant') {
+          if (streamingTextBuffer) {
+            completedTurnsText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+          }
+          streamingTextBuffer = '';
+        }
+
+        if (message.type === 'result') {
+          const textResult = (message as ResultMessage).result ?? null;
+          if (textResult && textResult !== lastFinalText) {
+            lastFinalText = textResult;
+            onOutput({ result: textResult, partial: false });
+          }
+          // Reset streaming buffers for next user turn
+          completedTurnsText = '';
+          streamingTextBuffer = '';
+        }
+      }
+    }
+
+    // First query: stream + result, then second query: stream
+    simulateAgentRunnerWithResult(
+      [
+        // First query
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'First response' },
+          },
+        },
+        { type: 'assistant' },
+        { type: 'result', result: 'First response' },
+        // Second query (follow-up message piped into same runQuery)
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Second response' },
+          },
+        },
+      ],
+      writeOutput,
+    );
+
+    // The second query's partial should NOT include "First response"
+    const lastCall =
+      writeOutputMock.mock.calls[writeOutputMock.mock.calls.length - 1][0];
+    expect(lastCall.result).toBe('Second response');
+    expect(lastCall.partial).toBe(true);
+  });
+
+  it('resets buffers after duplicate result skip', () => {
+    type ResultMessage = { type: 'result'; result?: string; subtype?: string };
+    type ExtMessage = SDKMessage | ResultMessage;
+
+    function simulateAgentRunnerWithResult(
+      messages: ExtMessage[],
+      onOutput: (output: { result: string; partial: boolean }) => void,
+    ) {
+      let streamingTextBuffer = '';
+      let completedTurnsText = '';
+      let lastFinalText: string | null = null;
+
+      for (const message of messages) {
+        if (message.type === 'stream_event') {
+          const event = (message as StreamEvent).event;
+          if (
+            event.type === 'content_block_delta' &&
+            event.delta?.type === 'text_delta' &&
+            event.delta.text
+          ) {
+            streamingTextBuffer += event.delta.text;
+            const fullText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+            const visible = fullText
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (visible) {
+              onOutput({ result: visible, partial: true });
+            }
+          }
+          if (event.type === 'message_start') {
+            streamingTextBuffer = '';
+          }
+        }
+
+        if (message.type === 'assistant') {
+          if (streamingTextBuffer) {
+            completedTurnsText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+          }
+          streamingTextBuffer = '';
+        }
+
+        if (message.type === 'result') {
+          const textResult = (message as ResultMessage).result ?? null;
+          if (textResult && textResult !== lastFinalText) {
+            lastFinalText = textResult;
+            onOutput({ result: textResult, partial: false });
+          }
+          // Reset streaming buffers even on duplicate skip
+          completedTurnsText = '';
+          streamingTextBuffer = '';
+        }
+      }
+    }
+
+    // First result, then duplicate result, then new query
+    simulateAgentRunnerWithResult(
+      [
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Response A' },
+          },
+        },
+        { type: 'assistant' },
+        { type: 'result', result: 'Response A' },
+        // Duplicate result (skipped)
+        { type: 'result', result: 'Response A' },
+        // New query
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Response B' },
+          },
+        },
+      ],
+      writeOutput,
+    );
+
+    const lastCall =
+      writeOutputMock.mock.calls[writeOutputMock.mock.calls.length - 1][0];
+    expect(lastCall.result).toBe('Response B');
+    expect(lastCall.partial).toBe(true);
+  });
+
+  it('splits on double newline and emits split final', () => {
+    function simulateAgentRunnerWithSplit(
+      messages: SDKMessage[],
+      onOutput: (output: {
+        result: string;
+        partial: boolean;
+        split?: boolean;
+      }) => void,
+    ) {
+      let streamingTextBuffer = '';
+      let completedTurnsText = '';
+
+      for (const message of messages) {
+        if (message.type === 'stream_event') {
+          const event = (message as StreamEvent).event;
+          if (
+            event.type === 'content_block_delta' &&
+            event.delta?.type === 'text_delta' &&
+            event.delta.text
+          ) {
+            streamingTextBuffer += event.delta.text;
+
+            const splitIdx = streamingTextBuffer.indexOf('\n\n');
+            if (splitIdx !== -1) {
+              const beforeSplit = streamingTextBuffer.slice(0, splitIdx);
+              const afterSplit = streamingTextBuffer.slice(splitIdx + 2);
+
+              const fullText = completedTurnsText
+                ? completedTurnsText + '\n\n' + beforeSplit
+                : beforeSplit;
+              const visible = fullText
+                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                .trim();
+
+              if (visible) {
+                onOutput({ result: visible, partial: false, split: true });
+              }
+
+              completedTurnsText = '';
+              streamingTextBuffer = afterSplit;
+
+              if (afterSplit.trim()) {
+                const remainderVisible = afterSplit
+                  .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                  .trim();
+                if (remainderVisible) {
+                  onOutput({ result: remainderVisible, partial: true });
+                }
+              }
+              continue;
+            }
+
+            const fullText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+            const visible = fullText
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (visible) {
+              onOutput({ result: visible, partial: true });
+            }
+          }
+          if (event.type === 'message_start') {
+            streamingTextBuffer = '';
+            completedTurnsText = '';
+          }
+        }
+
+        if (message.type === 'assistant') {
+          if (streamingTextBuffer) {
+            completedTurnsText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+          }
+          streamingTextBuffer = '';
+        }
+      }
+    }
+
+    simulateAgentRunnerWithSplit(
+      [
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Hello\n\nWorld' },
+          },
+        },
+      ],
+      writeOutput,
+    );
+
+    // First call: split final with "Hello"
+    expect(writeOutputMock).toHaveBeenNthCalledWith(1, {
+      result: 'Hello',
+      partial: false,
+      split: true,
+    });
+    // Second call: partial with "World" (remainder)
+    expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
+      result: 'World',
+      partial: true,
+    });
+  });
+
+  it('handles multiple splits in sequence', () => {
+    function simulateAgentRunnerWithSplit(
+      messages: SDKMessage[],
+      onOutput: (output: {
+        result: string;
+        partial: boolean;
+        split?: boolean;
+      }) => void,
+    ) {
+      let streamingTextBuffer = '';
+      let completedTurnsText = '';
+
+      for (const message of messages) {
+        if (message.type === 'stream_event') {
+          const event = (message as StreamEvent).event;
+          if (
+            event.type === 'content_block_delta' &&
+            event.delta?.type === 'text_delta' &&
+            event.delta.text
+          ) {
+            streamingTextBuffer += event.delta.text;
+
+            const splitIdx = streamingTextBuffer.indexOf('\n\n');
+            if (splitIdx !== -1) {
+              const beforeSplit = streamingTextBuffer.slice(0, splitIdx);
+              const afterSplit = streamingTextBuffer.slice(splitIdx + 2);
+
+              const fullText = completedTurnsText
+                ? completedTurnsText + '\n\n' + beforeSplit
+                : beforeSplit;
+              const visible = fullText
+                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                .trim();
+
+              if (visible) {
+                onOutput({ result: visible, partial: false, split: true });
+              }
+
+              completedTurnsText = '';
+              streamingTextBuffer = afterSplit;
+
+              if (afterSplit.trim()) {
+                const remainderVisible = afterSplit
+                  .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+                  .trim();
+                if (remainderVisible) {
+                  onOutput({ result: remainderVisible, partial: true });
+                }
+              }
+              continue;
+            }
+
+            const fullText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+            const visible = fullText
+              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+              .trim();
+            if (visible) {
+              onOutput({ result: visible, partial: true });
+            }
+          }
+          if (event.type === 'message_start') {
+            streamingTextBuffer = '';
+            completedTurnsText = '';
+          }
+        }
+
+        if (message.type === 'assistant') {
+          if (streamingTextBuffer) {
+            completedTurnsText = completedTurnsText
+              ? completedTurnsText + '\n\n' + streamingTextBuffer
+              : streamingTextBuffer;
+          }
+          streamingTextBuffer = '';
+        }
+      }
+    }
+
+    // First delta has one split, second delta has another
+    simulateAgentRunnerWithSplit(
+      [
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Part 1\n\nPart 2' },
+          },
+        },
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: '\n\nPart 3' },
+          },
+        },
+      ],
+      writeOutput,
+    );
+
+    // First split: "Part 1"
+    expect(writeOutputMock).toHaveBeenNthCalledWith(1, {
+      result: 'Part 1',
+      partial: false,
+      split: true,
+    });
+    // Remainder partial: "Part 2"
+    expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
+      result: 'Part 2',
+      partial: true,
+    });
+    // Second split: "Part 2" (accumulated in buffer + new delta triggers split)
+    expect(writeOutputMock).toHaveBeenNthCalledWith(3, {
+      result: 'Part 2',
+      partial: false,
+      split: true,
+    });
+    // Remainder partial: "Part 3"
+    expect(writeOutputMock).toHaveBeenNthCalledWith(4, {
+      result: 'Part 3',
+      partial: true,
+    });
   });
 });

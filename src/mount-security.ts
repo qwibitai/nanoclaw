@@ -100,6 +100,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     );
 
     return cachedAllowlist;
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     allowlistLoadError = err instanceof Error ? err.message : String(err);
     logger.error(
@@ -134,6 +135,7 @@ function expandPath(p: string): string {
 function getRealPath(p: string): string | null {
   try {
     return fs.realpathSync(p);
+  // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     return null;
   }

@@ -92,8 +92,10 @@ vi.mock('../group-folder.js', () => ({
 
 // --- Grammy mock ---
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (...args: any[]) => any;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const botRef = vi.hoisted(() => ({ current: null as any }));
 
 vi.mock('grammy', () => ({
@@ -130,6 +132,7 @@ vi.mock('grammy', () => ({
       this.errorHandler = handler;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     start(opts: { onStart: (botInfo: any) => void }) {
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
     }
@@ -142,7 +145,6 @@ import fs from 'fs';
 import {
   setGroupModel,
   deleteSession,
-  getTaskById,
   updateTask,
 } from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
@@ -187,7 +189,9 @@ function createTextCtx(overrides: {
   username?: string;
   messageId?: number;
   date?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   entities?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   reply_to_message?: any;
 }) {
   const chatId = overrides.chatId ?? 100200300;
@@ -223,6 +227,7 @@ function createMediaCtx(overrides: {
   date?: number;
   messageId?: number;
   caption?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   extra?: Record<string, any>;
 }) {
   const chatId = overrides.chatId ?? 100200300;
@@ -461,6 +466,7 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createTextCtx({ text: 'Hi' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx.from.first_name = undefined as any;
       await triggerTextMessage(ctx);
 
@@ -476,7 +482,9 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createTextCtx({ text: 'Hi', fromId: 42 });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx.from.first_name = undefined as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx.from.username = undefined as any;
       await triggerTextMessage(ctx);
 
