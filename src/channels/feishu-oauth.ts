@@ -5,6 +5,7 @@
  * - token 缓存/刷新/持久化
  */
 import http from 'http';
+import os from 'os';
 
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -19,7 +20,23 @@ import {
 const API_BASE = 'https://open.feishu.cn/open-apis';
 const CALLBACK_PORT = 19876;
 const CALLBACK_PATH = '/feishu-callback';
-const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
+
+function getLocalIp(): string {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces || []) {
+      if (
+        iface.family === 'IPv4' &&
+        !iface.internal &&
+        !iface.address.startsWith('198.18')
+      ) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
+const REDIRECT_URI = `http://${getLocalIp()}:${CALLBACK_PORT}${CALLBACK_PATH}`;
 const REFRESH_AHEAD_MS = 5 * 60 * 1000; // 过期前 5 分钟刷新
 
 function getAppCredentials(): { appId: string; appSecret: string } | null {
@@ -196,16 +213,39 @@ async function exchangeCodeForToken(code: string): Promise<{
       };
     };
 
+    logger.info(
+      {
+        respCode: data.code,
+        dataKeys: data.data ? Object.keys(data.data) : [],
+      },
+      '飞书 OIDC 响应',
+    );
     if (data.code !== 0 || !data.data?.access_token) {
-      logger.error({ code: data.code }, '飞书 code 换 token 失败');
+      logger.error(
+        { code: data.code, data: JSON.stringify(data).slice(0, 500) },
+        '飞书 code 换 token 失败',
+      );
       return null;
     }
+
+    const openId =
+      data.data.open_id ||
+      ((data.data as Record<string, unknown>).open_id as string) ||
+      '';
+    logger.info(
+      {
+        openId,
+        hasRefresh: !!data.data.refresh_token,
+        expiresIn: data.data.expires_in,
+      },
+      '飞书 token 获取成功',
+    );
 
     return {
       accessToken: data.data.access_token,
       refreshToken: data.data.refresh_token || '',
       expiresIn: data.data.expires_in || 6900,
-      openId: data.data.open_id || '',
+      openId,
     };
   } catch (err) {
     logger.error({ err }, '飞书 code 换 token 异常');
@@ -215,6 +255,9 @@ async function exchangeCodeForToken(code: string): Promise<{
 
 // ---- 生成授权 URL ----
 
+// 授权时请求的权限范围
+const OAUTH_SCOPES = 'docx:document:readonly';
+
 export function buildAuthUrl(state: string): string {
   const creds = getAppCredentials();
   if (!creds) return '';
@@ -222,6 +265,7 @@ export function buildAuthUrl(state: string): string {
     `${API_BASE}/authen/v1/authorize` +
     `?app_id=${creds.appId}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(OAUTH_SCOPES)}` +
     `&state=${encodeURIComponent(state)}`
   );
 }
@@ -258,8 +302,10 @@ export function startOAuthCallbackServer(
       return;
     }
 
-    // state 格式: chatJid:groupFolder
-    const [chatJid, groupFolder] = state.split(':');
+    // state 格式: chatJid|groupFolder（chatJid 本身含冒号如 fs:oc_xxx，所以用 | 分隔）
+    const sepIdx = state.lastIndexOf('|');
+    const chatJid = sepIdx > 0 ? state.slice(0, sepIdx) : state;
+    const groupFolder = sepIdx > 0 ? state.slice(sepIdx + 1) : '';
 
     const tokenResult = await exchangeCodeForToken(code);
     if (!tokenResult) {
@@ -308,7 +354,7 @@ export function startOAuthCallbackServer(
     );
   });
 
-  server.listen(CALLBACK_PORT, '127.0.0.1', () => {
+  server.listen(CALLBACK_PORT, '0.0.0.0', () => {
     logger.info({ port: CALLBACK_PORT }, '飞书 OAuth 回调 server 已启动');
   });
 

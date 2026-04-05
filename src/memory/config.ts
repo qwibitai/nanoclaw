@@ -61,7 +61,7 @@ function loadMemoryConfig(): MemoryConfig {
   return {
     enabled,
     debounceSeconds: parseInt(env.MEMORY_DEBOUNCE_SECONDS || '30', 10),
-    maxFacts: parseInt(env.MEMORY_MAX_FACTS || '100', 10),
+    maxFacts: parseInt(env.MEMORY_MAX_FACTS || '0', 10), // 0 = 不限制
     factConfidenceThreshold: parseFloat(
       env.MEMORY_FACT_CONFIDENCE_THRESHOLD || '0.7',
     ),

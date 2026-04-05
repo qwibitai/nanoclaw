@@ -680,16 +680,20 @@ async function startMessageLoop(): Promise<void> {
     const { startOAuthCallbackServer } =
       await import('./channels/feishu-oauth.js');
     startOAuthCallbackServer(async ({ openId, chatJid }) => {
+      logger.info({ openId, chatJid }, '飞书 OAuth 授权成功回调');
       const channel = findChannel(channels, chatJid);
       if (channel) {
         await channel.sendMessage(
           chatJid,
           '✅ 飞书文档授权成功！后续文档操作将使用你的权限。',
         );
+        logger.info({ chatJid }, '飞书授权成功通知已发送');
+      } else {
+        logger.warn({ chatJid }, '飞书授权成功但找不到对应 channel');
       }
     });
-  } catch {
-    /* 飞书未配置时忽略 */
+  } catch (err) {
+    logger.warn({ err }, '飞书 OAuth server 启动失败');
   }
 
   logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
@@ -1190,7 +1194,7 @@ async function main(): Promise<void> {
         | undefined;
       if (!feishuChannel?.sendAuthCard) return;
       const { buildAuthUrl } = await import('./channels/feishu-oauth.js');
-      const state = `${chatJid}:${groupFolder}`;
+      const state = `${chatJid}|${groupFolder}`;
       const authUrl = buildAuthUrl(state);
       if (authUrl) {
         await feishuChannel.sendAuthCard(chatJid, authUrl);

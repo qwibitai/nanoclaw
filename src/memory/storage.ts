@@ -334,7 +334,7 @@ export function enforceMaxFacts(
     created_at: string;
   }>;
 
-  if (rows.length <= limit) return 0;
+  if (limit <= 0 || rows.length <= limit) return 0;
 
   const now = Date.now();
   const DAY_MS = 86400_000;
