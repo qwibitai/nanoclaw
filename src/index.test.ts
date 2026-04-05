@@ -5,11 +5,31 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RegisteredGroup } from './types.js';
 
-const { ensureAgent, setRegisteredGroup } = vi.hoisted(() => ({
+const {
+  deleteSession,
+  ensureAgent,
+  getAllRegisteredGroups,
+  getSession,
+  runContainerAgent,
+  setRegisteredGroup,
+  setSession,
+  writeGroupsSnapshot,
+  writeTasksSnapshot,
+} = vi.hoisted(() => ({
+  deleteSession: vi.fn(),
   ensureAgent: vi
     .fn()
     .mockResolvedValue({ name: 'test', identifier: 'test', created: true }),
+  getAllRegisteredGroups: vi.fn(() => ({})),
+  getSession: vi.fn(
+    (_groupFolder: string, _providerId?: string) =>
+      undefined as string | undefined,
+  ),
+  runContainerAgent: vi.fn(),
   setRegisteredGroup: vi.fn(),
+  setSession: vi.fn(),
+  writeGroupsSnapshot: vi.fn(),
+  writeTasksSnapshot: vi.fn(),
 }));
 
 vi.mock('@onecli-sh/sdk', () => ({
@@ -26,9 +46,9 @@ vi.mock('./channels/registry.js', () => ({
 }));
 
 vi.mock('./container-runner.js', () => ({
-  runContainerAgent: vi.fn(),
-  writeGroupsSnapshot: vi.fn(),
-  writeTasksSnapshot: vi.fn(),
+  runContainerAgent,
+  writeGroupsSnapshot,
+  writeTasksSnapshot,
 }));
 
 vi.mock('./container-runtime.js', () => ({
@@ -37,19 +57,20 @@ vi.mock('./container-runtime.js', () => ({
 }));
 
 vi.mock('./db.js', () => ({
-  deleteSession: vi.fn(),
+  deleteSession,
   getAllChats: vi.fn(() => []),
-  getAllRegisteredGroups: vi.fn(() => ({})),
+  getAllRegisteredGroups,
   getAllSessions: vi.fn(() => ({})),
   getAllTasks: vi.fn(() => []),
   getLastBotMessageTimestamp: vi.fn(() => ''),
   getMessagesSince: vi.fn(() => []),
   getNewMessages: vi.fn(() => ({ messages: [], newTimestamp: '' })),
+  getSession,
   getRouterState: vi.fn(() => ''),
   initDatabase: vi.fn(),
   setRegisteredGroup,
   setRouterState: vi.fn(),
-  setSession: vi.fn(),
+  setSession,
   storeChatMetadata: vi.fn(),
   storeMessage: vi.fn(),
 }));
@@ -162,8 +183,17 @@ describe('startup group registration memory seeding', () => {
   afterEach(() => {
     process.chdir(ORIGINAL_CWD);
     vi.resetModules();
+    deleteSession.mockReset();
     setRegisteredGroup.mockReset();
     ensureAgent.mockClear();
+    getAllRegisteredGroups.mockReset();
+    getAllRegisteredGroups.mockReturnValue({});
+    getSession.mockReset();
+    getSession.mockReturnValue(undefined);
+    runContainerAgent.mockReset();
+    setSession.mockReset();
+    writeGroupsSnapshot.mockReset();
+    writeTasksSnapshot.mockReset();
   });
 
   it('seeds new groups from canonical global AGENT.md and renders CLAUDE.md from it', async () => {
@@ -378,6 +408,139 @@ describe('startup group registration memory seeding', () => {
     _restoreRegisteredGroupsOnStartupForTest({});
     expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
       '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+  });
+});
+
+describe('provider-scoped runtime sessions', () => {
+  afterEach(() => {
+    process.chdir(ORIGINAL_CWD);
+    vi.resetModules();
+    deleteSession.mockReset();
+    getAllRegisteredGroups.mockReset();
+    getAllRegisteredGroups.mockReturnValue({});
+    getSession.mockReset();
+    getSession.mockReturnValue(undefined);
+    runContainerAgent.mockReset();
+    setSession.mockReset();
+    writeGroupsSnapshot.mockReset();
+    writeTasksSnapshot.mockReset();
+  });
+
+  it('uses the current provider session after a provider switch at runtime', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    const startupGroup: RegisteredGroup = {
+      name: 'Codex Group',
+      folder: 'codex-group',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      providerId: 'claude-code',
+    };
+    const runtimeGroup: RegisteredGroup = {
+      ...startupGroup,
+      providerId: 'codex',
+    };
+    getAllRegisteredGroups.mockReturnValue({ 'codex@g.us': startupGroup });
+    getSession.mockImplementation(
+      (groupFolder: string, providerId: string | undefined) => {
+        if (groupFolder !== 'codex-group') {
+          return undefined;
+        }
+        if (providerId === 'claude-code') {
+          return 'claude-session';
+        }
+        if (providerId === 'codex') {
+          return 'codex-session-current';
+        }
+        return undefined;
+      },
+    );
+    runContainerAgent.mockResolvedValue({
+      status: 'success',
+      result: 'done',
+      newSessionId: 'codex-session-next',
+    });
+
+    // Act
+    const { _loadStateForTest, _runAgentForTest, _setRegisteredGroups } =
+      await loadIndexModule(repoDir);
+    _loadStateForTest();
+    _setRegisteredGroups({ 'codex@g.us': runtimeGroup });
+    const result = await _runAgentForTest(runtimeGroup, 'Run', 'codex@g.us');
+
+    // Assert
+    expect(result).toBe('success');
+    expect(getSession.mock.calls).toEqual([
+      ['codex-group', 'claude-code'],
+      ['codex-group', 'codex'],
+    ]);
+    expect(runContainerAgent).toHaveBeenCalledTimes(1);
+    const [runtimeGroupArg, invocation] = runContainerAgent.mock.calls[0];
+    expect(runtimeGroupArg).toEqual(
+      expect.objectContaining({
+        folder: 'codex-group',
+        providerId: 'codex',
+      }),
+    );
+    expect(invocation).toEqual(
+      expect.objectContaining({
+        prompt: 'Run',
+        sessionId: 'codex-session-current',
+        groupFolder: 'codex-group',
+        chatJid: 'codex@g.us',
+      }),
+    );
+    expect(setSession).toHaveBeenCalledWith(
+      'codex-group',
+      'codex-session-next',
+      'codex',
+    );
+  });
+
+  it('clears only the active provider session when the runtime reports a stale session', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    const group: RegisteredGroup = {
+      name: 'Codex Group',
+      folder: 'codex-group',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      providerId: 'codex',
+    };
+    getAllRegisteredGroups.mockReturnValue({ 'codex@g.us': group });
+    getSession.mockImplementation(
+      (groupFolder: string, providerId: string | undefined) => {
+        if (groupFolder !== 'codex-group') {
+          return undefined;
+        }
+        if (providerId === 'codex') {
+          return 'codex-stale-session';
+        }
+        if (providerId === 'claude-code') {
+          return 'claude-session';
+        }
+        return undefined;
+      },
+    );
+    runContainerAgent.mockResolvedValue({
+      status: 'error',
+      result: null,
+      error: 'no conversation found for session',
+    });
+
+    // Act
+    const { _loadStateForTest, _runAgentForTest } =
+      await loadIndexModule(repoDir);
+    _loadStateForTest();
+    const result = await _runAgentForTest(group, 'Run', 'codex@g.us');
+
+    // Assert
+    expect(result).toBe('error');
+    expect(deleteSession).toHaveBeenCalledWith('codex-group', 'codex');
+    expect(deleteSession).not.toHaveBeenCalledWith(
+      'codex-group',
+      'claude-code',
     );
   });
 });

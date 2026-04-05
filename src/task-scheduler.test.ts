@@ -10,11 +10,13 @@ vi.mock('./container-runner.js', () => ({
   writeTasksSnapshot: writeTasksSnapshotMock,
 }));
 
+import { createSessionStore } from './agent/session-store.js';
 import {
   _initTestDatabase,
   createTask,
-  getTaskById,
+  deleteSession,
   getSession,
+  getTaskById,
   setSession,
 } from './db.js';
 import {
@@ -58,7 +60,11 @@ describe('task scheduler', () => {
 
     startSchedulerLoop({
       registeredGroups: () => ({}),
-      getSessions: () => ({}),
+      sessionStore: createSessionStore({
+        getSession,
+        setSession,
+        deleteSession,
+      }),
       queue: { enqueueTask } as any,
       onProcess: () => {},
       sendMessage: async () => {},
@@ -68,6 +74,141 @@ describe('task scheduler', () => {
 
     const task = getTaskById('task-invalid-folder');
     expect(task?.status).toBe('paused');
+  });
+
+  it('reuses and updates the active provider session without touching other providers', async () => {
+    // Arrange
+    createTask({
+      id: 'task-provider-session',
+      group_folder: 'other-group',
+      chat_jid: 'other@g.us',
+      prompt: 'run',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'group',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    setSession('other-group', 'claude-session', 'claude-code');
+    setSession('other-group', 'codex-session', 'codex');
+    const sessionStore = createSessionStore({
+      getSession,
+      setSession,
+      deleteSession,
+    });
+    const taskRuns: Array<Promise<void>> = [];
+
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: 'scheduled result',
+      newSessionId: 'codex-session-next',
+    });
+
+    // Act
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'other@g.us': {
+          name: 'Other',
+          folder: 'other-group',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+          providerId: 'codex',
+        },
+      }),
+      sessionStore,
+      queue: {
+        enqueueTask: (
+          _groupJid: string,
+          _taskId: string,
+          fn: () => Promise<void>,
+        ) => {
+          taskRuns.push(fn());
+        },
+        notifyIdle: () => {},
+        closeStdin: () => {},
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(taskRuns);
+
+    // Assert
+    const [, invocation] = runContainerAgentMock.mock.calls[0];
+    expect(invocation.sessionId).toBe('codex-session');
+    expect(getSession('other-group', 'codex')).toBe('codex-session-next');
+    expect(getSession('other-group', 'claude-code')).toBe('claude-session');
+  });
+
+  it('uses the group provider at execution time when the provider changed after task creation', async () => {
+    // Arrange
+    createTask({
+      id: 'task-provider-switch',
+      group_folder: 'other-group',
+      chat_jid: 'other@g.us',
+      prompt: 'run after switch',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'group',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    setSession('other-group', 'claude-session', 'claude-code');
+    setSession('other-group', 'codex-session', 'codex');
+    const sessionStore = createSessionStore({
+      getSession,
+      setSession,
+      deleteSession,
+    });
+    const taskRuns: Array<Promise<void>> = [];
+    const groups = {
+      'other@g.us': {
+        name: 'Other',
+        folder: 'other-group',
+        trigger: '@Andy',
+        added_at: '2026-02-22T00:00:00.000Z',
+        providerId: 'claude-code',
+      },
+    };
+
+    runContainerAgentMock.mockResolvedValue({
+      status: 'success',
+      result: null,
+      newSessionId: 'codex-session-next',
+    });
+
+    groups['other@g.us'] = {
+      ...groups['other@g.us'],
+      providerId: 'codex',
+    };
+
+    // Act
+    startSchedulerLoop({
+      registeredGroups: () => groups,
+      sessionStore,
+      queue: {
+        enqueueTask: (
+          _groupJid: string,
+          _taskId: string,
+          fn: () => Promise<void>,
+        ) => {
+          taskRuns.push(fn());
+        },
+        notifyIdle: () => {},
+        closeStdin: () => {},
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(taskRuns);
+
+    // Assert
+    const [groupArg, invocation] = runContainerAgentMock.mock.calls[0];
+    expect(groupArg.providerId).toBe('codex');
+    expect(invocation.sessionId).toBe('codex-session');
   });
 
   it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
@@ -159,10 +300,12 @@ describe('task scheduler', () => {
       status: 'active',
       created_at: '2026-02-22T00:00:00.000Z',
     });
-    const sessions = {
-      'other-group': 'shared-group-session',
-    };
     setSession('other-group', 'shared-group-session', 'codex');
+    const sessionStore = createSessionStore({
+      getSession,
+      setSession,
+      deleteSession,
+    });
     const taskRuns: Array<Promise<void>> = [];
 
     runContainerAgentMock.mockImplementation(
@@ -198,7 +341,7 @@ describe('task scheduler', () => {
           providerId: 'codex',
         },
       }),
-      getSessions: () => sessions,
+      sessionStore,
       queue: {
         enqueueTask: (
           _groupJid: string,
@@ -219,7 +362,9 @@ describe('task scheduler', () => {
     // Assert
     const [, invocation] = runContainerAgentMock.mock.calls[0];
     expect(invocation.sessionId).toBeUndefined();
-    expect(sessions['other-group']).toBe('shared-group-session');
+    expect(sessionStore.get('other-group', 'codex')).toBe(
+      'shared-group-session',
+    );
     expect(getSession('other-group', 'codex')).toBe('shared-group-session');
   });
 });

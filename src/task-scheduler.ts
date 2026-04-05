@@ -13,12 +13,12 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import type { AgentSessionStore } from './agent/session-store.js';
 import {
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
-  setSession,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -70,7 +70,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
-  getSessions: () => Record<string, string>;
+  sessionStore: Pick<AgentSessionStore, 'get' | 'set'>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
@@ -161,11 +161,10 @@ async function runTask(
   let error: string | null = null;
 
   // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
   const providerId = getGroupProviderId(group);
   const shouldPersistSession = task.context_mode === 'group';
   const sessionId = shouldPersistSession
-    ? sessions[task.group_folder]
+    ? deps.sessionStore.get(task.group_folder, providerId)
     : undefined;
 
   // After the task produces a result, close the container promptly.
@@ -199,11 +198,10 @@ async function runTask(
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (shouldPersistSession && streamedOutput.newSessionId) {
-          sessions[task.group_folder] = streamedOutput.newSessionId;
-          setSession(
+          deps.sessionStore.set(
             task.group_folder,
-            streamedOutput.newSessionId,
             providerId,
+            streamedOutput.newSessionId,
           );
         }
         if (streamedOutput.result) {
@@ -229,8 +227,11 @@ async function runTask(
       error = output.error || 'Unknown error';
     } else {
       if (shouldPersistSession && output.newSessionId) {
-        sessions[task.group_folder] = output.newSessionId;
-        setSession(task.group_folder, output.newSessionId, providerId);
+        deps.sessionStore.set(
+          task.group_folder,
+          providerId,
+          output.newSessionId,
+        );
       }
       if (output.result) {
         // Result was already forwarded to the user via the
