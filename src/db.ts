@@ -615,8 +615,9 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.type ?? ((group as { isMain?: boolean }).isMain ? 'main' : 'chat');
   // JSON 移行や外部入力経由で不正値が混入する可能性があるため、書き込み前に検証する
   if (!VALID_GROUP_TYPES.has(rawType)) {
-    console.warn(
-      `[db] Invalid group.type "${String(rawType)}" for JID ${jid}; falling back to "chat".`,
+    logger.warn(
+      { jid, rawType },
+      'Invalid group.type; falling back to "chat".',
     );
   }
   const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
