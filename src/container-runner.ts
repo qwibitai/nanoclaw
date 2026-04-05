@@ -1941,6 +1941,25 @@ function buildVolumeMounts(
       readonly: false,
     });
   } else {
+    // Mount project root read-only when enabled so agents can explore the codebase
+    // and understand NanoClaw's architecture. Shadow .env to prevent credential
+    // leakage (credentials flow via stdin instead).
+    if (group.containerConfig?.readOnlyProjectRoot) {
+      mounts.push({
+        hostPath: projectRoot,
+        containerPath: '/workspace/project',
+        readonly: true,
+      });
+      const envFile = path.join(projectRoot, '.env');
+      if (fs.existsSync(envFile)) {
+        mounts.push({
+          hostPath: '/dev/null',
+          containerPath: '/workspace/project/.env',
+          readonly: true,
+        });
+      }
+    }
+
     mounts.push({
       hostPath: effectiveGroupDir,
       containerPath: '/workspace/group',
