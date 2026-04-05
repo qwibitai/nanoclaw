@@ -41,6 +41,8 @@ Then run `/setup` to configure Telegram and OneCLI credentials. Initialize the p
 cd groups/idea-maze/scripts && npx tsx init-db.ts
 ```
 
+For a deployed VPS, use `./scripts/monitor-vps.sh` for a one-command health summary of the server, NanoClaw service, OneCLI, and Idea Maze databases. Add `--follow` to tail live service logs.
+
 > **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt.
 
 ## Philosophy
