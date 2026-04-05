@@ -6,6 +6,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'GATEWAY_PORT',
   'GATEWAY_URL',
+  'ONECLI_API_KEY',
   'OPERATOR_SLUG',
   'OPERATOR_NAME',
 ]);
@@ -31,6 +32,12 @@ export const OPERATOR_NAME =
 
 export const ANTHROPIC_API_KEY =
   Deno.env.get('ANTHROPIC_API_KEY') || envConfig.ANTHROPIC_API_KEY || '';
+
+// Set ONECLI_API_KEY in Deno.env so onecli.ts can read it
+const onecliKey = Deno.env.get('ONECLI_API_KEY') || envConfig.ONECLI_API_KEY;
+if (onecliKey) {
+  Deno.env.set('ONECLI_API_KEY', onecliKey);
+}
 
 export const DEV_DATA_DIR = resolve(PROJECT_ROOT, 'dev-data');
 export const SKILLS_DIR = resolve(PROJECT_ROOT, 'skills');

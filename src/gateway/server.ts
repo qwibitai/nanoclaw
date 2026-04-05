@@ -8,6 +8,7 @@ import {
 import * as queue from './queue.ts';
 import { logEvent, getRecentEvents } from './event-log.ts';
 import { loadSkills } from './skills.ts';
+import { getOneCLIStatus } from '../shared/onecli.ts';
 
 const startTime = Date.now();
 
@@ -63,6 +64,7 @@ async function handler(req: Request): Promise<Response> {
         uptime: formatUptime(Date.now() - startTime),
         operator: { name: OPERATOR_NAME, slug: OPERATOR_SLUG },
         skills: loadSkills(),
+        onecli: getOneCLIStatus(),
         pendingWork: queue.getPendingCount(),
         processingWork: queue.getProcessingCount(),
       });
