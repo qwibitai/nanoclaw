@@ -19,7 +19,10 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY package*.json ./
+# Install build tools needed for native modules (e.g. better-sqlite3)
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
