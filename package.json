@@ -3,39 +3,7 @@
   "version": "0.1.0",
   "description": "Simtricity Nexus — AI agent platform for energy community Operators",
   "type": "module",
-  "main": "dist/gateway/index.js",
-  "scripts": {
-    "build": "tsc",
-    "gateway": "tsx src/gateway/index.ts",
-    "worker": "tsx src/worker/index.ts",
-    "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:fix": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
-    "prepare": "husky",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.92"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.35.0",
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.10.0",
-    "eslint": "^9.35.0",
-    "eslint-plugin-no-catch-all": "^1.1.0",
-    "globals": "^15.12.0",
-    "husky": "^9.1.7",
-    "prettier": "^3.8.1",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
-    "typescript-eslint": "^8.35.0",
-    "vitest": "^4.0.18"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

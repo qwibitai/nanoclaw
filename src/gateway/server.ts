@@ -1,4 +1,5 @@
 import { logger } from '../shared/logger.ts';
+import type { WorkResult } from '../shared/types.ts';
 import {
   APP_VERSION,
   ASSISTANT_NAME,
@@ -73,10 +74,54 @@ async function handler(req: Request): Promise<Response> {
     <p>${OPERATOR_NAME}</p>
     <p style="font-size: 0.875rem; margin-top: 0.5rem;">Simtricity Nexus Agent Platform</p>
     <div class="badge">v${APP_VERSION}</div>
+    <p style="font-size: 0.75rem; margin-top: 1.5rem;"><a href="/licenses" style="color: #78716c;">Licenses</a></p>
   </div>
 </body>
 </html>`;
       return new Response(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // --- Licenses ---
+    if (path === '/licenses' && req.method === 'GET') {
+      const licensesHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Licenses — ${ASSISTANT_NAME}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; background: #f5f5f4; line-height: 1.6; }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #d6d3d1; padding-bottom: 0.25rem; }
+    a { color: #2563eb; }
+    .back { font-size: 0.875rem; }
+    code { background: #e7e5e4; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <p class="back"><a href="/">&larr; Back</a></p>
+  <h1>Licenses</h1>
+
+  <h2>Simtricity Nexus</h2>
+  <p>Copyright 2026 Simtricity Ltd<br>License: <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a></p>
+
+  <h2>NanoClaw</h2>
+  <p>Copyright 2026 Gavriel<br>License: MIT<br>Source: <a href="https://github.com/qwibitai/nanoclaw">github.com/qwibitai/nanoclaw</a></p>
+  <p>Simtricity Nexus was originally forked from NanoClaw. Design patterns for channel adapters, skills, and Agent SDK integration are derived from the NanoClaw codebase.</p>
+
+  <h2>Claude Agent SDK</h2>
+  <p>Copyright Anthropic PBC<br>License: <a href="https://code.claude.com/docs/en/legal-and-compliance">Anthropic Commercial Terms</a><br>Package: <code>@anthropic-ai/claude-agent-sdk</code></p>
+
+  <h2>Deno Standard Library</h2>
+  <p>Copyright 2018-2026 the Deno authors<br>License: MIT<br>Package: <code>@std/path</code></p>
+
+  <h2>OneCLI</h2>
+  <p>License: MIT<br>Source: <a href="https://www.onecli.sh">onecli.sh</a><br>Package: <code>@onecli-sh/sdk</code></p>
+</body>
+</html>`;
+      return new Response(licensesHtml, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
     }
@@ -106,9 +151,12 @@ async function handler(req: Request): Promise<Response> {
     }
 
     if (path === '/api/chat' && req.method === 'POST') {
-      const body = await req.json();
-      const message = body.message as string;
-      const groupId = (body.groupId as string) || 'web-chat';
+      const body = (await req.json()) as {
+        message?: string;
+        groupId?: string;
+      };
+      const message = body.message;
+      const groupId = body.groupId || 'web-chat';
 
       if (!message) {
         return json({ error: 'message is required' }, 400);
@@ -167,7 +215,7 @@ async function handler(req: Request): Promise<Response> {
     }
 
     if (path === '/work/complete' && req.method === 'POST') {
-      const result = await req.json();
+      const result = (await req.json()) as WorkResult & { groupId?: string };
       queue.complete(result);
 
       const eventType =
@@ -175,7 +223,7 @@ async function handler(req: Request): Promise<Response> {
       const summary =
         result.status === 'success'
           ? (result.result?.slice(0, 80) ?? '(empty response)') +
-            (result.result?.length > 80 ? '...' : '')
+            ((result.result?.length ?? 0) > 80 ? '...' : '')
           : `Error: ${result.error ?? 'unknown'}`;
 
       logEvent({

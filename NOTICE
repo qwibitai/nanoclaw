@@ -1,0 +1,39 @@
+Simtricity Nexus
+Copyright 2026 Simtricity Ltd
+
+This product is licensed under AGPL-3.0.
+
+This product includes software developed by third parties:
+
+---
+
+NanoClaw
+Copyright 2026 Gavriel
+License: MIT
+Source: https://github.com/qwibitai/nanoclaw
+
+Simtricity Nexus was originally forked from NanoClaw. Design patterns
+for channel adapters, skills, and Agent SDK integration are derived
+from the NanoClaw codebase. The original MIT license is retained for
+all files derived from NanoClaw.
+
+---
+
+Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
+Copyright Anthropic PBC
+License: Anthropic Commercial Terms
+Source: https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk
+
+---
+
+Deno Standard Library (@std/path)
+Copyright 2018-2026 the Deno authors
+License: MIT
+Source: https://jsr.io/@std/path
+
+---
+
+OneCLI SDK (@onecli-sh/sdk)
+Copyright OneCLI
+License: MIT
+Source: https://www.onecli.sh
