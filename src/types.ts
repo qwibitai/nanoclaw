@@ -107,6 +107,7 @@ export interface ScheduledTask {
   context_mode: 'group' | 'isolated';
   task_type?: 'container' | 'system'; // default 'container'
   schedule_tz?: string | null; // IANA timezone (e.g. 'America/New_York'). Null = use TIMEZONE from config
+  blueprint_id?: string | null; // Links task to an installed Blueprint
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;

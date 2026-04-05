@@ -64,6 +64,8 @@ import {
   startSkillInstall,
 } from './skills.js';
 import type { ActiveSession, AuthUser, Capabilities } from './types.js';
+import { handleWorkshopRoute } from './workshop.js';
+import type { WorkshopDeps } from './workshop.js';
 
 // --- Deps ---
 
@@ -85,6 +87,7 @@ export interface RouteDeps {
   onSkillInstallProgress: (jobId: string, output: string) => void;
   onSkillInstallComplete: (jobId: string, success: boolean) => void;
   resumeGateApproval?: (gateId: string) => Promise<void>;
+  triggerSchedulerPoll?: () => void;
 }
 
 // --- Auth helpers ---
@@ -167,6 +170,17 @@ export async function handleRoute(
   deps: RouteDeps,
   auth: AuthUser | true = true,
 ): Promise<boolean> {
+  // --- Workshop routes ---
+  if (pathname.startsWith('/api/workshop')) {
+    const workshopDeps: WorkshopDeps = {
+      hasGroupAccess: (a, g) => hasGroupAccess(a, g),
+      getCapabilities: deps.getCapabilities as () => { channels?: string[] },
+      triggerSchedulerPoll: deps.triggerSchedulerPoll || (() => {}),
+      getRegisteredGroups: deps.getRegisteredGroups,
+    };
+    return handleWorkshopRoute(req, res, pathname, method, auth, workshopDeps);
+  }
+
   // --- Existing endpoints (migrated from web-ui.ts) ---
 
   if (pathname === '/events' && method === 'GET') {
@@ -1057,6 +1071,13 @@ export async function handleRoute(
     }
     if (!hasGroupAccess(auth, task.group_folder)) {
       json(res, 403, { error: 'Access denied to group' });
+      return true;
+    }
+    if (task.blueprint_id) {
+      json(res, 409, {
+        error:
+          'This task is managed by a Workshop Blueprint. Uninstall it from The Workshop instead.',
+      });
       return true;
     }
     deleteTask(taskId);
