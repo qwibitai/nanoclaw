@@ -1,0 +1,10 @@
+node_modules/
+.git/
+.env
+dist/
+container/
+.claude/
+*.md
+!skills/**/*.md
+!knowledge/**/*.md
+!dev-data/**/*.md

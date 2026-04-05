@@ -51,6 +51,36 @@ async function handler(req: Request): Promise<Response> {
   const path = url.pathname;
 
   try {
+    // --- Landing page ---
+    if (path === '/' && req.method === 'GET') {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${ASSISTANT_NAME} — ${OPERATOR_NAME}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f4; color: #1c1917; }
+    .container { text-align: center; padding: 2rem; }
+    h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.5rem; }
+    p { color: #78716c; margin: 0.25rem 0; }
+    .badge { display: inline-block; background: #d1fae5; color: #065f46; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>${ASSISTANT_NAME}</h1>
+    <p>${OPERATOR_NAME}</p>
+    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Simtricity Nexus Agent Platform</p>
+    <div class="badge">v${APP_VERSION}</div>
+  </div>
+</body>
+</html>`;
+      return new Response(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+
     // --- Health ---
     if (path === '/health' && req.method === 'GET') {
       return json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -168,5 +198,6 @@ async function handler(req: Request): Promise<Response> {
 }
 
 export function createGateway(port: number): Deno.HttpServer {
-  return Deno.serve({ port, hostname: '0.0.0.0' }, handler);
+  // Bind to :: (all interfaces, IPv4+IPv6) so Fly internal 6PN networking works
+  return Deno.serve({ port, hostname: '::' }, handler);
 }

@@ -45,6 +45,9 @@ export async function runAgent(options: {
           : undefined,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        env: Object.fromEntries(
+          Object.entries(Deno.env.toObject()),
+        ),
       },
     })) {
       messageCount++;

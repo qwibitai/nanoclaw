@@ -1,0 +1,6 @@
+{
+  "name": "Bristol Energy",
+  "slug": "bec",
+  "products": ["nexus"],
+  "channels": ["web-chat"]
+}

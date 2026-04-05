@@ -1,0 +1,54 @@
+app = "simt-nexus-mgf"
+primary_region = "lhr"
+
+[build]
+dockerfile = "Dockerfile"
+
+[env]
+ASSISTANT_NAME = "Nexus"
+GATEWAY_PORT = "3001"
+
+# Per-operator secrets (set via fly secrets set):
+# ANTHROPIC_API_KEY
+# ONECLI_API_KEY
+# OPERATOR_SLUG
+# OPERATOR_NAME
+# GATEWAY_URL (internal DNS for worker -> gateway)
+
+[processes]
+gateway = "deno run -A src/gateway/index.ts"
+worker = "deno run -A src/worker/index.ts"
+
+[http_service]
+internal_port = 3001
+force_https = true
+auto_stop_machines = "off"
+auto_start_machines = true
+min_machines_running = 1
+processes = ["gateway"]
+
+[http_service.concurrency]
+type = "requests"
+soft_limit = 20
+hard_limit = 50
+
+[[http_service.checks]]
+grace_period = "30s"
+interval = "30s"
+method = "GET"
+path = "/health"
+timeout = "5s"
+
+[[vm]]
+size = "shared-cpu-2x"
+memory = "1gb"
+processes = ["gateway"]
+
+[[vm]]
+size = "shared-cpu-2x"
+memory = "1gb"
+processes = ["worker"]
+
+[[restart]]
+policy = "on-failure"
+retries = 5
