@@ -34,10 +34,6 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
-import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -814,13 +810,7 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
-}
-
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();

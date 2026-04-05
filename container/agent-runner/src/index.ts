@@ -33,6 +33,13 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  workspacePaths: {
+    group: string;
+    project?: string;
+    global?: string;
+    ipc: string;
+    extra?: string;
+  };
 }
 
 interface ContainerOutput {
@@ -74,9 +81,20 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// 工作目录路径 — 在 stdin 解析后初始化
+let PATHS: {
+  group: string;
+  project?: string;
+  global?: string;
+  ipc: string;
+  extra?: string;
+  ipcInput: string;
+  ipcClose: string;
+  conversations: string;
+  globalClaudeMd?: string;
+};
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -196,7 +214,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = PATHS.conversations;
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -307,9 +325,9 @@ function formatTranscriptMarkdown(
  * Check for _close sentinel.
  */
 function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
+  if (fs.existsSync(PATHS.ipcClose)) {
     try {
-      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+      fs.unlinkSync(PATHS.ipcClose);
     } catch {
       /* ignore */
     }
@@ -324,15 +342,15 @@ function shouldClose(): boolean {
  */
 function drainIpcInput(): string[] {
   try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+    fs.mkdirSync(PATHS.ipcInput, { recursive: true });
     const files = fs
-      .readdirSync(IPC_INPUT_DIR)
+      .readdirSync(PATHS.ipcInput)
       .filter((f) => f.endsWith('.json'))
       .sort();
 
     const messages: string[] = [];
     for (const file of files) {
-      const filePath = path.join(IPC_INPUT_DIR, file);
+      const filePath = path.join(PATHS.ipcInput, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
@@ -427,17 +445,17 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = PATHS.globalClaudeMd;
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (!containerInput.isMain && globalClaudeMdPath && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
+  // Discover additional directories at extra workspace path
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
+  const extraBase = PATHS.extra;
+  if (extraBase && fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
       const fullPath = path.join(extraBase, entry);
       if (fs.statSync(fullPath).isDirectory()) {
@@ -452,7 +470,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: PATHS.group,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -496,6 +514,7 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IPC_DIR: PATHS.ipc,
           },
         },
       },
@@ -749,11 +768,21 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
-    try {
-      fs.unlinkSync('/tmp/input.json');
-    } catch {
-      /* may not exist */
-    }
+
+    // 初始化工作目录路径
+    const wp = containerInput.workspacePaths;
+    PATHS = {
+      group: wp.group,
+      project: wp.project,
+      global: wp.global,
+      ipc: wp.ipc,
+      extra: wp.extra,
+      ipcInput: path.join(wp.ipc, 'input'),
+      ipcClose: path.join(wp.ipc, 'input', '_close'),
+      conversations: path.join(wp.group, 'conversations'),
+      globalClaudeMd: wp.global ? path.join(wp.global, 'CLAUDE.md') : undefined,
+    };
+
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
@@ -772,11 +801,11 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+  fs.mkdirSync(PATHS.ipcInput, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
   try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    fs.unlinkSync(PATHS.ipcClose);
   } catch {
     /* ignore */
   }

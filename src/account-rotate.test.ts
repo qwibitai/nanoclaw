@@ -13,9 +13,6 @@ import { detectRateLimit, rotateAccount } from './container-runner.js';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
-  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
-  CONTAINER_TIMEOUT: 1800000,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000,
@@ -50,24 +47,15 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock container-runtime
-vi.mock('./container-runtime.js', () => ({
-  CONTAINER_RUNTIME_BIN: 'docker',
-  hostGatewayArgs: () => [],
-  readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
-  stopContainer: vi.fn(),
+// Mock env
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
 }));
 
-// Mock mount-security
-vi.mock('./mount-security.js', () => ({
-  validateAdditionalMounts: vi.fn(() => []),
-}));
-
-// Mock OneCLI SDK
-vi.mock('@onecli-sh/sdk', () => ({
-  OneCLI: class {
-    applyContainerConfig = vi.fn().mockResolvedValue(true);
-  },
+// Mock group-folder
+vi.mock('./group-folder.js', () => ({
+  resolveGroupFolderPath: (folder: string) => `/tmp/nanoclaw-test-groups/${folder}`,
+  resolveGroupIpcPath: (folder: string) => `/tmp/nanoclaw-test-data/ipc/${folder}`,
 }));
 
 // Mock child_process — 控制 execSync 的返回值
