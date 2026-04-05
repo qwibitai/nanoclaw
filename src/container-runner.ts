@@ -34,6 +34,8 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const CONTAINER_UID = 1000;
+const CONTAINER_GID = 1000;
 
 export interface ContainerInput {
   prompt: string;
@@ -68,6 +70,31 @@ function applyExplicitContainerEnv(args: string[]): void {
   const tavilyApiKey = process.env.TAVILY_API_KEY || envConfig.TAVILY_API_KEY;
   if (tavilyApiKey) {
     args.push('-e', `TAVILY_API_KEY=${tavilyApiKey}`);
+  }
+}
+
+function ensureContainerWritableOwnership(hostPath: string): void {
+  if (process.getuid?.() !== 0) return;
+
+  const applyOwnership = (targetPath: string) => {
+    const stats = fs.lstatSync(targetPath);
+    if (stats.isSymbolicLink()) return;
+
+    fs.chownSync(targetPath, CONTAINER_UID, CONTAINER_GID);
+    if (!stats.isDirectory()) return;
+
+    for (const entry of fs.readdirSync(targetPath)) {
+      applyOwnership(path.join(targetPath, entry));
+    }
+  };
+
+  try {
+    applyOwnership(hostPath);
+  } catch (err) {
+    logger.warn(
+      { hostPath, err },
+      'Failed to sync writable mount ownership for container user',
+    );
   }
 }
 
@@ -125,6 +152,7 @@ function buildVolumeMounts(
       });
     }
   }
+  ensureContainerWritableOwnership(groupDir);
 
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
@@ -170,6 +198,7 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+  ensureContainerWritableOwnership(groupSessionsDir);
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -182,6 +211,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  ensureContainerWritableOwnership(groupIpcDir);
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -215,6 +245,7 @@ function buildVolumeMounts(
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
   }
+  ensureContainerWritableOwnership(groupAgentRunnerDir);
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
@@ -263,14 +294,13 @@ async function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
-  // Run as the host UID for writable bind mounts.
-  // Root-owned Linux deployments commonly check the repo out under /root, which
-  // makes writable mounts fail for the image's default node user (uid 1000).
-  // Keep uid 1000 on non-root Linux hosts so the image default still works.
+  // Run as the host user so bind-mounted files are accessible.
+  // Skip when running as root (uid 0), as the container's node user (uid 1000),
+  // or when getuid is unavailable (native Windows without WSL).
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid ?? hostUid}`);
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
 

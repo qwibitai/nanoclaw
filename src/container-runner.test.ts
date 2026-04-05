@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { spawn } from 'child_process';
+import fs from 'fs';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -46,6 +47,11 @@ vi.mock('fs', async () => {
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      lstatSync: vi.fn(() => ({
+        isDirectory: () => true,
+        isSymbolicLink: () => false,
+      })),
+      chownSync: vi.fn(),
       copyFileSync: vi.fn(),
     },
   };
@@ -257,11 +263,14 @@ describe('container-runner timeout behavior', () => {
     expect(containerArgs).toContain('TAVILY_API_KEY=tvly-test-key');
   });
 
-  it('runs the container as root on root-owned hosts', async () => {
+  it('re-owns writable mounts for the node user on root-owned hosts', async () => {
     const getuidSpy = vi.spyOn(process, 'getuid').mockReturnValue(0);
     const getgidSpy = vi.spyOn(process, 'getgid').mockReturnValue(0);
 
     try {
+      const chownSyncMock = vi.mocked(fs.chownSync);
+      chownSyncMock.mockClear();
+
       const resultPromise = runContainerAgent(
         testGroup,
         testInput,
@@ -282,9 +291,8 @@ describe('container-runner timeout behavior', () => {
       const spawnMock = vi.mocked(spawn);
       const containerArgs = spawnMock.mock.calls.at(-1)?.[1] ?? [];
 
-      expect(containerArgs).toContain('--user');
-      expect(containerArgs).toContain('0:0');
-      expect(containerArgs).toContain('HOME=/home/node');
+      expect(containerArgs).not.toContain('--user');
+      expect(chownSyncMock).toHaveBeenCalled();
     } finally {
       getuidSpy.mockRestore();
       getgidSpy.mockRestore();
