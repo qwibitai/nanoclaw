@@ -182,7 +182,7 @@ function buildVolumeMounts(
     JSON.stringify(settingsContent, null, 2) + '\n',
   );
 
-  // container/skills/ から各グループ의 .claude/skills/ にスキルを同期
+  // container/skills/ から各グループの .claude/skills/ にスキルを同期
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
