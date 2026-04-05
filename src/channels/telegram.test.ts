@@ -47,6 +47,10 @@ vi.mock('grammy', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
+      sendPhoto: vi.fn().mockResolvedValue(undefined),
+      sendDocument: vi.fn().mockResolvedValue(undefined),
+      sendAudio: vi.fn().mockResolvedValue(undefined),
+      sendVideo: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
@@ -73,6 +77,12 @@ vi.mock('grammy', () => ({
     }
 
     stop() {}
+  },
+  InputFile: class MockInputFile {
+    source: string;
+    constructor(source: string) {
+      this.source = source;
+    }
   },
 }));
 
@@ -1122,6 +1132,101 @@ describe('TelegramChannel', () => {
       await handler(ctx);
 
       expect(ctx.reply).toHaveBeenCalledWith('Andy is online.');
+    });
+  });
+
+  // --- sendFile ---
+
+  describe('sendFile', () => {
+    it('sends photo for image extensions', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Create a temp file
+      const fs = await import('fs');
+      const tmpFile = '/tmp/nc-test-photo.jpg';
+      fs.writeFileSync(tmpFile, 'fake image data');
+
+      await channel.sendFile('tg:100200300', tmpFile, 'A photo');
+
+      expect(currentBot().api.sendPhoto).toHaveBeenCalledWith(
+        '100200300',
+        expect.anything(),
+        { caption: 'A photo' },
+      );
+
+      fs.unlinkSync(tmpFile);
+    });
+
+    it('sends document for unknown extensions', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const fs = await import('fs');
+      const tmpFile = '/tmp/nc-test-file.pdf';
+      fs.writeFileSync(tmpFile, 'fake pdf data');
+
+      await channel.sendFile('tg:100200300', tmpFile);
+
+      expect(currentBot().api.sendDocument).toHaveBeenCalledWith(
+        '100200300',
+        expect.anything(),
+        {},
+      );
+
+      fs.unlinkSync(tmpFile);
+    });
+
+    it('sends audio for audio extensions', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const fs = await import('fs');
+      const tmpFile = '/tmp/nc-test-audio.mp3';
+      fs.writeFileSync(tmpFile, 'fake audio data');
+
+      await channel.sendFile('tg:100200300', tmpFile);
+
+      expect(currentBot().api.sendAudio).toHaveBeenCalledWith(
+        '100200300',
+        expect.anything(),
+        {},
+      );
+
+      fs.unlinkSync(tmpFile);
+    });
+
+    it('sends video for video extensions', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const fs = await import('fs');
+      const tmpFile = '/tmp/nc-test-video.mp4';
+      fs.writeFileSync(tmpFile, 'fake video data');
+
+      await channel.sendFile('tg:100200300', tmpFile);
+
+      expect(currentBot().api.sendVideo).toHaveBeenCalledWith(
+        '100200300',
+        expect.anything(),
+        {},
+      );
+
+      fs.unlinkSync(tmpFile);
+    });
+
+    it('does not throw when bot is not initialized', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      // Don't connect — bot is null
+
+      await expect(
+        channel.sendFile('tg:100200300', '/tmp/file.pdf'),
+      ).resolves.not.toThrow();
     });
   });
 

@@ -2,7 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -395,6 +395,38 @@ export class TelegramChannel implements Channel {
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async sendFile(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      const file = new InputFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const opts = caption ? { caption } : {};
+
+      if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+        await this.bot.api.sendPhoto(numericId, file, opts);
+      } else if (['.mp4', '.webm', '.avi', '.mov'].includes(ext)) {
+        await this.bot.api.sendVideo(numericId, file, opts);
+      } else if (['.mp3', '.ogg', '.wav', '.flac', '.m4a'].includes(ext)) {
+        await this.bot.api.sendAudio(numericId, file, opts);
+      } else {
+        await this.bot.api.sendDocument(numericId, file, opts);
+      }
+
+      logger.info({ jid, filePath }, 'Telegram file sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Telegram file');
     }
   }
 
