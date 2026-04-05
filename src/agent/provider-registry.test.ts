@@ -57,6 +57,29 @@ describe('provider registry', () => {
     expect(codexProvider.id).toBe('codex');
   });
 
+  it('preserves a fallback to legacy .claude state for the claude-code provider', () => {
+    // Arrange
+    const registry = createProviderRegistry();
+    const claudeProvider = registry.getProvider('claude-code');
+
+    // Act
+    const preparedSession = claudeProvider.prepareSession({
+      projectRoot: '/repo',
+      dataDir: '/repo/data',
+      groupFolder: 'whatsapp_main',
+      groupDir: '/repo/groups/whatsapp_main',
+      isMain: true,
+    });
+
+    // Assert
+    expect(preparedSession.providerStateDir).toBe(
+      '/repo/data/sessions/whatsapp_main/claude-code',
+    );
+    expect(preparedSession.fallbackProviderStateDirs).toEqual([
+      '/repo/data/sessions/whatsapp_main/.claude',
+    ]);
+  });
+
   it('rejects duplicate provider registration', () => {
     // Arrange
     const registry = new AgentProviderRegistry();

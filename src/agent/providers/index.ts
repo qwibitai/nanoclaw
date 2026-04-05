@@ -5,8 +5,8 @@ import type {
   PrepareSessionContext,
   PreparedSession,
   ProviderCapabilities,
-  RuntimeInvocationContext,
   ProviderRuntimeInput,
+  RuntimeInvocationContext,
 } from '../provider-types.js';
 
 const CLAUDE_SETTINGS = JSON.stringify(
@@ -24,6 +24,7 @@ const CLAUDE_SETTINGS = JSON.stringify(
 function createPreparedSession(
   providerId: string,
   ctx: PrepareSessionContext,
+  fallbackProviderStateDirNames: string[] = [],
 ): PreparedSession {
   return {
     providerStateDir: path.join(
@@ -33,6 +34,9 @@ function createPreparedSession(
       providerId,
     ),
     files: [],
+    fallbackProviderStateDirs: fallbackProviderStateDirNames.map((dirName) =>
+      path.join(ctx.dataDir, 'sessions', ctx.groupFolder, dirName),
+    ),
   };
 }
 
@@ -69,7 +73,7 @@ function createClaudeProvider(): AgentProvider {
       return [];
     },
     prepareSession(ctx) {
-      const session = createPreparedSession(id, ctx);
+      const session = createPreparedSession(id, ctx, ['.claude']);
       const canonicalMemoryPath = path.join(ctx.groupDir, 'AGENT.md');
       const compatibilityPath = path.join(ctx.groupDir, 'CLAUDE.md');
 

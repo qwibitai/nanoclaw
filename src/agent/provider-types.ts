@@ -36,6 +36,7 @@ export interface PreparedSession {
   providerStateDir: string;
   files: ProviderFileMaterialization[];
   directorySyncs?: ProviderDirectorySync[];
+  fallbackProviderStateDirs?: string[];
   metadata?: Record<string, unknown>;
 }
 

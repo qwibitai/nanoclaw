@@ -16,6 +16,9 @@ import type {
   ProviderRuntimeInput,
 } from './provider-types.js';
 
+const WORKSPACE_ROOT = process.env.NANOCLAW_WORKSPACE_ROOT || '/workspace';
+const GROUP_DIR = path.join(WORKSPACE_ROOT, 'group');
+const GLOBAL_DIR = path.join(WORKSPACE_ROOT, 'global');
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const SCRIPT_TIMEOUT_MS = 30_000;
@@ -124,10 +127,10 @@ export async function* dispatchProviderInput(
 ): AsyncGenerator<ContainerOutput> {
   const registry = createContainerProviderRegistry(options.providers);
   const provider = registry.getProvider(containerInput.providerId);
-  const workspaceDir = '/workspace/group';
+  const workspaceDir = GROUP_DIR;
   const globalMemoryDir = containerInput.runtimeInput.isMain
     ? undefined
-    : '/workspace/global';
+    : GLOBAL_DIR;
   const preparedWorkspace = await provider.prepareWorkspace({
     providerHomeDir: provider.providerHomeDir,
     workspaceDir,
@@ -138,7 +141,11 @@ export async function* dispatchProviderInput(
 
   materializeWorkspaceFiles(
     provider.id,
-    [workspaceDir, provider.providerHomeDir, ...(globalMemoryDir ? [globalMemoryDir] : [])],
+    [
+      workspaceDir,
+      provider.providerHomeDir,
+      ...(globalMemoryDir ? [globalMemoryDir] : []),
+    ],
     preparedWorkspace.files,
   );
 

@@ -8,6 +8,8 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT,
   listManagedMemoryFiles,
   seedGroupMemoryFiles,
 } from '../src/agent/memory.ts';
@@ -121,12 +123,52 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
+  const globalDir = path.join(projectRoot, 'groups', 'global');
+  const globalSeededMemory = seedGroupMemoryFiles({
+    targetDir: globalDir,
+    templateDir: globalDir,
+    canonicalTemplateFingerprint: DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT,
+  });
+
+  if (globalSeededMemory.canonical.created) {
+    logger.info(
+      {
+        file: globalSeededMemory.canonical.path,
+        seededFrom: globalSeededMemory.canonical.seededFrom,
+      },
+      'Prepared canonical global memory before group registration',
+    );
+  }
+
+  if (globalSeededMemory.compatibility.created) {
+    logger.info(
+      {
+        file: globalSeededMemory.compatibility.path,
+        seededFrom: globalSeededMemory.compatibility.seededFrom,
+      },
+      'Prepared compatibility global memory before group registration',
+    );
+  }
+
+  if (globalSeededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        canonicalPath: globalSeededMemory.migration.canonicalPath,
+        compatibilityPath: globalSeededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy global CLAUDE.md before group registration',
+    );
+  }
+
   const templateDir = parsed.isMain
     ? path.join(projectRoot, 'groups', 'main')
     : path.join(projectRoot, 'groups', 'global');
   const seededMemory = seedGroupMemoryFiles({
     targetDir: groupDir,
     templateDir,
+    canonicalTemplateFingerprint: parsed.isMain
+      ? DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT
+      : undefined,
   });
 
   if (seededMemory.canonical.created) {
@@ -146,6 +188,16 @@ export async function run(args: string[]): Promise<void> {
         seededFrom: seededMemory.compatibility.seededFrom,
       },
       'Created CLAUDE.md compatibility memory',
+    );
+  }
+
+  if (seededMemory.migration?.status === 'migrated') {
+    logger.info(
+      {
+        canonicalPath: seededMemory.migration.canonicalPath,
+        compatibilityPath: seededMemory.migration.compatibilityPath,
+      },
+      'Promoted legacy CLAUDE.md into canonical AGENT.md during registration',
     );
   }
 
