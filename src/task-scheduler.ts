@@ -177,7 +177,6 @@ async function runTask(
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
-        isMain: isPrivileged,
         groupType: resolveGroupType(group),
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,

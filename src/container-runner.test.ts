@@ -100,7 +100,6 @@ const testInput = {
   prompt: 'Hello',
   groupFolder: 'test-group',
   chatJid: 'test@g.us',
-  isMain: false,
   groupType: 'chat' as const,
 };
 

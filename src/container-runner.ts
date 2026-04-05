@@ -39,8 +39,6 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  /** @deprecated groupType を使用すること */
-  isMain: boolean;
   groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;

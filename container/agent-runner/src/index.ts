@@ -24,8 +24,6 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  /** @deprecated groupType を使用すること */
-  isMain: boolean;
   // NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。
   // コンテナはホストのソースを import できないため、ここで再定義している。
   // GroupType を変更した場合はこのファイルも更新すること。
@@ -374,7 +372,7 @@ async function runQuery(
   // グローバルメモリ（CLAUDE.md）を追加のシステムコンテキストとしてロード（全グループで共有）
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  const resolvedGroupType = containerInput.groupType ?? (containerInput.isMain ? 'main' : 'chat');
+  const resolvedGroupType = containerInput.groupType ?? 'chat';
   const isPrivileged = resolvedGroupType === 'main' || resolvedGroupType === 'override';
   if (!isPrivileged && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');

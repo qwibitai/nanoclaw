@@ -272,14 +272,14 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = hasPrivilege(group);
+  const isPrivileged = hasPrivilege(group);
   const sessionId = sessions[group.folder];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    isPrivileged,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -295,7 +295,7 @@ async function runAgent(
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
-    isMain,
+    isPrivileged,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
@@ -319,7 +319,6 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        isMain,
         groupType: resolveGroupType(group),
         assistantName: ASSISTANT_NAME,
       },
