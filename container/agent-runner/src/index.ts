@@ -24,7 +24,9 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  /** @deprecated groupType を使用すること */
   isMain: boolean;
+  groupType?: 'override' | 'main' | 'chat' | 'thread';
   isScheduledTask?: boolean;
   assistantName?: string;
 }
@@ -369,7 +371,9 @@ async function runQuery(
   // グローバルメモリ（CLAUDE.md）を追加のシステムコンテキストとしてロード（全グループで共有）
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  const resolvedGroupType = containerInput.groupType ?? (containerInput.isMain ? 'main' : 'chat');
+  const isPrivileged = resolvedGroupType === 'main' || resolvedGroupType === 'override';
+  if (!isPrivileged && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
@@ -420,7 +424,8 @@ async function runQuery(
           env: {
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_IS_MAIN: isPrivileged ? '1' : '0',
+            NANOCLAW_GROUP_TYPE: resolvedGroupType,
           },
         },
       },

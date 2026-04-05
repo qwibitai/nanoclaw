@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  getAllRegisteredGroups,
   getAllTasks,
   getRegisteredGroup,
   getTaskById,
@@ -17,7 +18,7 @@ const MAIN_GROUP: RegisteredGroup = {
   folder: 'whatsapp_main',
   trigger: 'always',
   added_at: '2024-01-01T00:00:00.000Z',
-  isMain: true,
+  type: 'main',
 };
 
 const OTHER_GROUP: RegisteredGroup = {
@@ -674,5 +675,160 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- register_group / update_group の group_type 処理 ---
+
+describe('register_group group_type', () => {
+  it('group_type を指定するとその値が DB に反映される', async () => {
+    // メイングループから group_type: 'chat' を指定して登録
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'typed@g.us',
+        name: 'Typed Group',
+        folder: 'typed-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // DB から取得して group_type が正しいか確認
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['typed@g.us']).toBeDefined();
+    expect(allGroups['typed@g.us'].type).toBe('chat');
+  });
+
+  it('group_type: override を指定すると拒否される', async () => {
+    // メイングループから group_type: 'override' を指定して登録を試みる
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'override@g.us',
+        name: 'Override Group',
+        folder: 'override-group',
+        trigger: '@Andy',
+        group_type: 'override',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // override は IPC 経由で設定できないため登録されていないことを確認
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['override@g.us']).toBeUndefined();
+  });
+});
+
+describe('update_group group_type', () => {
+  it('update_group で既存グループの type を変更できる', async () => {
+    // まず type: 'chat' でグループを登録
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'target@g.us',
+        name: 'Target Group',
+        folder: 'target-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    {
+      const allGroups = getAllRegisteredGroups();
+      expect(allGroups['target@g.us']?.type).toBe('chat');
+    }
+
+    // メイングループから update_group で type を 'main' に変更
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'target@g.us',
+        group_type: 'main',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // type が 'main' に変更されていることを確認
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['target@g.us']).toBeDefined();
+    expect(allGroups['target@g.us'].type).toBe('main');
+  });
+
+  it('update_group で override への変更が拒否される', async () => {
+    // まず type: 'chat' でグループを登録
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'noraise@g.us',
+        name: 'No Raise Group',
+        folder: 'noraise-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // override への変更を試みる — 拒否されるべき
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'noraise@g.us',
+        group_type: 'override',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // type が 'override' に変わっていないことを確認
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['noraise@g.us']).toBeDefined();
+    expect(allGroups['noraise@g.us'].type).not.toBe('override');
+  });
+
+  it('メイン以外のグループから update_group は拒否される', async () => {
+    // まず type: 'chat' でグループを登録
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'protected@g.us',
+        name: 'Protected Group',
+        folder: 'protected-group',
+        trigger: '@Andy',
+        group_type: 'chat',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // メイン以外のグループ（other-group）から update_group を発行 — 拒否されるべき
+    await processTaskIpc(
+      {
+        type: 'update_group',
+        jid: 'protected@g.us',
+        group_type: 'main',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    // type が変わっていないことを確認
+    const allGroups = getAllRegisteredGroups();
+    expect(allGroups['protected@g.us']).toBeDefined();
+    expect(allGroups['protected@g.us'].type).toBe('chat');
   });
 });

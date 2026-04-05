@@ -449,26 +449,26 @@ describe('message query LIMIT', () => {
   });
 });
 
-// --- RegisteredGroup isMain round-trip ---
+// --- RegisteredGroup GroupType round-trip ---
 
-describe('registered group isMain', () => {
-  it('persists isMain=true through set/get round-trip', () => {
+describe('registered group type', () => {
+  it('persists type=main through set/get round-trip', () => {
     setRegisteredGroup('main@s.whatsapp.net', {
       name: 'Main Chat',
       folder: 'whatsapp_main',
       trigger: '@Andy',
       added_at: '2024-01-01T00:00:00.000Z',
-      isMain: true,
+      type: 'main',
     });
 
     const groups = getAllRegisteredGroups();
     const group = groups['main@s.whatsapp.net'];
     expect(group).toBeDefined();
-    expect(group.isMain).toBe(true);
+    expect(group.type).toBe('main');
     expect(group.folder).toBe('whatsapp_main');
   });
 
-  it('omits isMain for non-main groups', () => {
+  it('defaults to chat type for non-main groups', () => {
     setRegisteredGroup('group@g.us', {
       name: 'Family Chat',
       folder: 'whatsapp_family-chat',
@@ -479,6 +479,23 @@ describe('registered group isMain', () => {
     const groups = getAllRegisteredGroups();
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
-    expect(group.isMain).toBeUndefined();
+    expect(group.type).toBe('chat');
+  });
+
+  it('persists all GroupType values', () => {
+    const types = ['override', 'main', 'chat', 'thread'] as const;
+    for (const t of types) {
+      const jid = `test-${t}@g.us`;
+      const folder = `whatsapp_test-${t}`;
+      setRegisteredGroup(jid, {
+        name: `Test ${t}`,
+        folder,
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        type: t,
+      });
+      const groups = getAllRegisteredGroups();
+      expect(groups[jid].type).toBe(t);
+    }
   });
 });

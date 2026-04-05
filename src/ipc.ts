@@ -7,8 +7,23 @@ import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
+import { hasPrivilege } from './group-type.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { GroupType, RegisteredGroup } from './types.js';
+
+const VALID_GROUP_TYPES: ReadonlySet<string> = new Set([
+  'override',
+  'main',
+  'chat',
+  'thread',
+]);
+
+function parseIpcGroupType(value: unknown): GroupType | null {
+  if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
+    return value as GroupType;
+  }
+  return null;
+}
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -18,7 +33,7 @@ export interface IpcDeps {
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
-    isMain: boolean,
+    isPrivileged: boolean,
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
@@ -52,14 +67,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
-    // 登録済みグループから folder→isMain のルックアップを構築
-    const folderIsMain = new Map<string, boolean>();
+    // 登録済みグループから folder→hasPrivilege のルックアップを構築
+    const folderPrivilege = new Map<string, boolean>();
     for (const group of Object.values(registeredGroups)) {
-      if (group.isMain) folderIsMain.set(group.folder, true);
+      if (hasPrivilege(group)) folderPrivilege.set(group.folder, true);
     }
 
     for (const sourceGroup of groupFolders) {
-      const isMain = folderIsMain.get(sourceGroup) === true;
+      const isPrivileged = folderPrivilege.get(sourceGroup) === true;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
@@ -77,7 +92,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 // 認可: このグループが対象の chatJid に送信可能か確認
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
-                  isMain ||
+                  isPrivileged ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
@@ -125,7 +140,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // 認可のため送信元グループの識別情報を processTaskIpc に渡す
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, sourceGroup, isPrivileged, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -164,16 +179,17 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    // register_group 用
+    // register_group / update_group 用
     jid?: string;
     name?: string;
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    group_type?: string;
   },
   sourceGroup: string, // IPC ディレクトリから検証された識別情報
-  isMain: boolean, // ディレクトリパスから検証された情報
+  isPrivileged: boolean, // main または override の特権を持つか
   deps: IpcDeps,
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
@@ -201,7 +217,7 @@ export async function processTaskIpc(
         const targetFolder = targetGroupEntry.folder;
 
         // 認可: メイン以外のグループは自分自身に対してのみスケジュール可能
-        if (!isMain && targetFolder !== sourceGroup) {
+        if (!isPrivileged && targetFolder !== sourceGroup) {
           logger.warn(
             { sourceGroup, targetFolder },
             'Unauthorized schedule_task attempt blocked',
@@ -276,7 +292,7 @@ export async function processTaskIpc(
     case 'pause_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'paused' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -294,7 +310,7 @@ export async function processTaskIpc(
     case 'resume_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'active' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -312,7 +328,7 @@ export async function processTaskIpc(
     case 'cancel_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
+        if (task && (isPrivileged || task.group_folder === sourceGroup)) {
           deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -337,7 +353,7 @@ export async function processTaskIpc(
           );
           break;
         }
-        if (!isMain && task.group_folder !== sourceGroup) {
+        if (!isPrivileged && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task update attempt',
@@ -393,7 +409,7 @@ export async function processTaskIpc(
 
     case 'refresh_groups':
       // メイングループのみがリフレッシュを要求可能
-      if (isMain) {
+      if (isPrivileged) {
         logger.info(
           { sourceGroup },
           'Group metadata refresh requested via IPC',
@@ -417,7 +433,7 @@ export async function processTaskIpc(
 
     case 'register_group':
       // メイングループのみが新しいグループを登録可能
-      if (!isMain) {
+      if (!isPrivileged) {
         logger.warn(
           { sourceGroup },
           'Unauthorized register_group attempt blocked',
@@ -432,7 +448,15 @@ export async function processTaskIpc(
           );
           break;
         }
-        // 多層防御: エージェントは IPC 経由で isMain を設定できない
+        // 多層防御: エージェントは IPC 経由で override を設定できない
+        if (data.group_type === 'override') {
+          logger.warn(
+            { sourceGroup },
+            'override type cannot be set via IPC',
+          );
+          break;
+        }
+        const groupType = parseIpcGroupType(data.group_type) ?? 'chat';
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
@@ -440,11 +464,66 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          type: groupType,
         });
+        logger.info(
+          { jid: data.jid, folder: data.folder, groupType, sourceGroup },
+          'Group registered via IPC',
+        );
       } else {
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'update_group':
+      // メイン/override グループのみが既存グループの設定を変更可能
+      if (!isPrivileged) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized update_group attempt blocked',
+        );
+        break;
+      }
+      // override への変更は IPC 経由で不可
+      if (data.group_type === 'override') {
+        logger.warn(
+          { sourceGroup },
+          'override type cannot be set via IPC',
+        );
+        break;
+      }
+      if (data.jid && data.group_type) {
+        const newType = parseIpcGroupType(data.group_type);
+        if (!newType) {
+          logger.warn(
+            { sourceGroup, group_type: data.group_type },
+            'Invalid group_type in update_group request',
+          );
+          break;
+        }
+        const targetGroup = registeredGroups[data.jid];
+        if (!targetGroup) {
+          logger.warn(
+            { sourceGroup, jid: data.jid },
+            'update_group: target group not found',
+          );
+          break;
+        }
+        deps.registerGroup(data.jid, {
+          ...targetGroup,
+          type: newType,
+        });
+        logger.info(
+          { jid: data.jid, newType, sourceGroup },
+          'Group type updated via IPC',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid update_group request - missing jid or group_type',
         );
       }
       break;

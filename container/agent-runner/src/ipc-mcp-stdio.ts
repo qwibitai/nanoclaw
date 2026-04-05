@@ -18,7 +18,8 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 // 環境変数からのコンテキスト（エージェントランナーによって設定されます）
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const groupType = process.env.NANOCLAW_GROUP_TYPE ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
+const isMain = groupType === 'main' || groupType === 'override';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });

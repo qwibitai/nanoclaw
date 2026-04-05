@@ -58,6 +58,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { hasPrivilege, resolveGroupType } from './group-type.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -158,7 +159,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.isMain === true;
+  const isMainGroup = hasPrivilege(group);
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -271,7 +272,7 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.isMain === true;
+  const isMain = hasPrivilege(group);
   const sessionId = sessions[group.folder];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
@@ -319,6 +320,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        groupType: resolveGroupType(group),
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
@@ -392,7 +394,7 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.isMain === true;
+          const isMainGroup = hasPrivilege(group);
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
           // メイン以外のグループについては、トリガーメッセージに対してのみアクションを実行。
@@ -501,10 +503,10 @@ async function main(): Promise<void> {
     msg: NewMessage,
   ): Promise<void> {
     const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
+    if (!group || !hasPrivilege(group)) {
       logger.warn(
         { chatJid, sender: msg.sender },
-        'Remote control rejected: not main group',
+        'Remote control rejected: not privileged group',
       );
       return;
     }

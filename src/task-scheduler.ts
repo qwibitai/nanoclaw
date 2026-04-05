@@ -18,6 +18,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { hasPrivilege, resolveGroupType } from './group-type.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -130,11 +131,11 @@ async function runTask(
   }
 
   // コンテナが読み取るためのタスクスナップショットを更新します（グループでフィルタリング）
-  const isMain = group.isMain === true;
+  const isPrivileged = hasPrivilege(group);
   const tasks = getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
-    isMain,
+    isPrivileged,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -176,7 +177,8 @@ async function runTask(
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
-        isMain,
+        isMain: isPrivileged,
+        groupType: resolveGroupType(group),
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
       },

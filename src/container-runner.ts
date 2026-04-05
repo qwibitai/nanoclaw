@@ -27,7 +27,8 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { getDefaultAllowedTools, resolveGroupType } from './group-type.js';
+import { GroupType, RegisteredGroup } from './types.js';
 
 // 堅牢な出力パースのためのセンチネルマーカー (agent-runner と一致させる必要があります)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -38,7 +39,9 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  /** @deprecated groupType を使用すること */
   isMain: boolean;
+  groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;
 }
@@ -58,13 +61,14 @@ interface VolumeMount {
 
 function buildVolumeMounts(
   group: RegisteredGroup,
-  isMain: boolean,
+  groupType: GroupType,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const isPrivileged = groupType === 'main' || groupType === 'override';
 
-  if (isMain) {
+  if (isPrivileged) {
     // メイングループにはプロジェクトルートを読み取り専用でマウントします。
     // エージェントが必要とする書き込み可能なパス（グループフォルダ、IPC、.claude/）は、
     // 以下で個別にマウントされます。読み取り専用にすることで、エージェントが
@@ -125,26 +129,27 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // 追加マウントされたディレクトリから CLAUDE.md を読み込む
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    const allowedTools = getDefaultAllowedTools(groupType);
+    const settingsContent: Record<string, unknown> = {
+      env: {
+        // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
+        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        // 追加マウントされたディレクトリから CLAUDE.md を読み込む
+        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
+        // https://code.claude.com/docs/en/memory#manage-auto-memory
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      },
+    };
+    if (allowedTools !== undefined) {
+      settingsContent.permissions = {
+        allow: allowedTools,
+        deny: [],
+      };
+    }
+    fs.writeFileSync(settingsFile, JSON.stringify(settingsContent, null, 2) + '\n');
   }
 
   // container/skills/ から各グループ의 .claude/skills/ にスキルを同期
@@ -205,7 +210,7 @@ function buildVolumeMounts(
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
       group.name,
-      isMain,
+      isPrivileged,
     );
     mounts.push(...validatedMounts);
   }
@@ -276,7 +281,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.groupType);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -299,7 +304,7 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mountCount: mounts.length,
-      isMain: input.isMain,
+      groupType: input.groupType,
     },
     'Spawning container agent',
   );
@@ -493,7 +498,7 @@ export async function runContainerAgent(
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
+        `GroupType: ${input.groupType}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Stdout Truncated: ${stdoutTruncated}`,
@@ -645,7 +650,7 @@ export async function runContainerAgent(
 
 export function writeTasksSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isPrivileged: boolean,
   tasks: Array<{
     id: string;
     groupFolder: string;
@@ -661,7 +666,7 @@ export function writeTasksSnapshot(
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // メイングループはすべてのタスクを表示でき、他は自身のタスクのみを表示できる
-  const filteredTasks = isMain
+  const filteredTasks = isPrivileged
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
 
@@ -683,7 +688,7 @@ export interface AvailableGroup {
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isPrivileged: boolean,
   groups: AvailableGroup[],
   registeredJids: Set<string>,
 ): void {
@@ -691,7 +696,7 @@ export function writeGroupsSnapshot(
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // メイングループはすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
-  const visibleGroups = isMain ? groups : [];
+  const visibleGroups = isPrivileged ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(
