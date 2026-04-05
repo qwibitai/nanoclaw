@@ -449,7 +449,7 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
-      model: 'sonnet[1m]',
+      model: 'haiku',
       allowedTools: [
         'Bash',
         'Read',

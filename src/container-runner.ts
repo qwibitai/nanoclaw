@@ -158,6 +158,18 @@ function buildVolumeMounts(
     );
   }
 
+  // Sync host Claude credentials into the session dir so the container's
+  // Claude Code CLI can authenticate natively (OAuth mode).
+  // The credential proxy's create_api_key exchange requires org:create_api_key
+  // scope which Claude Pro subscription tokens do not have.
+  if (detectAuthMode() === 'oauth') {
+    const hostCredsFile = path.join(os.homedir(), '.claude', '.credentials.json');
+    if (fs.existsSync(hostCredsFile)) {
+      const sessionCredsFile = path.join(groupSessionsDir, '.credentials.json');
+      fs.copyFileSync(hostCredsFile, sessionCredsFile);
+    }
+  }
+
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
@@ -174,6 +186,24 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // gcalcli: config dir (client secret + rcfile) and XDG data dir (oauth token + cache)
+  const gcalcliDir = path.join(homeDir, '.gcalcli');
+  if (fs.existsSync(gcalcliDir)) {
+    mounts.push({
+      hostPath: gcalcliDir,
+      containerPath: '/home/node/.gcalcli',
+      readonly: false,
+    });
+  }
+  const gcalcliDataDir = path.join(homeDir, '.local', 'share', 'gcalcli');
+  if (fs.existsSync(gcalcliDataDir)) {
+    mounts.push({
+      hostPath: gcalcliDataDir,
+      containerPath: '/home/node/.local/share/gcalcli',
+      readonly: false,
+    });
+  }
 
   // Gmail credentials directory (for Gmail MCP inside the container)
   const gmailDir = path.join(homeDir, '.gmail-mcp');
@@ -272,22 +302,17 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
+    // API key mode: route through credential proxy which injects the real key
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-  } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
+  // OAuth mode: credentials are synced into the per-group session dir (buildVolumeMounts)
+  // so the existing /home/node/.claude mount already contains them. No proxy needed.
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
