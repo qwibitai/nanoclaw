@@ -160,9 +160,7 @@ function createSchema(database: Database.Database): void {
 
   // Add agent_runner column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN agent_runner TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN agent_runner TEXT`);
   } catch {
     /* column already exists */
   }
@@ -633,8 +631,11 @@ export function getRegisteredGroup(
     ? JSON.parse(row.container_config)
     : null;
   const containerConfig = row.agent_runner
-    ? { ...(baseConfig ?? {}), agentRunner: row.agent_runner as import('./types.js').AgentRunner }
-    : baseConfig ?? undefined;
+    ? {
+        ...(baseConfig ?? {}),
+        agentRunner: row.agent_runner as import('./types.js').AgentRunner,
+      }
+    : (baseConfig ?? undefined);
   return {
     jid: row.jid,
     name: row.name,
@@ -700,8 +701,11 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       ? JSON.parse(row.container_config)
       : null;
     const containerConfig = row.agent_runner
-      ? { ...(baseConfig ?? {}), agentRunner: row.agent_runner as import('./types.js').AgentRunner }
-      : baseConfig ?? undefined;
+      ? {
+          ...(baseConfig ?? {}),
+          agentRunner: row.agent_runner as import('./types.js').AgentRunner,
+        }
+      : (baseConfig ?? undefined);
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
