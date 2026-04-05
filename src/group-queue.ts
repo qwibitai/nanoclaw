@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  replyThreadId: string | undefined;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        replyThreadId: undefined,
       };
       this.groups.set(groupJid, state);
     }
@@ -151,6 +153,14 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
+  }
+
+  setReplyThread(groupJid: string, threadId: string | undefined): void {
+    this.getGroup(groupJid).replyThreadId = threadId;
+  }
+
+  getReplyThread(groupJid: string): string | undefined {
+    return this.getGroup(groupJid).replyThreadId;
   }
 
   /**

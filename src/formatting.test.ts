@@ -109,6 +109,16 @@ describe('formatMessages', () => {
     );
   });
 
+  it('includes topic attribute when thread_id is present', () => {
+    const result = formatMessages([makeMsg({ thread_id: '42' })], TZ);
+    expect(result).toContain('topic="42"');
+  });
+
+  it('omits topic attribute when thread_id is absent', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('topic=');
+  });
+
   it('handles empty array', () => {
     const result = formatMessages([], TZ);
     expect(result).toContain('<context timezone="UTC" />');
