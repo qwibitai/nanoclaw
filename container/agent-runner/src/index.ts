@@ -26,6 +26,9 @@ interface ContainerInput {
   chatJid: string;
   /** @deprecated groupType を使用すること */
   isMain: boolean;
+  // NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。
+  // コンテナはホストのソースを import できないため、ここで再定義している。
+  // GroupType を変更した場合はこのファイルも更新すること。
   groupType?: 'override' | 'main' | 'chat' | 'thread';
   isScheduledTask?: boolean;
   assistantName?: string;

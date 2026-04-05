@@ -128,32 +128,41 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    const allowedTools = getDefaultAllowedTools(groupType);
-    const settingsContent: Record<string, unknown> = {
-      env: {
-        // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
-        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        // 追加マウントされたディレクトリから CLAUDE.md を読み込む
-        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
-        // https://code.claude.com/docs/en/memory#manage-auto-memory
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-      },
-    };
-    if (allowedTools !== undefined) {
-      settingsContent.permissions = {
-        allow: allowedTools,
-        deny: [],
-      };
+  // settings.json が存在する場合は読み込む、存在しない場合は空オブジェクトから始める
+  let settingsContent: Record<string, unknown> = {};
+  if (fs.existsSync(settingsFile)) {
+    try {
+      settingsContent = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    } catch {
+      // 読み込み失敗時は空オブジェクトから始める
     }
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(settingsContent, null, 2) + '\n',
-    );
+  } else {
+    // 新規作成時のみ env セクションを設定する
+    settingsContent.env = {
+      // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
+      // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      // 追加マウントされたディレクトリから CLAUDE.md を読み込む
+      // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+      // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
+      // https://code.claude.com/docs/en/memory#manage-auto-memory
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    };
   }
+  // permissions を groupType に基づいて常に同期する
+  // （既存環境のアップグレードや groupType 変更時も反映されるようにするため）
+  const allowedTools = getDefaultAllowedTools(groupType);
+  if (allowedTools !== undefined) {
+    settingsContent.permissions = { allow: allowedTools, deny: [] };
+  } else {
+    // main/override: permissions 制限なし → フィールドを削除
+    delete settingsContent.permissions;
+  }
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(settingsContent, null, 2) + '\n',
+  );
 
   // container/skills/ から各グループ의 .claude/skills/ にスキルを同期
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');

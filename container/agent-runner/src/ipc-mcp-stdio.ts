@@ -18,7 +18,13 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 // 環境変数からのコンテキスト（エージェントランナーによって設定されます）
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const groupType = process.env.NANOCLAW_GROUP_TYPE ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
+// NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。
+// コンテナはホストのソースを import できないため、ここで再定義している。
+// GroupType を変更した場合はこのファイルも更新すること。
+const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
+const rawGroupType = process.env.NANOCLAW_GROUP_TYPE;
+const groupTypeCandidate = rawGroupType ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
+const groupType = allowedGroupTypes.has(groupTypeCandidate) ? groupTypeCandidate : 'chat';
 const isMain = groupType === 'main' || groupType === 'override';
 
 function writeIpcFile(dir: string, data: object): string {
