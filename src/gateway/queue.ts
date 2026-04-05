@@ -1,5 +1,4 @@
-import crypto from 'crypto';
-import type { WorkItem, WorkResult } from '../shared/types.js';
+import type { WorkItem, WorkResult } from '../shared/types.ts';
 
 const pending: WorkItem[] = [];
 const processing = new Map<string, WorkItem>();
@@ -43,10 +42,6 @@ export function complete(result: WorkResult): void {
   }
 }
 
-export function getResult(groupId: string): WorkResult | null {
-  return results.get(groupId) ?? null;
-}
-
 export function consumeResult(groupId: string): WorkResult | null {
   const result = results.get(groupId);
   if (result) {
@@ -61,8 +56,4 @@ export function getPendingCount(): number {
 
 export function getProcessingCount(): number {
   return processing.size;
-}
-
-export function getSessionId(groupId: string): string | undefined {
-  return sessions.get(groupId);
 }

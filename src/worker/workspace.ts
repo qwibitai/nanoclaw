@@ -1,5 +1,4 @@
-import fs from 'fs';
-import path from 'path';
+import { basename, dirname, relative, resolve } from '@std/path';
 import {
   SKILLS_DIR,
   KNOWLEDGE_DIR,
@@ -8,54 +7,90 @@ import {
   ASSISTANT_NAME,
   OPERATOR_NAME,
   WORKSPACE_DIR,
-} from '../shared/config.js';
-import { logger } from '../shared/logger.js';
+} from '../shared/config.ts';
+import { logger } from '../shared/logger.ts';
 
-function readFilesRecursive(dir: string, ext: string): { path: string; content: string }[] {
+function dirExists(path: string): boolean {
+  try {
+    return Deno.statSync(path).isDirectory;
+  } catch {
+    return false;
+  }
+}
+
+function readFilesRecursive(
+  dir: string,
+  ext: string,
+): { path: string; content: string }[] {
   const results: { path: string; content: string }[] = [];
-  if (!fs.existsSync(dir)) return results;
+  if (!dirExists(dir)) return results;
 
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
+  for (const entry of Deno.readDirSync(dir)) {
+    const fullPath = resolve(dir, entry.name);
+    if (entry.isDirectory) {
       results.push(...readFilesRecursive(fullPath, ext));
     } else if (entry.name.endsWith(ext)) {
-      results.push({ path: fullPath, content: fs.readFileSync(fullPath, 'utf-8') });
+      results.push({
+        path: fullPath,
+        content: Deno.readTextFileSync(fullPath),
+      });
     }
   }
   return results;
+}
+
+function copyDirSync(src: string, dest: string): void {
+  Deno.mkdirSync(dest, { recursive: true });
+  for (const entry of Deno.readDirSync(src)) {
+    const srcPath = resolve(src, entry.name);
+    const destPath = resolve(dest, entry.name);
+    if (entry.isDirectory) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      Deno.copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 export function buildWorkspace(groupId: string): {
   cwd: string;
   systemPrompt: string;
 } {
-  const workDir = path.join(WORKSPACE_DIR, groupId);
-  fs.mkdirSync(workDir, { recursive: true });
+  const workDir = resolve(WORKSPACE_DIR, groupId);
+  Deno.mkdirSync(workDir, { recursive: true });
 
   // Read operator context
-  const contextPath = path.join(OPERATORS_DIR, OPERATOR_SLUG, 'context.md');
-  const operatorContext = fs.existsSync(contextPath)
-    ? fs.readFileSync(contextPath, 'utf-8')
-    : `Operator: ${OPERATOR_NAME}`;
+  const contextPath = resolve(OPERATORS_DIR, OPERATOR_SLUG, 'context.md');
+  let operatorContext: string;
+  try {
+    operatorContext = Deno.readTextFileSync(contextPath);
+  } catch {
+    operatorContext = `Operator: ${OPERATOR_NAME}`;
+  }
 
   // Read all skills
   const skills = readFilesRecursive(SKILLS_DIR, '.md');
-  const skillsSection = skills.length > 0
-    ? skills.map(s => {
-        const name = path.basename(path.dirname(s.path));
-        return `### Skill: ${name}\n\n${s.content}`;
-      }).join('\n\n---\n\n')
-    : 'No skills loaded.';
+  const skillsSection =
+    skills.length > 0
+      ? skills
+          .map((s) => {
+            const name = basename(dirname(s.path));
+            return `### Skill: ${name}\n\n${s.content}`;
+          })
+          .join('\n\n---\n\n')
+      : 'No skills loaded.';
 
   // Read all knowledge
   const knowledge = readFilesRecursive(KNOWLEDGE_DIR, '.md');
-  const knowledgeSection = knowledge.length > 0
-    ? knowledge.map(k => {
-        const rel = path.relative(KNOWLEDGE_DIR, k.path);
-        return `### ${rel}\n\n${k.content}`;
-      }).join('\n\n---\n\n')
-    : 'No knowledge files loaded.';
+  const knowledgeSection =
+    knowledge.length > 0
+      ? knowledge
+          .map((k) => {
+            const rel = relative(KNOWLEDGE_DIR, k.path);
+            return `### ${rel}\n\n${k.content}`;
+          })
+          .join('\n\n---\n\n')
+      : 'No knowledge files loaded.';
 
   // Build CLAUDE.md
   const claudeMd = `# ${ASSISTANT_NAME}
@@ -76,16 +111,14 @@ ${knowledgeSection}
 `;
 
   // Write CLAUDE.md to workspace
-  fs.writeFileSync(path.join(workDir, 'CLAUDE.md'), claudeMd);
+  Deno.writeTextFileSync(resolve(workDir, 'CLAUDE.md'), claudeMd);
 
   // Copy skills and knowledge into workspace so agent can Read them
-  const wsSkills = path.join(workDir, 'skills');
-  const wsKnowledge = path.join(workDir, 'knowledge');
-  if (fs.existsSync(SKILLS_DIR)) {
-    fs.cpSync(SKILLS_DIR, wsSkills, { recursive: true });
+  if (dirExists(SKILLS_DIR)) {
+    copyDirSync(SKILLS_DIR, resolve(workDir, 'skills'));
   }
-  if (fs.existsSync(KNOWLEDGE_DIR)) {
-    fs.cpSync(KNOWLEDGE_DIR, wsKnowledge, { recursive: true });
+  if (dirExists(KNOWLEDGE_DIR)) {
+    copyDirSync(KNOWLEDGE_DIR, resolve(workDir, 'knowledge'));
   }
 
   logger.info(
@@ -93,7 +126,6 @@ ${knowledgeSection}
     'Workspace built',
   );
 
-  // The system prompt is the operator context appended to the claude_code preset
   return {
     cwd: workDir,
     systemPrompt: operatorContext,

@@ -1,9 +1,9 @@
-import { GATEWAY_URL, WORKER_POLL_INTERVAL } from '../shared/config.js';
-import { logger } from '../shared/logger.js';
-import type { WorkItem, WorkResult } from '../shared/types.js';
-import { runAgent } from './agent.js';
-import { getSessionId, saveSessionId } from './sessions.js';
-import { buildWorkspace } from './workspace.js';
+import { GATEWAY_URL, WORKER_POLL_INTERVAL } from '../shared/config.ts';
+import { logger } from '../shared/logger.ts';
+import type { WorkItem, WorkResult } from '../shared/types.ts';
+import { runAgent } from './agent.ts';
+import { getSessionId, saveSessionId } from './sessions.ts';
+import { buildWorkspace } from './workspace.ts';
 
 async function fetchWork(): Promise<WorkItem | null> {
   try {
@@ -32,18 +32,11 @@ async function submitResult(result: WorkResult): Promise<void> {
 }
 
 async function processWork(item: WorkItem): Promise<void> {
-  logger.info(
-    { id: item.id, groupId: item.groupId },
-    'Processing work item',
-  );
+  logger.info({ id: item.id, groupId: item.groupId }, 'Processing work item');
 
-  // Get existing session for conversation continuity
   const sessionId = item.sessionId || getSessionId(item.groupId);
-
-  // Build workspace with skills and knowledge
   const { cwd, systemPrompt } = buildWorkspace(item.groupId);
 
-  // Run agent
   const agentResult = await runAgent({
     prompt: item.prompt,
     cwd,
@@ -51,12 +44,10 @@ async function processWork(item: WorkItem): Promise<void> {
     systemPrompt,
   });
 
-  // Save session for next time
   if (agentResult.sessionId) {
     saveSessionId(item.groupId, agentResult.sessionId);
   }
 
-  // Submit result back to gateway
   const result: WorkResult = {
     id: item.id,
     status: agentResult.status,
@@ -67,10 +58,7 @@ async function processWork(item: WorkItem): Promise<void> {
   };
 
   await submitResult(result);
-  logger.info(
-    { id: item.id, status: agentResult.status },
-    'Work item completed',
-  );
+  logger.info({ id: item.id, status: agentResult.status }, 'Work item completed');
 }
 
 async function pollLoop(): Promise<void> {

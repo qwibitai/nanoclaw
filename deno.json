@@ -1,0 +1,22 @@
+{
+  "version": "0.1.0",
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "gateway": "deno run -A src/gateway/index.ts",
+    "worker": "deno run -A src/worker/index.ts",
+    "check": "deno check src/shared/ src/gateway/ src/worker/"
+  },
+  "imports": {
+    "@anthropic-ai/claude-agent-sdk": "npm:@anthropic-ai/claude-agent-sdk@^0.2.92",
+    "@std/path": "jsr:@std/path@^1.0.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.ns", "deno.unstable"]
+  },
+  "exclude": [
+    "node_modules/**/*",
+    "dist/**/*",
+    "container/**/*"
+  ]
+}

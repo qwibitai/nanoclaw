@@ -1,8 +1,11 @@
 # Dependencies
 node_modules/
 .npm-cache/
+deno.lock
+
 # Build output
 dist/
+_fresh/
 
 # Local data & auth
 store/

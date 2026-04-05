@@ -14,7 +14,9 @@ const RESET = '\x1b[39m';
 const FULL_RESET = '\x1b[0m';
 
 const threshold =
-  LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
+  LEVELS[(Deno.env.get('LOG_LEVEL') as Level) || 'info'] ?? LEVELS.info;
+
+const encoder = new TextEncoder();
 
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
@@ -47,15 +49,21 @@ function log(
 ): void {
   if (LEVELS[level] < threshold) return;
   const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
-  const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
+  const useStderr = LEVELS[level] >= LEVELS.warn;
   if (typeof dataOrMsg === 'string') {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
-    );
+    const line = `[${ts()}] ${tag} (${Deno.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`;
+    if (useStderr) {
+      Deno.stderr.writeSync(encoder.encode(line));
+    } else {
+      Deno.stdout.writeSync(encoder.encode(line));
+    }
   } else {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
-    );
+    const line = `[${ts()}] ${tag} (${Deno.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`;
+    if (useStderr) {
+      Deno.stderr.writeSync(encoder.encode(line));
+    } else {
+      Deno.stdout.writeSync(encoder.encode(line));
+    }
   }
 }
 
@@ -72,11 +80,11 @@ export const logger = {
     log('fatal', dataOrMsg, msg),
 };
 
-process.on('uncaughtException', (err) => {
-  logger.fatal({ err }, 'Uncaught exception');
-  process.exit(1);
+globalThis.addEventListener('error', (event) => {
+  logger.fatal({ err: event.error }, 'Uncaught exception');
+  Deno.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
-  logger.error({ err: reason }, 'Unhandled rejection');
+globalThis.addEventListener('unhandledrejection', (event) => {
+  logger.error({ err: event.reason }, 'Unhandled rejection');
 });

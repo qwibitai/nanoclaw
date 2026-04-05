@@ -1,5 +1,4 @@
-import crypto from 'crypto';
-import type { ActivityEvent } from '../shared/types.js';
+import type { ActivityEvent } from '../shared/types.ts';
 
 const MAX_EVENTS = 100;
 

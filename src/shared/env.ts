@@ -1,17 +1,15 @@
-import fs from 'fs';
-import path from 'path';
-import { logger } from './logger.js';
+import { logger } from './logger.ts';
 
 /**
  * Parse the .env file and return values for the requested keys.
- * Does NOT load anything into process.env — callers decide what to
+ * Does NOT load anything into Deno.env — callers decide what to
  * do with the values.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  const envFile = `${Deno.cwd()}/.env`;
   let content: string;
   try {
-    content = fs.readFileSync(envFile, 'utf-8');
+    content = Deno.readTextFileSync(envFile);
   } catch (err) {
     logger.debug({ err }, '.env file not found, using defaults');
     return {};

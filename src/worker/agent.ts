@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { logger } from '../shared/logger.js';
+import { logger } from '../shared/logger.ts';
 
 export interface AgentResult {
   status: 'success' | 'error';
@@ -56,12 +56,17 @@ export async function runAgent(options: {
 
       if (message.type === 'result') {
         const text =
-          'result' in message ? (message as { result?: string }).result : null;
+          'result' in message
+            ? (message as { result?: string }).result
+            : null;
         if (text) resultText = text;
       }
     }
 
-    logger.info({ messageCount, hasResult: !!resultText }, 'Agent query complete');
+    logger.info(
+      { messageCount, hasResult: !!resultText },
+      'Agent query complete',
+    );
 
     return {
       status: resultText !== null ? 'success' : 'error',

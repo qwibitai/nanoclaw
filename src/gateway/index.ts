@@ -1,16 +1,14 @@
-import { GATEWAY_PORT } from '../shared/config.js';
-import { logger } from '../shared/logger.js';
-import { logEvent } from './event-log.js';
-import { createGateway } from './server.js';
+import { GATEWAY_PORT } from '../shared/config.ts';
+import { logger } from '../shared/logger.ts';
+import { logEvent } from './event-log.ts';
+import { createGateway } from './server.ts';
 
-const server = createGateway(GATEWAY_PORT);
+createGateway(GATEWAY_PORT);
 
-server.listen(GATEWAY_PORT, () => {
-  logger.info({ port: GATEWAY_PORT }, 'Nexus gateway listening');
-  logEvent({
-    type: 'system',
-    channel: 'system',
-    groupId: 'system',
-    summary: 'Gateway started',
-  });
+logger.info({ port: GATEWAY_PORT }, 'Nexus gateway listening');
+logEvent({
+  type: 'system',
+  channel: 'system',
+  groupId: 'system',
+  summary: 'Gateway started',
 });
