@@ -23,7 +23,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ github.token }}
+          password: ${{ secrets.PACKAGE_TOKEN }}
 
       - name: Build and push nanoclaw
         uses: docker/build-push-action@v6
