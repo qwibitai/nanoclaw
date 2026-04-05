@@ -295,6 +295,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let streamingMessageId: string | null = null;
   let editDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingEditText: string | null = null;
+  // completedText holds finalized text from prior streaming rounds + tool calls.
+  // Each new Ollama partial (which is the full accumulated text for the current round)
+  // is appended to completedText for display.
+  let completedText = '';
+  // Track the latest partial text from the current streaming round
+  let currentRoundText = '';
 
   const flushEdit = async () => {
     if (pendingEditText && streamingMessageId && channel.editMessage) {
@@ -335,22 +341,46 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (result.isPartial) {
         // Streaming partial update
         if (result.isTooling) {
-          // Tool execution — flush any pending partial edit (preserving the
-          // streamed text), show tool usage as a new message, then reset
-          // so the next response starts fresh.
+          // Tool execution — finalize current streaming text + append tool info.
           if (editDebounceTimer) {
             clearTimeout(editDebounceTimer);
             editDebounceTimer = null;
-            await flushEdit();
           }
-          // Send tool info as a separate message
-          await channel.sendMessage(chatJid, text);
-          streamingMessageId = null;
+          // Finalize: completedText = prior completed + current round + tool info
+          if (currentRoundText) {
+            completedText = completedText
+              ? `${completedText}\n\n${currentRoundText}\n\n${text}`
+              : `${currentRoundText}\n\n${text}`;
+          } else {
+            completedText = completedText
+              ? `${completedText}\n\n${text}`
+              : text;
+          }
+          currentRoundText = '';
+          if (streamingMessageId && channel.editMessage) {
+            await channel.editMessage(
+              chatJid,
+              streamingMessageId,
+              completedText,
+            );
+          } else if (channel.sendMessageReturningId) {
+            streamingMessageId = await channel.sendMessageReturningId(
+              chatJid,
+              completedText,
+            );
+            outputSentToUser = true;
+          }
         } else if (streamingMessageId && channel.editMessage) {
-          // Edit existing message (debounced)
-          debouncedEdit(text);
+          // Streaming partial — text is the full accumulated text for this round.
+          // Prepend completedText (prior rounds + tool calls) for full display.
+          currentRoundText = text;
+          const fullText = completedText
+            ? `${completedText}\n\n${text}`
+            : text;
+          debouncedEdit(fullText);
         } else if (channel.sendMessageReturningId) {
           // First partial — send initial message and track its ID
+          currentRoundText = text;
           streamingMessageId = await channel.sendMessageReturningId(
             chatJid,
             text,
@@ -366,9 +396,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           editDebounceTimer = null;
         }
         if (streamingMessageId && channel.editMessage) {
-          // Edit the streaming message one final time with complete text
-          await channel.editMessage(chatJid, streamingMessageId, text);
+          // Edit the streaming message one final time with complete text,
+          // including any accumulated text from before tool calls
+          const fullText = completedText
+            ? `${completedText}\n\n${text}`
+            : text;
+          await channel.editMessage(chatJid, streamingMessageId, fullText);
           streamingMessageId = null;
+          completedText = '';
+          currentRoundText = '';
         } else {
           // No streaming happened, or channel doesn't support it
           await channel.sendMessage(chatJid, text);

@@ -170,6 +170,42 @@ export const TOOL_DEFINITIONS: OllamaToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        'Search the web using a query string. Returns search results with titles, URLs, and snippets.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The search query',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description:
+        'Fetch the contents of a URL. Returns the page text (HTML tags stripped).',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'The URL to fetch',
+          },
+        },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
 function truncate(text: string): string {
@@ -201,6 +237,10 @@ export async function executeTool(
         return truncate(executeGlob(args));
       case 'grep':
         return truncate(executeGrep(args));
+      case 'web_search':
+        return truncate(await executeWebSearch(args));
+      case 'web_fetch':
+        return truncate(await executeWebFetch(args));
       default:
         return `Unknown tool: ${name}`;
     }
@@ -339,5 +379,139 @@ function executeGrep(args: Record<string, unknown>): string {
     return output.trim() || 'No matches found';
   } catch {
     return 'No matches found';
+  }
+}
+
+async function executeWebSearch(args: Record<string, unknown>): Promise<string> {
+  const query = args.query as string;
+  if (!query) return 'Error: query is required';
+
+  try {
+    // Use DuckDuckGo instant answer API (JSON, no CAPTCHA)
+    const encoded = encodeURIComponent(query);
+    const response = await fetch(
+      `https://api.duckduckgo.com/?q=${encoded}&format=json&no_html=1&skip_disambig=1`,
+    );
+    if (!response.ok) throw new Error(`status ${response.status}`);
+
+    const data = (await response.json()) as {
+      AbstractText?: string;
+      AbstractURL?: string;
+      AbstractSource?: string;
+      RelatedTopics?: Array<{
+        Text?: string;
+        FirstURL?: string;
+        Topics?: Array<{ Text?: string; FirstURL?: string }>;
+      }>;
+    };
+
+    const results: string[] = [];
+
+    // Main abstract
+    if (data.AbstractText) {
+      results.push(
+        `${data.AbstractSource || 'Summary'}: ${data.AbstractText}`,
+      );
+      if (data.AbstractURL) results.push(`Source: ${data.AbstractURL}`);
+      results.push('');
+    }
+
+    // Related topics
+    if (data.RelatedTopics) {
+      for (const topic of data.RelatedTopics.slice(0, 8)) {
+        if (topic.Text && topic.FirstURL) {
+          results.push(`• ${topic.Text}`);
+          results.push(`  ${topic.FirstURL}`);
+        }
+        // Nested topics
+        if (topic.Topics) {
+          for (const sub of topic.Topics.slice(0, 3)) {
+            if (sub.Text && sub.FirstURL) {
+              results.push(`• ${sub.Text}`);
+              results.push(`  ${sub.FirstURL}`);
+            }
+          }
+        }
+      }
+    }
+
+    if (results.length > 0) return results.join('\n');
+
+    // Fallback: fetch a search results page and extract text
+    const fetchResult = await executeWebFetch({
+      url: `https://search.brave.com/search?q=${encoded}`,
+    });
+    return fetchResult || 'No results found';
+  } catch (err) {
+    // Fallback to Brave Search as plain text
+    try {
+      const encoded = encodeURIComponent(query);
+      return await executeWebFetch({
+        url: `https://search.brave.com/search?q=${encoded}`,
+      });
+    } catch {
+      return `Search error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+}
+
+async function executeWebFetch(args: Record<string, unknown>): Promise<string> {
+  const url = args.url as string;
+  if (!url) return 'Error: url is required';
+
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return 'Error: url must start with http:// or https://';
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (compatible; NanoClaw/1.0; +https://github.com/qwibitai/nanoclaw)',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return `Fetch error: HTTP ${response.status}`;
+
+    let html = await response.text();
+    if (html.length > 2 * 1024 * 1024) {
+      html = html.slice(0, 2 * 1024 * 1024);
+    }
+
+    // Strip script, style, nav, header, footer tags and their contents
+    let text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+      .replace(/<header[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+      .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+
+    // Strip remaining HTML tags
+    text = text.replace(/<[^>]+>/g, ' ');
+
+    // Decode HTML entities
+    text = text
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'");
+
+    // Collapse whitespace and trim lines
+    text = text
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
+
+    // Limit output
+    const lines = text.split('\n').slice(0, 200);
+    return lines.join('\n') || '(empty page)';
+  } catch (err) {
+    return `Fetch error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
