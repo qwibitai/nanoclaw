@@ -84,6 +84,7 @@ function createClaudeProvider(): AgentProvider {
       session.files.push({
         targetPath: path.join(session.providerStateDir, 'settings.json'),
         content: `${CLAUDE_SETTINGS}\n`,
+        onlyIfMissing: true,
       });
       session.directorySyncs = [
         {

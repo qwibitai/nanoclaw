@@ -16,6 +16,7 @@ export interface ProviderFileMaterialization {
   sourcePath?: string;
   targetPath: string;
   content?: string;
+  onlyIfMissing?: boolean;
 }
 
 export interface ProviderDirectorySync {
