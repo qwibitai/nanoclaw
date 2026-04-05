@@ -19,11 +19,16 @@ function parseGroupType(
   groupType: string | null,
   isMain: number | null,
 ): GroupType {
-  if (groupType && VALID_GROUP_TYPES.has(groupType)) {
+  if (groupType == null) {
+    // NULL はレガシー DB → is_main フォールバック
+    return isMain === 1 ? 'main' : 'chat';
+  }
+  if (VALID_GROUP_TYPES.has(groupType)) {
     return groupType as GroupType;
   }
-  // group_type が NULL や不明な値の場合、is_main からフォールバック
-  return isMain === 1 ? 'main' : 'chat';
+  // 不正な文字列は is_main を無視して 'chat' にフォールバック
+  logger.warn({ groupType }, 'Invalid group_type in DB; falling back to "chat".');
+  return 'chat';
 }
 
 let db: Database.Database;

@@ -148,8 +148,11 @@ function buildVolumeMounts(
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         settingsContent = parsed as Record<string, unknown>;
       }
-    } catch {
-      // パース失敗時は空オブジェクトから始める（既存 env は失われるが壊れたファイルより安全）
+    } catch (err) {
+      logger.warn(
+        { group: group.folder, settingsFile, error: err },
+        'Failed to parse settings.json; starting from empty object (existing user settings lost)',
+      );
     }
   }
 

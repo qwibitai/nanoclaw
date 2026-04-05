@@ -206,7 +206,6 @@ server.tool(
       type: 'pause_task',
       taskId: args.task_id,
       groupFolder,
-      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -225,7 +224,6 @@ server.tool(
       type: 'resume_task',
       taskId: args.task_id,
       groupFolder,
-      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -244,7 +242,6 @@ server.tool(
       type: 'cancel_task',
       taskId: args.task_id,
       groupFolder,
-      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -291,7 +288,6 @@ server.tool(
       type: 'update_task',
       taskId: args.task_id,
       groupFolder,
-      isPrivileged: String(isPrivileged),
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
