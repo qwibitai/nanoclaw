@@ -9,7 +9,9 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
+  setGroupModel,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -648,5 +650,99 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- RegisteredGroup model round-trip ---
+
+describe('registered group model', () => {
+  it('persists model through set/get round-trip', () => {
+    setRegisteredGroup('tg:123', {
+      name: 'Test Chat',
+      folder: 'telegram_test',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-opus-4-20250514',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['tg:123'].model).toBe('claude-opus-4-20250514');
+  });
+
+  it('returns undefined model when not set', () => {
+    setRegisteredGroup('tg:456', {
+      name: 'No Model',
+      folder: 'telegram_no-model',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['tg:456'].model).toBeUndefined();
+  });
+
+  it('persists model via getRegisteredGroup', () => {
+    setRegisteredGroup('tg:789', {
+      name: 'Single',
+      folder: 'telegram_single',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-haiku-4-20250514',
+    });
+
+    const group = getRegisteredGroup('tg:789');
+    expect(group).toBeDefined();
+    expect(group!.model).toBe('claude-haiku-4-20250514');
+  });
+
+  it('setGroupModel updates model for existing group', () => {
+    setRegisteredGroup('tg:100', {
+      name: 'Updatable',
+      folder: 'telegram_updatable',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    setGroupModel('tg:100', 'claude-opus-4-20250514');
+
+    const group = getRegisteredGroup('tg:100');
+    expect(group!.model).toBe('claude-opus-4-20250514');
+  });
+
+  it('setGroupModel clears model when set to null', () => {
+    setRegisteredGroup('tg:200', {
+      name: 'Clearable',
+      folder: 'telegram_clearable',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-opus-4-20250514',
+    });
+
+    setGroupModel('tg:200', null);
+
+    const group = getRegisteredGroup('tg:200');
+    expect(group!.model).toBeUndefined();
+  });
+
+  it('setRegisteredGroup overwrites existing model on re-register', () => {
+    setRegisteredGroup('tg:300', {
+      name: 'Overwrite',
+      folder: 'telegram_overwrite',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-opus-4-20250514',
+    });
+
+    setRegisteredGroup('tg:300', {
+      name: 'Overwrite',
+      folder: 'telegram_overwrite',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      model: 'claude-sonnet-4-20250514',
+    });
+
+    const group = getRegisteredGroup('tg:300');
+    expect(group!.model).toBe('claude-sonnet-4-20250514');
   });
 });

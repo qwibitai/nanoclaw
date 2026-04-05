@@ -4,6 +4,7 @@ import fs from 'fs';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_MODEL,
   HOST_MODE,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
@@ -189,6 +190,7 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
+        model: group.model || DEFAULT_MODEL,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

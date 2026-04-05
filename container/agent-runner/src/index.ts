@@ -54,6 +54,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  model?: string;
 }
 
 interface ContainerOutput {
@@ -484,6 +485,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: containerInput.model || undefined,
       cwd: WORKSPACE_GROUP,
       pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || undefined,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,

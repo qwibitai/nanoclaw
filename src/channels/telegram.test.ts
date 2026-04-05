@@ -11,7 +11,27 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  DEFAULT_MODEL: 'claude-sonnet-4-20250514',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  resolveModelAlias: vi.fn((name: string) => {
+    const aliases: Record<string, string> = {
+      opus: 'claude-opus-4-20250514',
+      sonnet: 'claude-sonnet-4-20250514',
+      haiku: 'claude-haiku-4-20250514',
+    };
+    return aliases[name.toLowerCase()] || name;
+  }),
+  loadModelAliases: vi.fn(() => ({
+    opus: 'claude-opus-4-20250514',
+    sonnet: 'claude-sonnet-4-20250514',
+    haiku: 'claude-haiku-4-20250514',
+  })),
+}));
+
+// Mock db functions used by /model command
+vi.mock('../db.js', () => ({
+  setGroupModel: vi.fn(),
+  deleteSession: vi.fn(),
 }));
 
 // Mock logger
@@ -48,6 +68,8 @@ vi.mock('grammy', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
+      setMyCommands: vi.fn().mockResolvedValue(undefined),
+      deleteMyCommands: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
@@ -78,6 +100,7 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
+import { setGroupModel, deleteSession } from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -235,6 +258,14 @@ describe('TelegramChannel', () => {
 
       expect(currentBot().commandHandlers.has('chatid')).toBe(true);
       expect(currentBot().commandHandlers.has('ping')).toBe(true);
+      expect(currentBot().commandHandlers.has('model')).toBe(true);
+      expect(currentBot().api.setMyCommands).toHaveBeenCalledWith([
+        { command: 'chatid', description: 'Show chat ID for registration' },
+        { command: 'ping', description: 'Check bot status' },
+        { command: 'model', description: 'View or change the AI model' },
+      ]);
+      // Clears stale commands from scoped menus (e.g. leftover OpenClaw commands)
+      expect(currentBot().api.deleteMyCommands).toHaveBeenCalledTimes(3);
       expect(currentBot().filterHandlers.has('message:text')).toBe(true);
       expect(currentBot().filterHandlers.has('message:photo')).toBe(true);
       expect(currentBot().filterHandlers.has('message:video')).toBe(true);
@@ -323,7 +354,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('skips bot commands (/chatid, /ping) but passes other / messages through', async () => {
+    it('skips bot commands (/chatid, /ping, /model) but passes other / messages through', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1145,6 +1176,231 @@ describe('TelegramChannel', () => {
       await handler(ctx);
 
       expect(ctx.reply).toHaveBeenCalledWith('Andy is online.');
+    });
+  });
+
+  // --- /model command ---
+
+  describe('/model command', () => {
+    it('registers the model command handler', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      expect(currentBot().commandHandlers.has('model')).toBe(true);
+    });
+
+    it('/model shows current model (default) when no per-group model set', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('claude-sonnet-4-20250514'),
+        expect.objectContaining({ parse_mode: 'Markdown' }),
+      );
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('(default)'),
+        expect.any(Object),
+      );
+    });
+
+    it('/model shows current model when per-group model is set', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'tg:100200300': {
+            name: 'Test Group',
+            folder: 'test-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            model: 'claude-opus-4-20250514',
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('claude-opus-4-20250514'),
+        expect.any(Object),
+      );
+      // Should NOT show "(default)" when a per-group model is set
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.not.stringContaining('(default)'),
+        expect.any(Object),
+      );
+    });
+
+    it('/model shows alias list', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain('opus');
+      expect(replyText).toContain('sonnet');
+      expect(replyText).toContain('haiku');
+    });
+
+    it('/model <alias> sets model and clears session', async () => {
+      const groups = {
+        'tg:100200300': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model opus' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(setGroupModel).toHaveBeenCalledWith(
+        'tg:100200300',
+        'claude-opus-4-20250514',
+      );
+      expect(deleteSession).toHaveBeenCalledWith('test-group');
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('claude-opus-4-20250514'),
+        expect.any(Object),
+      );
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Session cleared'),
+        expect.any(Object),
+      );
+    });
+
+    it('/model <full-id> sets model with full model ID', async () => {
+      const groups = {
+        'tg:100200300': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model claude-opus-4-20250514' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(setGroupModel).toHaveBeenCalledWith(
+        'tg:100200300',
+        'claude-opus-4-20250514',
+      );
+      expect(deleteSession).toHaveBeenCalledWith('test-group');
+    });
+
+    it('/model reset clears per-group model and session', async () => {
+      const groups = {
+        'tg:100200300': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          model: 'claude-opus-4-20250514',
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model reset' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(setGroupModel).toHaveBeenCalledWith('tg:100200300', null);
+      expect(deleteSession).toHaveBeenCalledWith('test-group');
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('default'),
+        expect.any(Object),
+      );
+    });
+
+    it('/model replies error for unregistered chat', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({})),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 999999 },
+        message: { text: '/model' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
+      expect(setGroupModel).not.toHaveBeenCalled();
+    });
+
+    it('/model is skipped by general message handler', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: '/model opus' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
   });
 

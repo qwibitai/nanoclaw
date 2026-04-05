@@ -264,8 +264,8 @@ describe('streaming output', () => {
     simulateStreamingOutput(
       [
         { result: 'Hello', partial: true, time: 0 },
-        { result: 'Hello w', partial: true, time: 500 },     // throttled
-        { result: 'Hello wor', partial: true, time: 1000 },  // throttled
+        { result: 'Hello w', partial: true, time: 500 }, // throttled
+        { result: 'Hello wor', partial: true, time: 1000 }, // throttled
         { result: 'Hello world', partial: true, time: 2000 }, // sent
         { result: 'Hello world!', partial: false, time: 4000 },
       ],
@@ -441,7 +441,10 @@ describe('streaming output', () => {
     // First edit attempt fails → streamingFailed
     expect(channel.editMessage).toHaveBeenCalledTimes(1);
     // Final uses sendMessage because streamingFailed
-    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Complete response');
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'jid',
+      'Complete response',
+    );
     expect(outputSentToUser).toBe(true);
   });
 
@@ -547,11 +550,17 @@ describe('agent-runner streaming buffer', () => {
       [
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Hello' },
+          },
         },
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: ' world' },
+          },
         },
       ],
       writeOutput,
@@ -573,7 +582,10 @@ describe('agent-runner streaming buffer', () => {
       [
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'First turn' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'First turn' },
+          },
         },
         {
           type: 'stream_event',
@@ -581,7 +593,10 @@ describe('agent-runner streaming buffer', () => {
         },
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Second turn' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Second turn' },
+          },
         },
       ],
       writeOutput,
@@ -600,12 +615,18 @@ describe('agent-runner streaming buffer', () => {
       [
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn 1 text' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Turn 1 text' },
+          },
         },
         { type: 'assistant' },
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Turn 2 text' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Turn 2 text' },
+          },
         },
       ],
       writeOutput,
@@ -624,11 +645,20 @@ describe('agent-runner streaming buffer', () => {
       [
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '<internal>thinking</internal>' } },
+          event: {
+            type: 'content_block_delta',
+            delta: {
+              type: 'text_delta',
+              text: '<internal>thinking</internal>',
+            },
+          },
         },
         {
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Answer' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Answer' },
+          },
         },
       ],
       writeOutput,

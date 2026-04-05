@@ -4,7 +4,14 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  DEFAULT_MODEL,
+  resolveModelAlias,
+  loadModelAliases,
+  TRIGGER_PATTERN,
+} from '../config.js';
+import { setGroupModel, deleteSession } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -135,9 +142,56 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Command to view/change the model for this group
+    this.bot.command('model', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const args = (ctx.message?.text || '').split(/\s+/).slice(1);
+
+      if (args.length === 0) {
+        const current = group.model || DEFAULT_MODEL;
+        const aliases = loadModelAliases();
+        const aliasEntries = Object.entries(aliases)
+          .map(([alias, id]) => `  ${alias} → ${id}`)
+          .join('\n');
+        const aliasBlock = aliasEntries
+          ? `\n\nAliases:\n${aliasEntries}`
+          : '';
+        ctx.reply(
+          `Model: \`${current}\`${group.model ? '' : ' (default)'}${aliasBlock}`,
+          { parse_mode: 'Markdown' },
+        );
+        return;
+      }
+
+      if (args[0] === 'reset') {
+        setGroupModel(chatJid, null);
+        group.model = undefined;
+        deleteSession(group.folder);
+        ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`). Session cleared.`, {
+          parse_mode: 'Markdown',
+        });
+        return;
+      }
+
+      const resolved = resolveModelAlias(args[0]);
+      setGroupModel(chatJid, resolved);
+      group.model = resolved;
+      deleteSession(group.folder);
+      ctx.reply(`Model set to \`${resolved}\`. Session cleared.`, {
+        parse_mode: 'Markdown',
+      });
+    });
+
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping', 'model']);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
@@ -343,6 +397,26 @@ export class TelegramChannel implements Channel {
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
+
+    // Register slash commands in Telegram's command menu.
+    // Clear all scoped commands first to remove stale entries from previous
+    // setups (e.g. OpenClaw), then set the canonical list on default scope.
+    const commands = [
+      { command: 'chatid', description: 'Show chat ID for registration' },
+      { command: 'ping', description: 'Check bot status' },
+      { command: 'model', description: 'View or change the AI model' },
+    ];
+    const scopesToClear = [
+      { type: 'all_private_chats' as const },
+      { type: 'all_group_chats' as const },
+      { type: 'all_chat_administrators' as const },
+    ];
+    await Promise.all([
+      ...scopesToClear.map((scope) =>
+        this.bot!.api.deleteMyCommands({ scope }).catch(() => {}),
+      ),
+      this.bot!.api.setMyCommands(commands),
+    ]);
 
     // Start polling — returns a Promise that resolves when started
     return new Promise<void>((resolve) => {

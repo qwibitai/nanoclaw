@@ -1,3 +1,4 @@
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -10,6 +11,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'HOST_MODE',
   'ONECLI_URL',
+  'DEFAULT_MODEL',
   'TZ',
 ]);
 
@@ -99,3 +101,28 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Default model for agent invocations (overridable per-group via DB)
+export const DEFAULT_MODEL =
+  process.env.DEFAULT_MODEL || envConfig.DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+
+// Model alias config: maps short names (e.g. "opus") to full model IDs
+export const MODEL_ALIASES_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'model-aliases.json',
+);
+
+export function loadModelAliases(): Record<string, string> {
+  try {
+    return JSON.parse(fs.readFileSync(MODEL_ALIASES_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+export function resolveModelAlias(nameOrId: string): string {
+  const aliases = loadModelAliases();
+  return aliases[nameOrId.toLowerCase()] || nameOrId;
+}
