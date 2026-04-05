@@ -109,7 +109,7 @@ export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
 // Map short aliases to full model IDs
 export const MODEL_ALIASES: Record<string, string> = {
   opus: 'claude-opus-4-6[1m]',
-  sonnet: 'claude-sonnet-4-6',
+  sonnet: 'claude-sonnet-4-6[1m]',
   haiku: 'claude-haiku-4-5-20251001',
 };
 
