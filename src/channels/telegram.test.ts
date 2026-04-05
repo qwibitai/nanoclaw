@@ -29,6 +29,11 @@ vi.mock('../group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn((folder: string) => `/tmp/test-groups/${folder}`),
 }));
 
+// Mock transcription (returns null by default — no whisper in test env)
+vi.mock('../transcription.js', () => ({
+  transcribeAudio: vi.fn(() => Promise.resolve(null)),
+}));
+
 
 // --- Grammy mock ---
 
@@ -816,6 +821,30 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content: '[Audio] (/workspace/group/attachments/song.mp3)',
+        }),
+      );
+    });
+
+    it('transcribes voice message when whisper is available', async () => {
+      const { transcribeAudio } = await import('../transcription.js');
+      vi.mocked(transcribeAudio).mockResolvedValueOnce('Hello, how are you doing today?');
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'voice/file_0.oga' });
+
+      const ctx = createMediaCtx({
+        extra: { voice: { file_id: 'voice_id' } },
+      });
+      await triggerMediaMessage('message:voice', ctx);
+      await flushPromises();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Voice: Hello, how are you doing today?]',
         }),
       );
     });
