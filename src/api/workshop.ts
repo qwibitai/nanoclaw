@@ -289,7 +289,8 @@ export async function handleWorkshopRoute(
 
       if (!body.blueprint_id || !body.group_folder || !body.chat_jid) {
         json(res, 400, {
-          error: 'Missing required fields: blueprint_id, group_folder, chat_jid',
+          error:
+            'Missing required fields: blueprint_id, group_folder, chat_jid',
         });
         return true;
       }
@@ -405,8 +406,7 @@ export async function handleWorkshopRoute(
         });
       } catch (err) {
         // UNIQUE constraint violation → concurrent duplicate install
-        const msg =
-          err instanceof Error ? err.message : String(err);
+        const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('UNIQUE constraint')) {
           json(res, 409, {
             error: 'Blueprint already installed for this group',
