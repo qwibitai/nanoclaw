@@ -1,4 +1,8 @@
+import fs from 'fs';
 import https from 'https';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -75,6 +79,87 @@ export class TelegramChannel implements Channel {
       );
     });
 
+    // Command to apply a preset to the Claude Code router config
+    this.bot.command('preset', async (ctx) => {
+      const preset = ctx.match?.trim();
+      const homeDir = os.homedir();
+      const presetsBaseDir = path.join(
+        homeDir,
+        '.claude-code-router',
+        'presets',
+      );
+
+      if (!preset) {
+        let available = 'No presets found.';
+        if (fs.existsSync(presetsBaseDir)) {
+          try {
+            const list = fs.readdirSync(presetsBaseDir).filter((f) => {
+              const fullPath = path.join(presetsBaseDir, f);
+              return (
+                fs.statSync(fullPath).isDirectory() &&
+                fs.existsSync(path.join(fullPath, 'manifest.json'))
+              );
+            });
+            if (list.length > 0) {
+              available = list.map((p) => `\`${p}\``).join(', ');
+            }
+          } catch (err) {
+            logger.error({ err }, 'Failed to list presets');
+          }
+        }
+        ctx.reply(`Usage: \`/preset <name>\`\nAvailable: ${available}`, {
+          parse_mode: 'Markdown',
+        });
+        return;
+      }
+
+      const presetPath = path.join(presetsBaseDir, preset, 'manifest.json');
+      const configPath = path.join(
+        homeDir,
+        '.claude-code-router',
+        'config.json',
+      );
+
+      try {
+        if (!fs.existsSync(presetPath)) {
+          ctx.reply(`Preset \`${preset}\` not found.`, {
+            parse_mode: 'Markdown',
+          });
+          return;
+        }
+
+        // Copy entire preset file to config.json
+        fs.copyFileSync(presetPath, configPath);
+
+        // Restart ccr service to pick up new config
+        execFile(
+          'systemctl',
+          ['--user', 'restart', 'ccr.service'],
+          { timeout: 10000 },
+          (err) => {
+            if (err) {
+              logger.error({ err }, 'Failed to restart CCR service');
+              ctx.reply(
+                `Applied preset \`${preset}\` but failed to restart CCR service: ${err.message}`,
+                { parse_mode: 'Markdown' },
+              );
+            } else {
+              logger.info('CCR service restarted');
+              ctx.reply(`Successfully applied preset \`${preset}\`.`, {
+                parse_mode: 'Markdown',
+              });
+            }
+          },
+        );
+      } catch (err) {
+        logger.error({ err, preset }, 'Failed to apply preset');
+        ctx.reply(
+          `Failed to apply preset \`${preset}\`: ${err instanceof Error ? err.message : String(err)}`,
+          { parse_mode: 'Markdown' },
+        );
+      }
+    });
+
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
@@ -82,7 +167,7 @@ export class TelegramChannel implements Channel {
 
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping', 'preset']);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
