@@ -102,6 +102,7 @@ function createTextCtx(overrides: {
   messageId?: number;
   date?: number;
   entities?: any[];
+  messageThreadId?: number;
 }) {
   const chatId = overrides.chatId ?? 100200300;
   const chatType = overrides.chatType ?? 'group';
@@ -121,6 +122,7 @@ function createTextCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
+      message_thread_id: overrides.messageThreadId,
     },
     me: { username: 'andy_ai_bot' },
     reply: vi.fn(),
@@ -135,6 +137,7 @@ function createMediaCtx(overrides: {
   date?: number;
   messageId?: number;
   caption?: string;
+  messageThreadId?: number;
   extra?: Record<string, any>;
 }) {
   const chatId = overrides.chatId ?? 100200300;
@@ -153,6 +156,7 @@ function createMediaCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       caption: overrides.caption,
+      message_thread_id: overrides.messageThreadId,
       ...(overrides.extra || {}),
     },
     me: { username: 'andy_ai_bot' },
@@ -432,6 +436,37 @@ describe('TelegramChannel', () => {
         }),
       );
     });
+
+    it('includes thread_id for topic messages', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Hello topic',
+        messageThreadId: 777,
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ thread_id: '777' }),
+      );
+    });
+
+    it('leaves thread_id undefined outside topics', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: 'Hello regular chat' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ thread_id: undefined }),
+      );
+    });
   });
 
   // --- @mention translation ---
@@ -708,6 +743,23 @@ describe('TelegramChannel', () => {
 
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
+
+    it('includes thread_id for non-text topic messages', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({ messageThreadId: 888 });
+      await triggerMediaMessage('message:photo', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Photo]',
+          thread_id: '888',
+        }),
+      );
+    });
   });
 
   // --- sendMessage ---
@@ -738,6 +790,20 @@ describe('TelegramChannel', () => {
         '-1001234567890',
         'Group message',
         { parse_mode: 'Markdown' },
+      );
+    });
+
+    it('passes message_thread_id when threadId is provided', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage('tg:100200300', 'Hello topic', '999');
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        'Hello topic',
+        { message_thread_id: 999, parse_mode: 'Markdown' },
       );
     });
 

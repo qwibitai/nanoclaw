@@ -30,6 +30,7 @@ function store(overrides: {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  thread_id?: string;
 }) {
   storeMessage({
     id: overrides.id,
@@ -39,6 +40,7 @@ function store(overrides: {
     content: overrides.content,
     timestamp: overrides.timestamp,
     is_from_me: overrides.is_from_me ?? false,
+    thread_id: overrides.thread_id,
   });
 }
 
@@ -139,6 +141,29 @@ describe('storeMessage', () => {
     );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
+  });
+
+  it('stores and retrieves thread_id', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    store({
+      id: 'msg-thread',
+      chat_jid: 'group@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'in topic',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      thread_id: '321',
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+
+    expect(messages[0].thread_id).toBe('321');
+    expect(formatMessages(messages, 'UTC')).toContain('topic="321"');
   });
 });
 
