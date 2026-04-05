@@ -717,7 +717,7 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // メイングループはすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
+  // 特権グループ（main/override）はすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
   const visibleGroups = isPrivileged ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
