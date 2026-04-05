@@ -163,8 +163,10 @@ async function runTask(
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
   const providerId = getGroupProviderId(group);
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const shouldPersistSession = task.context_mode === 'group';
+  const sessionId = shouldPersistSession
+    ? sessions[task.group_folder]
+    : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -196,7 +198,7 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.newSessionId) {
+        if (shouldPersistSession && streamedOutput.newSessionId) {
           sessions[task.group_folder] = streamedOutput.newSessionId;
           setSession(
             task.group_folder,
@@ -226,7 +228,7 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else {
-      if (output.newSessionId) {
+      if (shouldPersistSession && output.newSessionId) {
         sessions[task.group_folder] = output.newSessionId;
         setSession(task.group_folder, output.newSessionId, providerId);
       }
