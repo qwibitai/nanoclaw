@@ -262,9 +262,7 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
-        const taskModel = data.model
-          ? resolveModelAlias(data.model)
-          : null;
+        const taskModel = data.model ? resolveModelAlias(data.model) : null;
         createTask({
           id: taskId,
           group_folder: targetFolder,

@@ -179,16 +179,17 @@ export class TelegramChannel implements Channel {
 
       if (args[0] === 'task') {
         if (args.length < 3) {
-          ctx.reply(
-            'Usage: `/model task <task-id> <model|reset>`',
-            { parse_mode: 'Markdown' },
-          );
+          ctx.reply('Usage: `/model task <task-id> <model|reset>`', {
+            parse_mode: 'Markdown',
+          });
           return;
         }
         const taskId = args[1];
         const task = getTaskById(taskId);
         if (!task) {
-          ctx.reply(`Task \`${taskId}\` not found.`, { parse_mode: 'Markdown' });
+          ctx.reply(`Task \`${taskId}\` not found.`, {
+            parse_mode: 'Markdown',
+          });
           return;
         }
         if (args[2] === 'reset') {

@@ -1,5 +1,7 @@
+import { ChildProcess } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ContainerOutput } from './container-runner.js';
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
@@ -7,6 +9,17 @@ import {
   startSchedulerLoop,
   type SchedulerDependencies,
 } from './task-scheduler.js';
+import { RegisteredGroup } from './types.js';
+
+vi.mock('./host-runner.js', () => ({
+  runHostAgent: vi.fn(),
+}));
+
+// Resolved lazily after vi.mock hoisting
+async function getRunHostAgentMock() {
+  const mod = await import('./host-runner.js');
+  return mod.runHostAgent as ReturnType<typeof vi.fn>;
+}
 
 describe('task scheduler', () => {
   beforeEach(() => {
@@ -170,6 +183,111 @@ describe('task scheduler', () => {
 
     const task = getTaskById('noisy-task');
     expect(task?.silent).toBe(0); // SQLite stores false as 0
+  });
+
+  function makeDeps(overrides?: Partial<SchedulerDependencies>): SchedulerDependencies {
+    const groupFolder = 'test-group';
+    const chatJid = 'tg:999';
+    return {
+      registeredGroups: () => ({
+        [chatJid]: {
+          name: 'test',
+          folder: groupFolder,
+          isMain: true,
+          requiresTrigger: false,
+          trigger: '',
+          added_at: '',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_jid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: vi.fn(async () => {}),
+      ...overrides,
+    };
+  }
+
+  it('HEARTBEAT_OK output is not sent to user', async () => {
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        _input: any,
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          await onOutput({ result: 'HEARTBEAT_OK', status: 'success' });
+        }
+        return { result: 'HEARTBEAT_OK', status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'heartbeat-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deps.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('duplicate streaming output is sent only once', async () => {
+    const mock = await getRunHostAgentMock();
+    mock.mockImplementation(
+      async (
+        _group: RegisteredGroup,
+        _input: any,
+        _onProcess: any,
+        onOutput?: (output: ContainerOutput) => Promise<void>,
+      ) => {
+        if (onOutput) {
+          await onOutput({ result: 'Hello!', status: 'success' });
+          await onOutput({ result: 'Hello!', status: 'success' });
+          await onOutput({ result: 'Hello!', status: 'success' });
+        }
+        return { result: 'Hello!', status: 'success' as const };
+      },
+    );
+
+    createTask({
+      id: 'dedup-task',
+      group_folder: 'test-group',
+      chat_jid: 'tg:999',
+      prompt: 'say hello',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const deps = makeDeps();
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(deps.sendMessage).toHaveBeenCalledTimes(1);
+    expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Hello!');
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {

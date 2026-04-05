@@ -28,6 +28,8 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
+const HEARTBEAT_OK_MARKER = 'HEARTBEAT_OK';
+
 /**
  * Compute the next run time for a recurring task, anchored to the
  * task's scheduled time rather than Date.now() to prevent cumulative
@@ -158,6 +160,7 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  let lastSentText: string | null = null;
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -198,9 +201,11 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user unless task is silent
-          if (!task.silent) {
-            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          const text = streamedOutput.result.trim();
+          const isHeartbeatOk = text === HEARTBEAT_OK_MARKER;
+          if (!task.silent && !isHeartbeatOk && text && text !== lastSentText) {
+            await deps.sendMessage(task.chat_jid, text);
+            lastSentText = text;
           }
           scheduleClose();
         }
