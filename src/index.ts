@@ -878,6 +878,46 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Event-driven: kick message processing immediately without waiting for poll
+      const group = registeredGroups[chatJid];
+      if (!group) return;
+
+      const ch = findChannel(channels, chatJid);
+      if (!ch) return;
+
+      const isMainGroup = group.isMain === true;
+      const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+      if (needsTrigger) {
+        const triggerPattern = getTriggerPattern(group.trigger);
+        const allowlistCfg = loadSenderAllowlist();
+        const hasTrigger =
+          triggerPattern.test(msg.content.trim()) &&
+          (msg.is_from_me ||
+            isTriggerAllowed(chatJid, msg.sender, allowlistCfg));
+        if (!hasTrigger) return;
+      }
+
+      // Active container → pipe via IPC + typing indicator
+      const allPending = getMessagesSince(
+        chatJid,
+        getOrRecoverCursor(chatJid),
+        ASSISTANT_NAME,
+        MAX_MESSAGES_PER_PROMPT,
+      );
+      if (allPending.length > 0) {
+        const formatted = formatMessages(allPending, TIMEZONE);
+        if (queue.sendMessage(chatJid, formatted)) {
+          if (!queue.isRecentResponseSent(chatJid)) {
+            ch.setTyping?.(chatJid, true)?.catch(() => {});
+          }
+          return;
+        }
+      }
+
+      // No active container → enqueue for a new one
+      queue.enqueueMessageCheck(chatJid);
     },
     onChatMetadata: (
       chatJid: string,
