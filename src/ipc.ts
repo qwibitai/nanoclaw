@@ -401,7 +401,7 @@ export async function processTaskIpc(
       break;
 
     case 'refresh_groups':
-      // メイングループのみがリフレッシュを要求可能
+      // 特権グループ（main/override）のみがリフレッシュを要求可能
       if (isPrivileged) {
         logger.info(
           { sourceGroup },
