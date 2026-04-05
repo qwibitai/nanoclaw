@@ -24,6 +24,12 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    poppler-utils \
+    python3 \
+    python3-pip \
+    python3-venv \
+    jq \
+    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
