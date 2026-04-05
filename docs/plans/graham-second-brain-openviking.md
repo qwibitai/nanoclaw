@@ -32,9 +32,9 @@ NanoClaw Host
     │                              │   └─ configured via mounted ~/.openviking/ovcli.conf (host machine)
     │                              │       (points to sb-openviking server + API key)
     │                              │
-    │                              └─ ovcli ──▶ sb-openviking (search + immediate index of own writes)
+    │                              └─ ovcli ──▶ sb-openviking (search)
     │
-    ├─ spawns per-message ──▶  nanoclaw-agent container (main / graham)
+    ├─ spawns per-message ──▶  nanoclaw-agent container (main / other graham with SB write access)
     │                              │
     │                              ├─ R/W mount ──▶ ~/.SB_PERSONAL
     │                              │                  (can write notes — auto-synced to OV in ≤2 mins)
@@ -42,10 +42,10 @@ NanoClaw Host
     │                              └─ NO ovcli, NO OpenViking access
     │                                 (routes search queries via graham-second-brain IPC)
     │
-    ├─ spawns per-message ──▶  nanoclaw-agent container (whatsapp_*)
-    │                              │
-    │                              ├─ R/W mount ──▶ ~/.SB_PERSONAL (can write, auto-synced)
-    │                              └─ NO ovcli (routes search via IPC)
+    ├─ spawns per-message ──▶  nanoclaw-agent container (graham_no_sb_access_example)
+    │                              └─ NO ovcli, NO OpenViking access, NO ~/.SB_PERSONAL mount
+    │                                 (routes search queries via graham-second-brain IPC)
+    |                                 (routes new information to be stored to other agents with SB access)
     │
     └─ spawns per-message ──▶  nanoclaw-agent container (gmail_*)
                                    │
@@ -59,20 +59,14 @@ NanoClaw Host
 |---|---|---|---|
 | `graham-second-brain` | R/W | Yes | Writes notes AND searches. Indexes own writes immediately. |
 | `graham` (main) | R/W | No | Can write notes. Auto-synced to OV in ≤2 mins. Routes search via IPC. |
-| Other agents | R/W | No | Can write notes. Auto-synced to OV in ≤2 mins. Routes search via IPC. |
+| Other agents (for now) | No | No | Routes any queries or information to other agents via IPC. |
 
-### Data flow: Writing a new note (any agent)
+### Data flow: Writing a new note
 
 1. Agent receives information (from Morgan, WhatsApp, etc. via IPC)
 2. Agent determines the right PARA location
 3. Agent writes the file to the R/W mount at `/workspace/extra/.SB_PERSONAL/`
 4. OpenViking's `watch_interval` (2 mins) detects the change and auto-indexes it
-
-### Data flow: Writing a new note (second-brain agent)
-
-1–3. Same as above
-4. Agent also indexes immediately via `ovcli`: `ov add-resource <file-path> --target viking://resources/<PARA-path>/ --reason "<context>" --instruction "<ingestion instruction>"`
-5. OpenViking parses the file, generates L0/L1/L2 summaries via VLM, and updates the vector index
 
 ### Data flow: Searching / retrieving (progressive L0→L2)
 
@@ -95,8 +89,6 @@ The initial bulk ingest sets `watch_interval: 2` (minutes) on the root resource.
 - Any other external changes
 
 When no files have changed, the cycle costs nothing — just a local filesystem walk. When files change, only the changed files trigger VLM summarization and re-embedding (fractions of a cent per file via `gpt-4o-mini` + `text-embedding-3-large`).
-
-The `graham-second-brain` agent additionally indexes its own writes immediately via `ovcli` so its search results are up-to-date within the same conversation.
 
 ## Part 1: OpenViking Sidecar Setup
 
@@ -282,7 +274,7 @@ Register or update the `graham-second-brain` group with:
 - First mount: second brain at `/workspace/extra/.SB_PERSONAL/` with read-write access (agent writes notes here).
 - Second mount: `~/.openviking/` from the host machine (where `ovcli.conf` lives) mounted read-only. The agent can use the CLI but can't modify credentials. This mount is specific to `graham-second-brain`; no other agent can see it — stronger isolation than storing credentials in the synced repo.
 
-For other agents that need R/W filesystem access but NOT search:
+For other agents that need R/W filesystem access but NOT search (this is NO agents for now):
 
 ```json
 {

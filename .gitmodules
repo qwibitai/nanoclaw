@@ -7,3 +7,6 @@
 [submodule "groups/graham-shops"]
 	path = groups/graham-shops
 	url = git@github.com:mlwynne24/nanoclaw-group-graham-shops.git
+[submodule "groups/graham-second-brain"]
+	path = groups/graham-second-brain
+	url = git@github.com:mlwynne24/nanoclaw-group-graham-second-brain.git
