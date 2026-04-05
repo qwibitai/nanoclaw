@@ -288,6 +288,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   let hadError = false;
   let outputSentToUser = false;
+  let lastSentText: string | null = null;
 
   let output: 'success' | 'error';
   try {
@@ -302,11 +303,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-        if (text) {
+        if (text && text !== lastSentText) {
           clearInterval(typingKeepalive);
           await channel.sendMessage(chatJid, text);
           outputSentToUser = true;
           queue.markResponseSent(chatJid);
+          lastSentText = text;
+        } else if (text && text === lastSentText) {
+          logger.warn({ group: group.name }, 'Duplicate output suppressed');
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
         resetIdleTimer();

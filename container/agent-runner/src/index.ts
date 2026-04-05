@@ -439,6 +439,7 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let lastFinalText: string | null = null;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
@@ -591,14 +592,19 @@ async function runQuery(
       resultCount++;
       const textResult =
         'result' in message ? (message as { result?: string }).result : null;
-      log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
-      );
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-      });
+      if (textResult && textResult === lastFinalText) {
+        log(`Result #${resultCount}: SKIPPED (duplicate)`);
+      } else {
+        log(
+          `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
+        );
+        lastFinalText = textResult;
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId,
+        });
+      }
     }
   }
 
