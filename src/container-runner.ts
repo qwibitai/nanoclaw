@@ -706,14 +706,13 @@ export interface AvailableGroup {
 
 /**
  * コンテナが読み取るための利用可能なグループのスナップショットを書き込みます。
- * メイングループのみが、すべての利用可能なグループを表示できます（アクティブ化のため）。
- * メイン以外のグループは、自身の登録ステータスのみを表示できます。
+ * 特権グループ（main/override）のみが全グループを表示できます。
+ * 非特権グループにはこのファイルは空リストとして書き込まれます。
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
   isPrivileged: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });

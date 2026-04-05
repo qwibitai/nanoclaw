@@ -293,12 +293,7 @@ async function runAgent(
 
   // 利用可能なグループのスナップショットを更新（メイングループのみが全グループを表示可能）
   const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isPrivileged,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
+  writeGroupsSnapshot(group.folder, isPrivileged, availableGroups);
 
   // ストリームされた結果からセッション ID を追跡するために onOutput をラップ
   const wrappedOnOutput = onOutput
@@ -631,8 +626,7 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

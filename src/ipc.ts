@@ -28,7 +28,6 @@ export interface IpcDeps {
     groupFolder: string,
     isPrivileged: boolean,
     availableGroups: AvailableGroup[],
-    registeredJids: Set<string>,
   ) => void;
 }
 
@@ -410,12 +409,7 @@ export async function processTaskIpc(
         await deps.syncGroups(true);
         // 更新されたスナップショットを即座に書き出し
         const availableGroups = deps.getAvailableGroups();
-        deps.writeGroupsSnapshot(
-          sourceGroup,
-          isPrivileged,
-          availableGroups,
-          new Set(Object.keys(registeredGroups)),
-        );
+        deps.writeGroupsSnapshot(sourceGroup, isPrivileged, availableGroups);
       } else {
         logger.warn(
           { sourceGroup },
