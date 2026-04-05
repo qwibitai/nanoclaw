@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
-import { getAvailableGroups, _setRegisteredGroups } from './orchestrator.js';
+import { AgentLiteInstance } from './instance.js';
+
+const testInstance = new AgentLiteInstance('test', {});
 
 beforeEach(() => {
   _initTestDatabase();
-  _setRegisteredGroups({});
+  testInstance._setRegisteredGroups({});
 });
 
 // --- JID ownership patterns ---
@@ -50,7 +52,7 @@ describe('getAvailableGroups', () => {
       true,
     );
 
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     expect(groups).toHaveLength(2);
     expect(groups.map((g) => g.jid)).toContain('group1@g.us');
     expect(groups.map((g) => g.jid)).toContain('group2@g.us');
@@ -67,7 +69,7 @@ describe('getAvailableGroups', () => {
       true,
     );
 
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     expect(groups).toHaveLength(1);
     expect(groups[0].jid).toBe('group@g.us');
   });
@@ -88,7 +90,7 @@ describe('getAvailableGroups', () => {
       true,
     );
 
-    _setRegisteredGroups({
+    testInstance._setRegisteredGroups({
       'reg@g.us': {
         name: 'Registered',
         folder: 'registered',
@@ -97,7 +99,7 @@ describe('getAvailableGroups', () => {
       },
     });
 
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     const reg = groups.find((g) => g.jid === 'reg@g.us');
     const unreg = groups.find((g) => g.jid === 'unreg@g.us');
 
@@ -128,7 +130,7 @@ describe('getAvailableGroups', () => {
       true,
     );
 
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     expect(groups[0].jid).toBe('new@g.us');
     expect(groups[1].jid).toBe('mid@g.us');
     expect(groups[2].jid).toBe('old@g.us');
@@ -158,13 +160,13 @@ describe('getAvailableGroups', () => {
       true,
     );
 
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     expect(groups).toHaveLength(1);
     expect(groups[0].jid).toBe('group@g.us');
   });
 
   it('returns empty array when no chats exist', () => {
-    const groups = getAvailableGroups();
+    const groups = testInstance.getAvailableGroups();
     expect(groups).toHaveLength(0);
   });
 });

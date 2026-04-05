@@ -9,23 +9,22 @@
  * @example
  * ```typescript
  * import { AgentLite } from '@boxlite-ai/agentlite';
- * import { TelegramChannel } from '@boxlite-ai/agentlite/channels/telegram';
  *
- * const agent = new AgentLite({
- *   workdir: './agentlite-data',
- *   model: { credentials: async () => ({ ANTHROPIC_API_KEY: 'sk-...' }) },
- * });
+ * const agent = new AgentLite({ workdir: './agentlite-data' });
  * await agent.start();
  *
- * await agent.registerChannelFactory('telegram', (opts) =>
+ * const instance = agent.createInstance('main');
+ * await instance.registerChannelFactory('telegram', (opts) =>
  *   new TelegramChannel({ token: '123:ABC', channelOptions: opts })
  * );
- * agent.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
+ * instance.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
+ * await instance.run();
  * ```
  */
 
-import { ASSISTANT_NAME, applyConfig } from './config.js';
-import { Channel, RegisteredGroup } from './types.js';
+import path from 'path';
+
+import { applyConfig, getProjectRoot } from './config.js';
 import type { AgentLiteOptions, GroupOptions } from './options.js';
 import type { ChannelFactory } from './channels/registry.js';
 
@@ -46,11 +45,13 @@ export type {
   AllowedRoot,
 } from './types.js';
 export type { ChannelOpts, ChannelFactory } from './channels/registry.js';
+// Re-export AgentLiteInstance type for consumers
+export type { AgentLiteInstance } from './instance.js';
 
 export class AgentLite {
-  private _groups: Map<string, RegisteredGroup> = new Map();
   private _started = false;
-  private _orchestrator: typeof import('./orchestrator.js') | null = null;
+  private _instances = new Map<string, InstanceType<typeof import('./instance.js').AgentLiteInstance>>();
+  private _instanceModule: typeof import('./instance.js') | null = null;
   private _options: AgentLiteOptions;
 
   constructor(options?: AgentLiteOptions) {
@@ -58,83 +59,50 @@ export class AgentLite {
   }
 
   /**
-   * Start the orchestrator.
-   * Initializes BoxLite runtime, database, and message processing loop.
-   * This is when native modules are loaded — not at import time.
-   * Call this first, then registerChannelFactory/registerGroup dynamically.
+   * Initialize shared infrastructure: config, BoxLite runtime.
+   * Call this before createInstance(). Native modules load here.
    */
   async start(): Promise<void> {
     if (this._started) throw new Error('AgentLite already started');
     this._started = true;
 
-    // Apply all options to config module — every downstream import
-    // sees updated values via ESM live bindings. One call, zero
-    // changes needed in orchestrator/container-runner/ipc/etc.
+    // Apply config — sets PROJECT_ROOT, STORE_DIR, etc. for shared defaults
     applyConfig(this._options);
 
-    // Dynamic import — the orchestrator (and its native deps) load here, not at import time
-    const orchestrator = await import('./orchestrator.js');
-    this._orchestrator = orchestrator;
+    // Dynamic import — native deps load here, not at import time
+    const boxRuntime = await import('./box-runtime.js');
+    boxRuntime.setBoxliteHome(path.join(getProjectRoot(), '.boxlite'));
+    boxRuntime.ensureRuntimeReady();
 
-    await orchestrator.start({
-      groups: this._groups,
-      model: this._options.model,
-      channelHandler: this._options.channelHandler,
-    });
+    // Pre-load instance module (also loads native deps)
+    this._instanceModule = await import('./instance.js');
   }
 
   /**
-   * Register a channel factory. Must be called after start().
-   * The factory receives ChannelOpts (callbacks) and returns a Channel.
-   * Returns true if the factory produced a channel, false if it returned null.
+   * Create a named instance (like a RocksDB column family).
+   * Each instance has its own DB, groups, channels, and message loop.
    */
-  async registerChannelFactory(
-    name: string,
-    factory: ChannelFactory,
-  ): Promise<boolean> {
-    if (!this._started || !this._orchestrator) {
-      throw new Error('Cannot register channels before start()');
+  createInstance(name: string): import('./instance.js').AgentLiteInstance {
+    if (!this._started || !this._instanceModule) {
+      throw new Error('Call start() before createInstance()');
     }
-    return this._orchestrator.registerChannelFactory(name, factory);
+    if (this._instances.has(name)) {
+      throw new Error(`Instance "${name}" already exists`);
+    }
+
+    const instance = new this._instanceModule.AgentLiteInstance(name, this._options);
+    this._instances.set(name, instance);
+    return instance;
   }
 
   /**
-   * Register a group/chat for the agent to monitor.
-   * Only `name` is required — folder, trigger, and timestamps are auto-derived.
-   * Can be called before or after start().
-   */
-  registerGroup(jid: string, options: GroupOptions): void {
-    const folder =
-      options.folder ??
-      options.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-
-    const group: RegisteredGroup = {
-      name: options.name,
-      folder,
-      trigger: options.trigger ?? `@${ASSISTANT_NAME}`,
-      added_at: new Date().toISOString(),
-      isMain: options.isMain ?? false,
-      requiresTrigger:
-        options.requiresTrigger ?? (options.isMain ? false : true),
-      containerConfig: options.containerConfig,
-    };
-
-    this._groups.set(jid, group);
-
-    if (this._started && this._orchestrator) {
-      this._orchestrator.registerGroup(jid, group);
-    }
-  }
-
-  /**
-   * Stop the orchestrator gracefully.
+   * Stop all instances and shared infrastructure.
    */
   async stop(): Promise<void> {
-    if (!this._started || !this._orchestrator) return;
-    await this._orchestrator.stop();
+    for (const inst of this._instances.values()) {
+      await inst.stop();
+    }
+    this._instances.clear();
     this._started = false;
   }
 }

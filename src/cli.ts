@@ -37,6 +37,15 @@ async function main(): Promise<void> {
   const agent = new AgentLite(options);
   await agent.start();
 
+  // Create the instance (name from AGENTLITE_INSTANCE env, defaults to 'main')
+  const instanceName = process.env.AGENTLITE_INSTANCE || 'main';
+  const instance = agent.createInstance(instanceName);
+
+  for (const channelName of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(channelName)!;
+    await instance.registerChannelFactory(channelName, factory);
+  }
+
   // Graceful shutdown on signals (CLI-only — SDK consumers handle their own lifecycle)
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -45,25 +54,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Auto-discover and register channels from the registry
-  let registered = 0;
-  for (const channelName of getRegisteredChannelNames()) {
-    const factory = getChannelFactory(channelName)!;
-    const success = await agent.registerChannelFactory(channelName, factory);
-    if (success) {
-      registered++;
-    } else {
-      logger.warn(
-        { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
-      );
-    }
-  }
-
-  if (registered === 0) {
-    logger.fatal('No channels connected');
-    process.exit(1);
-  }
+  // Start the instance — connects pre-registered channels and starts message loop
+  await instance.run();
 }
 
 main().catch((err) => {
