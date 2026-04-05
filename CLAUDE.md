@@ -108,23 +108,9 @@ Re-run `npm run build && npm test` after fixing any gate findings, before commit
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
 
 <!-- gitnexus:start -->
-## When Asked About Architecture
-
-When the user asks how a system works, how something is implemented, or questions about this codebase's architecture, you MUST explore the code directly using GitNexus and file reads — do not answer from memory or training data.
-
-```bash
-# Start here for a codebase overview
-gitnexus_query({query: "<relevant concept>"})
-gitnexus_query({query: "repo/nanoclaw/processes"})
-```
-
-For specific questions: `gitnexus_context({name: "symbolName"})` gives you callers, callees, and execution flow participation. For full step-by-step traces: `READ gitnexus://repo/nanoclaw/process/{processName}`.
-
-See the GitNexus CLI table below for more tools. The index is kept up-to-date in containers via the entrypoint (runs `gitnexus analyze` on workspace repos at startup).
-
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **nanoclaw** (1241 symbols, 3340 relationships, 98 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **nanoclaw** (1240 symbols, 3340 relationships, 98 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

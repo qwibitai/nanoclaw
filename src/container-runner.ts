@@ -2145,10 +2145,7 @@ function buildVolumeMounts(
           ],
         });
       }
-      fs.writeFileSync(
-        settingsFile,
-        JSON.stringify(settings, null, 2) + '\n',
-      );
+      fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
     } catch {
       // Non-fatal: agent works without hooks, just no auto-enrichment
     }
