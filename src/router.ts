@@ -35,8 +35,36 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+export function stripModelTokens(text: string): string {
+  return text.replace(
+    /<\|(?:user|assistant|system|endoftext|im_start|im_end|end)\|?>/g,
+    '',
+  );
+}
+
+export function stripUnclosedInternalTag(text: string): string {
+  return text.replace(/<internal>[\s\S]*$/g, '');
+}
+
+/**
+ * Strip model artifacts from output text.
+ * - Always: model special tokens (<|user|>, etc.) and closed <internal> pairs
+ * - Final only: unclosed <internal> tags (during streaming, these may be incomplete)
+ */
+export function stripModelArtifacts(
+  text: string,
+  isFinal: boolean,
+): string {
+  let result = stripModelTokens(text);
+  result = stripInternalTags(result);
+  if (isFinal) {
+    result = stripUnclosedInternalTag(result);
+  }
+  return result.trim();
+}
+
 export function formatOutbound(rawText: string): string {
-  const text = stripInternalTags(rawText);
+  const text = stripModelArtifacts(rawText, true);
   if (!text) return '';
   return text;
 }

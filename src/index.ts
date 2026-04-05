@@ -51,7 +51,13 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  stripModelArtifacts,
+  stripUnclosedInternalTag,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -332,15 +338,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks (closed or unclosed) and model special tokens
-      const text = raw
-        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-        .replace(/<internal>[\s\S]*$/g, '')
-        .replace(
-          /<\|(?:user|assistant|system|endoftext|im_start|im_end|end)[|>]*/g,
-          '',
-        )
-        .trim();
+      // Strip model artifacts — special tokens always, unclosed <internal> only on final output
+      const text = stripModelArtifacts(raw, !result.isPartial);
       if (!text) return;
 
       if (result.isPartial) {
@@ -351,11 +350,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             clearTimeout(editDebounceTimer);
             editDebounceTimer = null;
           }
-          // Finalize: completedText = prior completed + current round + tool info
-          if (currentRoundText) {
+          // Finalize: completedText = prior completed + current round + tool info.
+          // Strip unclosed <internal> tags from currentRoundText before baking in,
+          // since this text is being permanently finalized.
+          const safeCurrentRound = currentRoundText
+            ? stripUnclosedInternalTag(currentRoundText)
+            : '';
+          if (safeCurrentRound) {
             completedText = completedText
-              ? `${completedText}\n\n${currentRoundText}\n\n${text}`
-              : `${currentRoundText}\n\n${text}`;
+              ? `${completedText}\n\n${safeCurrentRound}\n\n${text}`
+              : `${safeCurrentRound}\n\n${text}`;
           } else {
             completedText = completedText
               ? `${completedText}\n\n${text}`
