@@ -43,7 +43,15 @@ async function sendTelegramMessage(
   }
 }
 
-const pendingRejections = new Map<string, { decisionId: string; expiresAt: number }>();
+const pendingRejections = new Map<
+  string,
+  { decisionId: string; expiresAt: number }
+>();
+
+const pendingSpendPrompts = new Map<
+  string,
+  { merchantName: string; visitEndTime: string; expiresAt: number }
+>();
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
@@ -106,6 +114,183 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Command to manage pantry items — CEO chat only
+    this.bot!.command('pantry', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      // Restrict to CEO group only
+      if (!group || group.folder !== 'ceo') {
+        return;
+      }
+
+      const pantryUrl =
+        process.env.PANTRY_MANAGER_URL || 'http://localhost:3052';
+      const args = ((ctx.match as string) || '').trim();
+      const spaceIdx = args.indexOf(' ');
+      const subcommand =
+        spaceIdx >= 0
+          ? args.slice(0, spaceIdx).toLowerCase()
+          : args.toLowerCase();
+      const rest = spaceIdx >= 0 ? args.slice(spaceIdx + 1).trim() : '';
+
+      try {
+        if (subcommand === 'add') {
+          if (!rest) {
+            await ctx.reply(
+              'Usage: /pantry add milk, eggs, oat milk',
+            );
+            return;
+          }
+
+          // Parse comma-separated item names
+          const itemNames = rest
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          // Fetch existing products once to avoid repeated requests
+          const productsResp = await fetch(`${pantryUrl}/api/v1/products`);
+          if (!productsResp.ok)
+            throw new Error(`Products API returned ${productsResp.status}`);
+          const products = (await productsResp.json()) as Array<{
+            id: number;
+            name: string;
+          }>;
+          const productMap = new Map(
+            products.map((p) => [p.name.toLowerCase(), p]),
+          );
+
+          const added: string[] = [];
+
+          for (const itemName of itemNames) {
+            // Find or create product
+            let product = productMap.get(itemName.toLowerCase());
+
+            if (!product) {
+              const createResp = await fetch(`${pantryUrl}/api/v1/products`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: itemName }),
+              });
+              if (!createResp.ok)
+                throw new Error(
+                  `Create product returned ${createResp.status}`,
+                );
+              product = (await createResp.json()) as { id: number; name: string };
+              productMap.set(itemName.toLowerCase(), product);
+            }
+
+            // Create pantry item
+            const itemResp = await fetch(`${pantryUrl}/api/v1/pantry-items`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                product_id: product.id,
+                user_id: 'jeff',
+                quantity: 1,
+                purchased_at: new Date().toISOString(),
+              }),
+            });
+            if (!itemResp.ok)
+              throw new Error(
+                `Create pantry item returned ${itemResp.status}`,
+              );
+            added.push(itemName);
+          }
+
+          await ctx.reply(`Added to pantry: ${added.join(', ')}`);
+        } else if (subcommand === 'list') {
+          const [itemsResp, productsResp] = await Promise.all([
+            fetch(`${pantryUrl}/api/v1/pantry-items`),
+            fetch(`${pantryUrl}/api/v1/products`),
+          ]);
+          if (!itemsResp.ok || !productsResp.ok)
+            throw new Error('Pantry API error');
+
+          const items = (await itemsResp.json()) as Array<{
+            id: number;
+            product_id: number;
+            quantity: number;
+            purchased_at: string | null;
+          }>;
+          const products = (await productsResp.json()) as Array<{
+            id: number;
+            name: string;
+          }>;
+          const productById = new Map(products.map((p) => [p.id, p.name]));
+
+          const recent = items
+            .slice()
+            .sort((a, b) => {
+              const tA = a.purchased_at
+                ? new Date(a.purchased_at).getTime()
+                : 0;
+              const tB = b.purchased_at
+                ? new Date(b.purchased_at).getTime()
+                : 0;
+              return tB - tA;
+            })
+            .slice(0, 10);
+          if (recent.length === 0) {
+            await ctx.reply(
+              'No pantry items yet. Use /pantry add to add some.',
+            );
+            return;
+          }
+
+          const lines = recent.map((item) => {
+            const name =
+              productById.get(item.product_id) || `Product #${item.product_id}`;
+            const date = item.purchased_at
+              ? new Date(item.purchased_at).toLocaleDateString()
+              : 'unknown date';
+            return `• ${name} (qty: ${item.quantity}, added: ${date})`;
+          });
+
+          await ctx.reply(
+            `*Pantry Items* (last ${recent.length}):\n${lines.join('\n')}`,
+            { parse_mode: 'Markdown' },
+          );
+        } else if (subcommand === 'status') {
+          const resp = await fetch(`${pantryUrl}/api/v1/nudges/status`);
+          if (!resp.ok)
+            throw new Error(`Nudges status returned ${resp.status}`);
+
+          const status = (await resp.json()) as {
+            total_tracked_products: number;
+            nudge_eligible_count: number;
+            suppressed_count: number;
+            confidence_breakdown: {
+              low: number;
+              medium: number;
+              high: number;
+            };
+          };
+
+          const msg = [
+            `*Pantry Nudge Status*`,
+            `• Tracked products: ${status.total_tracked_products}`,
+            `• Nudge-eligible: ${status.nudge_eligible_count}`,
+            `• Suppressed: ${status.suppressed_count}`,
+            `• Confidence: ${status.confidence_breakdown.high} high, ${status.confidence_breakdown.medium} medium, ${status.confidence_breakdown.low} low`,
+          ].join('\n');
+
+          await ctx.reply(msg, { parse_mode: 'Markdown' });
+        } else {
+          await ctx.reply(
+            'Usage:\n' +
+              '  /pantry add <items> — add items (comma-separated)\n' +
+              '  /pantry list — show recent pantry items\n' +
+              '  /pantry status — show nudge engine summary',
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, 'Pantry command error');
+        await ctx.reply('Pantry Manager is offline — try again later');
+      }
+    });
+
     this.bot!.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
@@ -119,23 +304,80 @@ export class TelegramChannel implements Channel {
           const text = ctx.message.text.trim();
           const rationale = text.toLowerCase() === 'skip' ? '' : text;
           try {
-            const agencyHqUrl = process.env.AGENCY_HQ_URL || 'http://localhost:3040';
-            const resp = await fetch(`${agencyHqUrl}/api/v1/decisions/${pending.decisionId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'rejected', rationale }),
-            });
+            const agencyHqUrl =
+              process.env.AGENCY_HQ_URL || 'http://localhost:3040';
+            const resp = await fetch(
+              `${agencyHqUrl}/api/v1/decisions/${pending.decisionId}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'rejected', rationale }),
+              },
+            );
             if (!resp.ok) throw new Error(`Agency HQ returned ${resp.status}`);
             const summary = rationale ? ` Reason: ${rationale}` : '';
             await ctx.reply(`✅ Decision rejected.${summary}`);
-            logger.info({ decisionId: pending.decisionId }, 'Decision rejected with reason');
+            logger.info(
+              { decisionId: pending.decisionId },
+              'Decision rejected with reason',
+            );
           } catch (err) {
-            logger.error({ err, decisionId: pending.decisionId }, 'Failed to submit rejection');
-            await ctx.reply('❌ Failed to submit rejection — please try again.');
+            logger.error(
+              { err, decisionId: pending.decisionId },
+              'Failed to submit rejection',
+            );
+            await ctx.reply(
+              '❌ Failed to submit rejection — please try again.',
+            );
           }
           return;
         }
         // Expired — fall through to normal handling
+      }
+
+      // Check for pending spend prompt reply
+      const pendingSpend = pendingSpendPrompts.get(chatIdKey);
+      if (pendingSpend) {
+        pendingSpendPrompts.delete(chatIdKey);
+        if (pendingSpend.expiresAt > Date.now()) {
+          const text = ctx.message.text.trim().toLowerCase();
+          if (text !== 'skip' && text !== 'nothing' && text !== 'n') {
+            const amountMatch = text.replace(/[$,]/g, '').match(/[\d]+(?:\.\d{1,2})?/);
+            if (amountMatch) {
+              const amount = parseFloat(amountMatch[0]);
+              try {
+                const pingUrl = process.env.PING_BASE_URL || 'http://localhost:3001';
+                const pingKey = process.env.PING_API_KEY || process.env.X_PING_KEY || '';
+                const resp = await fetch(`${pingUrl}/api/v1/expenses`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Ping-Key': pingKey,
+                  },
+                  body: JSON.stringify({
+                    merchant: pendingSpend.merchantName,
+                    amount,
+                    currency: 'USD',
+                    category: 'Grocery',
+                    timestamp: pendingSpend.visitEndTime,
+                  }),
+                });
+                if (!resp.ok) throw new Error(`Ping expenses returned ${resp.status}`);
+                await ctx.reply(`✅ Logged $${amount.toFixed(2)} at ${pendingSpend.merchantName}`);
+                logger.info({ merchant: pendingSpend.merchantName, amount }, 'Grocery spend logged');
+              } catch (err) {
+                logger.error({ err }, 'Failed to log grocery spend to Ping');
+                await ctx.reply('❌ Could not log spend — Ping is offline. Try again later.');
+              }
+            } else {
+              await ctx.reply('Could not parse that amount. Try: 47 or $47.50');
+              // Re-add prompt so they can retry
+              pendingSpendPrompts.set(chatIdKey, pendingSpend);
+            }
+          }
+          return;
+        }
+        // Expired — fall through
       }
 
       const chatJid = `tg:${ctx.chat.id}`;
@@ -302,12 +544,16 @@ export class TelegramChannel implements Channel {
       const status = statusMap[action];
 
       try {
-        const agencyHqUrl = process.env.AGENCY_HQ_URL || 'http://localhost:3040';
-        const resp = await fetch(`${agencyHqUrl}/api/v1/decisions/${decisionId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
-        });
+        const agencyHqUrl =
+          process.env.AGENCY_HQ_URL || 'http://localhost:3040';
+        const resp = await fetch(
+          `${agencyHqUrl}/api/v1/decisions/${decisionId}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+          },
+        );
         if (!resp.ok) throw new Error(`Agency HQ returned ${resp.status}`);
 
         await ctx.answerCallbackQuery(`${labels[action]}!`);
@@ -316,7 +562,10 @@ export class TelegramChannel implements Channel {
         await ctx.reply(`${labels[action]} — decision updated.`);
         logger.info({ decisionId, action }, 'Decision vote processed');
       } catch (err) {
-        logger.error({ err, decisionId, action }, 'Failed to process decision vote');
+        logger.error(
+          { err, decisionId, action },
+          'Failed to process decision vote',
+        );
         await ctx.answerCallbackQuery('Error updating decision — try again');
       }
     });
@@ -431,6 +680,31 @@ export class TelegramChannel implements Channel {
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
+  }
+
+  /**
+   * Send a grocery spend prompt to the CEO chat when Ping detects a grocery zone exit.
+   * The user's reply is intercepted by the message:text handler and logged to Ping expenses.
+   */
+  async sendGrocerySpendPrompt(
+    ceoChatJid: string,
+    merchantName: string,
+    visitEndTime: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericId = ceoChatJid.replace(/^tg:/, '');
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    pendingSpendPrompts.set(numericId, {
+      merchantName,
+      visitEndTime,
+      expiresAt: Date.now() + FOUR_HOURS_MS,
+    });
+    await sendTelegramMessage(
+      this.bot.api,
+      numericId,
+      `Just left ${merchantName} — how much did you spend? (reply with amount or "skip")`,
+    );
+    logger.info({ merchantName, ceoChatJid }, 'Grocery spend prompt sent');
   }
 
   isConnected(): boolean {
