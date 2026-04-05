@@ -149,7 +149,10 @@ function buildVolumeMounts(
         deny: [],
       };
     }
-    fs.writeFileSync(settingsFile, JSON.stringify(settingsContent, null, 2) + '\n');
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify(settingsContent, null, 2) + '\n',
+    );
   }
 
   // container/skills/ から各グループ의 .claude/skills/ にスキルを同期

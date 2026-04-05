@@ -450,10 +450,7 @@ export async function processTaskIpc(
         }
         // 多層防御: エージェントは IPC 経由で override を設定できない
         if (data.group_type === 'override') {
-          logger.warn(
-            { sourceGroup },
-            'override type cannot be set via IPC',
-          );
+          logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
           break;
         }
         const groupType = parseIpcGroupType(data.group_type) ?? 'chat';
@@ -489,10 +486,7 @@ export async function processTaskIpc(
       }
       // override への変更は IPC 経由で不可
       if (data.group_type === 'override') {
-        logger.warn(
-          { sourceGroup },
-          'override type cannot be set via IPC',
-        );
+        logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
         break;
       }
       if (data.jid && data.group_type) {

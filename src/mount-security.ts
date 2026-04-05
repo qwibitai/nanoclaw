@@ -233,7 +233,6 @@ export interface MountValidationResult {
 export function validateMount(
   mount: AdditionalMount,
   isMain: boolean, // true = main または override の特権グループ
-
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
@@ -338,7 +337,6 @@ export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
   isMain: boolean, // true = main または override の特権グループ
-
 ): Array<{
   hostPath: string;
   containerPath: string;
