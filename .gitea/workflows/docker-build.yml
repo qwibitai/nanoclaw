@@ -22,8 +22,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ gitea.actor }}
-          password: ${{ gitea.token }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Build and push nanoclaw
         uses: docker/build-push-action@v6
