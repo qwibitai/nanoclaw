@@ -14,7 +14,7 @@ import {
 
 let db: Database.Database;
 
-function createSchema(database: Database.Database): void {
+export function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,

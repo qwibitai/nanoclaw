@@ -28,16 +28,20 @@ function ensureWithinBase(baseDir: string, resolvedPath: string): void {
   }
 }
 
-export function resolveGroupFolderPath(folder: string): string {
+export function resolveGroupFolderPath(
+  folder: string,
+  groupsDir?: string,
+): string {
   assertValidGroupFolder(folder);
-  const groupPath = path.resolve(GROUPS_DIR, folder);
-  ensureWithinBase(GROUPS_DIR, groupPath);
+  const base = groupsDir ?? GROUPS_DIR;
+  const groupPath = path.resolve(base, folder);
+  ensureWithinBase(base, groupPath);
   return groupPath;
 }
 
-export function resolveGroupIpcPath(folder: string): string {
+export function resolveGroupIpcPath(folder: string, dataDir?: string): string {
   assertValidGroupFolder(folder);
-  const ipcBaseDir = path.resolve(DATA_DIR, 'ipc');
+  const ipcBaseDir = path.resolve(dataDir ?? DATA_DIR, 'ipc');
   const ipcPath = path.resolve(ipcBaseDir, folder);
   ensureWithinBase(ipcBaseDir, ipcPath);
   return ipcPath;

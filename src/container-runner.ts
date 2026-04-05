@@ -65,6 +65,12 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  /** Instance name for multi-instance support. Scopes container names. */
+  instanceName?: string;
+  /** Override config.GROUPS_DIR for per-instance group paths. */
+  groupsDir?: string;
+  /** Override config.DATA_DIR for per-instance data paths. */
+  dataDir?: string;
 }
 
 export interface ContainerOutput {
@@ -83,9 +89,13 @@ export interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  groupsDir?: string,
+  dataDir?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const groupDir = resolveGroupFolderPath(group.folder);
+  const groupDir = resolveGroupFolderPath(group.folder, groupsDir);
+  const effectiveGroupsDir = groupsDir ?? GROUPS_DIR;
+  const effectiveDataDir = dataDir ?? DATA_DIR;
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -126,7 +136,7 @@ function buildVolumeMounts(
 
     // Global memory directory (read-only for non-main)
     // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(GROUPS_DIR, 'global');
+    const globalDir = path.join(effectiveGroupsDir, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
         hostPath: globalDir,
@@ -139,7 +149,7 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
-    DATA_DIR,
+    effectiveDataDir,
     'sessions',
     group.folder,
     '.claude',
@@ -188,7 +198,7 @@ function buildVolumeMounts(
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = resolveGroupIpcPath(group.folder);
+  const groupIpcDir = resolveGroupIpcPath(group.folder, dataDir);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -208,7 +218,7 @@ function buildVolumeMounts(
     'src',
   );
   const groupAgentRunnerDir = path.join(
-    DATA_DIR,
+    effectiveDataDir,
     'sessions',
     group.folder,
     'agent-runner-src',
@@ -331,12 +341,18 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
-  const groupDir = resolveGroupFolderPath(group.folder);
+  const groupDir = resolveGroupFolderPath(group.folder, input.groupsDir);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(
+    group,
+    input.isMain,
+    input.groupsDir,
+    input.dataDir,
+  );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `agentlite-${safeName}-${Date.now()}`;
+  const instancePrefix = input.instanceName ? `${input.instanceName}-` : '';
+  const containerName = `agentlite-${instancePrefix}${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined
@@ -739,9 +755,10 @@ export function writeTasksSnapshot(
     status: string;
     next_run: string | null;
   }>,
+  dataDir?: string,
 ): void {
   // Write filtered tasks to the group's IPC directory
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  const groupIpcDir = resolveGroupIpcPath(groupFolder, dataDir);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all tasks, others only see their own
@@ -770,8 +787,9 @@ export function writeGroupsSnapshot(
   isMain: boolean,
   groups: AvailableGroup[],
   _registeredJids: Set<string>,
+  dataDir?: string,
 ): void {
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  const groupIpcDir = resolveGroupIpcPath(groupFolder, dataDir);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all groups; others see nothing (they can't activate groups)

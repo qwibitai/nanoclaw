@@ -8,6 +8,10 @@ dist/
 store/
 data/
 logs/
+instances/
+
+# BoxLite runtime state
+.boxlite/
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*
