@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { VALID_GROUP_TYPES } from './group-type.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -12,13 +13,6 @@ import {
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
-
-const VALID_GROUP_TYPES: ReadonlySet<string> = new Set([
-  'override',
-  'main',
-  'chat',
-  'thread',
-]);
 
 /** DB の group_type / is_main から GroupType を解決する */
 function parseGroupType(

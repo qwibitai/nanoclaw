@@ -159,7 +159,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = hasPrivilege(group);
+  const isPrivileged = hasPrivilege(group);
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -171,7 +171,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // メイン以外のグループについては、トリガーが必要かつ存在するか確認
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  if (!isPrivileged && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
@@ -394,8 +394,8 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = hasPrivilege(group);
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isPrivileged = hasPrivilege(group);
+          const needsTrigger = !isPrivileged && group.requiresTrigger !== false;
 
           // メイン以外のグループについては、トリガーメッセージに対してのみアクションを実行。
           // トリガー以外のメッセージは DB に蓄積され、最終的にトリガーが届いたときに

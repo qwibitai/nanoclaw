@@ -7,16 +7,9 @@ import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
-import { hasPrivilege } from './group-type.js';
+import { hasPrivilege, VALID_GROUP_TYPES } from './group-type.js';
 import { logger } from './logger.js';
 import { GroupType, RegisteredGroup } from './types.js';
-
-const VALID_GROUP_TYPES: ReadonlySet<string> = new Set([
-  'override',
-  'main',
-  'chat',
-  'thread',
-]);
 
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
@@ -432,7 +425,7 @@ export async function processTaskIpc(
       break;
 
     case 'register_group':
-      // メイングループのみが新しいグループを登録可能
+      // main または override グループのみが新しいグループを登録可能
       if (!isPrivileged) {
         logger.warn(
           { sourceGroup },
@@ -453,7 +446,17 @@ export async function processTaskIpc(
           logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
           break;
         }
-        const groupType = parseIpcGroupType(data.group_type) ?? 'chat';
+        const parsedGroupType = data.group_type
+          ? parseIpcGroupType(data.group_type)
+          : null;
+        if (data.group_type && !parsedGroupType) {
+          logger.warn(
+            { sourceGroup, group_type: data.group_type },
+            'Invalid group_type in register_group request',
+          );
+          break;
+        }
+        const groupType = parsedGroupType ?? 'chat';
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
