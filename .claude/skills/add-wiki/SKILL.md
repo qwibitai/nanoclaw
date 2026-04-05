@@ -41,33 +41,22 @@ Create a `container/skills/wiki/SKILL.md` tailored to this user's wiki. This is 
 
 ### 3c. Group CLAUDE.md
 
-Add a wiki section to the group's CLAUDE.md that activates the wiki behavior and points to the container skill.
+Add a wiki section to the group's CLAUDE.md that activates the wiki behavior and points to the container skill. It should concisely explain the system and have an index of the key files and folders.
 
-## Step 4: Source handling skills
+## Step 4: Source handling capabilities
 
-Check which source-handling capabilities are installed and offer to add missing ones based on what the user plans to ingest:
-
-| Source type | Skill needed | Check |
-|---|---|---|
-| Images | `/add-image-vision` | `src/channels/image-vision.ts` or similar exists |
-| PDFs | `/add-pdf-reader` | `container/skills/pdf-reader/` exists |
-| Voice notes | `/add-voice-transcription` | `container/skills/voice-transcription/` exists |
-
-For each missing skill the user needs, invoke it.
+Based on the source types the user plans to ingest (discussed in Step 3), check whether the agent can already handle those formats — some are supported natively, others need a skill (e.g. `/add-image-vision`, `/add-pdf-reader`, `/add-voice-transcription`). If a needed capability isn't installed, check if there's an available skill for it and help the user get it set up.
 
 ### URL handling note
 
-The agent has built-in `WebFetch`, but it returns a summary, not the full document. For wiki ingestion where the full text matters, the container skill should instruct the agent to use `curl` piped through an HTML-to-text conversion instead:
+claude has built-in `WebFetch`, but it returns a summary, not the full document. For wiki ingestion of a URL where the full text matters, the container skill and CLAUDE.md should instruct claude to use bash commands to download full files instead. For example:
 
 ```bash
-curl -sL "<url>" | sed 's/<[^>]*>//g'
+curl -sLo sources/filename.pdf "<url>"
 ```
 
-Or better, use `agent-browser` to open the page and extract full text if available. The container skill should note this so the agent gets full content for sources rather than summaries.
+If the document is a webpage, then claude can use fetch or `agent-browser` to open the page and extract full text if available. The container skill and CLAUDE.md should note this so claude gets full content for sources rather than summaries.
 
-### File attachments
-
-If the user's channel supports file attachments (WhatsApp documents, Telegram files, Slack uploads), these arrive in the container's workspace. The container skill should note that attached files can be read directly and saved to `sources/`.
 
 ## Step 5: Optional lint schedule
 
