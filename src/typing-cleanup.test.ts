@@ -25,7 +25,9 @@ describe('typing keepalive cleanup', () => {
       typingCalls.push(isTyping);
       return Promise.resolve();
     });
-    const sendMessage = vi.fn((_jid: string, _text: string) => Promise.resolve());
+    const sendMessage = vi.fn((_jid: string, _text: string) =>
+      Promise.resolve(),
+    );
 
     // Simulate typing keepalive pattern from processGroupMessages
     await setTyping('chat1', true);
@@ -51,7 +53,9 @@ describe('typing keepalive cleanup', () => {
       typingCalls.push(isTyping);
       return Promise.resolve();
     });
-    const sendMessage = vi.fn((_jid: string, _text: string) => Promise.resolve());
+    const sendMessage = vi.fn((_jid: string, _text: string) =>
+      Promise.resolve(),
+    );
 
     await setTyping('chat1', true);
     const typingKeepalive = setInterval(() => {
@@ -69,13 +73,18 @@ describe('typing keepalive cleanup', () => {
   });
 
   it('try-finally guarantees cleanup on error', async () => {
-    const setTyping = vi.fn((_jid: string, _isTyping: boolean) => Promise.resolve());
+    const setTyping = vi.fn((_jid: string, _isTyping: boolean) =>
+      Promise.resolve(),
+    );
 
     const typingKeepalive = setInterval(() => {
       setTyping('chat1', true).catch(() => {});
     }, 4000);
 
-    let idleTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {}, 30000);
+    let idleTimer: ReturnType<typeof setTimeout> | null = setTimeout(
+      () => {},
+      30000,
+    );
     let cleaned = false;
 
     // Simulate try-finally pattern around runAgent
@@ -118,7 +127,9 @@ describe('typing keepalive cleanup', () => {
   });
 
   it('setTyping error in finally does not mask original error', async () => {
-    const setTyping = vi.fn((_jid: string, _isTyping: boolean) => Promise.reject(new Error('channel disconnected')));
+    const setTyping = vi.fn((_jid: string, _isTyping: boolean) =>
+      Promise.reject(new Error('channel disconnected')),
+    );
 
     const typingKeepalive = setInterval(() => {}, 4000);
     const originalError = new Error('agent failed');
@@ -153,7 +164,9 @@ describe('message loop typing suppression', () => {
   it('typing is suppressed when response was sent recently', () => {
     vi.setSystemTime(new Date('2026-04-05T12:00:00Z'));
 
-    const setTyping = vi.fn((_jid: string, _isTyping: boolean) => Promise.resolve());
+    const setTyping = vi.fn((_jid: string, _isTyping: boolean) =>
+      Promise.resolve(),
+    );
     let lastResponseSentAt = 0;
 
     // Simulate markResponseSent
@@ -174,7 +187,9 @@ describe('message loop typing suppression', () => {
   it('typing is shown when response was sent long ago', () => {
     vi.setSystemTime(new Date('2026-04-05T12:00:00Z'));
 
-    const setTyping = vi.fn((_jid: string, _isTyping: boolean) => Promise.resolve());
+    const setTyping = vi.fn((_jid: string, _isTyping: boolean) =>
+      Promise.resolve(),
+    );
     let lastResponseSentAt = 0;
 
     // Simulate markResponseSent
