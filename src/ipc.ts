@@ -412,7 +412,7 @@ export async function processTaskIpc(
         const availableGroups = deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
           sourceGroup,
-          true,
+          isPrivileged,
           availableGroups,
           new Set(Object.keys(registeredGroups)),
         );
