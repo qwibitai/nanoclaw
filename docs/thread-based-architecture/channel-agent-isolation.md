@@ -184,5 +184,117 @@ GroupType が `chat` でも `agent` で MCP を付与すれば、「返信しか
 1. **`AgentConfig` 型定義** を `types.ts` に追加
 2. **`container-runner.ts` の settings.json 生成** を agent 対応に拡張
 3. **`container-runner.ts` の skills 同期** を agent.skills で選択的に
-4. **グループ登録 UI/コマンド** で agent を設定できるように
+4. **IPC の `register_group` / `update_group` で agent を設定** できるように
 5. **thread_defaults の agent 継承ロジック**
+
+## 設定方法: DB + IPC 拡張
+
+`agent` 設定は `containerConfig` と同じパターンで、DB に JSON として保存する。
+
+### DB スキーマ変更
+
+```sql
+ALTER TABLE registered_groups ADD COLUMN agent_config TEXT;
+```
+
+`agent_config` には `AgentConfig` の JSON を格納する。NULL の場合は `type` のデフォルト設定を使用。
+
+### 保存される JSON の例
+
+```json
+{
+  "allowedTools": ["mcp__gmail__*"],
+  "mcpServers": {
+    "gmail": {
+      "command": "npx",
+      "args": ["@anthropic/gmail-mcp"]
+    }
+  },
+  "skills": []
+}
+```
+
+### IPC での設定
+
+`register_group` に `agent` フィールドを追加:
+
+```json
+{
+  "type": "register_group",
+  "jid": "dc:123456789",
+  "name": "discord-email",
+  "folder": "discord-email",
+  "trigger": "!",
+  "agent": {
+    "allowedTools": ["mcp__gmail__*"],
+    "mcpServers": {
+      "gmail": { "command": "npx", "args": ["@anthropic/gmail-mcp"] }
+    },
+    "skills": []
+  }
+}
+```
+
+既存グループの agent 変更は `update_group` IPC:
+
+```json
+{
+  "type": "update_group",
+  "jid": "dc:123456789",
+  "agent": {
+    "allowedTools": ["mcp__gmail__*", "mcp__gmail__send"],
+    "mcpServers": {
+      "gmail": { "command": "npx", "args": ["@anthropic/gmail-mcp"] }
+    }
+  }
+}
+```
+
+### container-runner での読み出し
+
+`container-runner.ts` が settings.json を生成する際に、DB から `agent_config` を読む:
+
+```
+container-runner.ts: buildVolumeMounts()
+  ├── DB から group.agent_config を取得
+  ├── JSON.parse して AgentConfig に変換
+  └── settings.json を動的構築
+        ├── allowedTools → permissions.allow
+        ├── mcpServers  → mcpServers
+        └── skills      → skills/ の選択的同期
+```
+
+`containerConfig`（タイムアウト、追加マウント）が既に同じパターンで DB → JSON → container-runner と流れているので、`agent_config` も同じ流れに乗せる。
+
+### 運用フロー
+
+```
+ユーザー「#email チャンネルはメール専用にして。使えるツールは Gmail MCP だけ」
+  ↓
+メインエージェントが IPC で register_group / update_group を発行
+  ↓
+DB の registered_groups.agent_config に JSON 保存
+  ↓
+次回コンテナ起動時に container-runner が agent_config を読んで settings.json を生成
+  ↓
+エージェントは Gmail MCP のみ使用可能な状態で起動
+```
+
+### thread_defaults での agent 継承
+
+`thread_defaults` も DB に JSON で保存する（`containerConfig` と同様）:
+
+```json
+{
+  "type": "update_group",
+  "jid": "dc:123456789",
+  "thread_defaults": {
+    "type": "thread",
+    "agent": {
+      "inherit": true
+    }
+  }
+}
+```
+
+`inherit: true` の場合、子スレッド作成時に親の `agent_config` をコピーする。明示的に `agent` を指定すればオーバーライド可能。

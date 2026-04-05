@@ -98,3 +98,54 @@ type GroupType = 'override' | 'main' | 'chat' | 'thread';
 3. **`thread_defaults`**: 親チャネルから子スレッドへの設定継承テンプレート
 4. **スレッド検知時の自動グループ登録ロジック**: Discord スレッド作成イベントをフックし、親の `thread_defaults` に基づいてグループを自動登録
 5. **スラッシュコマンド**: `/override-start`（オーバーライドスレッド作成）、`/override-end`（終了・アーカイブ）
+
+## 設定方法: DB + IPC 拡張
+
+`type` は既存の `isMain` と同じ方式で DB に保存する。`isMain: boolean` を `type: GroupType` に置き換える形。
+
+### DB スキーマ変更
+
+```sql
+-- isMain を type に置換するマイグレーション
+ALTER TABLE registered_groups ADD COLUMN type TEXT DEFAULT 'chat';
+UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
+```
+
+`isMain` カラムは互換性のため残し、読み込み時に `type` を優先する。将来的に削除。
+
+### IPC での設定
+
+`register_group` IPC に `type` フィールドを追加:
+
+```json
+{
+  "type": "register_group",
+  "jid": "dc:123456789",
+  "name": "discord-email",
+  "folder": "discord-email",
+  "trigger": "!",
+  "type": "chat"
+}
+```
+
+メインエージェントへの自然言語指示で設定する:
+
+```
+「#email チャンネルを chat タイプで登録して」
+→ メインエージェントが IPC で register_group を発行
+→ DB に type = 'chat' で保存
+```
+
+### 既存グループの type 変更
+
+新しい IPC タスク `update_group` を追加:
+
+```json
+{
+  "type": "update_group",
+  "jid": "dc:123456789",
+  "type": "main"
+}
+```
+
+`register_group` は新規登録、`update_group` は既存グループの設定変更という棲み分け。
