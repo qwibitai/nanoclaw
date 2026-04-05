@@ -130,6 +130,7 @@ function buildProgressCard(
 
   return JSON.stringify({
     schema: '2.0',
+    config: { update_multi: true },
     header: {
       template: 'yellow',
       title: {
@@ -172,6 +173,7 @@ function buildCompletedCard(
 
   return JSON.stringify({
     schema: '2.0',
+    config: { update_multi: true },
     header: {
       template: 'green',
       title: { tag: 'plain_text', content: '✅ 已完成' },
