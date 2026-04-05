@@ -28,11 +28,9 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  // NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。
-  // コンテナはホストのソースを import できないため、ここで再定義している。
+  // NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。コンテナはホストのソースを import できないため、ここで再定義している。
   // GroupType を変更した場合はこのファイルも更新すること。
-  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため
-  // ホスト・コンテナは常にセットで更新する運用）。
+  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのためホスト・コンテナは常にセットで更新する運用）。
   groupType?: 'override' | 'main' | 'chat' | 'thread';
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -580,8 +578,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 認証情報はホストの認証情報プロキシによって ANTHROPIC_BASE_URL 経由で注入されます。
-  // コンテナ環境には本物のシークレットは存在しません。
+  // 認証情報はホストの認証情報プロキシによって ANTHROPIC_BASE_URL 経由で注入されます。コンテナ環境には本物のシークレットは存在しません。
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -634,8 +631,7 @@ async function main(): Promise<void> {
       }
 
       // クエリ実行中に _close が消費された場合は即座に終了。
-      // セッション更新マーカーを出力しないでください（ホストのアイドルタイマーがリセットされ、
-      // 次の _close まで 30 分の遅延が発生するため）。
+      // セッション更新マーカーを出力しないでください（ホストのアイドルタイマーがリセットされ、次の _close まで 30 分の遅延が発生するため）。
       if (queryResult.closedDuringQuery) {
         log('クエリ実行中にクローズセンチネルが消費されました。終了します');
         break;
