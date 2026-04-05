@@ -25,7 +25,7 @@ const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
 const rawGroupType = process.env.NANOCLAW_GROUP_TYPE;
 const groupTypeCandidate = rawGroupType ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
 const groupType = allowedGroupTypes.has(groupTypeCandidate) ? groupTypeCandidate : 'chat';
-const isMain = groupType === 'main' || groupType === 'override';
+const isPrivileged = groupType === 'main' || groupType === 'override';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -135,7 +135,7 @@ server.tool(
     }
 
     // メイン以外のグループは自分自身に対してのみスケジュール可能
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid = isPrivileged && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -173,7 +173,7 @@ server.tool(
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
-      const tasks = isMain
+      const tasks = isPrivileged
         ? allTasks
         : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
 
@@ -206,7 +206,7 @@ server.tool(
       type: 'pause_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -225,7 +225,7 @@ server.tool(
       type: 'resume_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -244,7 +244,7 @@ server.tool(
       type: 'cancel_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isPrivileged,
       timestamp: new Date().toISOString(),
     };
 
@@ -291,7 +291,7 @@ server.tool(
       type: 'update_task',
       taskId: args.task_id,
       groupFolder,
-      isMain: String(isMain),
+      isPrivileged: String(isPrivileged),
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
@@ -316,7 +316,7 @@ server.tool(
     trigger: z.string().describe('トリガーワード（例: "@Andy"）'),
   },
   async (args) => {
-    if (!isMain) {
+    if (!isPrivileged) {
       return {
         content: [{ type: 'text' as const, text: '新しいグループの登録はメイングループのみが可能です。' }],
         isError: true,
