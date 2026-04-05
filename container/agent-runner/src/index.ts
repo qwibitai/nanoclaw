@@ -486,6 +486,19 @@ async function runQuery(
   let streamingTextBuffer = '';
   let completedTurnsText = '';
 
+  // Load custom system prompt (falls back to claude_code preset if file missing)
+  const systemPromptPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'system-prompt.md',
+  );
+  const customSystemPrompt = fs.existsSync(systemPromptPath)
+    ? fs.readFileSync(systemPromptPath, 'utf-8')
+    : undefined;
+  if (customSystemPrompt) {
+    log(`Loaded custom system prompt (${customSystemPrompt.length} chars)`);
+  }
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
   let globalClaudeMd: string | undefined;
@@ -533,13 +546,17 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
+      systemPrompt: customSystemPrompt
+        ? globalClaudeMd
+          ? customSystemPrompt + '\n\n---\n\n' + globalClaudeMd
+          : customSystemPrompt
+        : globalClaudeMd
+          ? {
+              type: 'preset' as const,
+              preset: 'claude_code' as const,
+              append: globalClaudeMd,
+            }
+          : undefined,
       allowedTools: [
         'Bash',
         'Read',

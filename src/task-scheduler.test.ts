@@ -215,9 +215,6 @@ describe('task scheduler', () => {
       } as any,
       onProcess: () => {},
       sendMessage: vi.fn(async () => {}),
-      sendStreamMessage: vi.fn(async () => 42),
-      editMessage: vi.fn(async () => {}),
-      setTyping: vi.fn(async () => {}),
       ...overrides,
     };
   }
@@ -301,7 +298,7 @@ describe('task scheduler', () => {
     expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Hello!');
   });
 
-  it('streams partial output via sendStreamMessage/editMessage', async () => {
+  it('ignores partial output and sends only the final result', async () => {
     const mock = await getRunHostAgentMock();
     mock.mockImplementation(
       async (
@@ -342,57 +339,9 @@ describe('task scheduler', () => {
     startSchedulerLoop(deps);
     await vi.advanceTimersByTimeAsync(10);
 
-    // First partial → sendStreamMessage
-    expect(deps.sendStreamMessage).toHaveBeenCalledWith('tg:999', 'Hello');
-    // Final → editMessage (streaming was active)
-    expect(deps.editMessage).toHaveBeenCalledWith('tg:999', 42, 'Hello world!');
-    // sendMessage should NOT be called (streaming handled it)
-    expect(deps.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it('falls back to sendMessage when sendStreamMessage is undefined', async () => {
-    const mock = await getRunHostAgentMock();
-    mock.mockImplementation(
-      async (
-        _group: RegisteredGroup,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        _input: any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        _onProcess: any,
-        onOutput?: (output: ContainerOutput) => Promise<void>,
-      ) => {
-        if (onOutput) {
-          await onOutput({
-            result: 'Partial',
-            status: 'success',
-            partial: true,
-          });
-          await onOutput({ result: 'Final text', status: 'success' });
-        }
-        return { result: 'Final text', status: 'success' as const };
-      },
-    );
-
-    createTask({
-      id: 'fallback-task',
-      group_folder: 'test-group',
-      chat_jid: 'tg:999',
-      prompt: 'say hello',
-      schedule_type: 'once',
-      schedule_value: '2026-01-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: new Date(Date.now() - 60_000).toISOString(),
-      status: 'active',
-      created_at: '2026-01-01T00:00:00.000Z',
-    });
-
-    const deps = makeDeps({ sendStreamMessage: undefined });
-    startSchedulerLoop(deps);
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Partials ignored, final via sendMessage
+    // Partials ignored — only final result sent via sendMessage
     expect(deps.sendMessage).toHaveBeenCalledTimes(1);
-    expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Final text');
+    expect(deps.sendMessage).toHaveBeenCalledWith('tg:999', 'Hello world!');
   });
 
   it('strips internal tags from task output', async () => {

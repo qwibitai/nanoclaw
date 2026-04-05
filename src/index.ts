@@ -918,21 +918,6 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-    sendStreamMessage: async (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel?.sendStreamMessage) return null;
-      return channel.sendStreamMessage(jid, text);
-    },
-    editMessage: async (jid, messageId, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel?.editMessage) return;
-      await channel.editMessage(jid, messageId, text);
-    },
-    setTyping: async (jid, isTyping) => {
-      const channel = findChannel(channels, jid);
-      if (!channel?.setTyping) return;
-      await channel.setTyping(jid, isTyping);
-    },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {

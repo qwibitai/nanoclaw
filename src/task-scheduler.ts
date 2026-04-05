@@ -82,9 +82,6 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendStreamMessage?: (jid: string, text: string) => Promise<number | null>;
-  editMessage?: (jid: string, messageId: number, text: string) => Promise<void>;
-  setTyping?: (jid: string, isTyping: boolean) => Promise<void>;
 }
 
 async function runTask(
@@ -165,10 +162,6 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
   let lastSentText: string | null = null;
-  let streamMessageId: number | null = null;
-  let lastEditTime = 0;
-  let streamingFailed = false;
-  const EDIT_THROTTLE_MS = 1500;
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -220,65 +213,20 @@ async function runTask(
             return;
           }
 
-          if (streamedOutput.partial) {
-            // --- Streaming partial ---
-            if (!text || streamingFailed || !deps.sendStreamMessage) return;
-
-            if (streamMessageId === null) {
-              const msgId = await deps.sendStreamMessage(task.chat_jid, text);
-              if (!msgId || typeof msgId !== 'number') {
-                streamingFailed = true;
-                return;
-              }
-              streamMessageId = msgId;
-              lastEditTime = Date.now();
-              lastSentText = text;
-              await deps.setTyping?.(task.chat_jid, true).catch(() => {});
-            } else {
-              const now = Date.now();
-              if (now - lastEditTime < EDIT_THROTTLE_MS) return;
-              if (text === lastSentText) return;
-              if (text.length > 4000) {
-                streamingFailed = true;
-                return;
-              }
-              try {
-                await deps.editMessage!(task.chat_jid, streamMessageId, text);
-                lastEditTime = now;
-                lastSentText = text;
-                // eslint-disable-next-line no-catch-all/no-catch-all
-              } catch {
-                streamingFailed = true;
-              }
-            }
-            return;
-          }
+          // Scheduled tasks skip partial streaming — wait for
+          // the final result so suppression logic can evaluate the
+          // complete output before anything reaches the user.
+          if (streamedOutput.partial) return;
 
           // --- Final result ---
-          if (streamMessageId !== null) {
-            if (text && text !== lastSentText) {
-              if (!streamingFailed && text.length <= 4096 && deps.editMessage) {
-                await deps.editMessage(task.chat_jid, streamMessageId, text);
-              } else {
-                await deps.sendMessage(task.chat_jid, text);
-              }
-            }
-            lastSentText = text;
-          } else if (text && text !== lastSentText) {
+          if (text && text !== lastSentText) {
             await deps.sendMessage(task.chat_jid, text);
             lastSentText = text;
           }
-          // Reset streaming state for next query
-          streamMessageId = null;
-          lastEditTime = 0;
-          streamingFailed = false;
           scheduleClose();
         }
 
-        if (
-          streamedOutput.status === 'success' &&
-          !streamedOutput.partial
-        ) {
+        if (streamedOutput.status === 'success' && !streamedOutput.partial) {
           deps.queue.notifyIdle(task.chat_jid);
           scheduleClose();
         }
