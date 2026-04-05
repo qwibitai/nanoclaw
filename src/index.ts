@@ -93,6 +93,7 @@ const lastUsage: Record<
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const compactPending = new Set<string>(); // chatJids with pending compact
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -509,6 +510,14 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+
+          if (compactPending.has(chatJid)) {
+            compactPending.delete(chatJid);
+            const ch = findChannel(channels, chatJid);
+            if (ch) {
+              ch.sendMessage(chatJid, 'Compact completed.').catch(() => {});
+            }
+          }
         }
         if (output.usage) {
           lastUsage[group.folder] = output.usage;
@@ -544,6 +553,7 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      compactPending.delete(chatJid);
       // Detect stale/corrupt session — clear it so the next retry starts fresh.
       // The session .jsonl can go missing after a crash mid-write, manual
       // deletion, or disk-full. The existing backoff in group-queue.ts
@@ -883,8 +893,13 @@ async function main(): Promise<void> {
       sessions: { ...sessions },
       lastUsage: { ...lastUsage },
     }),
-    sendIpcMessage: (chatJid: string, text: string) =>
-      queue.sendMessage(chatJid, text),
+    sendIpcMessage: (chatJid: string, text: string) => {
+      const sent = queue.sendMessage(chatJid, text);
+      if (sent && text === '/compact') {
+        compactPending.add(chatJid);
+      }
+      return sent;
+    },
     clearSession: (groupFolder: string) => {
       delete sessions[groupFolder];
       deleteSession(groupFolder);
