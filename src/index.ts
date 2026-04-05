@@ -291,7 +291,7 @@ async function runAgent(
     })),
   );
 
-  // 利用可能なグループのスナップショットを更新（メイングループのみが全グループを表示可能）
+  // 利用可能なグループのスナップショットを更新（特権グループのみが全グループを表示可能）
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(group.folder, isPrivileged, availableGroups);
 
