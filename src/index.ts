@@ -29,7 +29,6 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
-  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -551,7 +550,7 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
-  await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT);
   initDatabase();
   logger.info('Database initialized');
   loadState();

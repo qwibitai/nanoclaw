@@ -14,29 +14,28 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 /**
  * IP address containers use to reach the host machine.
  * Apple Container VMs use a bridge network (192.168.64.x); the host is at the gateway.
- * Detected from the bridge0 interface, falling back to 192.168.64.1.
+ * Detected from the bridge100 interface, falling back to 192.168.64.1.
+ *
+ * Lazy: bridge100 only exists after the container runtime starts, so this must
+ * be called after ensureContainerRuntimeRunning(), not at module load time.
  */
-export const CONTAINER_HOST_GATEWAY = detectHostGateway();
+let _cachedHostGateway: string | null = null;
 
-function detectHostGateway(): string {
-  // Apple Container on macOS: containers reach the host via the bridge network gateway
+export function getContainerHostGateway(): string {
+  if (_cachedHostGateway) return _cachedHostGateway;
   const ifaces = os.networkInterfaces();
   const bridge = ifaces['bridge100'] || ifaces['bridge0'];
   if (bridge) {
     const ipv4 = bridge.find((a) => a.family === 'IPv4');
-    if (ipv4) return ipv4.address;
+    if (ipv4) {
+      _cachedHostGateway = ipv4.address;
+      return _cachedHostGateway;
+    }
   }
-  // Fallback: Apple Container's default gateway
-  return '192.168.64.1';
+  _cachedHostGateway = '192.168.64.1';
+  return _cachedHostGateway;
 }
 
-/**
- * Address the credential proxy binds to.
- * Binds to the bridge interface IP so only Apple Container VMs can reach it.
- * Never 0.0.0.0 — that would expose credentials to the local network.
- */
-export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || CONTAINER_HOST_GATEWAY;
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {

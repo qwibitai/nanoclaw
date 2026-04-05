@@ -23,9 +23,17 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
+// Allow localhost and Apple Container bridge network (192.168.64.0/24)
+const ALLOWED_PREFIXES = ['127.', '::1', '::ffff:127.', '192.168.64.'];
+
+function isAllowedSource(ip: string | undefined): boolean {
+  if (!ip) return false;
+  return ALLOWED_PREFIXES.some((p) => ip.startsWith(p));
+}
+
 export function startCredentialProxy(
   port: number,
-  host = '127.0.0.1',
+  host = '0.0.0.0',
 ): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
@@ -46,6 +54,12 @@ export function startCredentialProxy(
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
+      if (!isAllowedSource(req.socket.remoteAddress)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
