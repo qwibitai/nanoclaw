@@ -172,8 +172,8 @@ if (data.group_type === 'override') {
 |---|---|---|
 | `override` | 制限なし（全許可） | サンドボックスなしのフル権限 |
 | `main` | 制限なし（全許可） | Bash、ファイル操作等が必要 |
-| `chat` | `[]`（空 = ツールなし） | 会話のみ。必要なツールは `agent_config` で明示的に付与 |
-| `thread` | `[]`（空 = ツールなし） | タスクに必要なツールは `agent_config` or `thread_defaults` で付与 |
+| `chat` | `["Read"]` | 会話のみ。Read はCLAUDE.md等の読み込みに必要（副作用なし）。追加ツールは `agent_config` で明示的に付与 |
+| `thread` | `["Read"]` | タスクに必要なツールは `agent_config` or `thread_defaults` で付与。Read は最低限残す |
 
 ### override のライフサイクル
 
