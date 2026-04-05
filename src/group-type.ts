@@ -7,9 +7,15 @@ export const VALID_GROUP_TYPES: ReadonlySet<string> = new Set([
   'thread',
 ]);
 
-/** グループの type を解決する。未指定時は 'chat' */
+/** グループの type を解決する。未指定時や不正値は 'chat' にフォールバック */
 export function resolveGroupType(group: RegisteredGroup): GroupType {
-  return group.type ?? 'chat';
+  const type = group.type;
+  if (type == null) return 'chat';
+  if (VALID_GROUP_TYPES.has(type)) return type as GroupType;
+  console.warn(
+    `[group-type] Invalid group.type "${String(type)}"; falling back to "chat".`,
+  );
+  return 'chat';
 }
 
 /** main または override の特権を持つかどうか */
@@ -26,6 +32,9 @@ export function getDefaultAllowedTools(type: GroupType): string[] | undefined {
       return undefined; // 制限なし
     case 'chat':
     case 'thread':
+      return ['Read'];
+    default:
+      // 将来 GroupType に新しい値が追加されてもフォールバックで安全側に倒す
       return ['Read'];
   }
 }

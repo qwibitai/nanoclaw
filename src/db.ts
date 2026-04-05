@@ -611,11 +611,15 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
-  // NOTE: group.type の不正値バリデーションは意図的に省略。
-  // 呼び出し元は TypeScript の GroupType で型付けされているため実質不正値は混入しない。
-  // 個人プロジェクトのため防御的バリデーションは過剰と判断。
-  const groupType =
+  const rawType =
     group.type ?? ((group as { isMain?: boolean }).isMain ? 'main' : 'chat');
+  // JSON 移行や外部入力経由で不正値が混入する可能性があるため、書き込み前に検証する
+  if (!VALID_GROUP_TYPES.has(rawType)) {
+    console.warn(
+      `[db] Invalid group.type "${String(rawType)}" for JID ${jid}; falling back to "chat".`,
+    );
+  }
+  const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
