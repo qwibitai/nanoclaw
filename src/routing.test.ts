@@ -22,6 +22,16 @@ describe('JID ownership patterns', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
   });
+
+  it('Gmail JID: starts with gmail:', () => {
+    const jid = 'gmail:abc123def';
+    expect(jid.startsWith('gmail:')).toBe(true);
+  });
+
+  it('Gmail thread JID: starts with gmail: followed by thread ID', () => {
+    const jid = 'gmail:18d3f4a5b6c7d8e9';
+    expect(jid.startsWith('gmail:')).toBe(true);
+  });
 });
 
 // --- getAvailableGroups ---
@@ -166,5 +176,26 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+
+  it('excludes Gmail threads from group list (Gmail threads are not groups)', () => {
+    storeChatMetadata(
+      'gmail:abc123',
+      '2024-01-01T00:00:01.000Z',
+      'Email thread',
+      'gmail',
+      false,
+    );
+    storeChatMetadata(
+      'group@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'Group',
+      'whatsapp',
+      true,
+    );
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('group@g.us');
   });
 });
