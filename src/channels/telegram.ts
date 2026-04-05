@@ -426,6 +426,60 @@ export class TelegramChannel implements Channel {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
   }
+
+  async sendStreamMessage(
+    jid: string,
+    text: string,
+    threadId?: string,
+  ): Promise<number | null> {
+    if (!this.bot) return null;
+    const numericId = jid.replace(/^tg:/, '');
+    const options = threadId
+      ? { message_thread_id: parseInt(threadId, 10) }
+      : {};
+    try {
+      const msg = await this.bot.api.sendMessage(numericId, text, {
+        ...options,
+        parse_mode: 'Markdown',
+      });
+      return msg.message_id;
+    } catch {
+      // Markdown failed — fall back to plain text
+      try {
+        const msg = await this.bot.api.sendMessage(numericId, text, options);
+        return msg.message_id;
+      } catch (err2) {
+        logger.error({ jid, err2 }, 'Failed to send streaming message');
+        return null;
+      }
+    }
+  }
+
+  async editMessage(
+    jid: string,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericId = jid.replace(/^tg:/, '');
+    try {
+      await this.bot.api.editMessageText(numericId, messageId, text, {
+        parse_mode: 'Markdown',
+      });
+    } catch (err) {
+      // Telegram throws 400 when content is unchanged — that's fine
+      if (String(err).includes('message is not modified')) return;
+      // Markdown failed — retry plain text
+      try {
+        await this.bot.api.editMessageText(numericId, messageId, text);
+      } catch (err2) {
+        logger.debug(
+          { jid, messageId, err2 },
+          'Failed to edit streaming message',
+        );
+      }
+    }
+  }
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {

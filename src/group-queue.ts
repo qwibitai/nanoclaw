@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, HOST_MODE, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  lastResponseSentAt: number;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        lastResponseSentAt: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -175,6 +177,18 @@ export class GroupQueue {
     } catch {
       return false;
     }
+  }
+
+  /** Mark that the agent has sent a response to the user in this session. */
+  markResponseSent(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.lastResponseSentAt = Date.now();
+  }
+
+  /** Check if the agent sent a response recently (within withinMs, default 10s). */
+  isRecentResponseSent(groupJid: string, withinMs: number = 10000): boolean {
+    const state = this.getGroup(groupJid);
+    return Date.now() - state.lastResponseSentAt < withinMs;
   }
 
   /**
@@ -347,19 +361,26 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeContainers: string[] = [];
     for (const [_jid, state] of this.groups) {
       if (state.process && !state.process.killed && state.containerName) {
         activeContainers.push(state.containerName);
+        // Host mode: kill child processes directly — they won't clean up on their own
+        if (HOST_MODE) {
+          state.process.kill('SIGTERM');
+        }
       }
     }
 
     logger.info(
-      { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      {
+        activeCount: this.activeCount,
+        detachedContainers: activeContainers,
+        hostModeKilled: HOST_MODE,
+      },
+      HOST_MODE
+        ? 'GroupQueue shutting down (host processes killed)'
+        : 'GroupQueue shutting down (containers detached, not killed)',
     );
   }
 }

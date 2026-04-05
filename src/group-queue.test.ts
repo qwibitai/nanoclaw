@@ -5,6 +5,7 @@ import { GroupQueue } from './group-queue.js';
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
+  HOST_MODE: false,
   MAX_CONCURRENT_CONTAINERS: 2,
 }));
 
@@ -480,5 +481,42 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Response sent tracking ---
+
+  it('markResponseSent records timestamp and isRecentResponseSent checks it', () => {
+    vi.setSystemTime(new Date('2026-04-05T12:00:00Z'));
+
+    expect(queue.isRecentResponseSent('group1@g.us')).toBe(false);
+
+    queue.markResponseSent('group1@g.us');
+    expect(queue.isRecentResponseSent('group1@g.us')).toBe(true);
+
+    // Advance 5 seconds — still within 10s window
+    vi.setSystemTime(new Date('2026-04-05T12:00:05Z'));
+    expect(queue.isRecentResponseSent('group1@g.us')).toBe(true);
+
+    // Advance to 11 seconds — outside window
+    vi.setSystemTime(new Date('2026-04-05T12:00:11Z'));
+    expect(queue.isRecentResponseSent('group1@g.us')).toBe(false);
+  });
+
+  it('isRecentResponseSent respects custom window', () => {
+    vi.setSystemTime(new Date('2026-04-05T12:00:00Z'));
+
+    queue.markResponseSent('group1@g.us');
+
+    vi.setSystemTime(new Date('2026-04-05T12:00:03Z'));
+    expect(queue.isRecentResponseSent('group1@g.us', 5000)).toBe(true);
+    expect(queue.isRecentResponseSent('group1@g.us', 2000)).toBe(false);
+  });
+
+  it('markResponseSent is per-group', () => {
+    vi.setSystemTime(new Date('2026-04-05T12:00:00Z'));
+
+    queue.markResponseSent('group1@g.us');
+    expect(queue.isRecentResponseSent('group1@g.us')).toBe(true);
+    expect(queue.isRecentResponseSent('group2@g.us')).toBe(false);
   });
 });
