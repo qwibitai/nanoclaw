@@ -5,6 +5,9 @@
 
 // gmail
 
+// matrix
+import './matrix.js';
+
 // slack
 
 // telegram
