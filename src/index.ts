@@ -374,9 +374,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           // Streaming partial — text is the full accumulated text for this round.
           // Prepend completedText (prior rounds + tool calls) for full display.
           currentRoundText = text;
-          const fullText = completedText
-            ? `${completedText}\n\n${text}`
-            : text;
+          const fullText = completedText ? `${completedText}\n\n${text}` : text;
           debouncedEdit(fullText);
         } else if (channel.sendMessageReturningId) {
           // First partial — send initial message and track its ID
@@ -398,9 +396,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (streamingMessageId && channel.editMessage) {
           // Edit the streaming message one final time with complete text,
           // including any accumulated text from before tool calls
-          const fullText = completedText
-            ? `${completedText}\n\n${text}`
-            : text;
+          const fullText = completedText ? `${completedText}\n\n${text}` : text;
           await channel.editMessage(chatJid, streamingMessageId, fullText);
           streamingMessageId = null;
           completedText = '';

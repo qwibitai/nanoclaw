@@ -256,8 +256,17 @@ async function callOllamaStreaming(
       try {
         const chunk = JSON.parse(line);
 
+        // Accumulate any content from this chunk (including tool_calls chunks)
+        if (chunk.message?.content) {
+          accumulated += chunk.message.content;
+        }
+
         // Capture tool_calls from any chunk (Ollama sends them in non-done chunks)
         if (chunk.message?.tool_calls) {
+          // Emit final partial with all accumulated text before tool execution
+          if (accumulated.length > lastEmitLen) {
+            onPartial(accumulated);
+          }
           if (!finalResponse) {
             finalResponse = {
               message: { role: 'assistant', content: accumulated, tool_calls: chunk.message.tool_calls },
@@ -265,6 +274,7 @@ async function callOllamaStreaming(
               model,
             };
           } else {
+            finalResponse.message.content = accumulated;
             finalResponse.message.tool_calls = chunk.message.tool_calls;
           }
         }
@@ -285,7 +295,7 @@ async function callOllamaStreaming(
             );
           }
         } else {
-          accumulated += chunk.message?.content || '';
+          // Content already accumulated above — just handle partial emission
           const now = Date.now();
           if (
             accumulated.length - lastEmitLen >= STREAM_MIN_CHARS ||
