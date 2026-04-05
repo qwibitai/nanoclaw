@@ -266,29 +266,14 @@ export function parseEnvOutput(output: string): Record<string, string> {
   return result;
 }
 
-/** 获取 API key — OneCLI CLI → process.env → .env */
-async function getCredentials(agentId?: string): Promise<{
+/** 获取 API key — process.env → .env（OneCLI 不暴露 secret 明文） */
+async function getCredentials(): Promise<{
   anthropicApiKey?: string;
   ghToken?: string;
   sshAuthSock?: string;
 }> {
   let anthropicApiKey: string | undefined;
-  if (agentId) {
-    try {
-      const out = execFileSync(
-        'onecli',
-        ['agents', 'get-env', '--id', agentId],
-        {
-          encoding: 'utf8',
-          timeout: 5000,
-        },
-      );
-      anthropicApiKey = parseEnvOutput(out).ANTHROPIC_API_KEY;
-    } catch {
-      /* OneCLI 不可用 */
-    }
-  }
-  anthropicApiKey ??= process.env.ANTHROPIC_API_KEY;
+  anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   anthropicApiKey ??= readEnvFile(['ANTHROPIC_API_KEY']).ANTHROPIC_API_KEY;
 
   return {
@@ -347,9 +332,8 @@ async function getFeishuToken(chatJid?: string): Promise<string | undefined> {
 async function buildLocalEnv(
   input: ContainerInput,
   groupSessionsDir: string,
-  agentId?: string,
 ): Promise<NodeJS.ProcessEnv> {
-  const creds = await getCredentials(agentId);
+  const creds = await getCredentials();
 
   return {
     HOME: process.env.HOME,
@@ -438,14 +422,7 @@ export async function runContainerAgent(
   checkAgentRunnerDist();
 
   // 构建环境变量
-  const agentIdentifier = isMain
-    ? undefined
-    : group.folder.toLowerCase().replace(/_/g, '-');
-  const localEnv = await buildLocalEnv(
-    input,
-    groupSessionsDir,
-    agentIdentifier,
-  );
+  const localEnv = await buildLocalEnv(input, groupSessionsDir);
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const agentName = `nanoclaw-${safeName}-${Date.now()}`;

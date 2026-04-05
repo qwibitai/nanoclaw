@@ -54,8 +54,10 @@ vi.mock('./env.js', () => ({
 
 // Mock group-folder
 vi.mock('./group-folder.js', () => ({
-  resolveGroupFolderPath: (folder: string) => `/tmp/nanoclaw-test-groups/${folder}`,
-  resolveGroupIpcPath: (folder: string) => `/tmp/nanoclaw-test-data/ipc/${folder}`,
+  resolveGroupFolderPath: (folder: string) =>
+    `/tmp/nanoclaw-test-groups/${folder}`,
+  resolveGroupIpcPath: (folder: string) =>
+    `/tmp/nanoclaw-test-data/ipc/${folder}`,
 }));
 
 // Mock child_process — 控制 execSync 的返回值
