@@ -18,6 +18,7 @@ import {
 function parseGroupType(
   groupType: string | null,
   isMain: number | null,
+  jid?: string,
 ): GroupType {
   if (groupType == null) {
     // NULL はレガシー DB → is_main フォールバック
@@ -28,7 +29,7 @@ function parseGroupType(
   }
   // 不正な文字列は is_main を無視して 'chat' にフォールバック
   logger.warn(
-    { groupType },
+    { jid, groupType },
     'Invalid group_type in DB; falling back to "chat".',
   );
   return 'chat';
@@ -599,7 +600,7 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
-  const groupType = parseGroupType(row.group_type, row.is_main);
+  const groupType = parseGroupType(row.group_type, row.is_main, row.jid);
   return {
     jid: row.jid,
     name: row.name,
@@ -666,7 +667,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
-    const groupType = parseGroupType(row.group_type, row.is_main);
+    const groupType = parseGroupType(row.group_type, row.is_main, row.jid);
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
