@@ -13,7 +13,9 @@ No delete operations on purpose.
 Auth: SENTRY_AUTH_TOKEN env var, falls back to macOS Keychain
 (service=nanoclaw, account=sentry-auth-token).
 
-Config: Reads org and baseUrl from config/private.yaml via load_private_config.
+Config: reads `SENTRY_ORG` (required) and `SENTRY_BASE_URL` (optional, defaults
+to https://sentry.io) from the environment. Installers are responsible for
+exporting these before invoking the wrapper — see `.claude/skills/add-sentry/SKILL.md`.
 
 Examples:
   python3 scripts/sentry_wrapper.py projects
@@ -33,24 +35,15 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-# Load config — try private config loader first, fall back to env vars
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    from load_private_config import load_private_config
-    _PRIVATE = load_private_config()
-    SENTRY_BASE_URL = _PRIVATE["sentry"]["baseUrl"].rstrip("/")
-    SENTRY_ORG = _PRIVATE["sentry"]["org"]
-except (ImportError, KeyError):
-    SENTRY_BASE_URL = os.environ.get("SENTRY_BASE_URL", "https://sentry.io").rstrip("/")
-    SENTRY_ORG = os.environ.get("SENTRY_ORG", "")
-    if not SENTRY_ORG:
-        print(json.dumps({"error": "SENTRY_ORG env var is required when load_private_config is unavailable"}))
-        sys.exit(1)
+SENTRY_BASE_URL = os.environ.get("SENTRY_BASE_URL", "https://sentry.io").rstrip("/")
+SENTRY_ORG = os.environ.get("SENTRY_ORG", "")
+if not SENTRY_ORG:
+    print(json.dumps({"error": "SENTRY_ORG env var is required"}))
+    sys.exit(1)
 
 
 def die(message: str, code: int = 1) -> int:
