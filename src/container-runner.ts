@@ -688,7 +688,7 @@ export function writeTasksSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // メイングループはすべてのタスクを表示でき、他は自身のタスクのみを表示できる
+  // 特権グループ（main/override）はすべてのタスクを表示でき、非特権グループは自身のタスクのみを表示できる
   const filteredTasks = isPrivileged
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
