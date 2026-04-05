@@ -21,6 +21,8 @@ import {
   query,
   HookCallback,
   PreCompactHookInput,
+  SessionStartHookInput,
+  SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
@@ -235,6 +237,44 @@ function createPreCompactHook(assistantName?: string): HookCallback {
     }
 
     return {};
+  };
+}
+
+/**
+ * Re-inject CLAUDE.md into context after compact or clear so instructions
+ * survive context compaction.
+ */
+function createSessionStartHook(isMain: boolean): HookCallback {
+  return async (input) => {
+    const sessionStart = input as SessionStartHookInput;
+    if (sessionStart.source !== 'compact' && sessionStart.source !== 'clear') {
+      return {};
+    }
+
+    const parts: string[] = [];
+
+    const groupPath = path.join(WORKSPACE_GROUP, 'CLAUDE.md');
+    if (fs.existsSync(groupPath)) {
+      parts.push(fs.readFileSync(groupPath, 'utf-8'));
+    }
+
+    if (!isMain) {
+      const globalPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
+      if (fs.existsSync(globalPath)) {
+        parts.push(fs.readFileSync(globalPath, 'utf-8'));
+      }
+    }
+
+    if (parts.length === 0) return {};
+
+    const content = parts.join('\n\n---\n\n');
+    log(`SessionStart(${sessionStart.source}): injecting CLAUDE.md (${content.length} chars)`);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart' as const,
+        additionalContext: content,
+      },
+    };
   };
 }
 
@@ -545,6 +585,9 @@ async function runQuery(
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
         ],
+        SessionStart: [
+          { hooks: [createSessionStartHook(containerInput.isMain)] },
+        ],
       },
     },
   })) {
@@ -614,12 +657,9 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
+      const resultMsg = message as unknown as SDKResultMessage;
       const textResult =
-        'result' in message ? (message as { result?: string }).result : null;
-      const resultMsg = message as {
-        usage?: { input_tokens: number; output_tokens: number };
-        num_turns?: number;
-      };
+        'result' in resultMsg ? (resultMsg as { result?: string }).result ?? null : null;
       const usage = resultMsg.usage
         ? {
             inputTokens: resultMsg.usage.input_tokens,
