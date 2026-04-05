@@ -1,0 +1,183 @@
+name: nanoclaw
+
+services:
+  nanoclaw:
+    image: gitea.pitthappens.dyndns.org/ragincajunbanjo/nanoclaw:latest
+    container_name: nanoclaw
+    restart: unless-stopped
+    volumes:
+      # DooD: NanoClaw spawns agent containers through the host Docker daemon
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      # OneCLI SDK writes CA certs to /tmp and passes those paths to docker run.
+      # Host /tmp must be shared so the host Docker daemon can find those files.
+      - type: bind
+        source: /tmp
+        target: /tmp
+      # App data — all live under /DATA/AppData/$AppID on the host
+      - type: bind
+        source: /DATA/AppData/$AppID/store
+        target: /app/store
+      - type: bind
+        source: /DATA/AppData/$AppID/groups
+        target: /app/groups
+      - type: bind
+        source: /DATA/AppData/$AppID/data
+        target: /app/data
+      - type: bind
+        source: /DATA/AppData/$AppID/logs
+        target: /app/logs
+      # Allowlist config (outside project so containers can't tamper with it)
+      - type: bind
+        source: /DATA/AppData/$AppID/nanoclaw-config
+        target: /root/.config/nanoclaw
+    environment:
+      # Host path of the app data directory — used to build correct Docker volume
+      # mount paths for agent containers (spawned by host daemon, not this container)
+      HOST_PROJECT_ROOT: /DATA/AppData/$AppID
+      ONECLI_URL: http://onecli:10254
+      CONTAINER_IMAGE: gitea.pitthappens.dyndns.org/ragincajunbanjo/nanoclaw-agent:latest
+      TZ: $TZ
+      # Channel tokens — fill these in via CasaOS app settings
+      DISCORD_BOT_TOKEN: ""
+      # Optional: Ollama endpoint for local model access
+      OLLAMA_HOST: ""
+      # Assistant name (default: Andy)
+      ASSISTANT_NAME: Andy
+    depends_on:
+      onecli:
+        condition: service_healthy
+    x-casaos:
+      envs:
+        - container: HOST_PROJECT_ROOT
+          description:
+            en_us: Host path of NanoClaw data directory (do not change)
+        - container: ONECLI_URL
+          description:
+            en_us: OneCLI gateway URL (do not change)
+        - container: CONTAINER_IMAGE
+          description:
+            en_us: Agent container image (do not change)
+        - container: TZ
+          description:
+            en_us: Timezone
+        - container: DISCORD_BOT_TOKEN
+          description:
+            en_us: Discord bot token (from Discord Developer Portal)
+        - container: OLLAMA_HOST
+          description:
+            en_us: Ollama endpoint, e.g. http://host.docker.internal:11434
+        - container: ASSISTANT_NAME
+          description:
+            en_us: Name the assistant responds to (default Andy)
+      volumes:
+        - container: /app/store
+          description:
+            en_us: SQLite database
+        - container: /app/groups
+          description:
+            en_us: Per-group agent memory
+        - container: /app/data
+          description:
+            en_us: Agent sessions and IPC
+        - container: /app/logs
+          description:
+            en_us: Service logs
+        - container: /root/.config/nanoclaw
+          description:
+            en_us: Mount allowlist config
+
+  onecli:
+    image: ghcr.io/onecli/onecli:latest
+    container_name: onecli
+    restart: unless-stopped
+    ports:
+      - target: 10254
+        published: "10254"
+        protocol: tcp
+      - target: 10255
+        published: "10255"
+        protocol: tcp
+    environment:
+      DATABASE_URL: postgresql://onecli:onecli@postgres:5432/onecli
+      # Required — generate with: openssl rand -base64 32
+      NEXTAUTH_SECRET: ""
+      # Optional — encrypts secrets at rest, generate with: openssl rand -base64 32
+      SECRET_ENCRYPTION_KEY: ""
+      TZ: $TZ
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/onecli
+        target: /app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:10254/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    x-casaos:
+      envs:
+        - container: NEXTAUTH_SECRET
+          description:
+            en_us: "Required: random secret, generate with: openssl rand -base64 32"
+        - container: SECRET_ENCRYPTION_KEY
+          description:
+            en_us: "Optional: encrypts secrets at rest, generate with: openssl rand -base64 32"
+        - container: DATABASE_URL
+          description:
+            en_us: PostgreSQL connection string (do not change)
+      ports:
+        - container: "10254"
+          description:
+            en_us: OneCLI dashboard — open to register your Anthropic API key
+        - container: "10255"
+          description:
+            en_us: OneCLI HTTPS proxy (used by agent containers)
+      volumes:
+        - container: /app/data
+          description:
+            en_us: OneCLI data and secrets
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: nanoclaw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: onecli
+      POSTGRES_USER: onecli
+      POSTGRES_PASSWORD: onecli
+      TZ: $TZ
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onecli"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    x-casaos:
+      volumes:
+        - container: /var/lib/postgresql/data
+          description:
+            en_us: PostgreSQL data
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: nanoclaw
+  store_app_id: nanoclaw
+  author: nanoclaw
+  category: Utilities
+  developer: nanoclaw
+  description:
+    en_us: Personal Claude assistant running in isolated agent containers. Supports Discord, WhatsApp, Telegram, Slack, and more.
+  title:
+    en_us: NanoClaw
+  port_map: "10254"
+  index: /

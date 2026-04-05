@@ -27,6 +27,13 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
+// When NanoClaw runs inside a container (e.g. docker-compose), process.cwd()
+// returns a container-internal path like /app. But agent containers are spawned
+// via the host Docker daemon, so volume mount paths must reference the host
+// filesystem. Set HOST_PROJECT_ROOT to the absolute host path of the project.
+export const HOST_PROJECT_ROOT =
+  process.env.HOST_PROJECT_ROOT || PROJECT_ROOT;
+
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,

@@ -4,6 +4,7 @@
 FROM node:22-slim
 
 # Install system dependencies for Chromium
+# libasound2 was renamed to libasound2t64 in Debian Trixie (t64 transition)
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -17,13 +18,13 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
-    libasound2 \
     libpangocairo-1.0-0 \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
     curl \
     git \
+    && (apt-get install -y libasound2t64 2>/dev/null || apt-get install -y libasound2) \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
