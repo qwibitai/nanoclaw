@@ -150,7 +150,7 @@ function buildVolumeMounts(
       }
     } catch (err) {
       logger.warn(
-        { group: group.folder, settingsFile, error: err },
+        { group: group.folder, settingsFile, err },
         'Failed to parse settings.json; starting from empty object (existing user settings lost)',
       );
     }
