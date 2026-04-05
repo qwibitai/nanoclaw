@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import type { AddressInfo } from 'net';
 
 const mockEnv: Record<string, string> = {};
@@ -10,22 +7,11 @@ vi.mock('./env.js', () => ({
   readEnvFile: vi.fn(() => ({ ...mockEnv })),
 }));
 
-vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/nanoclaw-test-data',
-}));
-
 vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import {
-  startCredentialProxy,
-  readCredentials,
-  refreshOAuthToken,
-  ensureValidToken,
-  proactiveRefresh,
-  OAuthRefreshError,
-} from './credential-proxy.js';
+import { startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -63,13 +49,9 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
-  let tmpDir: string;
-  let credsPath: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-test-'));
-    credsPath = path.join(tmpDir, '.credentials.json');
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
@@ -86,14 +68,13 @@ describe('credential-proxy', () => {
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
     Object.assign(mockEnv, env, {
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
     });
-    proxyServer = await startCredentialProxy(0, '127.0.0.1', credsPath);
+    proxyServer = await startCredentialProxy(0, '127.0.0.1');
     return (proxyServer.address() as AddressInfo).port;
   }
 
@@ -116,66 +97,14 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
-  it('OAuth mode reads token from credentials file and injects Authorization', async () => {
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'creds-file-token',
-          refreshToken: 'refresh-token',
-          expiresAt: Date.now() + 3600000,
-        },
-      }),
-    );
-    proxyPort = await startProxy({});
+  it('throws when ANTHROPIC_API_KEY is not set', async () => {
+    Object.assign(mockEnv, {
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
 
-    await makeRequest(
-      proxyPort,
-      {
-        method: 'POST',
-        path: '/api/oauth/claude_cli/create_api_key',
-        headers: {
-          'content-type': 'application/json',
-          authorization: 'Bearer placeholder',
-        },
-      },
-      '{}',
+    await expect(startCredentialProxy(0, '127.0.0.1')).rejects.toThrow(
+      /ANTHROPIC_API_KEY/,
     );
-
-    expect(lastUpstreamHeaders['authorization']).toBe(
-      'Bearer creds-file-token',
-    );
-  });
-
-  it('OAuth mode does not inject Authorization when container omits it', async () => {
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'creds-file-token',
-          refreshToken: 'refresh-token',
-          expiresAt: Date.now() + 3600000,
-        },
-      }),
-    );
-    proxyPort = await startProxy({});
-
-    // Post-exchange: container uses x-api-key only, no Authorization header
-    await makeRequest(
-      proxyPort,
-      {
-        method: 'POST',
-        path: '/v1/messages',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': 'temp-key-from-exchange',
-        },
-      },
-      '{}',
-    );
-
-    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
-    expect(lastUpstreamHeaders['authorization']).toBeUndefined();
   });
 
   it('strips hop-by-hop headers', async () => {
@@ -223,450 +152,5 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
-  });
-});
-
-describe('readCredentials', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cred-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('reads accessToken, refreshToken, expiresAt from credentials file', () => {
-    const credPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'at-123',
-          refreshToken: 'rt-456',
-          expiresAt: 1700000000000,
-        },
-      }),
-    );
-
-    const creds = readCredentials(credPath);
-    expect(creds.accessToken).toBe('at-123');
-    expect(creds.refreshToken).toBe('rt-456');
-    expect(creds.expiresAt).toBe(1700000000000);
-  });
-
-  it('throws if file does not exist', () => {
-    expect(() =>
-      readCredentials(path.join(tmpDir, 'nonexistent.json')),
-    ).toThrow();
-  });
-
-  it('throws if claudeAiOauth is missing', () => {
-    const credPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(credPath, JSON.stringify({ someOtherKey: {} }));
-
-    expect(() => readCredentials(credPath)).toThrow(/claudeAiOauth/);
-  });
-});
-
-describe('refreshOAuthToken', () => {
-  let tokenServer: http.Server;
-  let tokenPort: number;
-
-  beforeEach(async () => {
-    tokenServer = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        const body = new URLSearchParams(Buffer.concat(chunks).toString());
-        const refreshToken = body.get('refresh_token');
-
-        if (refreshToken === 'valid-refresh') {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              access_token: 'new-access-token',
-              refresh_token: 'new-refresh-token',
-              expires_in: 3600,
-            }),
-          );
-        } else {
-          res.writeHead(401, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: 'invalid_grant' }));
-        }
-      });
-    });
-    await new Promise<void>((resolve) =>
-      tokenServer.listen(0, '127.0.0.1', resolve),
-    );
-    tokenPort = (tokenServer.address() as AddressInfo).port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((r) => tokenServer?.close(() => r()));
-  });
-
-  it('returns new tokens on successful refresh', async () => {
-    const result = await refreshOAuthToken(
-      'valid-refresh',
-      `http://127.0.0.1:${tokenPort}/v1/oauth/token`,
-    );
-
-    expect(result.accessToken).toBe('new-access-token');
-    expect(result.refreshToken).toBe('new-refresh-token');
-    expect(result.expiresAt).toBeGreaterThan(Date.now());
-  });
-
-  it('throws OAuthRefreshError with parsed error code on failure', async () => {
-    try {
-      await refreshOAuthToken(
-        'invalid-refresh',
-        `http://127.0.0.1:${tokenPort}/v1/oauth/token`,
-      );
-      expect.unreachable('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(OAuthRefreshError);
-      expect((err as OAuthRefreshError).code).toBe('invalid_grant');
-    }
-  });
-
-  it('throws on network error', async () => {
-    await expect(
-      refreshOAuthToken('some-token', 'http://127.0.0.1:59999/v1/oauth/token'),
-    ).rejects.toThrow();
-  });
-});
-
-describe('ensureValidToken', () => {
-  let tmpDir: string;
-  let refreshServer: http.Server;
-  let refreshPort: number;
-  let refreshCallCount: number;
-
-  beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-token-test-'));
-    refreshCallCount = 0;
-
-    refreshServer = http.createServer((req, res) => {
-      refreshCallCount++;
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            access_token: 'refreshed-access-token',
-            refresh_token: 'refreshed-refresh-token',
-            expires_in: 7200,
-          }),
-        );
-      });
-    });
-    await new Promise<void>((resolve) =>
-      refreshServer.listen(0, '127.0.0.1', resolve),
-    );
-    refreshPort = (refreshServer.address() as AddressInfo).port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((r) => refreshServer?.close(() => r()));
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('refreshes token when within 5 minutes of expiry', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'old-access',
-          refreshToken: 'valid-refresh',
-          expiresAt: Date.now() + 2 * 60 * 1000, // 2 min from now
-          scopes: ['read', 'write'],
-          subscriptionType: 'pro',
-        },
-      }),
-    );
-
-    const result = await ensureValidToken(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    expect(result.accessToken).toBe('refreshed-access-token');
-    expect(result.refreshToken).toBe('refreshed-refresh-token');
-    expect(result.expiresAt).toBeGreaterThan(Date.now());
-
-    // Verify file was written back with new tokens and original fields preserved
-    const written = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
-    expect(written.claudeAiOauth.accessToken).toBe('refreshed-access-token');
-    expect(written.claudeAiOauth.refreshToken).toBe('refreshed-refresh-token');
-    expect(written.claudeAiOauth.scopes).toEqual(['read', 'write']);
-    expect(written.claudeAiOauth.subscriptionType).toBe('pro');
-  });
-
-  it('does not refresh when token is still valid', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'still-valid-access',
-          refreshToken: 'some-refresh',
-          expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour from now
-        },
-      }),
-    );
-
-    const result = await ensureValidToken(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    expect(result.accessToken).toBe('still-valid-access');
-    expect(refreshCallCount).toBe(0);
-  });
-
-  it('re-reads credentials from disk before each retry (picks up external refresh)', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'expired-access',
-          refreshToken: 'dead-refresh-token',
-          expiresAt: Date.now() - 1000,
-        },
-      }),
-    );
-
-    await new Promise<void>((r) => refreshServer.close(() => r()));
-    refreshCallCount = 0;
-    refreshServer = http.createServer((req, res) => {
-      refreshCallCount++;
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        const body = new URLSearchParams(Buffer.concat(chunks).toString());
-        const rt = body.get('refresh_token');
-        if (rt === 'externally-refreshed') {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              access_token: 'new-access-from-retry',
-              refresh_token: 'new-refresh-from-retry',
-              expires_in: 7200,
-            }),
-          );
-        } else {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              error: 'invalid_grant',
-              error_description: 'Refresh token not found or invalid',
-            }),
-          );
-        }
-      });
-    });
-    await new Promise<void>((resolve) =>
-      refreshServer.listen(0, '127.0.0.1', resolve),
-    );
-    refreshPort = (refreshServer.address() as AddressInfo).port;
-
-    setTimeout(() => {
-      fs.writeFileSync(
-        credsPath,
-        JSON.stringify({
-          claudeAiOauth: {
-            accessToken: 'externally-set-access',
-            refreshToken: 'externally-refreshed',
-            expiresAt: Date.now() - 1000,
-          },
-        }),
-      );
-    }, 1500);
-
-    const result = await ensureValidToken(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    expect(result.accessToken).toBe('new-access-from-retry');
-    expect(result.refreshToken).toBe('new-refresh-from-retry');
-  });
-
-  it('throws when all retries fail and token on disk is still expired', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'expired-access',
-          refreshToken: 'permanently-dead',
-          expiresAt: Date.now() - 1000,
-        },
-      }),
-    );
-
-    await new Promise<void>((r) => refreshServer.close(() => r()));
-    refreshServer = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: 'invalid_grant',
-            error_description: 'Refresh token not found or invalid',
-          }),
-        );
-      });
-    });
-    await new Promise<void>((resolve) =>
-      refreshServer.listen(0, '127.0.0.1', resolve),
-    );
-    refreshPort = (refreshServer.address() as AddressInfo).port;
-
-    await expect(
-      ensureValidToken(
-        credsPath,
-        `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-      ),
-    ).rejects.toThrow(/OAuth refresh failed/);
-  });
-
-  it('returns valid token from disk without refreshing if externally refreshed during retries', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'expired-access',
-          refreshToken: 'dead-refresh',
-          expiresAt: Date.now() - 1000,
-        },
-      }),
-    );
-
-    await new Promise<void>((r) => refreshServer.close(() => r()));
-    refreshCallCount = 0;
-    refreshServer = http.createServer((req, res) => {
-      refreshCallCount++;
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'invalid_grant' }));
-      });
-    });
-    await new Promise<void>((resolve) =>
-      refreshServer.listen(0, '127.0.0.1', resolve),
-    );
-    refreshPort = (refreshServer.address() as AddressInfo).port;
-
-    setTimeout(() => {
-      fs.writeFileSync(
-        credsPath,
-        JSON.stringify({
-          claudeAiOauth: {
-            accessToken: 'fresh-from-login',
-            refreshToken: 'fresh-refresh',
-            expiresAt: Date.now() + 3600000,
-          },
-        }),
-      );
-    }, 1500);
-
-    const result = await ensureValidToken(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    expect(result.accessToken).toBe('fresh-from-login');
-  });
-});
-
-describe('proactiveRefresh', () => {
-  let tmpDir: string;
-  let refreshServer: http.Server;
-  let refreshPort: number;
-  let refreshCallCount: number;
-
-  beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proactive-test-'));
-    refreshCallCount = 0;
-
-    refreshServer = http.createServer((req, res) => {
-      refreshCallCount++;
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            access_token: 'proactive-access-token',
-            refresh_token: 'proactive-refresh-token',
-            expires_in: 7200,
-          }),
-        );
-      });
-    });
-    await new Promise<void>((resolve) =>
-      refreshServer.listen(0, '127.0.0.1', resolve),
-    );
-    refreshPort = (refreshServer.address() as AddressInfo).port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((r) => refreshServer?.close(() => r()));
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('refreshes when token has < 3 hours remaining', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'two-hours-left',
-          refreshToken: 'valid-refresh',
-          expiresAt: Date.now() + 2 * 60 * 60 * 1000, // 2 hours from now
-        },
-      }),
-    );
-
-    const result = await proactiveRefresh(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    // Should refresh — 2h remaining is within the 3h proactive buffer
-    expect(result.accessToken).toBe('proactive-access-token');
-    expect(refreshCallCount).toBe(1);
-  });
-
-  it('skips refresh when token has > 3 hours remaining', async () => {
-    const credsPath = path.join(tmpDir, '.credentials.json');
-    fs.writeFileSync(
-      credsPath,
-      JSON.stringify({
-        claudeAiOauth: {
-          accessToken: 'plenty-of-time',
-          refreshToken: 'valid-refresh',
-          expiresAt: Date.now() + 5 * 60 * 60 * 1000, // 5 hours from now
-        },
-      }),
-    );
-
-    const result = await proactiveRefresh(
-      credsPath,
-      `http://127.0.0.1:${refreshPort}/v1/oauth/token`,
-    );
-
-    // Should NOT refresh — 5h remaining is outside the 3h buffer
-    expect(result.accessToken).toBe('plenty-of-time');
-    expect(refreshCallCount).toBe(0);
   });
 });
