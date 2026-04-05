@@ -239,10 +239,10 @@ function prepareProviderContainer(
     sessionId: input.sessionId,
   });
 
-  preparedSession.providerStateDir = ensurePathWithinRoot(
-    providerNamespaceRoot,
+  preparedSession.providerStateDir = ensurePathWithinRoots(
+    [providerNamespaceRoot, ...(preparedSession.allowedStateRoots || [])],
     preparedSession.providerStateDir,
-    'Provider session state dir must stay within the provider session namespace',
+    'Provider session state dir must stay within the provider session roots',
   );
   fs.mkdirSync(preparedSession.providerStateDir, { recursive: true });
 

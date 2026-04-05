@@ -308,8 +308,7 @@ export async function main(): Promise<void> {
       writeOutput(output);
     }
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     log(`Agent error: ${errorMessage}`);
     writeOutput({
       status: 'error',

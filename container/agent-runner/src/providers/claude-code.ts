@@ -116,7 +116,7 @@ function getSessionSummary(
 }
 
 function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input) => {
+  return async (input: unknown) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
     const sessionId = preCompact.session_id;
@@ -294,7 +294,9 @@ function drainIpcInput(): string[] {
 
     return messages;
   } catch (error) {
-    log(`IPC drain error: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `IPC drain error: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return [];
   }
 }
@@ -463,8 +465,10 @@ async function runQuery(
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
-      events.push({ type: 'session_started', sessionId: newSessionId });
-      log(`Session initialized: ${newSessionId}`);
+      if (newSessionId) {
+        events.push({ type: 'session_started', sessionId: newSessionId });
+        log(`Session initialized: ${newSessionId}`);
+      }
     }
 
     if (
@@ -546,7 +550,9 @@ export const claudeCodeProvider: ContainerAgentProvider = {
 
     const pending = drainIpcInput();
     if (pending.length > 0) {
-      log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+      log(
+        `Draining ${pending.length} pending IPC messages into initial prompt`,
+      );
       prompt += `\n${pending.join('\n')}`;
     }
 
