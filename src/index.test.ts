@@ -21,7 +21,10 @@ const {
     .fn()
     .mockResolvedValue({ name: 'test', identifier: 'test', created: true }),
   getAllRegisteredGroups: vi.fn(() => ({})),
-  getSession: vi.fn(() => undefined),
+  getSession: vi.fn(
+    (_groupFolder: string, _providerId?: string) =>
+      undefined as string | undefined,
+  ),
   runContainerAgent: vi.fn(),
   setRegisteredGroup: vi.fn(),
   setSession: vi.fn(),
