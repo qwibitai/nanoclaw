@@ -345,7 +345,14 @@ export async function runHostAgent(
             }
             hadStreamingOutput = true;
             resetTimeout();
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(() =>
+              onOutput(parsed).catch((err) =>
+                logger.error(
+                  { group: group.name, error: err },
+                  'Output callback failed',
+                ),
+              ),
+            );
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },

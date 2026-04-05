@@ -35,6 +35,7 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  onMaxRetriesExceeded?: (groupJid: string) => void;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -281,6 +282,7 @@ export class GroupQueue {
         { groupJid, retryCount: state.retryCount },
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
+      this.onMaxRetriesExceeded?.(groupJid);
       state.retryCount = 0;
       return;
     }

@@ -32,6 +32,8 @@ import {
 } from './container-runtime.js';
 import { runHostAgent } from './host-runner.js';
 import {
+  deleteOutboxMessage,
+  enqueueOutbox,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -40,7 +42,9 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getOutboxMessages,
   getRouterState,
+  incrementOutboxAttempts,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -305,7 +309,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
         if (text && text !== lastSentText) {
           clearInterval(typingKeepalive);
-          await channel.sendMessage(chatJid, text);
+          try {
+            await channel.sendMessage(chatJid, text);
+          } catch (err) {
+            logger.error(
+              { group: group.name, error: err },
+              'Failed to send message, queuing for retry',
+            );
+            enqueueOutbox(chatJid, text);
+          }
           outputSentToUser = true;
           queue.markResponseSent(chatJid);
           lastSentText = text;
@@ -538,9 +550,10 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
+            // Don't advance cursor here — the agent process may crash before
+            // reading the piped input. processGroupMessages will advance the
+            // cursor after successful processing, preventing message loss.
+
             // Show typing indicator while the container processes the piped message
             // Skip if agent sent a response recently — prevents typing reappearing on Telegram
             if (!queue.isRecentResponseSent(chatJid)) {
@@ -584,6 +597,37 @@ function recoverPendingMessages(): void {
         'Recovery: found unprocessed messages',
       );
       queue.enqueueMessageCheck(chatJid);
+    }
+  }
+}
+
+/**
+ * Startup recovery: retry sending messages that failed to deliver.
+ * Messages are persisted to the outbox table when channel.sendMessage() fails.
+ */
+async function recoverOutbox(): Promise<void> {
+  const pending = getOutboxMessages();
+  if (pending.length === 0) return;
+  logger.info({ count: pending.length }, 'Recovering unsent messages from outbox');
+  for (const msg of pending) {
+    const channel = findChannel(channels, msg.chatJid);
+    if (!channel) {
+      logger.warn(
+        { id: msg.id, chatJid: msg.chatJid },
+        'Outbox: no channel for JID, skipping',
+      );
+      continue;
+    }
+    try {
+      await channel.sendMessage(msg.chatJid, msg.text);
+      deleteOutboxMessage(msg.id);
+      logger.info({ id: msg.id, chatJid: msg.chatJid }, 'Outbox message delivered');
+    } catch (err) {
+      incrementOutboxAttempts(msg.id);
+      logger.error(
+        { id: msg.id, chatJid: msg.chatJid, error: err },
+        'Outbox recovery failed, will retry next restart',
+      );
     }
   }
 }
@@ -778,6 +822,16 @@ async function main(): Promise<void> {
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.onMaxRetriesExceeded = (groupJid) => {
+    const ch = findChannel(channels, groupJid);
+    if (ch) {
+      ch.sendMessage(
+        groupJid,
+        'Sorry, I was unable to process your message after several attempts. Please try again.',
+      ).catch(() => {});
+    }
+  };
+  await recoverOutbox();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

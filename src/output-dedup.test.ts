@@ -54,10 +54,7 @@ describe('host-side output dedup', () => {
     const sendMessage = vi.fn(async () => {});
 
     simulateOnOutput(
-      [
-        { result: 'First response' },
-        { result: 'Second response' },
-      ],
+      [{ result: 'First response' }, { result: 'Second response' }],
       sendMessage,
     );
 
@@ -70,10 +67,7 @@ describe('host-side output dedup', () => {
     const sendMessage = vi.fn(async () => {});
 
     simulateOnOutput(
-      [
-        { result: 'streaming...', partial: true },
-        { result: 'Final answer' },
-      ],
+      [{ result: 'streaming...', partial: true }, { result: 'Final answer' }],
       sendMessage,
     );
 

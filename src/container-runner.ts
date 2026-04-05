@@ -396,7 +396,14 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(() =>
+              onOutput(parsed).catch((err) =>
+                logger.error(
+                  { group: group.name, error: err },
+                  'Output callback failed',
+                ),
+              ),
+            );
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },

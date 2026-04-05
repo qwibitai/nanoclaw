@@ -212,6 +212,54 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(countAfterMaxRetries);
   });
 
+  // --- onMaxRetriesExceeded callback ---
+
+  it('calls onMaxRetriesExceeded when all retries are exhausted', async () => {
+    let callCount = 0;
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false; // Always fail
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    const exceeded = vi.fn();
+    queue.onMaxRetriesExceeded = exceeded;
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Exhaust all 5 retries (delays: 5s, 10s, 20s, 40s, 80s)
+    const retryDelays = [5000, 10000, 20000, 40000, 80000];
+    for (const delay of retryDelays) {
+      await vi.advanceTimersByTimeAsync(delay + 10);
+    }
+
+    // 6 total calls (1 initial + 5 retries), then callback fires
+    expect(callCount).toBe(6);
+    expect(exceeded).toHaveBeenCalledOnce();
+    expect(exceeded).toHaveBeenCalledWith('group1@g.us');
+  });
+
+  it('does not call onMaxRetriesExceeded on successful retry', async () => {
+    let callCount = 0;
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return callCount >= 2; // Succeed on second attempt
+    });
+    queue.setProcessMessagesFn(processMessages);
+
+    const exceeded = vi.fn();
+    queue.onMaxRetriesExceeded = exceeded;
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(5010); // First retry succeeds
+
+    expect(callCount).toBe(2);
+    expect(exceeded).not.toHaveBeenCalled();
+  });
+
   // --- Waiting groups get drained when slots free up ---
 
   it('drains waiting groups when active slots free up', async () => {
