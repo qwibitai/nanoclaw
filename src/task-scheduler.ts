@@ -2,7 +2,14 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import path from 'path';
+import {
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  HEARTBEAT_INTERVAL,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -260,6 +267,70 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   schedulerRunning = true;
   logger.info('Scheduler loop started');
 
+  // Track last heartbeat time per group
+  const lastHeartbeat: Record<string, number> = {};
+
+  const checkHeartbeats = async () => {
+    const groups = deps.registeredGroups();
+    for (const [jid, group] of Object.entries(groups)) {
+      const heartbeatPath = path.join(GROUPS_DIR, group.folder, 'HEARTBEAT.md');
+      if (!fs.existsSync(heartbeatPath)) continue;
+
+      const now = Date.now();
+      const lastBeat = lastHeartbeat[group.folder] || 0;
+      if (now - lastBeat < HEARTBEAT_INTERVAL) continue;
+
+      lastHeartbeat[group.folder] = now;
+
+      try {
+        const heartbeatContent = fs.readFileSync(heartbeatPath, 'utf-8').trim();
+        if (!heartbeatContent) continue;
+
+        logger.info(
+          { group: group.name, folder: group.folder },
+          'Heartbeat triggered',
+        );
+
+        const prompt = `[HEARTBEAT — This is an automated periodic check-in, not a user message.]\n\n${heartbeatContent}`;
+
+        const sessions = deps.getSessions();
+        const unifiedSessions = deps.getUnifiedSessions();
+        const sessionId = sessions[group.folder] || undefined;
+        const isMain = group.isMain === true;
+
+        deps.queue.enqueueTask(jid, `heartbeat-${group.folder}`, async () => {
+          const output = await runContainerAgent(
+            group,
+            {
+              prompt,
+              sessionId,
+              groupFolder: group.folder,
+              chatJid: jid,
+              isMain,
+              assistantName: ASSISTANT_NAME,
+              modelProvider: group.containerConfig?.modelProvider,
+              claudeModel: group.containerConfig?.claudeModel,
+              ollamaModel: group.containerConfig?.ollamaModel,
+              unifiedSessionId: unifiedSessions[group.folder],
+            },
+            (proc, containerName) =>
+              deps.onProcess(jid, proc, containerName, group.folder),
+          );
+
+          // Send any result to the chat
+          if (output.result) {
+            await deps.sendMessage(jid, output.result);
+          }
+        });
+      } catch (err) {
+        logger.error(
+          { err, group: group.name },
+          'Error processing heartbeat',
+        );
+      }
+    }
+  };
+
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
@@ -278,6 +349,9 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           runTask(currentTask, deps),
         );
       }
+
+      // Check heartbeats
+      await checkHeartbeats();
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
     }
