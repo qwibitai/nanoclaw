@@ -134,7 +134,7 @@ server.tool(
       }
     }
 
-    // メイン以外のグループは自分自身に対してのみスケジュール可能
+    // 特権以外のグループは自分自身に対してのみスケジュール可能
     const targetJid = isPrivileged && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
