@@ -5,6 +5,9 @@
 
 // gmail
 
+// msteams
+import './msteams.js';
+
 // slack
 
 // telegram
