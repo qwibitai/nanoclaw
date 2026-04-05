@@ -174,6 +174,18 @@ function buildVolumeMounts(
     }
   }
 
+  // Sync group-local subagents (allows groups to ship domain-specific subagents)
+  const groupAgentsSrc = path.join(groupDir, '.claude', 'agents');
+  const agentsDst = path.join(groupSessionsDir, 'agents');
+  if (fs.existsSync(groupAgentsSrc)) {
+    fs.mkdirSync(agentsDst, { recursive: true });
+    for (const entry of fs.readdirSync(groupAgentsSrc)) {
+      const src = path.join(groupAgentsSrc, entry);
+      const dst = path.join(agentsDst, entry);
+      fs.cpSync(src, dst, { recursive: true });
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
