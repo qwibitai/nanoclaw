@@ -27,7 +27,10 @@ function parseGroupType(
     return groupType as GroupType;
   }
   // 不正な文字列は is_main を無視して 'chat' にフォールバック
-  logger.warn({ groupType }, 'Invalid group_type in DB; falling back to "chat".');
+  logger.warn(
+    { groupType },
+    'Invalid group_type in DB; falling back to "chat".',
+  );
   return 'chat';
 }
 
