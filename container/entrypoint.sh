@@ -102,7 +102,7 @@ mkdir -p /home/node/.gitnexus
 for gitdir in $(find /workspace -maxdepth 3 -name .git \( -type d -o -type f \) 2>/dev/null); do
   repo=$(dirname "$gitdir")
   if [ -w "$repo" ]; then
-    (cd "$repo" && gitnexus analyze --skip-agents-md 2>&1 >&2) || true
+    (cd "$repo" && gitnexus analyze 2>&1 >&2) || true
   elif [ -d "$repo/.gitnexus" ] && [ -f "$repo/.gitnexus/meta.json" ]; then
     # Read-only mount with pre-built index: register in the container's registry
     # so the MCP server can serve it without needing to write anything.
