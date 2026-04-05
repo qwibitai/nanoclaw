@@ -1,29 +1,25 @@
 {
-  "name": "nanoclaw",
-  "version": "1.2.49",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "name": "simt-nexus",
+  "version": "0.1.0",
+  "description": "Simtricity Nexus — AI agent platform for energy community Operators",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/gateway/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "gateway": "tsx src/gateway/index.ts",
+    "worker": "tsx src/worker/index.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "prepare": "husky",
-    "setup": "tsx setup/index.ts",
-    "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@onecli-sh/sdk": "^0.2.0",
-    "better-sqlite3": "11.10.0",
-    "cron-parser": "5.5.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.92"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

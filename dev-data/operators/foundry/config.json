@@ -1,0 +1,6 @@
+{
+  "name": "Microgrid Foundry",
+  "slug": "foundry",
+  "products": ["nexus"],
+  "channels": ["web-chat"]
+}

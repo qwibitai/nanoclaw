@@ -36,3 +36,7 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Nexus dev data (ephemeral)
+dev-data/sessions/
+dev-data/conversations/
