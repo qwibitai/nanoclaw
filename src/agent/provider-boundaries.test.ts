@@ -40,7 +40,9 @@ describe('provider boundaries', () => {
     ]);
     const sourceFiles = [
       ...collectSourceFiles(path.join(projectRoot, 'src')),
-      ...collectSourceFiles(path.join(projectRoot, 'container', 'agent-runner', 'src')),
+      ...collectSourceFiles(
+        path.join(projectRoot, 'container', 'agent-runner', 'src'),
+      ),
     ];
 
     // Act
@@ -64,7 +66,9 @@ describe('provider boundaries', () => {
     ]);
     const sourceFiles = [
       ...collectSourceFiles(path.join(projectRoot, 'src')),
-      ...collectSourceFiles(path.join(projectRoot, 'container', 'agent-runner', 'src')),
+      ...collectSourceFiles(
+        path.join(projectRoot, 'container', 'agent-runner', 'src'),
+      ),
     ];
     const remoteControlSpawnPattern =
       /spawn\(\s*['"]claude['"]\s*,\s*\[\s*['"]remote-control['"]/;

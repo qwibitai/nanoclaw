@@ -1,6 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { _initTestDatabase, createTask, getTaskById } from './db.js';
+const { runContainerAgentMock, writeTasksSnapshotMock } = vi.hoisted(() => ({
+  runContainerAgentMock: vi.fn(),
+  writeTasksSnapshotMock: vi.fn(),
+}));
+
+vi.mock('./container-runner.js', () => ({
+  runContainerAgent: runContainerAgentMock,
+  writeTasksSnapshot: writeTasksSnapshotMock,
+}));
+
+import {
+  _initTestDatabase,
+  createTask,
+  getTaskById,
+  getSession,
+  setSession,
+} from './db.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
@@ -11,6 +27,8 @@ describe('task scheduler', () => {
   beforeEach(() => {
     _initTestDatabase();
     _resetSchedulerLoopForTests();
+    runContainerAgentMock.mockReset();
+    writeTasksSnapshotMock.mockReset();
     vi.useFakeTimers();
   });
 
@@ -125,5 +143,83 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('does not persist isolated task sessions into the shared group session', async () => {
+    // Arrange
+    createTask({
+      id: 'task-isolated-session',
+      group_folder: 'other-group',
+      chat_jid: 'other@g.us',
+      prompt: 'run isolated',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    const sessions = {
+      'other-group': 'shared-group-session',
+    };
+    setSession('other-group', 'shared-group-session', 'codex');
+    const taskRuns: Array<Promise<void>> = [];
+
+    runContainerAgentMock.mockImplementation(
+      async (
+        _group,
+        _invocation,
+        _onProcess,
+        onStream?: (output: {
+          status: 'success' | 'error';
+          result: string | null;
+          newSessionId?: string;
+          error?: string;
+        }) => Promise<void>,
+      ) => {
+        const streamedOutput = {
+          status: 'success' as const,
+          result: null,
+          newSessionId: 'isolated-session',
+        };
+        await onStream?.(streamedOutput);
+        return streamedOutput;
+      },
+    );
+
+    // Act
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'other@g.us': {
+          name: 'Other',
+          folder: 'other-group',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+          providerId: 'codex',
+        },
+      }),
+      getSessions: () => sessions,
+      queue: {
+        enqueueTask: (
+          _groupJid: string,
+          _taskId: string,
+          fn: () => Promise<void>,
+        ) => {
+          taskRuns.push(fn());
+        },
+        notifyIdle: () => {},
+        closeStdin: () => {},
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(taskRuns);
+
+    // Assert
+    const [, invocation] = runContainerAgentMock.mock.calls[0];
+    expect(invocation.sessionId).toBeUndefined();
+    expect(sessions['other-group']).toBe('shared-group-session');
+    expect(getSession('other-group', 'codex')).toBe('shared-group-session');
   });
 });

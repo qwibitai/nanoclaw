@@ -60,7 +60,9 @@ function createRuntimeWorkspace(): RuntimeWorkspace {
   };
 }
 
-function createWorkspaceEnv(runtimeWorkspace: RuntimeWorkspace): NodeJS.ProcessEnv {
+function createWorkspaceEnv(
+  runtimeWorkspace: RuntimeWorkspace,
+): NodeJS.ProcessEnv {
   return {
     ...process.env,
     NANOCLAW_WORKSPACE_GROUP_DIR: runtimeWorkspace.groupDir,
@@ -272,7 +274,9 @@ describe.sequential('claude-code container provider compatibility', () => {
       env: {
         NANOCLAW_CHAT_JID: 'test@g.us',
         NANOCLAW_GROUP_FOLDER: 'test-group',
+        NANOCLAW_IPC_DIR: runtimeWorkspace.ipcDir,
         NANOCLAW_IS_MAIN: '0',
+        NANOCLAW_WORKSPACE_ROOT: '/workspace',
       },
     });
   });

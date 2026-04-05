@@ -199,7 +199,9 @@ describe('container runner Claude provider compatibility', () => {
       ),
     ).toEqual(EXPECTED_CLAUDE_SETTINGS);
     expect(
-      fs.existsSync(path.join(providerStateDir, 'skills', 'status', 'SKILL.md')),
+      fs.existsSync(
+        path.join(providerStateDir, 'skills', 'status', 'SKILL.md'),
+      ),
     ).toBe(true);
     expect(spawnMock.mock.calls[0][1]).toContain(
       `${providerStateDir}:/home/node/.claude`,
@@ -210,7 +212,12 @@ describe('container runner Claude provider compatibility', () => {
     // Arrange
     const group = createClaudeGroup();
     const groupDir = path.join(groupsDir, group.folder);
-    const legacyStateDir = path.join(dataDir, 'sessions', group.folder, '.claude');
+    const legacyStateDir = path.join(
+      dataDir,
+      'sessions',
+      group.folder,
+      '.claude',
+    );
     fs.mkdirSync(groupDir, { recursive: true });
     fs.writeFileSync(path.join(groupDir, 'AGENT.md'), '# Canonical Agent\n');
     fs.mkdirSync(legacyStateDir, { recursive: true });

@@ -35,9 +35,7 @@ function getTableSql(
   tableName: string,
 ): string | undefined {
   const row = database
-    .prepare(
-      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
-    )
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
     .get(tableName) as { sql: string } | undefined;
   return row?.sql;
 }

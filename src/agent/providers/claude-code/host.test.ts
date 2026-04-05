@@ -118,7 +118,12 @@ describe('claude-code host provider', () => {
     const projectRoot = process.cwd();
     const dataDir = path.join(tempRoot, 'data');
     const groupDir = path.join(tempRoot, 'groups', 'test-group');
-    const legacyStateDir = path.join(dataDir, 'sessions', 'test-group', '.claude');
+    const legacyStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      '.claude',
+    );
     fs.mkdirSync(groupDir, { recursive: true });
     fs.mkdirSync(legacyStateDir, { recursive: true });
     fs.writeFileSync(

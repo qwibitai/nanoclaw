@@ -113,12 +113,8 @@ describe('database migrations', () => {
 
       // Arrange
       vi.resetModules();
-      const {
-        _closeDatabase,
-        getRegisteredGroup,
-        getSession,
-        initDatabase,
-      } = await import('./db.js');
+      const { _closeDatabase, getRegisteredGroup, getSession, initDatabase } =
+        await import('./db.js');
 
       // Act
       initDatabase();
@@ -202,18 +198,20 @@ describe('database migrations', () => {
 
       // Arrange
       vi.resetModules();
-      const { _closeDatabase, getSession, initDatabase } = await import(
-        './db.js'
-      );
+      const { _closeDatabase, getSession, initDatabase } =
+        await import('./db.js');
 
       // Act
       initDatabase();
       const sessionId = getSession('whatsapp_legacy');
       _closeDatabase();
 
-      const migratedDb = new Database(path.join(tempDir, 'store', 'messages.db'), {
-        readonly: true,
-      });
+      const migratedDb = new Database(
+        path.join(tempDir, 'store', 'messages.db'),
+        {
+          readonly: true,
+        },
+      );
       const sessionRows = migratedDb
         .prepare(`SELECT group_folder, provider_id, session_id FROM sessions`)
         .all() as Array<{

@@ -5,10 +5,7 @@ import path from 'path';
 import { PassThrough } from 'stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  AgentProvider,
-  PreparedSession,
-} from './agent/provider-types.js';
+import type { AgentProvider, PreparedSession } from './agent/provider-types.js';
 import type { RegisteredGroup } from './types.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -347,21 +344,149 @@ describe('container runner provider plumbing', () => {
         },
       },
     });
-    expect(
-      fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8'),
-    ).toBe('# Canonical Agent\n');
+    expect(fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8')).toBe(
+      '# Canonical Agent\n',
+    );
     expect(
       fs.readFileSync(path.join(providerStateDir, 'settings.json'), 'utf-8'),
     ).toContain('"provider": "codex"');
     expect(
-      fs.existsSync(path.join(providerStateDir, 'skills', 'status', 'SKILL.md')),
+      fs.existsSync(
+        path.join(providerStateDir, 'skills', 'status', 'SKILL.md'),
+      ),
     ).toBe(true);
     expect(fs.existsSync(path.join(copiedRunnerDir, 'providers'))).toBe(true);
     expect(spawnArgs).toContain(`CODEX_HOME=/home/node/.codex`);
-    expect(spawnArgs).toContain(
-      `${providerStateDir}:/home/node/.codex`,
-    );
+    expect(spawnArgs).toContain(`${providerStateDir}:/home/node/.codex`);
     expect(spawnArgs).toContain(`${copiedRunnerDir}:/app/src`);
+  });
+
+  it('preserves provider files that are marked onlyIfMissing', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    fs.mkdirSync(providerStateDir, { recursive: true });
+    const existingSettings = path.join(providerStateDir, 'settings.json');
+    fs.writeFileSync(existingSettings, '{"provider":"custom"}\n');
+
+    const provider = createPreparedSessionProvider({
+      providerStateDir,
+      files: [
+        {
+          targetPath: existingSettings,
+          content: '{"provider":"seeded"}\n',
+          onlyIfMissing: true,
+        },
+      ],
+    });
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: null,
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    // Assert
+    expect(fs.readFileSync(existingSettings, 'utf-8')).toBe(
+      '{"provider":"custom"}\n',
+    );
+  });
+
+  it('preserves the cached agent runner source when the project copy is unchanged', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const copiedRunnerDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'agent-runner-src',
+    );
+    fs.mkdirSync(copiedRunnerDir, { recursive: true });
+    const cachedIndex = path.join(copiedRunnerDir, 'index.ts');
+    fs.writeFileSync(cachedIndex, '// customized runner\n');
+
+    const sourceIndex = path.join(
+      process.cwd(),
+      'container',
+      'agent-runner',
+      'src',
+      'index.ts',
+    );
+    const newerCachedDate = new Date(fs.statSync(sourceIndex).mtimeMs + 10_000);
+    fs.utimesSync(cachedIndex, newerCachedDate, newerCachedDate);
+
+    const provider = createPreparedSessionProvider({
+      providerStateDir,
+      files: [],
+    });
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: null,
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    // Assert
+    expect(fs.readFileSync(cachedIndex, 'utf-8')).toBe(
+      '// customized runner\n',
+    );
   });
 
   it('rejects provider mounts that escape the current group workspace or provider session namespace', async () => {
@@ -537,11 +662,7 @@ describe('container runner provider plumbing', () => {
     },
   ])(
     'rejects escaped $name before spawning the container',
-    async ({
-      buildPreparedSession,
-      expectedError,
-      setupOutsideRoot,
-    }) => {
+    async ({ buildPreparedSession, expectedError, setupOutsideRoot }) => {
       // Arrange
       const groupDir = path.join(groupsDir, 'test-group');
       fs.mkdirSync(groupDir, { recursive: true });
