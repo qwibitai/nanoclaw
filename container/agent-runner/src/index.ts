@@ -61,6 +61,8 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** true = streaming chunk (not final); omit or false = final result */
+  partial?: boolean;
 }
 
 interface SessionEntry {
@@ -480,6 +482,7 @@ async function runQuery(
     prompt: stream,
     options: {
       cwd: WORKSPACE_GROUP,
+      pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || undefined,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -565,6 +568,23 @@ async function runQuery(
       log(
         `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
       );
+    }
+
+    if (message.type === 'assistant') {
+      // Emit partial output so the channel can stream text to the user
+      const content = (message as { message?: { content?: unknown } }).message?.content;
+      if (Array.isArray(content)) {
+        const textParts = content
+          .filter((c: { type?: string }) => c.type === 'text')
+          .map((c: { text?: string }) => c.text || '')
+          .join('');
+        const visible = textParts
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
+        if (visible) {
+          writeOutput({ status: 'success', result: visible, partial: true, newSessionId });
+        }
+      }
     }
 
     if (message.type === 'result') {

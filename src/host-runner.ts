@@ -3,7 +3,7 @@
  * Runs agent-runner directly on the host (no container).
  * Drop-in replacement for container-runner when HOST_MODE=true.
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,6 +15,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -32,6 +33,28 @@ import type { ContainerInput, ContainerOutput } from './container-runner.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+let cachedClaudePath: string | undefined;
+function findClaudePath(): string {
+  if (cachedClaudePath) return cachedClaudePath;
+  const candidates = [
+    path.join(process.env.HOME || '', '.local', 'bin', 'claude'),
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      cachedClaudePath = p;
+      return p;
+    }
+  }
+  try {
+    cachedClaudePath = execSync('which claude', { encoding: 'utf8' }).trim();
+  } catch {
+    cachedClaudePath = '';
+  }
+  return cachedClaudePath;
+}
+
 function buildEnvironment(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -41,8 +64,23 @@ function buildEnvironment(
   extraDir: string,
   claudeHome: string,
 ): Record<string, string> {
+  // Read auth credentials from .env — systemd doesn't load .env into process.env
+  const dotenvAuth = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+  ]);
+
+  // Ensure node/npx are on PATH (systemd may not have asdf/nvm paths)
+  const nodeBinDir = path.dirname(process.execPath);
+  const existingPath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin';
+  const augmentedPath = existingPath.includes(nodeBinDir)
+    ? existingPath
+    : `${nodeBinDir}:${existingPath}`;
+
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
+    ...dotenvAuth,
+    PATH: augmentedPath,
     TZ: TIMEZONE,
     // Agent-runner workspace paths (replaces container mount points)
     NANOCLAW_IPC_DIR: ipcDir,
@@ -53,6 +91,8 @@ function buildEnvironment(
     NANOCLAW_CHAT_JID: input.chatJid,
     NANOCLAW_GROUP_FOLDER: input.groupFolder,
     NANOCLAW_IS_MAIN: input.isMain ? '1' : '0',
+    // Use globally installed claude CLI in host mode
+    CLAUDE_CODE_PATH: process.env.CLAUDE_CODE_PATH || findClaudePath(),
     // Claude SDK reads settings from this directory
     CLAUDE_CONFIG_DIR: claudeHome,
   };
@@ -194,14 +234,10 @@ export async function runHostAgent(
     claudeHome,
   );
 
-  // Build the agent-runner in a temp directory then run it
+  // Build the agent-runner inside its own package directory so node_modules
+  // resolution works naturally (no symlinks needed).
   const agentRunnerPkg = path.join(projectRoot, 'container', 'agent-runner');
-  const buildDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-dist',
-  );
+  const buildDir = path.join(agentRunnerPkg, 'dist');
   fs.mkdirSync(buildDir, { recursive: true });
 
   // Compile agent-runner TypeScript
@@ -209,9 +245,8 @@ export async function runHostAgent(
   const entryPoint = path.join(buildDir, 'index.js');
 
   // Only recompile if source is newer than dist
-  const srcMtime = fs.existsSync(path.join(agentRunnerDir, 'index.ts'))
-    ? fs.statSync(path.join(agentRunnerDir, 'index.ts')).mtimeMs
-    : 0;
+  const srcFile = path.join(agentRunnerPkg, 'src', 'index.ts');
+  const srcMtime = fs.existsSync(srcFile) ? fs.statSync(srcFile).mtimeMs : 0;
   const distMtime = fs.existsSync(entryPoint)
     ? fs.statSync(entryPoint).mtimeMs
     : 0;
@@ -219,14 +254,15 @@ export async function runHostAgent(
   if (srcMtime > distMtime) {
     const { execSync } = await import('child_process');
     try {
-      execSync(
-        `npx tsc --rootDir ${agentRunnerDir} --outDir ${buildDir} --project ${tsconfigPath}`,
-        {
-          cwd: agentRunnerPkg,
-          stdio: 'pipe',
-          env: { ...process.env, PATH: process.env.PATH },
+      const npxPath = path.join(path.dirname(process.execPath), 'npx');
+      execSync(`${npxPath} tsc --project ${tsconfigPath}`, {
+        cwd: agentRunnerPkg,
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
         },
-      );
+      });
     } catch (err) {
       logger.error({ err }, 'Failed to compile agent-runner');
       return {
@@ -234,17 +270,6 @@ export async function runHostAgent(
         result: null,
         error: `Failed to compile agent-runner: ${err instanceof Error ? err.message : String(err)}`,
       };
-    }
-  }
-
-  // Ensure node_modules is accessible from build dir
-  const nmLink = path.join(buildDir, 'node_modules');
-  const nmTarget = path.join(agentRunnerPkg, 'node_modules');
-  if (!fs.existsSync(nmLink) && fs.existsSync(nmTarget)) {
-    try {
-      fs.symlinkSync(nmTarget, nmLink);
-    } catch {
-      // May already exist as a directory
     }
   }
 
@@ -266,7 +291,7 @@ export async function runHostAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const proc = spawn('node', [entryPoint], {
+    const proc = spawn(process.execPath, [entryPoint], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: groupDir,
       env,
