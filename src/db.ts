@@ -478,6 +478,33 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Blueprint Workshop — installed blueprints registry
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS installed_blueprints (
+      id TEXT PRIMARY KEY,
+      blueprint_id TEXT NOT NULL,
+      blueprint_version TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      config TEXT NOT NULL,
+      rendered_prompt TEXT NOT NULL,
+      trigger_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      scheduled_task_id TEXT DEFAULT NULL,
+      installed_at TEXT NOT NULL,
+      UNIQUE(blueprint_id, group_folder)
+    );
+  `);
+
+  // Add blueprint_id column to scheduled_tasks (links tasks to blueprints)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN blueprint_id TEXT DEFAULT NULL`,
+    );
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -1075,8 +1102,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, task_type, schedule_tz, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, task_type, schedule_tz, next_run, status, created_at, blueprint_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -1092,6 +1119,7 @@ export function createTask(
     task.next_run,
     task.status,
     task.created_at,
+    task.blueprint_id || null,
   );
 }
 
@@ -2683,6 +2711,104 @@ export function listMcpServers(groupFolder: string): McpServerConfig[] {
 export function deleteMcpServer(id: string): boolean {
   const result = db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+// --- Blueprint Workshop: installed blueprints CRUD ---
+
+export interface InstalledBlueprint {
+  id: string;
+  blueprint_id: string;
+  blueprint_version: string;
+  group_folder: string;
+  chat_jid: string;
+  config: string;
+  rendered_prompt: string;
+  trigger_type: string;
+  status: string;
+  scheduled_task_id: string | null;
+  installed_at: string;
+}
+
+export function createInstalledBlueprint(bp: {
+  id: string;
+  blueprint_id: string;
+  blueprint_version: string;
+  group_folder: string;
+  chat_jid: string;
+  config: string;
+  rendered_prompt: string;
+  trigger_type: string;
+  scheduled_task_id?: string;
+}): void {
+  db.prepare(
+    `INSERT INTO installed_blueprints (id, blueprint_id, blueprint_version, group_folder, chat_jid, config, rendered_prompt, trigger_type, scheduled_task_id, installed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    bp.id,
+    bp.blueprint_id,
+    bp.blueprint_version,
+    bp.group_folder,
+    bp.chat_jid,
+    bp.config,
+    bp.rendered_prompt,
+    bp.trigger_type,
+    bp.scheduled_task_id || null,
+    new Date().toISOString(),
+  );
+}
+
+export function getInstalledBlueprint(
+  id: string,
+): InstalledBlueprint | undefined {
+  return db
+    .prepare('SELECT * FROM installed_blueprints WHERE id = ?')
+    .get(id) as InstalledBlueprint | undefined;
+}
+
+export function getInstalledBlueprintsForGroup(
+  groupFolder: string,
+): InstalledBlueprint[] {
+  return db
+    .prepare(
+      'SELECT * FROM installed_blueprints WHERE group_folder = ? ORDER BY installed_at DESC',
+    )
+    .all(groupFolder) as InstalledBlueprint[];
+}
+
+export function updateInstalledBlueprint(
+  id: string,
+  updates: Partial<InstalledBlueprint>,
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (key === 'id') continue;
+    fields.push(`${key} = ?`);
+    values.push(value ?? null);
+  }
+
+  if (fields.length === 0) return;
+
+  values.push(id);
+  db.prepare(
+    `UPDATE installed_blueprints SET ${fields.join(', ')} WHERE id = ?`,
+  ).run(...values);
+}
+
+export function deleteInstalledBlueprint(id: string): void {
+  db.prepare('DELETE FROM installed_blueprints WHERE id = ?').run(id);
+}
+
+export function getInstalledBlueprintByBlueprintId(
+  blueprintId: string,
+  groupFolder: string,
+): InstalledBlueprint | undefined {
+  return db
+    .prepare(
+      'SELECT * FROM installed_blueprints WHERE blueprint_id = ? AND group_folder = ?',
+    )
+    .get(blueprintId, groupFolder) as InstalledBlueprint | undefined;
 }
 
 // --- Capability detection helpers (used by api/capabilities.ts) ---

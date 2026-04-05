@@ -22,6 +22,7 @@ import type { ActiveSession, AuthUser, Capabilities } from './api/types.js';
 import { getOrCreateJwtSecret, parseCookieToken, verifyJwt } from './auth.js';
 import { getUserById, getUserGroups, hasAnyUsers } from './db.js';
 import { logger } from './logger.js';
+import { triggerPoll } from './task-scheduler.js';
 import type { ProgressEvent } from './container-runner.js';
 
 // --- SSE client tracking ---
@@ -403,6 +404,7 @@ export function startWebUI(
     onSkillInstallComplete: (jobId, success) =>
       notifyWsSkillInstall(jobId, '', success ? 'completed' : 'failed'),
     resumeGateApproval: deps.resumeGateApproval,
+    triggerSchedulerPoll: triggerPoll,
   };
 
   const server = createServer((req, res) => {

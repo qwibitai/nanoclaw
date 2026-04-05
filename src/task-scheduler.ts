@@ -340,6 +340,8 @@ async function runTask(
 }
 
 let schedulerRunning = false;
+let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+let schedulerLoop: (() => Promise<void>) | null = null;
 
 export function startSchedulerLoop(deps: SchedulerDependencies): void {
   if (schedulerRunning) {
@@ -390,10 +392,25 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       logger.error({ err }, 'Error in scheduler loop');
     }
 
-    setTimeout(loop, SCHEDULER_POLL_INTERVAL);
+    pendingTimeout = setTimeout(loop, SCHEDULER_POLL_INTERVAL);
   };
 
+  schedulerLoop = loop;
   loop();
+}
+
+/**
+ * Immediately trigger a scheduler poll, clearing any pending timeout.
+ * Used by Workshop on-demand runs to reduce execution latency.
+ * Safe to call before the scheduler is started (no-op).
+ */
+export function triggerPoll(): void {
+  if (!schedulerLoop) return;
+  if (pendingTimeout) {
+    clearTimeout(pendingTimeout);
+    pendingTimeout = null;
+  }
+  schedulerLoop();
 }
 
 /** @internal - for tests only. */
