@@ -422,7 +422,11 @@ async function runQuery(
   // グローバルメモリ（CLAUDE.md）を追加のシステムコンテキストとしてロード（全グループで共有）
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  const resolvedGroupType = containerInput.groupType ?? 'chat';
+  const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
+  const rawGroupType = containerInput.groupType ?? 'chat';
+  const resolvedGroupType = allowedGroupTypes.has(rawGroupType)
+    ? rawGroupType
+    : 'chat';
   const isPrivileged =
     resolvedGroupType === 'main' || resolvedGroupType === 'override';
   if (!isPrivileged && fs.existsSync(globalClaudeMdPath)) {

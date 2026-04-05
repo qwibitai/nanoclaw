@@ -162,7 +162,12 @@ function buildVolumeMounts(
     !Array.isArray(settingsContent.env)
       ? (settingsContent.env as Record<string, unknown>)
       : {};
-  settingsContent.env = { ...defaultSettingsEnv, ...existingEnv };
+  const sanitizedExistingEnv: Record<string, string> = Object.fromEntries(
+    Object.entries(existingEnv).filter(
+      (e): e is [string, string] => typeof e[1] === 'string',
+    ),
+  );
+  settingsContent.env = { ...defaultSettingsEnv, ...sanitizedExistingEnv };
   // permissions を groupType に基づいて常に同期する
   // （既存環境のアップグレードや groupType 変更時も反映されるようにするため）
   const allowedTools = getDefaultAllowedTools(groupType);

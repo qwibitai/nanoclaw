@@ -446,10 +446,14 @@ export async function processTaskIpc(
           logger.warn({ sourceGroup }, 'override type cannot be set via IPC');
           break;
         }
-        const parsedGroupType = data.group_type
+        const hasGroupType = Object.prototype.hasOwnProperty.call(
+          data,
+          'group_type',
+        );
+        const parsedGroupType = hasGroupType
           ? parseIpcGroupType(data.group_type)
           : null;
-        if (data.group_type && !parsedGroupType) {
+        if (hasGroupType && !parsedGroupType) {
           logger.warn(
             { sourceGroup, group_type: data.group_type },
             'Invalid group_type in register_group request',
