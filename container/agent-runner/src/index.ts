@@ -504,8 +504,10 @@ async function runQuery(
     }
 
     // 工具调用进度输出 — 让宿主机能显示进度卡片
-    if (message.type === 'assistant' && 'content' in message) {
-      const content = (message as { content?: Array<{ type: string; name?: string; input?: unknown }> }).content;
+    if (message.type === 'assistant') {
+      const msg = message as Record<string, unknown>;
+      const content = msg.content as Array<{ type: string; name?: string; input?: unknown }> | undefined;
+      log(`[assistant] keys=${Object.keys(msg).join(',')}, hasContent=${!!content}, contentLen=${Array.isArray(content) ? content.length : 'N/A'}, contentTypes=${Array.isArray(content) ? content.map(b => b.type).join(',') : 'N/A'}`);
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === 'tool_use' && block.name) {

@@ -176,20 +176,31 @@ export class FeishuChannel implements Channel {
       return;
     }
 
-    // ---- 正式回复：删除进度卡片 ----
+    // ---- 正式回复：进度卡片标题改为「✅ 已完成」----
     const progressEntry = this.progressCards.get(jid);
     if (progressEntry) {
       this.progressCards.delete(jid);
       try {
-        await this.client.im.message.delete({
+        await this.client.im.message.patch({
           path: { message_id: progressEntry.messageId },
+          data: {
+            content: JSON.stringify({
+              elements: [
+                { tag: 'markdown', content: progressEntry.steps.join('\n') },
+              ],
+              header: {
+                template: 'green',
+                title: { tag: 'plain_text', content: '✅ 已完成' },
+              },
+            }),
+          },
         });
         logger.debug(
           { jid, messageId: progressEntry.messageId },
-          '飞书进度卡片已删除',
+          '飞书进度卡片已标记完成',
         );
       } catch (err) {
-        logger.debug({ err }, '飞书进度卡片删除失败（非致命）');
+        logger.debug({ err }, '飞书进度卡片更新失败（非致命）');
       }
     }
 
