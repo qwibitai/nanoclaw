@@ -50,7 +50,10 @@ export type { AgentLiteInstance } from './instance.js';
 
 export class AgentLite {
   private _started = false;
-  private _instances = new Map<string, InstanceType<typeof import('./instance.js').AgentLiteInstance>>();
+  private _instances = new Map<
+    string,
+    InstanceType<typeof import('./instance.js').AgentLiteInstance>
+  >();
   private _instanceModule: typeof import('./instance.js') | null = null;
   private _options: AgentLiteOptions;
 
@@ -90,7 +93,10 @@ export class AgentLite {
       throw new Error(`Instance "${name}" already exists`);
     }
 
-    const instance = new this._instanceModule.AgentLiteInstance(name, this._options);
+    const instance = new this._instanceModule.AgentLiteInstance(
+      name,
+      this._options,
+    );
     this._instances.set(name, instance);
     return instance;
   }

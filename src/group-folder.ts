@@ -39,10 +39,7 @@ export function resolveGroupFolderPath(
   return groupPath;
 }
 
-export function resolveGroupIpcPath(
-  folder: string,
-  dataDir?: string,
-): string {
+export function resolveGroupIpcPath(folder: string, dataDir?: string): string {
   assertValidGroupFolder(folder);
   const ipcBaseDir = path.resolve(dataDir ?? DATA_DIR, 'ipc');
   const ipcPath = path.resolve(ipcBaseDir, folder);

@@ -351,9 +351,7 @@ export async function runContainerAgent(
     input.dataDir,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const instancePrefix = input.instanceName
-    ? `${input.instanceName}-`
-    : '';
+  const instancePrefix = input.instanceName ? `${input.instanceName}-` : '';
   const containerName = `agentlite-${instancePrefix}${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain

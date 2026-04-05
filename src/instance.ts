@@ -91,7 +91,10 @@ export class AgentLiteInstance {
 
   // Pre-registered groups and channel factories (before run())
   private _preGroups = new Map<string, RegisteredGroup>();
-  private _preChannelFactories: Array<{ name: string; factory: ChannelFactory }> = [];
+  private _preChannelFactories: Array<{
+    name: string;
+    factory: ChannelFactory;
+  }> = [];
 
   private _parentOptions: AgentLiteOptions;
 
@@ -167,13 +170,19 @@ export class AgentLiteInstance {
 
     const channel = factory(opts);
     if (!channel) {
-      logger.warn({ channel: name, instance: this.name }, 'Factory returned null, skipping');
+      logger.warn(
+        { channel: name, instance: this.name },
+        'Factory returned null, skipping',
+      );
       return false;
     }
 
     this.channels.push(channel);
     await channel.connect();
-    logger.info({ channel: channel.name, instance: this.name }, 'Channel registered');
+    logger.info(
+      { channel: channel.name, instance: this.name },
+      'Channel registered',
+    );
     return true;
   }
 
@@ -181,7 +190,8 @@ export class AgentLiteInstance {
     model?: { credentials?: () => Promise<Record<string, string>> };
     channelHandler?: (builtin: ChannelHandler) => ChannelHandler;
   }): Promise<void> {
-    if (this._started) throw new Error(`Instance "${this.name}" already running`);
+    if (this._started)
+      throw new Error(`Instance "${this.name}" already running`);
     this._started = true;
 
     this.copyGroupTemplates();
@@ -216,7 +226,8 @@ export class AgentLiteInstance {
     restoreRemoteControl();
 
     // Store channel handler customizer
-    this._channelHandlerCustomizer = options?.channelHandler ?? this._parentOptions.channelHandler;
+    this._channelHandlerCustomizer =
+      options?.channelHandler ?? this._parentOptions.channelHandler;
 
     // Connect pre-registered channel factories
     for (const { name, factory } of this._preChannelFactories) {
@@ -225,9 +236,15 @@ export class AgentLiteInstance {
     this._preChannelFactories = [];
 
     if (this.channels.length > 0) {
-      logger.info({ count: this.channels.length, instance: this.name }, 'Initial channels connected');
+      logger.info(
+        { count: this.channels.length, instance: this.name },
+        'Initial channels connected',
+      );
     } else {
-      logger.info({ instance: this.name }, 'No initial channels — waiting for dynamic registration');
+      logger.info(
+        { instance: this.name },
+        'No initial channels — waiting for dynamic registration',
+      );
     }
 
     this.startSubsystems();
@@ -256,9 +273,7 @@ export class AgentLiteInstance {
   }
 
   /** @internal - exported for testing */
-  _setRegisteredGroups(
-    groups: Record<string, RegisteredGroup>,
-  ): void {
+  _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
     this._registeredGroups = groups;
   }
 
@@ -270,7 +285,9 @@ export class AgentLiteInstance {
         const { OneCLI } = await import('@onecli-sh/sdk');
         this._onecli = new OneCLI({ url: ONECLI_URL });
       } catch {
-        logger.debug('OneCLI SDK not installed — credential gateway unavailable');
+        logger.debug(
+          'OneCLI SDK not installed — credential gateway unavailable',
+        );
         return null;
       }
     }
@@ -311,14 +328,20 @@ export class AgentLiteInstance {
     this.sessions = getAllSessions();
     this._registeredGroups = getAllRegisteredGroups();
     logger.info(
-      { groupCount: Object.keys(this._registeredGroups).length, instance: this.name },
+      {
+        groupCount: Object.keys(this._registeredGroups).length,
+        instance: this.name,
+      },
       'State loaded',
     );
   }
 
   private saveState(): void {
     setRouterState('last_timestamp', this.lastTimestamp);
-    setRouterState('last_agent_timestamp', JSON.stringify(this.lastAgentTimestamp));
+    setRouterState(
+      'last_agent_timestamp',
+      JSON.stringify(this.lastAgentTimestamp),
+    );
   }
 
   private internalRegisterGroup(jid: string, group: RegisteredGroup): void {
@@ -392,14 +415,21 @@ export class AgentLiteInstance {
       onMessage: (chatJid: string, msg: NewMessage) => {
         // Remote control commands — intercept before storage
         const trimmed = msg.content.trim();
-        if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+        if (
+          trimmed === '/remote-control' ||
+          trimmed === '/remote-control-end'
+        ) {
           this.handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
             logger.error({ err, chatJid }, 'Remote control command error'),
           );
           return;
         }
 
-        if (!msg.is_from_me && !msg.is_bot_message && this._registeredGroups[chatJid]) {
+        if (
+          !msg.is_from_me &&
+          !msg.is_bot_message &&
+          this._registeredGroups[chatJid]
+        ) {
           const cfg = loadSenderAllowlist();
           if (
             shouldDropMessage(chatJid, cfg) &&
@@ -481,7 +511,11 @@ export class AgentLiteInstance {
     this.saveState();
 
     logger.info(
-      { group: group.name, messageCount: missedMessages.length, instance: this.name },
+      {
+        group: group.name,
+        messageCount: missedMessages.length,
+        instance: this.name,
+      },
       'Processing messages',
     );
 
@@ -502,29 +536,39 @@ export class AgentLiteInstance {
     let hadError = false;
     let outputSentToUser = false;
 
-    const output = await this.runAgent(group, prompt, chatJid, async (result) => {
-      if (result.result) {
-        const raw =
-          typeof result.result === 'string'
-            ? result.result
-            : JSON.stringify(result.result);
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-        if (text) {
-          await channel.sendMessage(chatJid, text);
-          outputSentToUser = true;
+    const output = await this.runAgent(
+      group,
+      prompt,
+      chatJid,
+      async (result) => {
+        if (result.result) {
+          const raw =
+            typeof result.result === 'string'
+              ? result.result
+              : JSON.stringify(result.result);
+          const text = raw
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+          logger.info(
+            { group: group.name },
+            `Agent output: ${raw.length} chars`,
+          );
+          if (text) {
+            await channel.sendMessage(chatJid, text);
+            outputSentToUser = true;
+          }
+          resetIdleTimer();
         }
-        resetIdleTimer();
-      }
 
-      if (result.status === 'success') {
-        this.queue.notifyIdle(chatJid);
-      }
+        if (result.status === 'success') {
+          this.queue.notifyIdle(chatJid);
+        }
 
-      if (result.status === 'error') {
-        hadError = true;
-      }
-    });
+        if (result.status === 'error') {
+          hadError = true;
+        }
+      },
+    );
 
     await channel.setTyping?.(chatJid, false);
     if (idleTimer) clearTimeout(idleTimer);
@@ -634,12 +678,18 @@ export class AgentLiteInstance {
 
   private async startMessageLoop(): Promise<void> {
     if (this.messageLoopRunning) {
-      logger.debug({ instance: this.name }, 'Message loop already running, skipping');
+      logger.debug(
+        { instance: this.name },
+        'Message loop already running, skipping',
+      );
       return;
     }
     this.messageLoopRunning = true;
 
-    logger.info({ instance: this.name }, `AgentLite running (trigger: @${ASSISTANT_NAME})`);
+    logger.info(
+      { instance: this.name },
+      `AgentLite running (trigger: @${ASSISTANT_NAME})`,
+    );
 
     while (true) {
       try {
@@ -651,7 +701,10 @@ export class AgentLiteInstance {
         );
 
         if (messages.length > 0) {
-          logger.info({ count: messages.length, instance: this.name }, 'New messages');
+          logger.info(
+            { count: messages.length, instance: this.name },
+            'New messages',
+          );
 
           this.lastTimestamp = newTimestamp;
           this.saveState();
@@ -672,12 +725,16 @@ export class AgentLiteInstance {
 
             const channel = findChannel(this.channels, chatJid);
             if (!channel) {
-              logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+              logger.warn(
+                { chatJid },
+                'No channel owns JID, skipping messages',
+              );
               continue;
             }
 
             const isMainGroup = group.isMain === true;
-            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+            const needsTrigger =
+              !isMainGroup && group.requiresTrigger !== false;
 
             if (needsTrigger) {
               const allowlistCfg = loadSenderAllowlist();
@@ -710,7 +767,10 @@ export class AgentLiteInstance {
               channel
                 .setTyping?.(chatJid, true)
                 ?.catch((err) =>
-                  logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
                 );
             } else {
               this.queue.enqueueMessageCheck(chatJid);
@@ -730,7 +790,11 @@ export class AgentLiteInstance {
       const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
       if (pending.length > 0) {
         logger.info(
-          { group: group.name, pendingCount: pending.length, instance: this.name },
+          {
+            group: group.name,
+            pendingCount: pending.length,
+            instance: this.name,
+          },
           'Recovery: found unprocessed messages',
         );
         this.queue.enqueueMessageCheck(chatJid);
@@ -785,14 +849,24 @@ export class AgentLiteInstance {
           next_run: t.next_run,
         }));
         for (const group of Object.values(this._registeredGroups)) {
-          writeTasksSnapshot(group.folder, group.isMain === true, taskRows, this.dataDir);
+          writeTasksSnapshot(
+            group.folder,
+            group.isMain === true,
+            taskRows,
+            this.dataDir,
+          );
         }
       },
     });
-    this.queue.setProcessMessagesFn((chatJid) => this.processGroupMessages(chatJid));
+    this.queue.setProcessMessagesFn((chatJid) =>
+      this.processGroupMessages(chatJid),
+    );
     this.recoverPendingMessages();
     this.startMessageLoop().catch((err) => {
-      logger.fatal({ err, instance: this.name }, 'Message loop crashed unexpectedly');
+      logger.fatal(
+        { err, instance: this.name },
+        'Message loop crashed unexpectedly',
+      );
       throw err;
     });
   }
