@@ -208,7 +208,7 @@ export async function processTaskIpc(
 
         const targetFolder = targetGroupEntry.folder;
 
-        // 認可: メイン以外のグループは自分自身に対してのみスケジュール可能
+        // 認可: 特権以外（chat/thread）のグループは自分自身に対してのみスケジュール可能
         if (!isPrivileged && targetFolder !== sourceGroup) {
           logger.warn(
             { sourceGroup, targetFolder },
