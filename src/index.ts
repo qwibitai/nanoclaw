@@ -661,18 +661,21 @@ async function startMessageLoop(): Promise<void> {
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          // Skip if cursor already covers these messages (event-driven
+          // onMessage handler already piped them to the active container).
+          if (allPending.length === 0) continue;
+          const formatted = formatMessages(allPending, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
-              { chatJid, count: messagesToSend.length },
+              { chatJid, count: allPending.length },
               'Piped messages to active container',
             );
-            // Don't advance cursor here — the agent process may crash before
-            // reading the piped input. Cursor is advanced via advanceCursorFn
-            // on successful container exit.
+            // Advance cursor so the next poll/event doesn't re-send these messages.
+            // advanceCursorFn on container exit also advances as a safety net.
+            lastAgentTimestamp[chatJid] =
+              allPending[allPending.length - 1].timestamp;
+            saveState();
 
             // Show typing indicator while the container processes the piped message
             // Skip if agent sent a response recently — prevents typing reappearing on Telegram
@@ -909,6 +912,10 @@ async function main(): Promise<void> {
       if (allPending.length > 0) {
         const formatted = formatMessages(allPending, TIMEZONE);
         if (queue.sendMessage(chatJid, formatted)) {
+          // Advance cursor so the next pipe doesn't re-send these messages
+          lastAgentTimestamp[chatJid] =
+            allPending[allPending.length - 1].timestamp;
+          saveState();
           if (!queue.isRecentResponseSent(chatJid)) {
             ch.setTyping?.(chatJid, true)?.catch(() => {});
           }
