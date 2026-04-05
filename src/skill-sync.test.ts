@@ -25,7 +25,9 @@ describe('syncSkills', () => {
     syncSkills(src, dst);
 
     expect(fs.existsSync(path.join(dst, 'my-skill', 'SKILL.md'))).toBe(true);
-    expect(fs.readFileSync(path.join(dst, 'my-skill', 'SKILL.md'), 'utf8')).toBe('# My Skill');
+    expect(
+      fs.readFileSync(path.join(dst, 'my-skill', 'SKILL.md'), 'utf8'),
+    ).toBe('# My Skill');
   });
 
   it('skips files at the root (only copies directories)', () => {
@@ -61,7 +63,9 @@ describe('syncSkills', () => {
     syncSkills(builtIn, dst);
     syncSkills(group, dst);
 
-    expect(fs.readFileSync(path.join(dst, 'status', 'SKILL.md'), 'utf8')).toBe('group override');
+    expect(fs.readFileSync(path.join(dst, 'status', 'SKILL.md'), 'utf8')).toBe(
+      'group override',
+    );
   });
 
   it('copies multiple skill directories', () => {

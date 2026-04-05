@@ -77,6 +77,17 @@ Standard Markdown works: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 ---
 
+## Task Model Selection
+
+Each task can use a different AI model. Set the `model` parameter when creating or updating a task:
+
+- `schedule_task` — set `model` (e.g. `"haiku"`, `"opus"`, `"sonnet"`, or a full model ID like `"claude-haiku-4-20250514"`)
+- `update_task` — set `model` to change it, or `"default"` to clear and use the group/global default
+
+Model resolution priority: task model → group model → global default.
+
+Use cheaper models (haiku) for simple recurring checks and heartbeats. Use stronger models (opus) for complex analysis tasks.
+
 ## Task Scripts
 
 For any recurring task, use `schedule_task`. Frequent agent invocations — especially multiple times a day — consume API credits and can risk account restrictions. If a simple check can determine whether action is needed, add a `script` — it runs first, and the agent is only called when the check passes. This keeps invocations to a minimum.

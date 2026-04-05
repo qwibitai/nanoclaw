@@ -473,6 +473,7 @@ async function runAgent(
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       silent: t.silent,
+      model: t.model,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -924,6 +925,7 @@ async function main(): Promise<void> {
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
         silent: t.silent,
+        model: t.model,
         status: t.status,
         next_run: t.next_run,
       }));

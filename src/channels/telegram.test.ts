@@ -28,10 +28,49 @@ vi.mock('../config.js', () => ({
   })),
 }));
 
-// Mock db functions used by /model command
+// Mock db functions used by /model and /tasks commands
 vi.mock('../db.js', () => ({
   setGroupModel: vi.fn(),
   deleteSession: vi.fn(),
+  getTaskById: vi.fn((id: string) => {
+    if (id === 'task-123') {
+      return {
+        id: 'task-123',
+        group_folder: 'test-group',
+        chat_jid: 'tg:100200300',
+        prompt: 'heartbeat',
+        schedule_type: 'cron',
+        schedule_value: '0 */4 * * *',
+        model: null,
+        status: 'active',
+      };
+    }
+    return undefined;
+  }),
+  getTasksForGroup: vi.fn((folder: string) => {
+    if (folder === 'test-group') {
+      return [
+        {
+          id: 'task-123',
+          prompt: 'heartbeat flow',
+          schedule_type: 'cron',
+          schedule_value: '0 */4 * * *',
+          model: 'claude-haiku-4-20250514',
+          status: 'active',
+        },
+        {
+          id: 'task-456',
+          prompt: 'weekly report',
+          schedule_type: 'once',
+          schedule_value: '2026-04-10T09:00',
+          model: null,
+          status: 'active',
+        },
+      ];
+    }
+    return [];
+  }),
+  updateTask: vi.fn(),
 }));
 
 // Mock logger
@@ -100,7 +139,12 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import { setGroupModel, deleteSession } from '../db.js';
+import {
+  setGroupModel,
+  deleteSession,
+  getTaskById,
+  updateTask,
+} from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -272,6 +316,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().commandHandlers.has('status')).toBe(true);
       expect(currentBot().commandHandlers.has('compact')).toBe(true);
       expect(currentBot().commandHandlers.has('clear')).toBe(true);
+      expect(currentBot().commandHandlers.has('tasks')).toBe(true);
       expect(currentBot().api.setMyCommands).toHaveBeenCalledWith([
         { command: 'chatid', description: 'Show chat ID for registration' },
         { command: 'ping', description: 'Check bot status' },
@@ -279,6 +324,7 @@ describe('TelegramChannel', () => {
         { command: 'status', description: 'Show system status' },
         { command: 'compact', description: 'Compact conversation context' },
         { command: 'clear', description: 'Clear conversation session' },
+        { command: 'tasks', description: 'List scheduled tasks' },
       ]);
       // Clears stale commands from scoped menus (e.g. leftover OpenClaw commands)
       expect(currentBot().api.deleteMyCommands).toHaveBeenCalledTimes(3);
@@ -1582,6 +1628,154 @@ describe('TelegramChannel', () => {
 
       expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
       expect(opts.clearSession).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- /tasks command ---
+
+  describe('/tasks command', () => {
+    it('lists tasks for registered group', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('tasks')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain('task-123');
+      expect(replyText).toContain('task-456');
+      expect(replyText).toContain('claude-haiku-4-20250514');
+      expect(replyText).toContain('(default)');
+    });
+
+    it('shows empty message when no tasks', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'tg:100200300': {
+            name: 'Empty Group',
+            folder: 'empty-group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('tasks')!;
+      const ctx = { chat: { id: 100200300 }, reply: vi.fn() };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('No tasks for this group.');
+    });
+
+    it('replies error for unregistered chat', async () => {
+      const opts = createTestOpts({ registeredGroups: vi.fn(() => ({})) });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('tasks')!;
+      const ctx = { chat: { id: 999 }, reply: vi.fn() };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
+    });
+  });
+
+  // --- /model task subcommand ---
+
+  describe('/model task subcommand', () => {
+    it('sets model for a task', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model task task-123 haiku' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(updateTask).toHaveBeenCalledWith('task-123', {
+        model: 'claude-haiku-4-20250514',
+      });
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('claude-haiku-4-20250514'),
+        expect.any(Object),
+      );
+    });
+
+    it('resets task model', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model task task-123 reset' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(updateTask).toHaveBeenCalledWith('task-123', { model: null });
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('reset to default'),
+        expect.any(Object),
+      );
+    });
+
+    it('shows error for unknown task', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model task nonexistent haiku' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('not found'),
+        expect.any(Object),
+      );
+      expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('shows usage when args missing', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('model')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/model task' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Usage'),
+        expect.any(Object),
+      );
     });
   });
 

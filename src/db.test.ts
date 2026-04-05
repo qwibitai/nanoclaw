@@ -746,3 +746,83 @@ describe('registered group model', () => {
     expect(group!.model).toBe('claude-sonnet-4-20250514');
   });
 });
+
+// --- ScheduledTask model round-trip ---
+
+describe('scheduled task model', () => {
+  it('persists model through create/get round-trip', () => {
+    createTask({
+      id: 'task-model-1',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'test prompt',
+      schedule_type: 'cron',
+      schedule_value: '0 * * * *',
+      context_mode: 'isolated',
+      model: 'claude-haiku-4-20250514',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-model-1');
+    expect(task).toBeDefined();
+    expect(task!.model).toBe('claude-haiku-4-20250514');
+  });
+
+  it('returns null/undefined model when not set', () => {
+    createTask({
+      id: 'task-model-2',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'no model',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-model-2');
+    expect(task!.model).toBeFalsy();
+  });
+
+  it('updateTask changes model', () => {
+    createTask({
+      id: 'task-model-3',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'updatable',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      model: 'claude-sonnet-4-20250514',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-model-3', { model: 'claude-opus-4-20250514' });
+    expect(getTaskById('task-model-3')!.model).toBe('claude-opus-4-20250514');
+  });
+
+  it('updateTask clears model with null', () => {
+    createTask({
+      id: 'task-model-4',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'clearable',
+      schedule_type: 'cron',
+      schedule_value: '0 9 * * *',
+      context_mode: 'isolated',
+      model: 'claude-haiku-4-20250514',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-model-4', { model: null });
+    expect(getTaskById('task-model-4')!.model).toBeFalsy();
+  });
+});

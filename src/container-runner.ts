@@ -696,6 +696,7 @@ export function writeTasksSnapshot(
     schedule_type: string;
     schedule_value: string;
     silent?: boolean | number;
+    model?: string | null;
     status: string;
     next_run: string | null;
   }>,

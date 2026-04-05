@@ -124,6 +124,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .describe(
         'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.',
       ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'Model to use for this task (e.g. "haiku", "opus", or full model ID). Resolved via model aliases. If omitted, uses group or global default.',
+      ),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -197,6 +203,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
+      model: args.model || undefined,
       targetJid,
       createdBy: groupFolder,
       timestamp: new Date().toISOString(),
@@ -377,6 +384,12 @@ server.tool(
       .describe(
         'New script for the task. Set to empty string to remove the script.',
       ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'Change the model for this task (e.g. "haiku", "opus"). Use "default" to clear and fall back to group/global model.',
+      ),
   },
   async (args) => {
     // Validate schedule_value if provided
@@ -424,6 +437,7 @@ server.tool(
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
     if (args.script !== undefined) data.script = args.script;
+    if (args.model !== undefined) data.model = args.model;
     if (args.schedule_type !== undefined)
       data.schedule_type = args.schedule_type;
     if (args.schedule_value !== undefined)

@@ -11,7 +11,13 @@ import {
   loadModelAliases,
   TRIGGER_PATTERN,
 } from '../config.js';
-import { setGroupModel, deleteSession } from '../db.js';
+import {
+  setGroupModel,
+  deleteSession,
+  getTaskById,
+  getTasksForGroup,
+  updateTask,
+} from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -171,6 +177,35 @@ export class TelegramChannel implements Channel {
         return;
       }
 
+      if (args[0] === 'task') {
+        if (args.length < 3) {
+          ctx.reply(
+            'Usage: `/model task <task-id> <model|reset>`',
+            { parse_mode: 'Markdown' },
+          );
+          return;
+        }
+        const taskId = args[1];
+        const task = getTaskById(taskId);
+        if (!task) {
+          ctx.reply(`Task \`${taskId}\` not found.`, { parse_mode: 'Markdown' });
+          return;
+        }
+        if (args[2] === 'reset') {
+          updateTask(taskId, { model: null });
+          ctx.reply(`Task \`${taskId}\` model reset to default.`, {
+            parse_mode: 'Markdown',
+          });
+        } else {
+          const resolved = resolveModelAlias(args[2]);
+          updateTask(taskId, { model: resolved });
+          ctx.reply(`Task \`${taskId}\` model set to \`${resolved}\`.`, {
+            parse_mode: 'Markdown',
+          });
+        }
+        return;
+      }
+
       if (args[0] === 'reset') {
         setGroupModel(chatJid, null);
         group.model = undefined;
@@ -263,6 +298,36 @@ export class TelegramChannel implements Channel {
       ctx.reply('Session cleared.');
     });
 
+    // Command to list scheduled tasks for this group
+    this.bot.command('tasks', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const tasks = getTasksForGroup(group.folder);
+      if (tasks.length === 0) {
+        ctx.reply('No tasks for this group.');
+        return;
+      }
+
+      const lines = tasks.map((t) => {
+        const model = t.model ? `\`${t.model}\`` : '(default)';
+        const prompt =
+          t.prompt.length > 60 ? t.prompt.slice(0, 57) + '...' : t.prompt;
+        return [
+          `\`${t.id}\` | ${t.schedule_type} ${t.schedule_value} | ${t.status}`,
+          `  Model: ${model}`,
+          `  Prompt: ${prompt}`,
+        ].join('\n');
+      });
+
+      ctx.reply(lines.join('\n\n'), { parse_mode: 'Markdown' });
+    });
+
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
     const TELEGRAM_BOT_COMMANDS = new Set([
@@ -272,6 +337,7 @@ export class TelegramChannel implements Channel {
       'status',
       'compact',
       'clear',
+      'tasks',
     ]);
 
     this.bot.on('message:text', async (ctx) => {
@@ -489,6 +555,7 @@ export class TelegramChannel implements Channel {
       { command: 'status', description: 'Show system status' },
       { command: 'compact', description: 'Compact conversation context' },
       { command: 'clear', description: 'Clear conversation session' },
+      { command: 'tasks', description: 'List scheduled tasks' },
     ];
     const scopesToClear = [
       { type: 'all_private_chats' as const },

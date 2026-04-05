@@ -150,6 +150,7 @@ async function runTask(
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       silent: t.silent,
+      model: t.model,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -190,7 +191,7 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
-        model: group.model || DEFAULT_MODEL,
+        model: task.model || group.model || DEFAULT_MODEL,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
