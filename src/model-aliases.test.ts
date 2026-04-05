@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
-import { loadModelAliases, resolveModelAlias, MODEL_ALIASES_PATH } from './config.js';
+import {
+  loadModelAliases,
+  resolveModelAlias,
+  MODEL_ALIASES_PATH,
+} from './config.js';
 
 describe('loadModelAliases', () => {
   beforeEach(() => {

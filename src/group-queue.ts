@@ -360,6 +360,10 @@ export class GroupQueue {
     }
   }
 
+  getStatus(): { activeContainers: number } {
+    return { activeContainers: this.activeCount };
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

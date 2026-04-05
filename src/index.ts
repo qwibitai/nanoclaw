@@ -80,6 +80,10 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+const lastUsage: Record<
+  string,
+  { inputTokens: number; outputTokens: number; numTurns: number }
+> = {};
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -483,12 +487,15 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session ID and usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (output.usage) {
+          lastUsage[group.folder] = output.usage;
         }
         await onOutput(output);
       }
@@ -515,6 +522,9 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+    if (output.usage) {
+      lastUsage[group.folder] = output.usage;
     }
 
     if (output.status === 'error') {
@@ -834,6 +844,18 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    getStatus: () => ({
+      activeContainers: queue.getStatus().activeContainers,
+      uptimeSeconds: Math.floor(process.uptime()),
+      sessions: { ...sessions },
+      lastUsage: { ...lastUsage },
+    }),
+    sendIpcMessage: (chatJid: string, text: string) =>
+      queue.sendMessage(chatJid, text),
+    clearSession: (groupFolder: string) => {
+      delete sessions[groupFolder];
+      deleteSession(groupFolder);
+    },
   };
 
   // Create and connect all registered channels.

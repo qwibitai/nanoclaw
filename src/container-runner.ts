@@ -53,6 +53,8 @@ export interface ContainerOutput {
   error?: string;
   /** true = streaming chunk (not final); omit or false = final result */
   partial?: boolean;
+  /** Cumulative token usage from the SDK result message */
+  usage?: { inputTokens: number; outputTokens: number; numTurns: number };
 }
 
 interface VolumeMount {

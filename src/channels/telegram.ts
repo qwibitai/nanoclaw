@@ -15,7 +15,7 @@ import { setGroupModel, deleteSession } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts } from './registry.js';
+import { registerChannel, ChannelOpts, StatusInfo } from './registry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -27,6 +27,9 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  getStatus: () => StatusInfo;
+  sendIpcMessage: (chatJid: string, text: string) => boolean;
+  clearSession: (groupFolder: string) => void;
 }
 
 /**
@@ -160,9 +163,7 @@ export class TelegramChannel implements Channel {
         const aliasEntries = Object.entries(aliases)
           .map(([alias, id]) => `  ${alias} → ${id}`)
           .join('\n');
-        const aliasBlock = aliasEntries
-          ? `\n\nAliases:\n${aliasEntries}`
-          : '';
+        const aliasBlock = aliasEntries ? `\n\nAliases:\n${aliasEntries}` : '';
         ctx.reply(
           `Model: \`${current}\`${group.model ? '' : ' (default)'}${aliasBlock}`,
           { parse_mode: 'Markdown' },
@@ -174,9 +175,12 @@ export class TelegramChannel implements Channel {
         setGroupModel(chatJid, null);
         group.model = undefined;
         deleteSession(group.folder);
-        ctx.reply(`Model reset to default (\`${DEFAULT_MODEL}\`). Session cleared.`, {
-          parse_mode: 'Markdown',
-        });
+        ctx.reply(
+          `Model reset to default (\`${DEFAULT_MODEL}\`). Session cleared.`,
+          {
+            parse_mode: 'Markdown',
+          },
+        );
         return;
       }
 
@@ -189,9 +193,86 @@ export class TelegramChannel implements Channel {
       });
     });
 
+    // Command to show system status
+    this.bot.command('status', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const status = this.opts.getStatus();
+      const model = group.model || DEFAULT_MODEL;
+      const sessionId = status.sessions[group.folder];
+      const usage = status.lastUsage[group.folder];
+
+      const hours = Math.floor(status.uptimeSeconds / 3600);
+      const minutes = Math.floor((status.uptimeSeconds % 3600) / 60);
+      const uptime = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+      const lines = [
+        `Status: Online`,
+        `Uptime: ${uptime}`,
+        `Active containers: ${status.activeContainers}`,
+        `Model: \`${model}\``,
+        `Session: ${sessionId ? `\`${sessionId.slice(0, 12)}...\`` : 'none'}`,
+      ];
+
+      if (usage) {
+        lines.push(
+          `Context: ~${usage.inputTokens.toLocaleString()} input tokens / ${usage.numTurns} turns`,
+        );
+      } else {
+        lines.push('Context: no usage data');
+      }
+
+      ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+    });
+
+    // Command to compact conversation context
+    this.bot.command('compact', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const sent = this.opts.sendIpcMessage(chatJid, '/compact');
+      if (sent) {
+        ctx.reply('Compact requested.');
+      } else {
+        ctx.reply('No active session to compact.');
+      }
+    });
+
+    // Command to clear conversation session
+    this.bot.command('clear', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      this.opts.clearSession(group.folder);
+      ctx.reply('Session cleared.');
+    });
+
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping', 'model']);
+    const TELEGRAM_BOT_COMMANDS = new Set([
+      'chatid',
+      'ping',
+      'model',
+      'status',
+      'compact',
+      'clear',
+    ]);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
@@ -405,6 +486,9 @@ export class TelegramChannel implements Channel {
       { command: 'chatid', description: 'Show chat ID for registration' },
       { command: 'ping', description: 'Check bot status' },
       { command: 'model', description: 'View or change the AI model' },
+      { command: 'status', description: 'Show system status' },
+      { command: 'compact', description: 'Compact conversation context' },
+      { command: 'clear', description: 'Clear conversation session' },
     ];
     const scopesToClear = [
       { type: 'all_private_chats' as const },

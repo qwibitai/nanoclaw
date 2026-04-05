@@ -119,6 +119,16 @@ function createTestOpts(
         added_at: '2024-01-01T00:00:00.000Z',
       },
     })),
+    getStatus: vi.fn(() => ({
+      activeContainers: 1,
+      uptimeSeconds: 9240,
+      sessions: { 'test-group': 'session-abc123-def456' },
+      lastUsage: {
+        'test-group': { inputTokens: 45200, outputTokens: 3100, numTurns: 12 },
+      },
+    })),
+    sendIpcMessage: vi.fn(() => true),
+    clearSession: vi.fn(),
     ...overrides,
   };
 }
@@ -259,10 +269,16 @@ describe('TelegramChannel', () => {
       expect(currentBot().commandHandlers.has('chatid')).toBe(true);
       expect(currentBot().commandHandlers.has('ping')).toBe(true);
       expect(currentBot().commandHandlers.has('model')).toBe(true);
+      expect(currentBot().commandHandlers.has('status')).toBe(true);
+      expect(currentBot().commandHandlers.has('compact')).toBe(true);
+      expect(currentBot().commandHandlers.has('clear')).toBe(true);
       expect(currentBot().api.setMyCommands).toHaveBeenCalledWith([
         { command: 'chatid', description: 'Show chat ID for registration' },
         { command: 'ping', description: 'Check bot status' },
         { command: 'model', description: 'View or change the AI model' },
+        { command: 'status', description: 'Show system status' },
+        { command: 'compact', description: 'Compact conversation context' },
+        { command: 'clear', description: 'Clear conversation session' },
       ]);
       // Clears stale commands from scoped menus (e.g. leftover OpenClaw commands)
       expect(currentBot().api.deleteMyCommands).toHaveBeenCalledTimes(3);
@@ -354,7 +370,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('skips bot commands (/chatid, /ping, /model) but passes other / messages through', async () => {
+    it('skips bot commands (/chatid, /ping, /model, /status, /compact, /clear) but passes other / messages through', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
@@ -1401,6 +1417,171 @@ describe('TelegramChannel', () => {
       await triggerTextMessage(ctx);
 
       expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- /status command ---
+
+  describe('/status command', () => {
+    it('shows system status with usage data', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('status')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain('Status: Online');
+      expect(replyText).toContain('2h 34m');
+      expect(replyText).toContain('Active containers: 1');
+      expect(replyText).toContain('45,200 input tokens');
+      expect(replyText).toContain('12 turns');
+      expect(replyText).toContain('session-abc1');
+    });
+
+    it('shows "no usage data" when no usage available', async () => {
+      const opts = createTestOpts({
+        getStatus: vi.fn(() => ({
+          activeContainers: 0,
+          uptimeSeconds: 120,
+          sessions: {},
+          lastUsage: {},
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('status')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      const replyText = ctx.reply.mock.calls[0][0];
+      expect(replyText).toContain('no usage data');
+      expect(replyText).toContain('Session: none');
+    });
+
+    it('replies error for unregistered chat', async () => {
+      const opts = createTestOpts({ registeredGroups: vi.fn(() => ({})) });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('status')!;
+      const ctx = { chat: { id: 999 }, reply: vi.fn() };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
+    });
+
+    it('/status is skipped by general message handler', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: '/status' });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- /compact command ---
+
+  describe('/compact command', () => {
+    it('sends compact via IPC when session is active', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('compact')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(opts.sendIpcMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        '/compact',
+      );
+      expect(ctx.reply).toHaveBeenCalledWith('Compact requested.');
+    });
+
+    it('shows error when no active session', async () => {
+      const opts = createTestOpts({
+        sendIpcMessage: vi.fn(() => false),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('compact')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('No active session to compact.');
+    });
+
+    it('replies error for unregistered chat', async () => {
+      const opts = createTestOpts({ registeredGroups: vi.fn(() => ({})) });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('compact')!;
+      const ctx = { chat: { id: 999 }, reply: vi.fn() };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
+    });
+  });
+
+  // --- /clear command ---
+
+  describe('/clear command', () => {
+    it('clears session for registered group', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('clear')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(opts.clearSession).toHaveBeenCalledWith('test-group');
+      expect(ctx.reply).toHaveBeenCalledWith('Session cleared.');
+    });
+
+    it('replies error for unregistered chat', async () => {
+      const opts = createTestOpts({ registeredGroups: vi.fn(() => ({})) });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('clear')!;
+      const ctx = { chat: { id: 999 }, reply: vi.fn() };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('This chat is not registered.');
+      expect(opts.clearSession).not.toHaveBeenCalled();
     });
   });
 

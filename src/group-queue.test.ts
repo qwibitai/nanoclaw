@@ -567,4 +567,24 @@ describe('GroupQueue', () => {
     expect(queue.isRecentResponseSent('group1@g.us')).toBe(true);
     expect(queue.isRecentResponseSent('group2@g.us')).toBe(false);
   });
+
+  // --- getStatus ---
+
+  it('getStatus returns 0 active containers initially', () => {
+    expect(queue.getStatus()).toEqual({ activeContainers: 0 });
+  });
+
+  it('getStatus reflects active container count', async () => {
+    queue.setProcessMessagesFn(async () => {
+      // Simulate long-running work
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+      return true;
+    });
+
+    queue.enqueueMessageCheck('group1@g.us');
+    // Let the processing start
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(queue.getStatus().activeContainers).toBe(1);
+  });
 });

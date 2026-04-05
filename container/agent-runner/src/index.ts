@@ -64,6 +64,8 @@ interface ContainerOutput {
   error?: string;
   /** true = streaming chunk (not final); omit or false = final result */
   partial?: boolean;
+  /** Cumulative token usage from the SDK result message */
+  usage?: { inputTokens: number; outputTokens: number; numTurns: number };
 }
 
 interface SessionEntry {
@@ -612,6 +614,17 @@ async function runQuery(
       resultCount++;
       const textResult =
         'result' in message ? (message as { result?: string }).result : null;
+      const resultMsg = message as {
+        usage?: { input_tokens: number; output_tokens: number };
+        num_turns?: number;
+      };
+      const usage = resultMsg.usage
+        ? {
+            inputTokens: resultMsg.usage.input_tokens,
+            outputTokens: resultMsg.usage.output_tokens,
+            numTurns: resultMsg.num_turns ?? 0,
+          }
+        : undefined;
       if (textResult && textResult === lastFinalText) {
         log(`Result #${resultCount}: SKIPPED (duplicate)`);
       } else {
@@ -623,6 +636,7 @@ async function runQuery(
           status: 'success',
           result: textResult || null,
           newSessionId,
+          usage,
         });
       }
     }

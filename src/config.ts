@@ -104,7 +104,9 @@ export const TIMEZONE = resolveConfigTimezone();
 
 // Default model for agent invocations (overridable per-group via DB)
 export const DEFAULT_MODEL =
-  process.env.DEFAULT_MODEL || envConfig.DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+  process.env.DEFAULT_MODEL ||
+  envConfig.DEFAULT_MODEL ||
+  'claude-sonnet-4-20250514';
 
 // Model alias config: maps short names (e.g. "opus") to full model IDs
 export const MODEL_ALIASES_PATH = path.join(
