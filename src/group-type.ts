@@ -1,3 +1,4 @@
+import { logger } from './logger.js';
 import type { GroupType, RegisteredGroup } from './types.js';
 
 export const VALID_GROUP_TYPES: ReadonlySet<string> = new Set([
@@ -12,9 +13,7 @@ export function resolveGroupType(group: RegisteredGroup): GroupType {
   const type = group.type;
   if (type == null) return 'chat';
   if (VALID_GROUP_TYPES.has(type)) return type as GroupType;
-  console.warn(
-    `[group-type] Invalid group.type "${String(type)}"; falling back to "chat".`,
-  );
+  logger.warn({ type }, 'Invalid group.type; falling back to "chat".');
   return 'chat';
 }
 

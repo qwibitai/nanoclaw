@@ -145,7 +145,10 @@ function buildVolumeMounts(
   let settingsContent: Record<string, unknown> = {};
   if (fs.existsSync(settingsFile)) {
     try {
-      settingsContent = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      const parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        settingsContent = parsed as Record<string, unknown>;
+      }
     } catch {
       // パース失敗時は空オブジェクトから始める（既存 env は失われるが壊れたファイルより安全）
     }
