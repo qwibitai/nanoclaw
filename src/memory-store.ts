@@ -112,31 +112,62 @@ export async function getMemoryBlock(
         ? recentMemoriesAllGroups(TOP_K)
         : recentMemories(groupFolder, TOP_K);
 
-    const embedding = await generateEmbedding(queryText);
-    let memories: Memory[];
-    if (embedding) {
-      try {
-        memories = crossGroup
-          ? searchMemoriesVecAllGroups(embedding, TOP_K)
-          : searchMemoriesVec(groupFolder, embedding, TOP_K);
-        if (memories.length === 0) {
+    if (crossGroup) {
+      // Cross-group search uses its own vec function; can't go through
+      // searchMemoriesSemantic which is single-group scoped.
+      const embedding = await generateEmbedding(queryText).catch(() => null);
+      let memories: Memory[];
+      if (embedding) {
+        try {
+          memories = searchMemoriesVecAllGroups(embedding, TOP_K);
+          if (memories.length === 0) memories = fetchRecent();
+        } catch (err) {
+          logger.warn({ err }, 'vec_memories search failed, falling back to recent');
           memories = fetchRecent();
         }
-      } catch (err) {
-        logger.warn(
-          { err },
-          'vec_memories search failed, falling back to recent',
-        );
+      } else {
         memories = fetchRecent();
       }
-    } else {
-      memories = fetchRecent();
+      return formatMemoryBlock(memories);
     }
+
+    const memories = await searchMemoriesSemantic(
+      groupFolder,
+      queryText,
+      TOP_K,
+      () => fetchRecent(),
+    );
     return formatMemoryBlock(memories);
   } catch (err) {
     logger.warn({ err, groupFolder }, 'Memory retrieval error — skipping');
     return '';
   }
+}
+
+/**
+ * Semantic memory search: embed the query, vector-search, fall back to a
+ * caller-provided fallback (keyword search or recent memories).
+ */
+export async function searchMemoriesSemantic(
+  groupFolder: string,
+  query: string,
+  limit: number,
+  fallback: (group: string, query: string, limit: number) => Memory[],
+): Promise<Memory[]> {
+  const embedding = await generateEmbedding(query).catch(() => null);
+  let results: Memory[] = [];
+  if (embedding) {
+    try {
+      results = searchMemoriesVec(groupFolder, embedding, limit);
+    } catch (err) {
+      logger.warn({ err }, 'vec_memories search failed, falling back to keyword');
+      results = fallback(groupFolder, query, limit);
+    }
+  }
+  if (results.length === 0) {
+    results = fallback(groupFolder, query, limit);
+  }
+  return results;
 }
 
 // Re-export DB query functions for IPC handlers

@@ -35,6 +35,7 @@ import {
   listMemories,
   saveMemory,
   searchMemoriesKeyword,
+  searchMemoriesSemantic,
   updateMemory,
 } from './memory-store.js';
 import { runCommitDigestForGroup } from './commit-digest.js';
@@ -1473,15 +1474,15 @@ function processQueryIpc(
         });
         break;
       }
-      const results = searchMemoriesKeyword(
-        sourceGroup,
-        data.query,
-        data.limit ?? 6,
-      );
-      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
-        status: 'ok',
-        memories: results,
-      });
+      const limit = data.limit ?? 6;
+      const query: string = data.query;
+      searchMemoriesSemantic(sourceGroup, query, limit, searchMemoriesKeyword)
+        .then((memories) => {
+          writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+            status: 'ok',
+            memories,
+          });
+        });
       break;
     }
 
