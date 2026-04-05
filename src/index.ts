@@ -914,7 +914,7 @@ async function main(): Promise<void> {
           const ch = findChannel(channels, chatJid);
           ch?.sendMessage(
             chatJid,
-            '✅ 对话已清除，下次消息将开始新 session。记忆保留。',
+            '对话已清除，下次消息将开始新 session。记忆保留。',
           ).catch((err) =>
             logger.error({ err }, 'Failed to send /clear reply'),
           );
@@ -926,7 +926,10 @@ async function main(): Promise<void> {
       if (trimmed === '/account' || trimmed.startsWith('/account ')) {
         const arg = trimmed.slice('/account'.length).trim();
         const ch = findChannel(channels, chatJid);
-        logger.info({ chatJid, arg, hasCh: !!ch, trimmed }, '/account 命令匹配');
+        logger.info(
+          { chatJid, arg, hasCh: !!ch, trimmed },
+          '/account 命令匹配',
+        );
         try {
           if (arg === 'auto on') {
             setRotateEnabled(true);
@@ -988,9 +991,12 @@ async function main(): Promise<void> {
             });
             const reply =
               lines.length > 0
-                ? `📋 可用账号：\n${lines.join('\n')}\n\n🔄 自动轮换: ${autoStatus}\n\n切换：/account <name>\n开关：/account auto on|off`
+                ? `可用账号：\n${lines.join('\n')}\n\n自动轮换: ${autoStatus}\n\n切换：/account <name>\n开关：/account auto on|off`
                 : '没有配置任何账号。用 onecli secrets create 添加。';
-            logger.info({ chatJid, replyLen: reply.length }, '/account 准备发送回复');
+            logger.info(
+              { chatJid, replyLen: reply.length },
+              '/account 准备发送回复',
+            );
             ch?.sendMessage(chatJid, reply)
               .then(() => logger.info('/account 回复已发送'))
               .catch((err) => logger.error({ err }, '/account reply failed'));
