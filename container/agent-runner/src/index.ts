@@ -641,7 +641,6 @@ async function runQuery(
       // text appears in the SDK result, so don't accumulate across turns.
       if (event.type === 'message_start') {
         streamingTextBuffer = '';
-        completedTurnsText = '';
       }
     }
 
@@ -658,8 +657,10 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const resultMsg = message as unknown as SDKResultMessage;
-      const textResult =
+      const sdkText =
         'result' in resultMsg ? (resultMsg as { result?: string }).result ?? null : null;
+      // Use accumulated text from all turns — SDK result only has the last turn
+      const textResult = completedTurnsText || sdkText;
       const usage = resultMsg.usage
         ? {
             inputTokens: resultMsg.usage.input_tokens,

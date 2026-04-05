@@ -523,7 +523,6 @@ describe('agent-runner streaming buffer', () => {
         }
         if (event.type === 'message_start') {
           streamingTextBuffer = '';
-          completedTurnsText = '';
         }
       }
 
@@ -540,10 +539,8 @@ describe('agent-runner streaming buffer', () => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let writeOutputMock: any;
-  const writeOutput = (output: {
-    result: string;
-    partial: boolean;
-  }) => writeOutputMock(output);
+  const writeOutput = (output: { result: string; partial: boolean }) =>
+    writeOutputMock(output);
 
   beforeEach(() => {
     writeOutputMock = vi.fn();
@@ -581,7 +578,7 @@ describe('agent-runner streaming buffer', () => {
     });
   });
 
-  it('resets buffer on message_start', () => {
+  it('resets streamingTextBuffer on message_start but keeps completedTurnsText', () => {
     simulateAgentRunner(
       [
         {
@@ -591,6 +588,7 @@ describe('agent-runner streaming buffer', () => {
             delta: { type: 'text_delta', text: 'First turn' },
           },
         },
+        { type: 'assistant' },
         {
           type: 'stream_event',
           event: { type: 'message_start' },
@@ -607,14 +605,14 @@ describe('agent-runner streaming buffer', () => {
     );
 
     expect(writeOutputMock).toHaveBeenCalledTimes(2);
-    // Second emission should NOT include "First turn"
+    // Second emission should include accumulated text from all turns
     expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
-      result: 'Second turn',
+      result: 'First turn\n\nSecond turn',
       partial: true,
     });
   });
 
-  it('does not leak early turn text after message_start', () => {
+  it('accumulates text across turns (assistant → message_start → new text)', () => {
     // Realistic SDK event order: assistant (turn complete) → message_start (new turn)
     simulateAgentRunner(
       [
@@ -642,9 +640,9 @@ describe('agent-runner streaming buffer', () => {
     );
 
     expect(writeOutputMock).toHaveBeenCalledTimes(2);
-    // Turn 2 should NOT include Turn 1 text — it was cleared by message_start
+    // Turn 2 should include Turn 1 text — accumulated across turns
     expect(writeOutputMock).toHaveBeenNthCalledWith(2, {
-      result: 'Turn 2 text',
+      result: 'Turn 1 text\n\nTurn 2 text',
       partial: true,
     });
   });
@@ -745,7 +743,8 @@ describe('agent-runner streaming buffer', () => {
         }
 
         if (message.type === 'result') {
-          const textResult = (message as ResultMessage).result ?? null;
+          const sdkText = (message as ResultMessage).result ?? null;
+          const textResult = completedTurnsText || sdkText;
           if (textResult && textResult !== lastFinalText) {
             lastFinalText = textResult;
             onOutput({ result: textResult, partial: false });
@@ -835,7 +834,8 @@ describe('agent-runner streaming buffer', () => {
         }
 
         if (message.type === 'result') {
-          const textResult = (message as ResultMessage).result ?? null;
+          const sdkText = (message as ResultMessage).result ?? null;
+          const textResult = completedTurnsText || sdkText;
           if (textResult && textResult !== lastFinalText) {
             lastFinalText = textResult;
             onOutput({ result: textResult, partial: false });
@@ -1014,7 +1014,6 @@ describe('agent-runner streaming buffer', () => {
           }
           if (event.type === 'message_start') {
             streamingTextBuffer = '';
-            completedTurnsText = '';
           }
         }
 
@@ -1029,7 +1028,8 @@ describe('agent-runner streaming buffer', () => {
 
         if (message.type === 'result') {
           const rm = message as ResultMessage;
-          const textResult = rm.result ?? null;
+          const sdkText = rm.result ?? null;
+          const textResult = completedTurnsText || sdkText;
           const usage = rm.usage
             ? {
                 inputTokens: rm.usage.input_tokens,
@@ -1121,7 +1121,6 @@ describe('agent-runner streaming buffer', () => {
           }
           if (event.type === 'message_start') {
             streamingTextBuffer = '';
-            completedTurnsText = '';
           }
         }
         if (message.type === 'assistant') {
@@ -1133,7 +1132,8 @@ describe('agent-runner streaming buffer', () => {
           streamingTextBuffer = '';
         }
         if (message.type === 'result') {
-          const textResult = (message as ResultMessage).result ?? null;
+          const sdkText = (message as ResultMessage).result ?? null;
+          const textResult = completedTurnsText || sdkText;
           if (textResult && textResult !== lastFinalText) {
             lastFinalText = textResult;
             onOutput({ result: textResult, partial: false });
