@@ -148,6 +148,7 @@ async function runTask(
       script: t.script,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      silent: t.silent,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -194,8 +195,10 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result to user unless task is silent
+          if (!task.silent) {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

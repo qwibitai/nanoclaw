@@ -69,6 +69,7 @@ export interface ScheduledTask {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
+  silent?: boolean | number;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
 }
@@ -95,6 +96,19 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: streaming support — send initial chunk and return messageId for editing.
+  sendStreamMessage?(
+    jid: string,
+    text: string,
+    threadId?: string,
+  ): Promise<number | null>;
+  // Optional: edit an existing message in-place (for streaming updates).
+  editMessage?(
+    jid: string,
+    messageId: number,
+    text: string,
+    threadId?: string,
+  ): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

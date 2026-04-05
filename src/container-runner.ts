@@ -50,6 +50,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** true = streaming chunk (not final); omit or false = final result */
+  partial?: boolean;
 }
 
 interface VolumeMount {
@@ -689,6 +691,7 @@ export function writeTasksSnapshot(
     script?: string | null;
     schedule_type: string;
     schedule_value: string;
+    silent?: boolean | number;
     status: string;
     next_run: string | null;
   }>,

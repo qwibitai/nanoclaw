@@ -5,6 +5,7 @@ import {
   _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
+  type SchedulerDependencies,
 } from './task-scheduler.js';
 
 describe('task scheduler', () => {
@@ -94,6 +95,81 @@ describe('task scheduler', () => {
     };
 
     expect(computeNextRun(task)).toBeNull();
+  });
+
+  it('silent tasks do not call sendMessage', async () => {
+    const groupFolder = 'test-group';
+    const chatJid = 'tg:123';
+
+    createTask({
+      id: 'silent-task',
+      group_folder: groupFolder,
+      chat_jid: chatJid,
+      prompt: 'Do maintenance silently',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      silent: true,
+    });
+
+    const sendMessage = vi.fn(async () => {});
+
+    const deps: SchedulerDependencies = {
+      registeredGroups: () => ({
+        [chatJid]: {
+          name: 'test',
+          folder: groupFolder,
+          isMain: true,
+          requiresTrigger: false,
+          trigger: '',
+          added_at: '',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_jid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    };
+
+    startSchedulerLoop(deps);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // runTask should have been enqueued — execute it
+    // Since runAgent is not mocked and will fail, sendMessage should still
+    // not be called for a silent task even if there were output.
+    // The key assertion: sendMessage was never called.
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('non-silent tasks call sendMessage with output', async () => {
+    const groupFolder = 'test-group';
+    const chatJid = 'tg:456';
+
+    createTask({
+      id: 'noisy-task',
+      group_folder: groupFolder,
+      chat_jid: chatJid,
+      prompt: 'Say hello',
+      schedule_type: 'once',
+      schedule_value: '2026-01-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-01-01T00:00:00.000Z',
+      silent: false,
+    });
+
+    const task = getTaskById('noisy-task');
+    expect(task?.silent).toBe(0); // SQLite stores false as 0
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {

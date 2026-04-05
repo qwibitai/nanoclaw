@@ -281,12 +281,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  // Keep typing indicator alive (Telegram clears it after ~5s)
+  const typingKeepalive = setInterval(() => {
+    channel.setTyping?.(chatJid, true).catch(() => {});
+  }, 4000);
+
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
-    if (result.result) {
+    // Skip partial (streaming) chunks — typing keepalive already signals activity
+    if (result.result && !result.partial) {
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -302,7 +308,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'success') {
+    if (result.status === 'success' && !result.partial) {
       queue.notifyIdle(chatJid);
     }
 
@@ -311,6 +317,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  clearInterval(typingKeepalive);
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
@@ -358,6 +365,7 @@ async function runAgent(
       script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      silent: t.silent,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -745,6 +753,7 @@ async function main(): Promise<void> {
         script: t.script || undefined,
         schedule_type: t.schedule_type,
         schedule_value: t.schedule_value,
+        silent: t.silent,
         status: t.status,
         next_run: t.next_run,
       }));
