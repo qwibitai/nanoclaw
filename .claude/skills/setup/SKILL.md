@@ -70,6 +70,22 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
+### OpenClaw Migration Detection
+
+Check for an existing OpenClaw installation:
+
+```bash
+ls -d ~/.openclaw 2>/dev/null || ls -d ~/.clawdbot 2>/dev/null
+```
+
+If a directory is found, AskUserQuestion:
+
+1. **Migrate now** — "Import identity, credentials, and settings from OpenClaw before continuing setup."
+2. **Fresh start** — "Skip migration and set up NanoClaw from scratch."
+3. **Migrate later** — "Continue setup now, run `/migrate-from-openclaw` anytime later."
+
+If "Migrate now": invoke `/migrate-from-openclaw`, then return here and continue at step 2a (Timezone).
+
 ## 2a. Timezone
 
 Run `npx tsx setup/index.ts --step timezone` and parse the status block.
@@ -200,7 +216,28 @@ Ask them to let you know when done.
 
 ### 4b. Apple Container → Native Credential Proxy
 
-Apple Container is not compatible with OneCLI. Invoke `/use-native-credential-proxy` to set up the built-in credential proxy instead. That skill handles credential collection, `.env` configuration, and verification.
+Apple Container is not compatible with OneCLI. The credential proxy code is already included in the apple-container branch — do NOT invoke `/use-native-credential-proxy` (it would conflict with already-applied code).
+
+Instead, just configure the credentials in `.env`:
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. Run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+For subscription: tell the user to run `claude setup-token` in another terminal. Stop and wait for the user to confirm they have completed this step successfully before proceeding.
+
+Once confirmed, add the token to `.env`:
+```bash
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+For API key: add to `.env`:
+```bash
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
+
+Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
 
 ## 5. Set Up Channels
 
