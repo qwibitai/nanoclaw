@@ -541,6 +541,39 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
       // Reset streaming accumulator for each new assistant turn
       streamAccumulated = '';
+
+      // Emit tool_use blocks as tooling signals so the user sees what Claude is doing
+      const assistantContent = (
+        message as {
+          message?: {
+            content?: Array<{
+              type: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            }>;
+          };
+        }
+      ).message?.content;
+      if (assistantContent) {
+        for (const block of assistantContent) {
+          if (block.type === 'tool_use' && block.name) {
+            const argSummary = block.input?.command
+              ? String(block.input.command).slice(0, 100)
+              : block.input?.file_path || block.input?.path
+                ? String(block.input.file_path || block.input.path)
+                : block.input?.pattern
+                  ? String(block.input.pattern)
+                  : JSON.stringify(block.input || {}).slice(0, 100);
+            writeOutput({
+              status: 'success',
+              result: `⚙️ ${block.name}: ${argSummary}`,
+              isPartial: true,
+              isTooling: true,
+              unifiedSessionId: unifiedSession.id,
+            });
+          }
+        }
+      }
     }
 
     // Stream partial text to user as it arrives from Claude
