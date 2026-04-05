@@ -101,6 +101,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import fs from 'fs';
 import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
@@ -275,5 +276,148 @@ describe('container-runner volume mounts', () => {
 
     // Verify the mount is writable (not read-only — no :ro suffix)
     expect(mountArg).not.toMatch(/:ro$/);
+  });
+});
+
+/** Collect all data written to a PassThrough stream and return it as a string. */
+function collectStream(stream: PassThrough): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString()));
+  });
+}
+
+describe('container-runner .mcp.json merge', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readFileSync).mockReturnValue('');
+  });
+
+  it('.mcp.json servers appear in container input mcpServers', async () => {
+    const mcpJson = {
+      mcpServers: {
+        perplexity: {
+          command: 'npx',
+          args: ['-y', '@perplexity-ai/mcp-server'],
+          env: { PERPLEXITY_API_KEY: '${PERPLEXITY_API_KEY}' },
+        },
+      },
+    };
+
+    // Make existsSync return true for .mcp.json path
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      if (String(p).endsWith('.mcp.json')) return true;
+      return false;
+    });
+
+    // Make readFileSync return .mcp.json content
+    vi.mocked(fs.readFileSync).mockImplementation((p, _encoding?) => {
+      if (String(p).endsWith('.mcp.json')) return JSON.stringify(mcpJson);
+      return '';
+    });
+
+    const stdinPromise = collectStream(fakeProc.stdin);
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const stdinData = await stdinPromise;
+    const containerInput = JSON.parse(stdinData);
+
+    expect(containerInput.mcpServers).toBeDefined();
+    expect(containerInput.mcpServers.perplexity).toEqual({
+      command: 'npx',
+      args: ['-y', '@perplexity-ai/mcp-server'],
+      env: { PERPLEXITY_API_KEY: '${PERPLEXITY_API_KEY}' },
+    });
+  });
+
+  it('per-group servers override global servers with the same name', async () => {
+    const mcpJson = {
+      mcpServers: {
+        perplexity: {
+          command: 'npx',
+          args: ['-y', '@perplexity-ai/mcp-server'],
+          env: { PERPLEXITY_API_KEY: '${PERPLEXITY_API_KEY}' },
+        },
+        'shared-server': {
+          command: 'global-cmd',
+          args: ['--global'],
+        },
+      },
+    };
+
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      if (String(p).endsWith('.mcp.json')) return true;
+      return false;
+    });
+
+    vi.mocked(fs.readFileSync).mockImplementation((p, _encoding?) => {
+      if (String(p).endsWith('.mcp.json')) return JSON.stringify(mcpJson);
+      return '';
+    });
+
+    // Group config overrides 'shared-server'
+    const groupWithMcp: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: {
+        mcpServers: {
+          'shared-server': {
+            command: 'group-cmd',
+            args: ['--group'],
+          },
+        },
+      },
+    };
+
+    const stdinPromise = collectStream(fakeProc.stdin);
+
+    const resultPromise = runContainerAgent(
+      groupWithMcp,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const stdinData = await stdinPromise;
+    const containerInput = JSON.parse(stdinData);
+
+    expect(containerInput.mcpServers).toBeDefined();
+
+    // Global server preserved
+    expect(containerInput.mcpServers.perplexity).toEqual({
+      command: 'npx',
+      args: ['-y', '@perplexity-ai/mcp-server'],
+      env: { PERPLEXITY_API_KEY: '${PERPLEXITY_API_KEY}' },
+    });
+
+    // Per-group override wins
+    expect(containerInput.mcpServers['shared-server']).toEqual({
+      command: 'group-cmd',
+      args: ['--group'],
+    });
   });
 });
