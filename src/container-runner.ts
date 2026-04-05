@@ -6,11 +6,15 @@ import { ChildProcess, execFileSync, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, GROUPS_DIR, IDLE_TIMEOUT, TIMEZONE } from './config.js';
+import os from 'os';
+import { DATA_DIR, GROUPS_DIR, IDLE_TIMEOUT, ONECLI_URL, TIMEZONE } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
+import { OneCLI } from '@onecli-sh/sdk';
 import { RegisteredGroup } from './types.js';
+
+const onecli = new OneCLI({ url: ONECLI_URL });
 import {
   getLastRotateAt,
   getRotateEnabled,
@@ -266,20 +270,57 @@ export function parseEnvOutput(output: string): Record<string, string> {
   return result;
 }
 
-/** 获取 API key — process.env → .env（OneCLI 不暴露 secret 明文） */
-async function getCredentials(): Promise<{
-  anthropicApiKey?: string;
-  ghToken?: string;
-  sshAuthSock?: string;
-}> {
-  let anthropicApiKey: string | undefined;
-  anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-  anthropicApiKey ??= readEnvFile(['ANTHROPIC_API_KEY']).ANTHROPIC_API_KEY;
+// OneCLI CA 证书临时文件路径
+const ONECLI_CA_PATH = path.join(os.tmpdir(), 'onecli-gateway-ca.pem');
+const ONECLI_COMBINED_CA_PATH = path.join(os.tmpdir(), 'onecli-combined-ca.pem');
 
+/**
+ * 获取 OneCLI 代理配置（HTTPS_PROXY + CA 证书），用于凭证注入。
+ * OneCLI 网关拦截到 api.anthropic.com 的请求并注入 API key。
+ * local 模式下把 host.docker.internal 替换为 localhost。
+ */
+async function getOneCLIProxyEnv(): Promise<Record<string, string>> {
+  try {
+    const config = await onecli.getContainerConfig();
+    if (!config?.env) return {};
+
+    // 写 CA 证书到临时文件
+    if (config.caCertificate) {
+      fs.writeFileSync(ONECLI_CA_PATH, config.caCertificate);
+      // combined CA = system CA + OneCLI CA (for git etc.)
+      const systemCa = process.env.SSL_CERT_FILE
+        ? fs.readFileSync(process.env.SSL_CERT_FILE, 'utf-8')
+        : '';
+      fs.writeFileSync(
+        ONECLI_COMBINED_CA_PATH,
+        systemCa ? `${systemCa}\n${config.caCertificate}` : config.caCertificate,
+      );
+    }
+
+    // 把 host.docker.internal 替换为 localhost（local 模式不走 Docker 网络）
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(config.env)) {
+      env[key] = value.replace(/host\.docker\.internal/g, 'localhost');
+    }
+    // 修正 CA 证书路径（容器内路径 → 宿主临时文件）
+    env.NODE_EXTRA_CA_CERTS = ONECLI_CA_PATH;
+    env.SSL_CERT_FILE = ONECLI_COMBINED_CA_PATH;
+
+    logger.info('OneCLI proxy config applied for local agent');
+    return env;
+  } catch (err) {
+    logger.warn({ err }, 'OneCLI proxy not available — agent will have no credentials');
+    return {};
+  }
+}
+
+/** 获取非代理凭证（GitHub token、SSH 等） */
+function getStaticCredentials(): Record<string, string | undefined> {
   return {
-    anthropicApiKey,
-    ghToken: process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
-    sshAuthSock: process.env.SSH_AUTH_SOCK,
+    GH_TOKEN: process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
+    GITHUB_TOKEN: process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
+    SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK,
+    SSH_AGENT_PID: process.env.SSH_AGENT_PID,
   };
 }
 
@@ -333,7 +374,9 @@ async function buildLocalEnv(
   input: ContainerInput,
   groupSessionsDir: string,
 ): Promise<NodeJS.ProcessEnv> {
-  const creds = await getCredentials();
+  // OneCLI 代理注入（HTTPS_PROXY + CA 证书）
+  const proxyEnv = await getOneCLIProxyEnv();
+  const staticCreds = getStaticCredentials();
 
   return {
     HOME: process.env.HOME,
@@ -343,16 +386,13 @@ async function buildLocalEnv(
     TZ: process.env.TZ || TIMEZONE,
 
     // SSH（纯透传）
-    SSH_AUTH_SOCK: creds.sshAuthSock,
-    SSH_AGENT_PID: process.env.SSH_AGENT_PID,
+    ...staticCreds,
+
+    // OneCLI 代理（HTTPS_PROXY, NODE_EXTRA_CA_CERTS 等）
+    ...proxyEnv,
 
     // Claude SDK
-    ANTHROPIC_API_KEY: creds.anthropicApiKey,
     CLAUDE_CONFIG_DIR: groupSessionsDir,
-
-    // GitHub
-    GH_TOKEN: creds.ghToken,
-    GITHUB_TOKEN: creds.ghToken,
 
     // 飞书
     FEISHU_TENANT_TOKEN: await getFeishuToken(input.chatJid),

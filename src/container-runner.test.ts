@@ -57,6 +57,23 @@ vi.mock('./group-folder.js', () => ({
     `/tmp/nanoclaw-test-data/ipc/${folder}`,
 }));
 
+// Mock OneCLI SDK
+vi.mock('@onecli-sh/sdk', () => ({
+  OneCLI: class {
+    getContainerConfig = vi.fn().mockResolvedValue({
+      env: {
+        HTTPS_PROXY: 'http://x:token@localhost:10255',
+        NODE_EXTRA_CA_CERTS: '/tmp/onecli-gateway-ca.pem',
+        NODE_USE_ENV_PROXY: '1',
+        CLAUDE_CODE_OAUTH_TOKEN: 'placeholder',
+      },
+      caCertificate: 'mock-cert',
+    });
+    applyContainerConfig = vi.fn().mockResolvedValue(true);
+    ensureAgent = vi.fn().mockResolvedValue({ id: 'test', created: false });
+  },
+}));
+
 // Mock db
 vi.mock('./db.js', () => ({
   getRotateEnabled: vi.fn(() => false),
