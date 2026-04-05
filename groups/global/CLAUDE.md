@@ -40,12 +40,15 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+You have multiple memory sources — use them in this order:
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+1. **Curated memory** (`memories.md`): Durable facts, decisions, preferences, and key context extracted from past conversations. Check this first — it's compact and high-signal. Update it when you learn something worth remembering long-term.
+
+2. **Conversation archive** (`conversations/`): Searchable history of past conversations, archived before context compaction. Use `Grep` to search when you need exact details or quotes that aren't in `memories.md`.
+
+3. **Structured files**: Create files for structured data (e.g., `customers.md`, `preferences.md`). Split files larger than 500 lines into folders. Keep an index for files you create.
+
+When you learn something important — a decision, preference, key fact, or context that should persist — append it to `memories.md` with today's date. Keep entries concise (one line per fact). This file is loaded every session, so brevity matters.
 
 ## Message Formatting
 
