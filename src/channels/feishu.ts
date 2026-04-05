@@ -172,8 +172,19 @@ export class FeishuChannel implements Channel {
       return;
     }
 
-    // ---- 正式回复：清除进度卡片 ----
-    this.progressCards.delete(jid);
+    // ---- 正式回复：删除进度卡片 ----
+    const progressEntry = this.progressCards.get(jid);
+    if (progressEntry) {
+      this.progressCards.delete(jid);
+      try {
+        await this.client.im.message.delete({
+          path: { message_id: progressEntry.messageId },
+        });
+        logger.debug({ jid, messageId: progressEntry.messageId }, '飞书进度卡片已删除');
+      } catch (err) {
+        logger.debug({ err }, '飞书进度卡片删除失败（非致命）');
+      }
+    }
 
     try {
       await this.sendPlainOrCard(chatId, text);
