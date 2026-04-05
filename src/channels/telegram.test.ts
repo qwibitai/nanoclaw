@@ -99,6 +99,12 @@ type Handler = (...args: any[]) => any;
 const botRef = vi.hoisted(() => ({ current: null as any }));
 
 vi.mock('grammy', () => ({
+  InputFile: class MockInputFile {
+    path: string;
+    constructor(path: string) {
+      this.path = path;
+    }
+  },
   Bot: class MockBot {
     token: string;
     commandHandlers = new Map<string, Handler>();
@@ -107,6 +113,7 @@ vi.mock('grammy', () => ({
 
     api = {
       sendMessage: vi.fn().mockResolvedValue(undefined),
+      sendPhoto: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       setMyCommands: vi.fn().mockResolvedValue(undefined),
@@ -142,11 +149,7 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import {
-  setGroupModel,
-  deleteSession,
-  updateTask,
-} from '../db.js';
+import { setGroupModel, deleteSession, updateTask } from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -1107,6 +1110,78 @@ describe('TelegramChannel', () => {
 
       // Don't connect — bot is null
       await channel.sendMessage('tg:100200300', 'No bot');
+
+      // No error, no API call
+    });
+  });
+
+  // --- sendPhoto ---
+
+  describe('sendPhoto', () => {
+    it('sends photo with URL directly', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendPhoto(
+        'tg:100200300',
+        'https://example.com/photo.jpg',
+        'A photo',
+      );
+
+      expect(currentBot().api.sendPhoto).toHaveBeenCalledWith(
+        '100200300',
+        'https://example.com/photo.jpg',
+        { caption: 'A photo', parse_mode: 'Markdown' },
+      );
+    });
+
+    it('wraps local file path with InputFile', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendPhoto('tg:100200300', '/tmp/photo.jpg');
+
+      const call = currentBot().api.sendPhoto.mock.calls[0];
+      expect(call[0]).toBe('100200300');
+      // Second arg should be a MockInputFile instance with the path
+      expect(call[1]).toEqual(
+        expect.objectContaining({ path: '/tmp/photo.jpg' }),
+      );
+      // No caption — options should be empty
+      expect(call[2]).toEqual({});
+    });
+
+    it('falls back to text on sendPhoto failure', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.sendPhoto.mockRejectedValueOnce(
+        new Error('Upload failed'),
+      );
+
+      await channel.sendPhoto(
+        'tg:100200300',
+        'https://example.com/big.jpg',
+        'Fallback caption',
+      );
+
+      // Should have fallen back to sendMessage with caption
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        'Fallback caption',
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    it('does nothing when bot is not initialized', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+
+      // Don't connect — bot is null
+      await channel.sendPhoto('tg:100200300', 'https://example.com/photo.jpg');
 
       // No error, no API call
     });

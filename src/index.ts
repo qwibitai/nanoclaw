@@ -56,7 +56,13 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  extractImages,
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  sendImages,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -368,15 +374,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // --- Final result ---
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
 
+        const { cleanText, images } = extractImages(text);
+
         if (streamMessageId !== null) {
           // Streaming was active — accumulated text already displayed.
           clearInterval(typingKeepalive);
-          if (text && text !== lastSentText) {
+          if (cleanText && cleanText !== lastSentText) {
             try {
-              if (!streamingFailed && text.length <= 4096) {
-                await channel.editMessage!(chatJid, streamMessageId, text);
+              if (!streamingFailed && cleanText.length <= 4096) {
+                await channel.editMessage!(
+                  chatJid,
+                  streamMessageId,
+                  cleanText,
+                );
               } else {
-                await channel.sendMessage(chatJid, text);
+                await channel.sendMessage(chatJid, cleanText);
               }
               // eslint-disable-next-line no-catch-all/no-catch-all
             } catch (err) {
@@ -384,29 +396,31 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
                 { group: group.name, error: err },
                 'Failed to send final message, queuing for retry',
               );
-              enqueueOutbox(chatJid, text);
+              enqueueOutbox(chatJid, cleanText);
             }
           }
+          await sendImages(channel, chatJid, images);
           outputSentToUser = true;
           queue.markResponseSent(chatJid);
-          lastSentText = text;
-        } else if (text && text !== lastSentText) {
+          lastSentText = cleanText;
+        } else if (cleanText && cleanText !== lastSentText) {
           // No streaming — use normal send
           clearInterval(typingKeepalive);
           try {
-            await channel.sendMessage(chatJid, text);
+            await channel.sendMessage(chatJid, cleanText);
             // eslint-disable-next-line no-catch-all/no-catch-all
           } catch (err) {
             logger.error(
               { group: group.name, error: err },
               'Failed to send message, queuing for retry',
             );
-            enqueueOutbox(chatJid, text);
+            enqueueOutbox(chatJid, cleanText);
           }
+          await sendImages(channel, chatJid, images);
           outputSentToUser = true;
           queue.markResponseSent(chatJid);
-          lastSentText = text;
-        } else if (text && text === lastSentText) {
+          lastSentText = cleanText;
+        } else if (cleanText && cleanText === lastSentText) {
           logger.warn({ group: group.name }, 'Duplicate output suppressed');
         }
         // Reset streaming state for next IPC query — the onOutput callback
@@ -916,14 +930,19 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (!text) return;
+      const { cleanText, images } = extractImages(text);
+      if (cleanText) await channel.sendMessage(jid, cleanText);
+      await sendImages(channel, jid, images);
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      const { cleanText, images } = extractImages(text);
+      if (cleanText) await channel.sendMessage(jid, cleanText);
+      await sendImages(channel, jid, images);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

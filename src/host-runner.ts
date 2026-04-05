@@ -50,7 +50,7 @@ function findClaudePath(): string {
   }
   try {
     cachedClaudePath = execSync('which claude', { encoding: 'utf8' }).trim();
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     cachedClaudePath = '';
   }
@@ -143,7 +143,7 @@ function setupDirectories(
         // Remove stale symlink
         if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
         fs.symlinkSync(hostPath, linkPath);
-      // eslint-disable-next-line no-catch-all/no-catch-all
+        // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.warn(
           { hostPath, linkPath, err },
@@ -259,7 +259,7 @@ export async function runHostAgent(
           PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
         },
       });
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ err }, 'Failed to compile agent-runner');
       return {
@@ -350,7 +350,7 @@ export async function runHostAgent(
                 ),
               ),
             );
-          // eslint-disable-next-line no-catch-all/no-catch-all
+            // eslint-disable-next-line no-catch-all/no-catch-all
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -502,7 +502,7 @@ export async function runHostAgent(
           'Host agent completed',
         );
         resolve(output);
-      // eslint-disable-next-line no-catch-all/no-catch-all
+        // eslint-disable-next-line no-catch-all/no-catch-all
       } catch (err) {
         logger.error(
           { group: group.name, stdout, stderr, error: err },

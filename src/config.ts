@@ -119,7 +119,7 @@ export const MODEL_ALIASES_PATH = path.join(
 export function loadModelAliases(): Record<string, string> {
   try {
     return JSON.parse(fs.readFileSync(MODEL_ALIASES_PATH, 'utf-8'));
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     return {};
   }

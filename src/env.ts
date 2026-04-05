@@ -13,7 +13,7 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     logger.debug({ err }, '.env file not found, using defaults');
     return {};

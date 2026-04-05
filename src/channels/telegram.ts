@@ -2,7 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 
 import {
   ASSISTANT_NAME,
@@ -54,7 +54,7 @@ async function sendTelegramMessage(
       ...options,
       parse_mode: 'Markdown',
     });
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
@@ -119,7 +119,7 @@ export class TelegramChannel implements Channel {
 
       logger.info({ fileId, dest: destPath }, 'Telegram file downloaded');
       return `/workspace/group/attachments/${finalName}`;
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ fileId, err }, 'Failed to download Telegram file');
       return null;
@@ -629,9 +629,31 @@ export class TelegramChannel implements Channel {
         { jid, length: text.length, threadId },
         'Telegram message sent',
       );
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async sendPhoto(jid: string, photo: string, caption?: string): Promise<void> {
+    if (!this.bot) return;
+    const numericId = jid.replace(/^tg:/, '');
+    try {
+      const input = photo.startsWith('http') ? photo : new InputFile(photo);
+      const options: Record<string, unknown> = {};
+      if (caption) {
+        options.caption = caption;
+        options.parse_mode = 'Markdown';
+      }
+      await this.bot.api.sendPhoto(numericId, input, options);
+      logger.info({ jid, photo }, 'Telegram photo sent');
+      // eslint-disable-next-line no-catch-all/no-catch-all
+    } catch (err) {
+      logger.error({ jid, photo, err }, 'Failed to send Telegram photo');
+      // Fallback: send caption as text
+      if (caption) {
+        await this.sendMessage(jid, caption);
+      }
     }
   }
 
@@ -656,7 +678,7 @@ export class TelegramChannel implements Channel {
     try {
       const numericId = jid.replace(/^tg:/, '');
       await this.bot.api.sendChatAction(numericId, 'typing');
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
@@ -678,7 +700,7 @@ export class TelegramChannel implements Channel {
         parse_mode: 'Markdown',
       });
       return msg.message_id;
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch {
       // Markdown failed — fall back to plain text
       try {
@@ -703,7 +725,7 @@ export class TelegramChannel implements Channel {
       await this.bot.api.editMessageText(numericId, messageId, text, {
         parse_mode: 'Markdown',
       });
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (err) {
       // Telegram throws 400 when content is unchanged — that's fine
       if (String(err).includes('message is not modified')) return;

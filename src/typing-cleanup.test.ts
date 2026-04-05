@@ -98,7 +98,7 @@ describe('typing keepalive cleanup', () => {
         idleTimer = null;
         cleaned = true;
       }
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch {
       // error expected
     }
@@ -144,7 +144,7 @@ describe('typing keepalive cleanup', () => {
         // .catch() prevents masking
         await setTyping('chat1', false).catch(() => {});
       }
-    // eslint-disable-next-line no-catch-all/no-catch-all
+      // eslint-disable-next-line no-catch-all/no-catch-all
     } catch (e) {
       caughtError = e as Error;
     }

@@ -30,7 +30,7 @@ function saveState(session: RemoteControlSession): void {
 function clearState(): void {
   try {
     fs.unlinkSync(STATE_FILE);
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     // ignore
   }
@@ -40,7 +40,7 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     return false;
   }
@@ -54,7 +54,7 @@ export function restoreRemoteControl(): void {
   let data: string;
   try {
     data = fs.readFileSync(STATE_FILE, 'utf-8');
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     return;
   }
@@ -70,7 +70,7 @@ export function restoreRemoteControl(): void {
     } else {
       clearState();
     }
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     clearState();
   }
@@ -118,11 +118,14 @@ export async function startRemoteControl(
       stdio: ['pipe', stdoutFd, stderrFd],
       detached: true,
     });
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch (err: unknown) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
-    return { ok: false, error: `Failed to start: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      ok: false,
+      error: `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   // Auto-accept the "Enable Remote Control?" prompt
@@ -158,7 +161,7 @@ export async function startRemoteControl(
       let content = '';
       try {
         content = fs.readFileSync(STDOUT_FILE, 'utf-8');
-      // eslint-disable-next-line no-catch-all/no-catch-all
+        // eslint-disable-next-line no-catch-all/no-catch-all
       } catch {
         // File might not have content yet
       }
@@ -187,11 +190,11 @@ export async function startRemoteControl(
       if (Date.now() - startTime >= URL_TIMEOUT_MS) {
         try {
           process.kill(-pid, 'SIGTERM');
-        // eslint-disable-next-line no-catch-all/no-catch-all
+          // eslint-disable-next-line no-catch-all/no-catch-all
         } catch {
           try {
             process.kill(pid, 'SIGTERM');
-          // eslint-disable-next-line no-catch-all/no-catch-all
+            // eslint-disable-next-line no-catch-all/no-catch-all
           } catch {
             // already dead
           }
@@ -222,7 +225,7 @@ export function stopRemoteControl():
   const { pid } = activeSession;
   try {
     process.kill(pid, 'SIGTERM');
-  // eslint-disable-next-line no-catch-all/no-catch-all
+    // eslint-disable-next-line no-catch-all/no-catch-all
   } catch {
     // already dead
   }

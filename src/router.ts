@@ -41,6 +41,38 @@ export function formatOutbound(rawText: string): string {
   return text;
 }
 
+export interface ExtractedImage {
+  path: string;
+  caption?: string;
+}
+
+const IMAGE_TAG_RE = /<image\s+path="([^"]+)"(?:\s+caption="([^"]*)")?\s*\/>/g;
+
+export function extractImages(text: string): {
+  cleanText: string;
+  images: ExtractedImage[];
+} {
+  const images: ExtractedImage[] = [];
+  const cleanText = text
+    .replace(IMAGE_TAG_RE, (_, path, caption) => {
+      images.push({ path, caption: caption || undefined });
+      return '';
+    })
+    .trim();
+  return { cleanText, images };
+}
+
+export async function sendImages(
+  channel: Channel,
+  jid: string,
+  images: ExtractedImage[],
+): Promise<void> {
+  if (!channel.sendPhoto) return;
+  for (const img of images) {
+    await channel.sendPhoto(jid, img.path, img.caption);
+  }
+}
+
 export function routeOutbound(
   channels: Channel[],
   jid: string,
