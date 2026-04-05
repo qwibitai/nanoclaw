@@ -160,9 +160,7 @@ function createSchema(database: Database.Database): void {
 
   // Add unified_session_id column for cross-provider session tracking
   try {
-    database.exec(
-      `ALTER TABLE sessions ADD COLUMN unified_session_id TEXT`,
-    );
+    database.exec(`ALTER TABLE sessions ADD COLUMN unified_session_id TEXT`);
   } catch {
     /* column already exists */
   }
@@ -413,6 +411,13 @@ export function getLastBotMessageTimestamp(
   return row?.ts ?? undefined;
 }
 
+export function getLastMessageTimestamp(chatJid: string): string | undefined {
+  const row = db
+    .prepare('SELECT MAX(timestamp) as ts FROM messages WHERE chat_jid = ?')
+    .get(chatJid) as { ts: string | null } | undefined;
+  return row?.ts ?? undefined;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
@@ -603,9 +608,7 @@ export function getAllSessions(): Record<string, string> {
 
 // --- Unified session accessors ---
 
-export function getUnifiedSessionId(
-  groupFolder: string,
-): string | undefined {
+export function getUnifiedSessionId(groupFolder: string): string | undefined {
   const row = db
     .prepare('SELECT unified_session_id FROM sessions WHERE group_folder = ?')
     .get(groupFolder) as { unified_session_id: string | null } | undefined;

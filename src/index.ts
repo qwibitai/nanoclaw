@@ -273,10 +273,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when agent is idle.
+  // Groups with HEARTBEAT.md stay alive indefinitely — heartbeats act as keepalive.
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const hasHeartbeat = fs.existsSync(
+    path.join(GROUPS_DIR, group.folder, 'HEARTBEAT.md'),
+  );
 
   const resetIdleTimer = () => {
+    if (hasHeartbeat) return;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug(

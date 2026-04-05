@@ -18,8 +18,10 @@ import {
 import {
   getAllTasks,
   getDueTasks,
+  getLastMessageTimestamp,
   getTaskById,
   logTaskRun,
+  storeMessage,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -270,76 +272,71 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   // Track last heartbeat time per group (init to now so we don't fire on startup)
   const lastHeartbeat: Record<string, number> = {};
   const startupTime = Date.now();
+  const HEARTBEAT_QUIET_PERIOD_MS = 300_000; // 5 minutes
 
   const checkHeartbeats = async () => {
     const groups = deps.registeredGroups();
     for (const [jid, group] of Object.entries(groups)) {
-      const heartbeatPath = path.join(GROUPS_DIR, group.folder, 'HEARTBEAT.md');
+      const heartbeatPath = path.join(
+        GROUPS_DIR,
+        group.folder,
+        'HEARTBEAT.md',
+      );
       if (!fs.existsSync(heartbeatPath)) continue;
 
       const now = Date.now();
       const lastBeat = lastHeartbeat[group.folder] || startupTime;
       if (now - lastBeat < HEARTBEAT_INTERVAL) continue;
 
+      // Skip if there has been recent direct interaction
+      const lastMsg = getLastMessageTimestamp(jid);
+      if (lastMsg) {
+        const lastMsgAge = now - new Date(lastMsg).getTime();
+        if (lastMsgAge < HEARTBEAT_QUIET_PERIOD_MS) {
+          logger.debug(
+            { group: group.name, lastMsgAge },
+            'Skipping heartbeat — recent interaction',
+          );
+          continue;
+        }
+      }
+
       lastHeartbeat[group.folder] = now;
 
       try {
-        const heartbeatContent = fs.readFileSync(heartbeatPath, 'utf-8').trim();
+        const heartbeatContent = fs
+          .readFileSync(heartbeatPath, 'utf-8')
+          .trim();
         if (!heartbeatContent) continue;
-
-        logger.info(
-          { group: group.name, folder: group.folder },
-          'Heartbeat triggered',
-        );
 
         const prompt = `[HEARTBEAT — This is an automated periodic check-in, not a user message.]\n\n${heartbeatContent}`;
 
-        const sessions = deps.getSessions();
-        const unifiedSessions = deps.getUnifiedSessions();
-        const sessionId = sessions[group.folder] || undefined;
-        const isMain = group.isMain === true;
-
-        deps.queue.enqueueTask(jid, `heartbeat-${group.folder}`, async () => {
-          // Close the container promptly after heartbeat completes
-          // so it doesn't block normal message processing.
-          const HEARTBEAT_CLOSE_DELAY_MS = 5000;
-          let heartbeatCloseTimer: ReturnType<typeof setTimeout> | null =
-            null;
-
-          const output = await runContainerAgent(
-            group,
-            {
-              prompt,
-              sessionId,
-              groupFolder: group.folder,
-              chatJid: jid,
-              isMain,
-              isScheduledTask: true,
-              assistantName: ASSISTANT_NAME,
-              modelProvider: group.containerConfig?.modelProvider,
-              claudeModel: group.containerConfig?.claudeModel,
-              ollamaModel: group.containerConfig?.ollamaModel,
-              unifiedSessionId: unifiedSessions[group.folder],
-            },
-            (proc, containerName) =>
-              deps.onProcess(jid, proc, containerName, group.folder),
-            async (streamedOutput) => {
-              // Schedule close after first result
-              if (streamedOutput.result && !heartbeatCloseTimer) {
-                heartbeatCloseTimer = setTimeout(() => {
-                  deps.queue.closeStdin(jid);
-                }, HEARTBEAT_CLOSE_DELAY_MS);
-              }
-            },
+        // Try to pipe into the active container first
+        if (deps.queue.sendMessage(jid, prompt)) {
+          logger.info(
+            { group: group.name, folder: group.folder },
+            'Heartbeat piped to active container',
           );
+          continue;
+        }
 
-          if (heartbeatCloseTimer) clearTimeout(heartbeatCloseTimer);
-
-          // Send any result to the chat (stripped of <internal> tags by host)
-          if (output.result) {
-            await deps.sendMessage(jid, output.result);
-          }
+        // No active container — store as a synthetic message so the normal
+        // message processing loop picks it up and spawns a container.
+        logger.info(
+          { group: group.name, folder: group.folder },
+          'Heartbeat spawning new container',
+        );
+        storeMessage({
+          id: `heartbeat-${Date.now()}`,
+          chat_jid: jid,
+          sender: '[System]',
+          sender_name: '[System]',
+          content: prompt,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
         });
+        deps.queue.enqueueMessageCheck(jid);
       } catch (err) {
         logger.error({ err, group: group.name }, 'Error processing heartbeat');
       }
