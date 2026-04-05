@@ -117,7 +117,7 @@ export function loadProfile(
   const db = getMemoryDb();
   const row = db
     .prepare(
-      "SELECT profile_json FROM memory_profiles WHERE user_id = ? OR user_id = '' ORDER BY updated_at DESC LIMIT 1",
+      'SELECT profile_json FROM memory_profiles WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
     )
     .get(userId) as { profile_json: string } | undefined;
   if (!row) return null;
@@ -157,7 +157,7 @@ export function loadFacts(
   const rows = db
     .prepare(
       `SELECT id, group_folder, content, category, confidence, source, embedding, created_at
-       FROM memory_facts WHERE user_id = ? OR user_id = ''
+       FROM memory_facts WHERE user_id = ?
        ORDER BY confidence DESC`,
     )
     .all(userId) as Array<{
