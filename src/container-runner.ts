@@ -39,8 +39,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため、
-  // ホスト・コンテナは常にセットで更新する運用）。
+  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため、ホスト・コンテナは常にセットで更新する運用）。
   groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -211,9 +210,7 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // agent-runner のソースをグループごとの書き込み可能な場所にコピーし、
-  // エージェントが他のグループに影響を与えずにカスタマイズ（ツールの追加、
-  // 動作の変更）できるようにします。コンテナ起動時に entrypoint.sh を介して再コンパイルされます。
+  // agent-runner のソースをグループごとの書き込み可能な場所にコピーし、エージェントが他のグループに影響を与えずにカスタマイズ（ツールの追加、動作の変更）できるようにします。コンテナ起動時に entrypoint.sh を介して再コンパイルされます。
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -265,8 +262,7 @@ function buildContainerArgs(
 
   // ホストの認証方法をプレースホルダー値でミラーリング
   // API キーモード: SDK は x-api-key を送信し、プロキシが本物のキーに置き換える
-  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、
-  //               プロキシはその交換リクエストに実際の OAuth トークンを注入する
+  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、プロキシはその交換リクエストに実際の OAuth トークンを注入する
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
@@ -277,9 +273,7 @@ function buildContainerArgs(
   // ホストゲートウェイ解決のためのランタイム固有の引数
   args.push(...hostGatewayArgs());
 
-  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。
-  // root (uid 0)、コンテナの node ユーザー (uid 1000)、または
-  // getuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
+  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。root (uid 0)、コンテナの node ユーザー (uid 1000)、またはgetuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
@@ -401,8 +395,7 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // アクティビティを検出 — ハードタイムアウトをリセット
             resetTimeout();
-            // 「サイレント」なクエリ完了でもアイドルタイマーが開始されるよう、
-            // すべてのマーカー（null 結果を含む）に対して onOutput を呼び出す。
+            // 「サイレント」なクエリ完了でもアイドルタイマーが開始されるよう、すべてのマーカー（null 結果を含む）に対して onOutput を呼び出す。
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
@@ -420,8 +413,7 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // stderr ではタイムアウトをリセットしない — SDK はデバッグログを常に出力するため。
-      // タイムアウトは、実際の出力（stdout 内の OUTPUT_MARKER）に対してのみリセットされる。
+      // stderr ではタイムアウトをリセットしない — SDK はデバッグログを常に出力するため。タイムアウトは、実際の出力（stdout 内の OUTPUT_MARKER）に対してのみリセットされる。
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -439,8 +431,7 @@ export async function runContainerAgent(
     let timedOut = false;
     let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // 猶予期間: ハード kill が発動する前に、グレースフルな _close センチネルが発動する
-    // 時間を確保するため、ハードタイムアウトは少なくとも IDLE_TIMEOUT + 30秒である必要があります。
+    // 猶予期間: ハード kill が発動する前に、グレースフルな _close センチネルが発動する時間を確保するため、ハードタイムアウトは少なくとも IDLE_TIMEOUT + 30秒である必要があります。
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
@@ -489,8 +480,7 @@ export async function runContainerAgent(
         );
 
         // 出力後のタイムアウト = 失敗ではなく、アイドルのクリーンアップ。
-        // エージェントはすでに応答を送信済み。これはアイドル期間が経過した後に
-        // コンテナが回収されただけである。
+        // エージェントはすでに応答を送信済み。これはアイドル期間が経過した後にコンテナが回収されただけである。
         if (hadStreamingOutput) {
           logger.info(
             { group: group.name, containerName, duration, code },
