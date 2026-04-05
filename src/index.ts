@@ -412,6 +412,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success' && !result.isPartial) {
+      // Reset streaming state on any final output so the next user turn
+      // starts a fresh message (even if this output had no text).
+      streamingMessageId = null;
+      completedText = '';
+      currentRoundText = '';
       queue.notifyIdle(chatJid);
     }
 
