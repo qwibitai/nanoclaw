@@ -27,7 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { getDefaultAllowedTools, resolveGroupType } from './group-type.js';
+import { getDefaultAllowedTools } from './group-type.js';
 import { GroupType, RegisteredGroup } from './types.js';
 
 // 堅牢な出力パースのためのセンチネルマーカー (agent-runner と一致させる必要があります)
@@ -39,6 +39,8 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため
+  // ホスト・コンテナは常にセットで更新する運用）。
   groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -126,28 +128,38 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  // settings.json が存在する場合は読み込む、存在しない場合は空オブジェクトから始める
+  const defaultSettingsEnv: Record<string, string> = {
+    // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
+    // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    // 追加マウントされたディレクトリから CLAUDE.md を読み込む
+    // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
+    // https://code.claude.com/docs/en/memory#manage-auto-memory
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
+
+  // settings.json が存在する場合は読み込む、存在しない場合やパース失敗時は
+  // 「ファイルが無い」と同様に空オブジェクトから始め、後で必須 env を補完する
   let settingsContent: Record<string, unknown> = {};
   if (fs.existsSync(settingsFile)) {
     try {
       settingsContent = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
     } catch {
-      // 読み込み失敗時は空オブジェクトから始める
+      // パース失敗時は空オブジェクトから始める（既存 env は失われるが壊れたファイルより安全）
     }
-  } else {
-    // 新規作成時のみ env セクションを設定する
-    settingsContent.env = {
-      // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
-      // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-      // 追加マウントされたディレクトリから CLAUDE.md を読み込む
-      // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-      // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
-      // https://code.claude.com/docs/en/memory#manage-auto-memory
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-    };
   }
+
+  // env はデフォルト値をベースに既存値で上書きする
+  // （新規作成・パース失敗・既存ファイルいずれの場合も CLAUDE_CODE_* フラグが必ず設定される）
+  const existingEnv =
+    settingsContent.env &&
+    typeof settingsContent.env === 'object' &&
+    !Array.isArray(settingsContent.env)
+      ? (settingsContent.env as Record<string, unknown>)
+      : {};
+  settingsContent.env = { ...defaultSettingsEnv, ...existingEnv };
   // permissions を groupType に基づいて常に同期する
   // （既存環境のアップグレードや groupType 変更時も反映されるようにするため）
   const allowedTools = getDefaultAllowedTools(groupType);
