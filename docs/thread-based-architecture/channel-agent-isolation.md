@@ -197,7 +197,7 @@ GroupType が `chat` でも `agent` で MCP を付与すれば、「返信しか
 ALTER TABLE registered_groups ADD COLUMN agent_config TEXT;
 ```
 
-`agent_config` には `AgentConfig` の JSON を格納する。NULL の場合は `type` のデフォルト設定を使用。
+`agent_config` には `AgentConfig` の JSON を格納する。NULL の場合は `type` のデフォルト設定を使用（`chat` / `thread` は `allowedTools: []`、`main` / `override` は全許可。詳細は [group-type-spec.md](group-type-spec.md#type-ごとのデフォルト-allowedtools) を参照）。
 
 ### 保存される JSON の例
 

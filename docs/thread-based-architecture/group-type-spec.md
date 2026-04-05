@@ -115,7 +115,7 @@ UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
 
 ### IPC での設定
 
-`register_group` IPC に `type` フィールドを追加:
+`register_group` IPC に `group_type` フィールドを追加:
 
 ```json
 {
@@ -124,7 +124,7 @@ UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
   "name": "discord-email",
   "folder": "discord-email",
   "trigger": "!",
-  "type": "chat"
+  "group_type": "chat"
 }
 ```
 
@@ -136,6 +136,20 @@ UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
 → DB に type = 'chat' で保存
 ```
 
+### IPC での type 変更制限
+
+`override` は IPC 経由で設定不可。エージェントが自分自身を override に昇格することを防ぐ。
+
+```ts
+// ipc.ts での検証
+if (data.group_type === 'override') {
+  logger.warn('override type cannot be set via IPC');
+  break;
+}
+```
+
+`override` の設定は Discord スラッシュコマンド (`/override-start`) 経由のみ。実行できるのは許可されたユーザー ID のみ（後述）。
+
 ### 既存グループの type 変更
 
 新しい IPC タスク `update_group` を追加:
@@ -144,8 +158,46 @@ UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
 {
   "type": "update_group",
   "jid": "dc:123456789",
-  "type": "main"
+  "group_type": "main"
 }
 ```
 
-`register_group` は新規登録、`update_group` は既存グループの設定変更という棲み分け。
+`register_group` は新規登録、`update_group` は既存グループの設定変更という棲み分け。`update_group` でも `override` への変更は拒否する。
+
+### type ごとのデフォルト allowedTools
+
+`agent_config` が未設定（NULL）の場合、`type` に応じてデフォルトの `allowedTools` が適用される:
+
+| type | デフォルト allowedTools | 理由 |
+|---|---|---|
+| `override` | 制限なし（全許可） | サンドボックスなしのフル権限 |
+| `main` | 制限なし（全許可） | Bash、ファイル操作等が必要 |
+| `chat` | `[]`（空 = ツールなし） | 会話のみ。必要なツールは `agent_config` で明示的に付与 |
+| `thread` | `[]`（空 = ツールなし） | タスクに必要なツールは `agent_config` or `thread_defaults` で付与 |
+
+### override のライフサイクル
+
+override はスレッド単位の一時的なフル権限セッション。
+
+**開始**: Discord スラッシュコマンド `/override-start`
+- 実行者のユーザー ID が許可リストに含まれているか検証
+- 新しい Discord スレッドを作成
+- `type = 'override'` でグループを DB に登録
+- 全ツールコールの Discord ログ出力を有効化
+
+**終了**: Discord スラッシュコマンド `/override-end`
+- グループの `type` を `'chat'` に変更（`allowedTools: []` のため事実上無効化）
+- 以降そのスレッドではメッセージを受け付けてもツール実行されない
+- DB の行は残す（監査ログとして）
+- Discord スレッドをアーカイブ
+
+**異常系**:
+- NanoClaw 再起動時: `type = 'override'` のグループが残っていたら、起動ログに警告を出す。自動終了はしない（意図的に継続している可能性がある）
+- 終了し忘れ: 今は手動管理。将来的にタイムアウト（例: 24時間）を追加可能
+
+**許可ユーザー管理**:
+
+```ts
+// config.ts or 環境変数
+OVERRIDE_ALLOWED_USERS: string[]  // Discord ユーザー ID のリスト
+```
