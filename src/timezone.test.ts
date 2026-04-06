@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  formatCurrentTime,
   formatLocalTime,
   isValidTimezone,
   resolveTimezone,
@@ -39,6 +40,28 @@ describe('formatLocalTime', () => {
     // Should format as UTC (noon UTC = 12:00 PM)
     expect(result).toContain('12:00');
     expect(result).toContain('PM');
+  });
+});
+
+// --- formatCurrentTime ---
+
+describe('formatCurrentTime', () => {
+  it('includes day-of-week abbreviation', () => {
+    const result = formatCurrentTime('UTC');
+    expect(result).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), /);
+  });
+
+  it('respects timezone', () => {
+    const utc = formatCurrentTime('UTC');
+    const tokyo = formatCurrentTime('Asia/Tokyo');
+    // Both should have day-of-week prefix
+    expect(utc).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), /);
+    expect(tokyo).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), /);
+  });
+
+  it('falls back to UTC for invalid timezone', () => {
+    const result = formatCurrentTime('IST-2');
+    expect(result).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), /);
   });
 });
 

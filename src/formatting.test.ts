@@ -63,7 +63,8 @@ describe('formatMessages', () => {
 
   it('formats a single message as XML with context header', () => {
     const result = formatMessages([makeMsg()], TZ);
-    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('timezone="UTC"');
+    expect(result).toContain('current_time="');
     expect(result).toContain('<message sender="Alice"');
     expect(result).toContain('>hello</message>');
     expect(result).toContain('Jan 1, 2024');
@@ -108,7 +109,7 @@ describe('formatMessages', () => {
 
   it('handles empty array', () => {
     const result = formatMessages([], TZ);
-    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('timezone="UTC"');
     expect(result).toContain('<messages>\n\n</messages>');
   });
 
@@ -176,7 +177,7 @@ describe('formatMessages', () => {
     );
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
-    expect(result).toContain('<context timezone="America/New_York" />');
+    expect(result).toContain('timezone="America/New_York"');
   });
 });
 

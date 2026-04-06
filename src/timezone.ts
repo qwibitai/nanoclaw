@@ -36,3 +36,21 @@ export function formatLocalTime(utcIso: string, timezone: string): string {
     hour12: true,
   });
 }
+
+/**
+ * Format the current date/time with day-of-week for the given timezone.
+ * Example: "Sun, Apr 6, 2025, 3:45 PM"
+ */
+export function formatCurrentTime(timezone: string): string {
+  const now = new Date();
+  return now.toLocaleString('en-US', {
+    timeZone: resolveTimezone(timezone),
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}

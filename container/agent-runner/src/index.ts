@@ -808,8 +808,18 @@ async function main(): Promise<void> {
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
+  const now = new Date();
+  const currentTime = now.toLocaleString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
   if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\nCurrent time: ${currentTime}\n\n${prompt}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
