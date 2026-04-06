@@ -303,7 +303,8 @@ async function runAgent(
   );
 
   try {
-    const preferredEngine = process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+    const preferredEngine =
+      process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
     const engineOrder = getEngineOrder(preferredEngine);
     let lastError: string | undefined;
 

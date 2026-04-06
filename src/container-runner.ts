@@ -318,8 +318,7 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const engine: 'claude' | 'codex' =
-    input.engine ||
-    (process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude');
+    input.engine || (process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude');
   const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
