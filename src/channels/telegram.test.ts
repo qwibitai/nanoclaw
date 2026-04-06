@@ -36,7 +36,9 @@ class FakeBot {
     return this;
   }
 
-  start(opts?: { onStart?: (botInfo: { username: string; id: number }) => void }) {
+  start(opts?: {
+    onStart?: (botInfo: { username: string; id: number }) => void;
+  }) {
     startMock(opts);
     opts?.onStart?.({ username: 'andy_bot', id: 42 });
   }
