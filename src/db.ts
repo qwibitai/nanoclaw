@@ -3,14 +3,37 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { VALID_GROUP_TYPES } from './group-type.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  GroupType,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
+
+/** DB の group_type / is_main から GroupType を解決する */
+function parseGroupType(
+  groupType: string | null,
+  isMain: number | null,
+  jid?: string,
+): GroupType {
+  if (groupType == null) {
+    // NULL はレガシー DB → is_main フォールバック
+    return isMain === 1 ? 'main' : 'chat';
+  }
+  if (VALID_GROUP_TYPES.has(groupType)) {
+    return groupType as GroupType;
+  }
+  // 不正な文字列は is_main を無視して 'chat' にフォールバック
+  logger.warn(
+    { jid, groupType },
+    'Invalid group_type in DB; falling back to "chat".',
+  );
+  return 'chat';
+}
 
 let db: Database.Database;
 
@@ -114,6 +137,18 @@ function createSchema(database: Database.Database): void {
     // 過去分への適用: folder = 'main' の既存行をメイングループとしてマーク
     database.exec(
       `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
+  // group_type カラムが存在しない場合は追加（isMain → GroupType マイグレーション）
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN group_type TEXT DEFAULT 'chat'`,
+    );
+    database.exec(
+      `UPDATE registered_groups SET group_type = 'main' WHERE is_main = 1`,
     );
   } catch {
     /* カラムはすでに存在します */
@@ -554,6 +589,7 @@ export function getRegisteredGroup(
         container_config: string | null;
         requires_trigger: number | null;
         is_main: number | null;
+        group_type: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -564,6 +600,7 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  const groupType = parseGroupType(row.group_type, row.is_main, row.jid);
   return {
     jid: row.jid,
     name: row.name,
@@ -575,7 +612,7 @@ export function getRegisteredGroup(
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    isMain: row.is_main === 1 ? true : undefined,
+    type: groupType,
   };
 }
 
@@ -583,9 +620,18 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
+  const rawType = group.type ?? 'chat';
+  // JSON 移行や外部入力経由で不正値が混入する可能性があるため、書き込み前に検証する
+  if (!VALID_GROUP_TYPES.has(rawType)) {
+    logger.warn(
+      { jid, rawType },
+      'Invalid group.type; falling back to "chat".',
+    );
+  }
+  const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -594,7 +640,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.isMain ? 1 : 0,
+    groupType === 'main' || groupType === 'override' ? 1 : 0,
+    groupType,
   );
 }
 
@@ -608,6 +655,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
     is_main: number | null;
+    group_type: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -618,6 +666,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    const groupType = parseGroupType(row.group_type, row.is_main, row.jid);
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
@@ -628,7 +677,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      isMain: row.is_main === 1 ? true : undefined,
+      type: groupType,
     };
   }
   return result;

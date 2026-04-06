@@ -27,7 +27,8 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { getDefaultAllowedTools } from './group-type.js';
+import { GroupType, RegisteredGroup } from './types.js';
 
 // 堅牢な出力パースのためのセンチネルマーカー (agent-runner と一致させる必要があります)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -38,7 +39,8 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  isMain: boolean;
+  // NOTE: isMain (boolean) は意図的に削除。後方互換性は不要（個人プロジェクトのため、ホスト・コンテナは常にセットで更新する運用）。
+  groupType: GroupType;
   isScheduledTask?: boolean;
   assistantName?: string;
 }
@@ -58,13 +60,14 @@ interface VolumeMount {
 
 function buildVolumeMounts(
   group: RegisteredGroup,
-  isMain: boolean,
+  groupType: GroupType,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const isPrivileged = groupType === 'main' || groupType === 'override';
 
-  if (isMain) {
+  if (isPrivileged) {
     // メイングループにはプロジェクトルートを読み取り専用でマウントします。
     // エージェントが必要とする書き込み可能なパス（グループフォルダ、IPC、.claude/）は、
     // 以下で個別にマウントされます。読み取り専用にすることで、エージェントが
@@ -124,30 +127,75 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // 追加マウントされたディレクトリから CLAUDE.md を読み込む
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+  const defaultSettingsEnv: Record<string, string> = {
+    // エージェントスウォーム（サブエージェントのオーケストレーション）を有効にする
+    // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    // 追加マウントされたディレクトリから CLAUDE.md を読み込む
+    // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Claude のメモリ機能を有効にする（セッション間でユーザー設定を永続化）
+    // https://code.claude.com/docs/en/memory#manage-auto-memory
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
+
+  // settings.json が存在する場合は読み込む、存在しない場合やパース失敗時は
+  // 「ファイルが無い」と同様に空オブジェクトから始め、後で必須 env を補完する
+  let settingsContent: Record<string, unknown> = {};
+  if (fs.existsSync(settingsFile)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        settingsContent = parsed as Record<string, unknown>;
+      }
+    } catch (err) {
+      logger.warn(
+        { group: group.folder, settingsFile, err },
+        'Failed to parse settings.json; starting from empty object (existing user settings lost)',
+      );
+    }
   }
 
-  // container/skills/ から各グループ의 .claude/skills/ にスキルを同期
+  // env はデフォルト値をベースに既存値で上書きする
+  // （新規作成・パース失敗・既存ファイルいずれの場合も CLAUDE_CODE_* フラグが必ず設定される）
+  const existingEnv =
+    settingsContent.env &&
+    typeof settingsContent.env === 'object' &&
+    !Array.isArray(settingsContent.env)
+      ? (settingsContent.env as Record<string, unknown>)
+      : {};
+  const dangerousEnvKeys = new Set(['__proto__', 'constructor', 'prototype']);
+  const sanitizedExistingEnv = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(existingEnv)) {
+    if (typeof value === 'string' && !dangerousEnvKeys.has(key)) {
+      sanitizedExistingEnv[key] = value;
+    }
+  }
+  const mergedEnv = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(defaultSettingsEnv)) {
+    if (!dangerousEnvKeys.has(key)) {
+      mergedEnv[key] = value;
+    }
+  }
+  for (const [key, value] of Object.entries(sanitizedExistingEnv)) {
+    mergedEnv[key] = value;
+  }
+  settingsContent.env = mergedEnv;
+  // permissions を groupType に基づいて常に同期する
+  // （既存環境のアップグレードや groupType 変更時も反映されるようにするため）
+  const allowedTools = getDefaultAllowedTools(groupType);
+  if (allowedTools !== undefined) {
+    settingsContent.permissions = { allow: allowedTools, deny: [] };
+  } else {
+    // main/override: permissions 制限なし → フィールドを削除
+    delete settingsContent.permissions;
+  }
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(settingsContent, null, 2) + '\n',
+  );
+
+  // container/skills/ から各グループの .claude/skills/ にスキルを同期
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
@@ -176,9 +224,7 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // agent-runner のソースをグループごとの書き込み可能な場所にコピーし、
-  // エージェントが他のグループに影響を与えずにカスタマイズ（ツールの追加、
-  // 動作の変更）できるようにします。コンテナ起動時に entrypoint.sh を介して再コンパイルされます。
+  // agent-runner のソースをグループごとの書き込み可能な場所にコピーし、エージェントが他のグループに影響を与えずにカスタマイズ（ツールの追加、動作の変更）できるようにします。コンテナ起動時に entrypoint.sh を介して再コンパイルされます。
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -205,7 +251,7 @@ function buildVolumeMounts(
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
       group.name,
-      isMain,
+      isPrivileged,
     );
     mounts.push(...validatedMounts);
   }
@@ -230,8 +276,7 @@ function buildContainerArgs(
 
   // ホストの認証方法をプレースホルダー値でミラーリング
   // API キーモード: SDK は x-api-key を送信し、プロキシが本物のキーに置き換える
-  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、
-  //               プロキシはその交換リクエストに実際の OAuth トークンを注入する
+  // OAuth モード:   SDK はプレースホルダー・トークンを一時的な API キーに交換し、プロキシはその交換リクエストに実際の OAuth トークンを注入する
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
@@ -242,9 +287,7 @@ function buildContainerArgs(
   // ホストゲートウェイ解決のためのランタイム固有の引数
   args.push(...hostGatewayArgs());
 
-  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。
-  // root (uid 0)、コンテナの node ユーザー (uid 1000)、または
-  // getuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
+  // バインドマウントされたファイルにアクセスできるよう、ホストユーザーとして実行。root (uid 0)、コンテナの node ユーザー (uid 1000)、またはgetuid が利用できない場合（WSL ではないネイティブ Windows）はスキップ。
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
@@ -276,7 +319,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.groupType);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -299,7 +342,7 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mountCount: mounts.length,
-      isMain: input.isMain,
+      groupType: input.groupType,
     },
     'Spawning container agent',
   );
@@ -366,8 +409,7 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // アクティビティを検出 — ハードタイムアウトをリセット
             resetTimeout();
-            // 「サイレント」なクエリ完了でもアイドルタイマーが開始されるよう、
-            // すべてのマーカー（null 結果を含む）に対して onOutput を呼び出す。
+            // 「サイレント」なクエリ完了でもアイドルタイマーが開始されるよう、すべてのマーカー（null 結果を含む）に対して onOutput を呼び出す。
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
@@ -385,8 +427,7 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // stderr ではタイムアウトをリセットしない — SDK はデバッグログを常に出力するため。
-      // タイムアウトは、実際の出力（stdout 内の OUTPUT_MARKER）に対してのみリセットされる。
+      // stderr ではタイムアウトをリセットしない — SDK はデバッグログを常に出力するため。タイムアウトは、実際の出力（stdout 内の OUTPUT_MARKER）に対してのみリセットされる。
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -404,8 +445,7 @@ export async function runContainerAgent(
     let timedOut = false;
     let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // 猶予期間: ハード kill が発動する前に、グレースフルな _close センチネルが発動する
-    // 時間を確保するため、ハードタイムアウトは少なくとも IDLE_TIMEOUT + 30秒である必要があります。
+    // 猶予期間: ハード kill が発動する前に、グレースフルな _close センチネルが発動する時間を確保するため、ハードタイムアウトは少なくとも IDLE_TIMEOUT + 30秒である必要があります。
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
@@ -454,8 +494,7 @@ export async function runContainerAgent(
         );
 
         // 出力後のタイムアウト = 失敗ではなく、アイドルのクリーンアップ。
-        // エージェントはすでに応答を送信済み。これはアイドル期間が経過した後に
-        // コンテナが回収されただけである。
+        // エージェントはすでに応答を送信済み。これはアイドル期間が経過した後にコンテナが回収されただけである。
         if (hadStreamingOutput) {
           logger.info(
             { group: group.name, containerName, duration, code },
@@ -493,7 +532,7 @@ export async function runContainerAgent(
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
+        `GroupType: ${input.groupType}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Stdout Truncated: ${stdoutTruncated}`,
@@ -645,7 +684,7 @@ export async function runContainerAgent(
 
 export function writeTasksSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isPrivileged: boolean,
   tasks: Array<{
     id: string;
     groupFolder: string;
@@ -660,8 +699,8 @@ export function writeTasksSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // メイングループはすべてのタスクを表示でき、他は自身のタスクのみを表示できる
-  const filteredTasks = isMain
+  // 特権グループ（main/override）はすべてのタスクを表示でき、非特権グループは自身のタスクのみを表示できる
+  const filteredTasks = isPrivileged
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
 
@@ -678,20 +717,19 @@ export interface AvailableGroup {
 
 /**
  * コンテナが読み取るための利用可能なグループのスナップショットを書き込みます。
- * メイングループのみが、すべての利用可能なグループを表示できます（アクティブ化のため）。
- * メイン以外のグループは、自身の登録ステータスのみを表示できます。
+ * 特権グループ（main/override）のみが全グループを表示できます。
+ * 非特権グループにはこのファイルは空リストとして書き込まれます。
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isPrivileged: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // メイングループはすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
-  const visibleGroups = isMain ? groups : [];
+  // 特権グループ（main/override）はすべてのグループを表示でき、他は何も表示できない（グループをアクティブ化できないため）
+  const visibleGroups = isPrivileged ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

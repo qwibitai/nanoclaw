@@ -20,7 +20,7 @@ interface RegisterArgs {
   folder: string;
   channel: string;
   requiresTrigger: boolean;
-  isMain: boolean;
+  type: 'main' | 'chat';
   assistantName: string;
 }
 
@@ -32,7 +32,7 @@ function parseArgs(args: string[]): RegisterArgs {
     folder: '',
     channel: 'whatsapp', // 後方互換性: リファクタリング前のインストールでは --channel が省略されます
     requiresTrigger: true,
-    isMain: false,
+    type: 'chat',
     assistantName: 'Andy',
   };
 
@@ -57,7 +57,7 @@ function parseArgs(args: string[]): RegisterArgs {
         result.requiresTrigger = false;
         break;
       case '--is-main':
-        result.isMain = true;
+        result.type = 'main';
         break;
       case '--assistant-name':
         result.assistantName = args[++i] || 'Andy';
@@ -106,7 +106,7 @@ export async function run(args: string[]): Promise<void> {
     trigger: parsed.trigger,
     added_at: new Date().toISOString(),
     requiresTrigger: parsed.requiresTrigger,
-    isMain: parsed.isMain,
+    type: parsed.type,
   });
 
   logger.info('SQLite に登録情報を書き込みました');

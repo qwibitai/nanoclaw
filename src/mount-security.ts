@@ -232,7 +232,7 @@ export interface MountValidationResult {
  */
 export function validateMount(
   mount: AdditionalMount,
-  isMain: boolean,
+  isPrivileged: boolean, // true = main または override の特権グループ
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
@@ -294,14 +294,14 @@ export function validateMount(
   let effectiveReadonly = true; // デフォルトは読み取り専用
 
   if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // メイン以外のグループは強制的に読み取り専用
+    if (!isPrivileged && allowlist.nonMainReadOnly) {
+      // 特権のないグループは強制的に読み取り専用
       effectiveReadonly = true;
       logger.info(
         {
           mount: mount.hostPath,
         },
-        'Mount forced to read-only for non-main group',
+        'Mount forced to read-only for non-privileged group',
       );
     } else if (!allowedRoot.allowReadWrite) {
       // ルートが読み書きを許可していない
@@ -336,7 +336,7 @@ export function validateMount(
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
-  isMain: boolean,
+  isPrivileged: boolean, // true = main または override の特権グループ
 ): Array<{
   hostPath: string;
   containerPath: string;
@@ -349,7 +349,7 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain);
+    const result = validateMount(mount, isPrivileged);
 
     if (result.allowed) {
       validatedMounts.push({

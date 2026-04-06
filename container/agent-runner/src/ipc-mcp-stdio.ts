@@ -18,7 +18,14 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 // 環境変数からのコンテキスト（エージェントランナーによって設定されます）
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+// NOTE: ホスト側の GroupType (src/types.ts) と同期が必要。
+// コンテナはホストのソースを import できないため、ここで再定義している。
+// GroupType を変更した場合はこのファイルも更新すること。
+const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
+const rawGroupType = process.env.NANOCLAW_GROUP_TYPE;
+const groupTypeCandidate = rawGroupType ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
+const groupType = allowedGroupTypes.has(groupTypeCandidate) ? groupTypeCandidate : 'chat';
+const isPrivileged = groupType === 'main' || groupType === 'override';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -90,7 +97,7 @@ server.tool(
     schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=特定の時刻に定期実行、interval=指定したミリ秒ごと、once=特定の時刻に一度だけ実行'),
     schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: "300000" などのミリ秒 | once: "2026-02-01T15:30:00" などのローカルタイムスタンプ（Zサフィックス禁止！）'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=チャット履歴とメモリを使用して実行、isolated=新規セッション（プロンプトにコンテキストを含めること）'),
-    target_group_jid: z.string().optional().describe('(メイングループのみ) タスクをスケジュールする対象グループの JID。デフォルトは現在のグループ。'),
+    target_group_jid: z.string().optional().describe('(特権グループ（main/override）のみ) タスクをスケジュールする対象グループの JID。デフォルトは現在のグループ。'),
   },
   async (args) => {
     // IPC 書き出し前に schedule_value を検証
@@ -127,8 +134,8 @@ server.tool(
       }
     }
 
-    // メイン以外のグループは自分自身に対してのみスケジュール可能
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    // 特権以外のグループは自分自身に対してのみスケジュール可能
+    const targetJid = isPrivileged && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -154,7 +161,7 @@ server.tool(
 
 server.tool(
   'list_tasks',
-  'スケジュールされているすべてのタスクを一覧表示します。メイングループからはすべてのタスクが表示されます。他のグループからは、そのグループ自身のタスクのみが表示されます。',
+  'スケジュールされているすべてのタスクを一覧表示します。特権グループ（main/override）からはすべてのタスクが表示されます。他のグループからは、そのグループ自身のタスクのみが表示されます。',
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
@@ -166,7 +173,7 @@ server.tool(
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
-      const tasks = isMain
+      const tasks = isPrivileged
         ? allTasks
         : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
 
@@ -199,7 +206,6 @@ server.tool(
       type: 'pause_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
       timestamp: new Date().toISOString(),
     };
 
@@ -218,7 +224,6 @@ server.tool(
       type: 'resume_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
       timestamp: new Date().toISOString(),
     };
 
@@ -237,7 +242,6 @@ server.tool(
       type: 'cancel_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
       timestamp: new Date().toISOString(),
     };
 
@@ -284,7 +288,6 @@ server.tool(
       type: 'update_task',
       taskId: args.task_id,
       groupFolder,
-      isMain: String(isMain),
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
@@ -299,7 +302,7 @@ server.tool(
 
 server.tool(
   'register_group',
-  `新しいチャット/グループを登録して、エージェントがそこでメッセージに応答できるようにします。メイングループのみが実行可能です。
+  `新しいチャット/グループを登録して、エージェントがそこでメッセージに応答できるようにします。特権グループ（main/override）のみが実行可能です。
 
 グループの JID を見つけるには available_groups.json を使用してください。フォルダ名はチャネルプレフィックス付きの "{channel}_{group-name}" 形式にする必要があります（例: "whatsapp_family-chat", "telegram_dev-team", "discord_general"）。グループ名の部分にはハイフン付きの小文字を使用してください。`,
   {
@@ -309,9 +312,9 @@ server.tool(
     trigger: z.string().describe('トリガーワード（例: "@Andy"）'),
   },
   async (args) => {
-    if (!isMain) {
+    if (!isPrivileged) {
       return {
-        content: [{ type: 'text' as const, text: '新しいグループの登録はメイングループのみが可能です。' }],
+        content: [{ type: 'text' as const, text: '新しいグループの登録は特権グループ（main/override）のみが可能です。' }],
         isError: true,
       };
     }

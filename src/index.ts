@@ -58,6 +58,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { hasPrivilege, resolveGroupType } from './group-type.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -158,7 +159,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.isMain === true;
+  const isPrivileged = hasPrivilege(group);
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -169,8 +170,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // メイン以外のグループについては、トリガーが必要かつ存在するか確認
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // 非特権グループ（chat/thread）については、トリガーが必要かつ存在するか確認
+  if (!isPrivileged && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
@@ -271,14 +272,15 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.isMain === true;
+  const groupType = resolveGroupType(group);
+  const isPrivileged = groupType === 'main' || groupType === 'override';
   const sessionId = sessions[group.folder];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    isPrivileged,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -290,14 +292,9 @@ async function runAgent(
     })),
   );
 
-  // 利用可能なグループのスナップショットを更新（メイングループのみが全グループを表示可能）
+  // 利用可能なグループのスナップショットを更新（特権グループのみが全グループを表示可能）
   const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
+  writeGroupsSnapshot(group.folder, isPrivileged, availableGroups);
 
   // ストリームされた結果からセッション ID を追跡するために onOutput をラップ
   const wrappedOnOutput = onOutput
@@ -318,7 +315,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        isMain,
+        groupType,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
@@ -392,8 +389,8 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isPrivileged = hasPrivilege(group);
+          const needsTrigger = !isPrivileged && group.requiresTrigger !== false;
 
           // メイン以外のグループについては、トリガーメッセージに対してのみアクションを実行。
           // トリガー以外のメッセージは DB に蓄積され、最終的にトリガーが届いたときに
@@ -501,10 +498,10 @@ async function main(): Promise<void> {
     msg: NewMessage,
   ): Promise<void> {
     const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
+    if (!group || !hasPrivilege(group)) {
       logger.warn(
         { chatJid, sender: msg.sender },
-        'Remote control rejected: not main group',
+        'Remote control rejected: not privileged group',
       );
       return;
     }
@@ -630,8 +627,7 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

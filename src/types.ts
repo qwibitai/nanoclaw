@@ -47,6 +47,9 @@ export type PlaceType =
 /** ユーザーの権限ロール */
 export type ActorRole = 'owner' | 'admin' | 'user';
 
+/** グループの権限タイプ */
+export type GroupType = 'override' | 'main' | 'chat' | 'thread';
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
@@ -54,7 +57,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
-  isMain?: boolean; // メインコントロールグループの場合は true（トリガー不要、特権あり）
+  type?: GroupType; // 未指定時は 'chat' として扱う
   channel_mode?: 'chat' | 'url_watch' | 'admin_control';
   chat_behavior?: 'ambient_room_chat' | 'directed_help_chat';
 }
