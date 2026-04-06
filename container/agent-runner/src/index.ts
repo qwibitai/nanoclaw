@@ -26,6 +26,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  providerFailureClass?: string;
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
@@ -219,12 +220,17 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+    const providerFailureClass =
+      err && typeof err === 'object' && 'providerFailureClass' in err
+        ? String((err as { providerFailureClass?: unknown }).providerFailureClass)
+        : undefined;
     log(`Agent error: ${errorMessage}`);
     writeOutput({
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
+      providerFailureClass,
     });
     process.exit(1);
   }

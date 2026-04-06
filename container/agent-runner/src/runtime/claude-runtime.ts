@@ -8,6 +8,7 @@ import {
   RunQueryResult,
   RuntimeHooks,
   RuntimeIpc,
+  ProviderFailureClass,
 } from './types.js';
 
 interface SDKUserMessage {
@@ -31,6 +32,59 @@ interface SessionsIndex {
 interface ParsedMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+class ProviderFailureError extends Error {
+  constructor(
+    message: string,
+    public readonly providerFailureClass: ProviderFailureClass,
+  ) {
+    super(message);
+    this.name = 'ProviderFailureError';
+  }
+}
+
+const QUOTA_PATTERNS = [
+  'rate_limit_event',
+  'rate limit',
+  'rate_limit',
+  'hit your limit',
+  'insufficient_quota',
+  'quota exceeded',
+  'quota',
+  'billing',
+  '429',
+];
+
+const AUTH_PATTERNS = [
+  '401',
+  'unauthorized',
+  'forbidden',
+  'failed to authenticate',
+  'invalid api key',
+  'oauth token has expired',
+  'authentication',
+  'oauth',
+];
+
+function matchesAny(text: string, patterns: string[]): boolean {
+  const normalized = text.toLowerCase();
+  return patterns.some((pattern) => normalized.includes(pattern));
+}
+
+function classifyProviderFailure(text: string): ProviderFailureClass {
+  if (matchesAny(text, QUOTA_PATTERNS)) return 'quota';
+  if (matchesAny(text, AUTH_PATTERNS)) return 'auth';
+  return 'unknown';
+}
+
+function maybeThrowProviderFailure(
+  text: string,
+  fallbackMessage: string,
+): void {
+  const failureClass = classifyProviderFailure(text);
+  if (failureClass === 'unknown') return;
+  throw new ProviderFailureError(fallbackMessage, failureClass);
 }
 
 /**
@@ -328,10 +382,28 @@ export class ClaudeRuntime implements AgentRuntime {
         this.hooks.onLog(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
       }
 
+      if (
+        message.type === 'system' &&
+        (message as { subtype?: string }).subtype === 'rate_limit_event'
+      ) {
+        const text = JSON.stringify(message);
+        this.hooks.onLog('Claude runtime emitted rate_limit_event; failing over');
+        throw new ProviderFailureError(
+          'Claude runtime hit a rate limit',
+          classifyProviderFailure(text),
+        );
+      }
+
       if (message.type === 'result') {
         resultCount++;
         const textResult = 'result' in message ? (message as { result?: string }).result : null;
         this.hooks.onLog(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+        if (textResult) {
+          maybeThrowProviderFailure(
+            textResult,
+            'Claude runtime returned a provider failure result',
+          );
+        }
         this.hooks.onResult(textResult || null, newSessionId);
       }
     }

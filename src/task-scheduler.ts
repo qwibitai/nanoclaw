@@ -20,6 +20,12 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import { setSession } from './db.js';
+import {
+  classifyProviderFailure,
+  getEngineOrder,
+  shouldFailover,
+} from './engine-switch.js';
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -170,50 +176,96 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt: task.prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-        script: task.script || undefined,
-      },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result) {
-          result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          scheduleClose();
-        }
-        if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
-        }
-        if (streamedOutput.status === 'error') {
-          error = streamedOutput.error || 'Unknown error';
-        }
-      },
-    );
+    const preferredEngine =
+      process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+    const engineOrder = getEngineOrder(preferredEngine);
 
-    if (closeTimer) clearTimeout(closeTimer);
+    for (let attempt = 0; attempt < engineOrder.length; attempt++) {
+      const engine = engineOrder[attempt];
+      let attemptSessionId = attempt === 0 ? sessionId : undefined;
+      let outputSentToUser = false;
 
-    if (output.status === 'error') {
+      const output = await runContainerAgent(
+        group,
+        {
+          prompt: task.prompt,
+          sessionId: attemptSessionId,
+          groupFolder: task.group_folder,
+          chatJid: task.chat_jid,
+          isMain,
+          isScheduledTask: true,
+          assistantName: ASSISTANT_NAME,
+          script: task.script || undefined,
+          engine,
+        },
+        (proc, containerName) =>
+          deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        async (streamedOutput: ContainerOutput) => {
+          if (streamedOutput.status === 'error') {
+            return;
+          }
+          if (streamedOutput.newSessionId) {
+            attemptSessionId = streamedOutput.newSessionId;
+          }
+          if (streamedOutput.result) {
+            result = streamedOutput.result;
+            outputSentToUser = true;
+            // Forward result to user (sendMessage handles formatting)
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+            scheduleClose();
+          }
+          if (streamedOutput.status === 'success') {
+            deps.queue.notifyIdle(task.chat_jid);
+            scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          }
+        },
+      );
+
+      if (closeTimer) clearTimeout(closeTimer);
+
+      if (output.status === 'success') {
+        error = null;
+        if (attemptSessionId) {
+          sessions[task.group_folder] = attemptSessionId;
+          setSession(task.group_folder, attemptSessionId);
+        }
+        if (output.result && !outputSentToUser) {
+          // Result was already forwarded to the user via the streaming callback above
+          result = output.result;
+        }
+        break;
+      }
+
+      const failureClass =
+        output.providerFailureClass ||
+        (output.error ? classifyProviderFailure(output.error) : undefined);
+      const canFailover =
+        shouldFailover(failureClass) && attempt < engineOrder.length - 1;
+
+      if (canFailover) {
+        logger.warn(
+          {
+            taskId: task.id,
+            fromEngine: engine,
+            toEngine: engineOrder[attempt + 1],
+            failureClass,
+            error: output.error,
+          },
+          'Provider failure, switching engine for scheduled task',
+        );
+        continue;
+      }
+
       error = output.error || 'Unknown error';
-    } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
-      result = output.result;
+      break;
     }
 
-    logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
-      'Task completed',
-    );
+    if (!error) {
+      logger.info(
+        { taskId: task.id, durationMs: Date.now() - startTime },
+        'Task completed',
+      );
+    }
   } catch (err) {
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);

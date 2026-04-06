@@ -293,4 +293,42 @@ describe('container-runner timeout behavior', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
   });
+
+  it('explicit engine input overrides the ambient engine selection', async () => {
+    process.env.AGENT_ENGINE = 'claude';
+    fakeProc.stdin.write = vi.fn();
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, engine: 'codex' },
+      () => {},
+      onOutput,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+    const stdinWrite = fakeProc.stdin.write as unknown as {
+      mock: { calls: unknown[][] };
+    };
+
+    expect(containerArgs).toContain('HOME=/home/node');
+    expect(String(stdinWrite.mock.calls[0]?.[0] ?? '')).toContain(
+      '"engine":"codex"',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
 });

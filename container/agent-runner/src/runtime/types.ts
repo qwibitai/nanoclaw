@@ -10,6 +10,15 @@ export interface ContainerInput {
   secrets?: Record<string, string>;
 }
 
+export type ProviderFailureClass =
+  | 'retryable'
+  | 'quota'
+  | 'rate_limit'
+  | 'transport'
+  | 'auth'
+  | 'config'
+  | 'unknown';
+
 export interface RuntimeHooks {
   onLog: (message: string) => void;
   onResult: (result: string | null, newSessionId?: string) => void;

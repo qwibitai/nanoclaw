@@ -38,6 +38,7 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -47,6 +48,11 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import {
+  classifyProviderFailure,
+  getEngineOrder,
+  shouldFailover,
+} from './engine-switch.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -296,39 +302,98 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
-  const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+  try {
+    const preferredEngine = process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+    const engineOrder = getEngineOrder(preferredEngine);
+    let lastError: string | undefined;
+
+    for (let attempt = 0; attempt < engineOrder.length; attempt++) {
+      const engine = engineOrder[attempt];
+      let attemptSessionId = attempt === 0 ? sessionId : undefined;
+      const wrappedOnOutput = onOutput
+        ? async (output: ContainerOutput) => {
+            if (output.status === 'error') {
+              return;
+            }
+            if (output.newSessionId) {
+              attemptSessionId = output.newSessionId;
+            }
+            await onOutput(output);
+          }
+        : undefined;
+
+      const output = await runContainerAgent(
+        group,
+        {
+          prompt,
+          sessionId: attemptSessionId,
+          groupFolder: group.folder,
+          chatJid,
+          isMain,
+          assistantName: ASSISTANT_NAME,
+          engine,
+        },
+        (proc, containerName) =>
+          queue.registerProcess(chatJid, proc, containerName, group.folder),
+        wrappedOnOutput,
+      );
+
+      if (output.status === 'success') {
+        if (output.newSessionId || attemptSessionId) {
+          const committedSessionId = output.newSessionId || attemptSessionId;
+          if (committedSessionId) {
+            sessions[group.folder] = committedSessionId;
+            setSession(group.folder, committedSessionId);
+          }
         }
+        return 'success';
+      }
+
+      lastError = output.error;
+
+      const failureClass =
+        output.providerFailureClass ||
+        (output.error ? classifyProviderFailure(output.error) : undefined);
+      const canFailover =
+        shouldFailover(failureClass) && attempt < engineOrder.length - 1;
+
+      if (canFailover) {
+        logger.warn(
+          {
+            group: group.name,
+            fromEngine: engine,
+            toEngine: engineOrder[attempt + 1],
+            failureClass,
+            error: output.error,
+          },
+          'Provider failure, switching engine',
+        );
+        continue;
+      }
+
+      if (onOutput) {
         await onOutput(output);
       }
-    : undefined;
 
-  try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: group.folder,
-        chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
-    );
+      // Detect stale/corrupt session — clear it so the next retry starts fresh.
+      // The session .jsonl can go missing after a crash mid-write, manual
+      // deletion, or disk-full. The existing backoff in group-queue.ts
+      // handles the retry; we just need to remove the broken session ID.
+      const isStaleSession =
+        sessionId &&
+        output.error &&
+        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+          output.error,
+        );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-    }
-
-    if (output.status === 'error') {
+      if (isStaleSession) {
+        logger.warn(
+          { group: group.name, staleSessionId: sessionId, error: output.error },
+          'Stale session detected — clearing for next retry',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -336,7 +401,13 @@ async function runAgent(
       return 'error';
     }
 
-    return 'success';
+    if (lastError) {
+      logger.error(
+        { group: group.name, error: lastError },
+        'Container agent error',
+      );
+    }
+    return 'error';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
