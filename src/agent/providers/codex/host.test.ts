@@ -152,7 +152,7 @@ describe('codex host provider', () => {
       groupFolder: 'test-group',
       projectRoot: '/workspace/project',
       env: process.env,
-      sender: 'alice',
+      sender: 'user1',
       chatJid: 'test@g.us',
     });
 

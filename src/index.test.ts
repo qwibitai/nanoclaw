@@ -39,14 +39,14 @@ const {
   findChannel: vi.fn(),
   getAllRegisteredGroups: vi.fn(() => ({})),
   getChannelFactory: vi.fn(),
-  getRegisteredChannelNames: vi.fn(() => [] as string[]),
-  getSession: vi.fn(
-    (_groupFolder?: string, _providerId?: string) =>
-      undefined as string | undefined,
-  ),
   providerHookStartRemoteControl: vi.fn(),
   providerRegistryGetProvider: vi.fn(),
   restoreRemoteControl: vi.fn(),
+  getRegisteredChannelNames: vi.fn((): string[] => []),
+  getSession: vi.fn(
+    (_groupFolder: string, _providerId?: string) =>
+      undefined as string | undefined,
+  ),
   runContainerAgent: vi.fn(),
   setRegisteredGroup: vi.fn(),
   setSession: vi.fn(),
@@ -187,6 +187,20 @@ vi.mock('./logger.js', () => ({
 const ORIGINAL_CWD = process.cwd();
 const ORIGINAL_ARGV_1 = process.argv[1];
 const INDEX_MODULE_PATH = fileURLToPath(new URL('./index.ts', import.meta.url));
+
+function readBundledGlobalTemplate(): string {
+  return fs.readFileSync(
+    path.join(ORIGINAL_CWD, 'groups', 'global', 'AGENT.md'),
+    'utf-8',
+  );
+}
+
+function readBundledMainTemplate(): string {
+  return fs.readFileSync(
+    path.join(ORIGINAL_CWD, 'groups', 'main', 'AGENT.md'),
+    'utf-8',
+  );
+}
 
 function createTempRepo(): string {
   const repoDir = fs.mkdtempSync(
@@ -372,6 +386,37 @@ describe('startup group registration memory seeding', () => {
     );
   });
 
+  it('promotes legacy main CLAUDE.md during runtime registration for groups/main', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    const group: RegisteredGroup = {
+      name: 'Control',
+      folder: 'main',
+      trigger: '@Andy',
+      added_at: '2026-04-03T00:00:00.000Z',
+      isMain: true,
+    };
+
+    // Act
+    const { _registerGroupForTest } = await loadIndexModule(repoDir);
+    _registerGroupForTest('dc:main', group);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+  });
+
   it('backfills AGENT.md for existing registered groups during startup recovery', async () => {
     // Arrange
     const repoDir = createTempRepo();
@@ -407,6 +452,39 @@ describe('startup group registration memory seeding', () => {
       '# Existing Legacy Memory\n\nKeep the runbook exactly.\n',
     );
     expect(ensureAgent).toHaveBeenCalled();
+  });
+
+  it('promotes legacy global CLAUDE.md into AGENT.md once during startup recovery', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'global', 'AGENT.md', readBundledGlobalTemplate());
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+
+    // Act
+    const { _restoreRegisteredGroupsOnStartupForTest } =
+      await loadIndexModule(repoDir);
+    _restoreRegisteredGroupsOnStartupForTest({});
+
+    // Assert
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Later Compatibility Edit\n',
+    );
+    _restoreRegisteredGroupsOnStartupForTest({});
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
   });
 });
 

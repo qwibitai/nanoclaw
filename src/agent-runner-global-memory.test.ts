@@ -21,19 +21,9 @@ interface RunnerResult {
   stderr: string;
 }
 
-interface RuntimeWorkspace {
-  root: string;
-  globalDir: string;
-  groupDir: string;
-  extraDir: string;
-  ipcDir: string;
-  capturePath: string;
-  loaderPath: string;
-}
-
 const tempRoots: string[] = [];
 
-function createRuntimeWorkspace(): RuntimeWorkspace {
+function createRuntimeWorkspace() {
   const root = fs.mkdtempSync(
     path.join(os.tmpdir(), 'nanoclaw-agent-runner-memory-'),
   );
@@ -59,18 +49,6 @@ function createRuntimeWorkspace(): RuntimeWorkspace {
     loaderPath: path.join(root, 'mock-claude-sdk-loader.mjs'),
   };
 }
-
-function createWorkspaceEnv(
-  runtimeWorkspace: RuntimeWorkspace,
-): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    NANOCLAW_WORKSPACE_GROUP_DIR: runtimeWorkspace.groupDir,
-    NANOCLAW_WORKSPACE_GLOBAL_DIR: runtimeWorkspace.globalDir,
-    NANOCLAW_WORKSPACE_EXTRA_DIR: runtimeWorkspace.extraDir,
-  };
-}
-
 function writeMockSdkLoader(
   loaderPath: string,
   compatibilityPath: string,
@@ -89,6 +67,7 @@ const mockModuleSource = ${JSON.stringify(`
       JSON.stringify({
         systemPrompt: options.systemPrompt ?? null,
         cwd: options.cwd,
+        mcpEnv: options.mcpServers?.nanoclaw?.env ?? null,
       }),
     );
     fs.writeFileSync(${JSON.stringify(compatibilityPath)}, '# Provider Compatibility Edit\\n');
@@ -182,7 +161,6 @@ describe.sequential('container agent runner global memory', () => {
     fs.writeFileSync(canonicalPath, '# Canonical Global\n');
     fs.writeFileSync(compatibilityPath, '# Legacy Compatibility\n');
     writeMockSdkLoader(runtimeWorkspace.loaderPath, compatibilityPath);
-    const env = createWorkspaceEnv(runtimeWorkspace);
 
     // Act
     const result = await runRunner(
@@ -203,8 +181,9 @@ describe.sequential('container agent runner global memory', () => {
         },
       },
       {
-        ...env,
+        ...process.env,
         NANOCLAW_IPC_DIR: runtimeWorkspace.ipcDir,
+        NANOCLAW_WORKSPACE_ROOT: runtimeWorkspace.root,
         TEST_CAPTURE_PATH: runtimeWorkspace.capturePath,
       },
     );
@@ -212,6 +191,7 @@ describe.sequential('container agent runner global memory', () => {
       fs.readFileSync(runtimeWorkspace.capturePath, 'utf-8'),
     ) as {
       cwd: string;
+      mcpEnv: Record<string, string> | null;
       systemPrompt: { append: string; preset: string; type: string } | null;
     };
 
@@ -222,6 +202,10 @@ describe.sequential('container agent runner global memory', () => {
       type: 'preset',
       preset: 'claude_code',
       append: '# Canonical Global\n',
+    });
+    expect(capturedQuery.mcpEnv).toMatchObject({
+      NANOCLAW_IPC_DIR: runtimeWorkspace.ipcDir,
+      NANOCLAW_WORKSPACE_ROOT: runtimeWorkspace.root,
     });
     expect(fs.readFileSync(canonicalPath, 'utf-8')).toBe(
       '# Canonical Global\n',

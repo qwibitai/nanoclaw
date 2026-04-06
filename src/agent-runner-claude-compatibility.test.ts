@@ -274,7 +274,9 @@ describe.sequential('claude-code container provider compatibility', () => {
       env: {
         NANOCLAW_CHAT_JID: 'test@g.us',
         NANOCLAW_GROUP_FOLDER: 'test-group',
+        NANOCLAW_IPC_DIR: runtimeWorkspace.ipcDir,
         NANOCLAW_IS_MAIN: '0',
+        NANOCLAW_WORKSPACE_ROOT: '/workspace',
       },
     });
   });

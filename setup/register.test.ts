@@ -283,6 +283,20 @@ describe('register run memory seeding', () => {
   const originalCwd = process.cwd();
   const tempDirs: string[] = [];
 
+  function readBundledGlobalTemplate(): string {
+    return fs.readFileSync(
+      path.join(originalCwd, 'groups', 'global', 'AGENT.md'),
+      'utf-8',
+    );
+  }
+
+  function readBundledMainTemplate(): string {
+    return fs.readFileSync(
+      path.join(originalCwd, 'groups', 'main', 'AGENT.md'),
+      'utf-8',
+    );
+  }
+
   function createTempRepo(): string {
     const repoDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-register-test-'),
@@ -360,7 +374,7 @@ describe('register run memory seeding', () => {
       repoDir,
       'global',
       'CLAUDE.md',
-      '# Compatibility Global\n\nProvider-only edits that must not win.\n',
+      '# Canonical Global\n\nYou are Andy, a personal assistant.\n',
     );
 
     // Act
@@ -383,6 +397,78 @@ describe('register run memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'telegram_dev_team', 'CLAUDE.md')).toBe(
       '# Canonical Global\n\nYou are Andy, a personal assistant.\n',
+    );
+  });
+
+  it('promotes legacy global CLAUDE.md before seeding a new non-main group', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'global', 'AGENT.md', readBundledGlobalTemplate());
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'tg:-1009',
+      '--name',
+      'Operations',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'telegram_operations',
+      '--channel',
+      'telegram',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    expect(readGroupFile(repoDir, 'telegram_operations', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    expect(readGroupFile(repoDir, 'telegram_operations', 'CLAUDE.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+  });
+
+  it('promotes legacy global CLAUDE.md even when registering the main group', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'global', 'AGENT.md', readBundledGlobalTemplate());
+    writeGroupFile(
+      repoDir,
+      'global',
+      'CLAUDE.md',
+      '# Existing Global Memory\n\nKeep this shared context.\n',
+    );
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+      '--assistant-name',
+      'Luna',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'global', 'AGENT.md')).toBe(
+      '# Existing Global Memory\n\nKeep this shared context.\n',
     );
   });
 
@@ -499,7 +585,10 @@ describe('register run memory seeding', () => {
       'AGENT.md',
       '# Global Template\n\nYou are Andy.\n',
     );
-    fs.writeFileSync(path.join(repoDir, '.env'), 'DEFAULT_AGENT_PROVIDER=codex\n');
+    fs.writeFileSync(
+      path.join(repoDir, '.env'),
+      'DEFAULT_AGENT_PROVIDER=codex\n',
+    );
 
     // Act
     await runRegister(repoDir, [
@@ -580,6 +669,97 @@ describe('register run memory seeding', () => {
     );
     expect(readGroupFile(repoDir, 'whatsapp_planning', 'CLAUDE.md')).toBe(
       '# Planning Claude\n\nProvider compatibility stays customized.\n',
+    );
+  });
+
+  it('promotes legacy main CLAUDE.md when registering an upgraded groups/main folder', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(repoDir, 'main', 'AGENT.md', readBundledMainTemplate());
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+  });
+
+  it('promotes legacy main CLAUDE.md after assistant-name rewrites changed the tracked template', async () => {
+    // Arrange
+    const repoDir = createTempRepo();
+    writeGroupFile(
+      repoDir,
+      'main',
+      'AGENT.md',
+      readBundledMainTemplate()
+        .replace(/^# Andy$/m, '# Luna')
+        .replace(/You are Andy/g, 'You are Luna'),
+    );
+    writeGroupFile(
+      repoDir,
+      'main',
+      'CLAUDE.md',
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    writeGroupFile(
+      repoDir,
+      'global',
+      'AGENT.md',
+      '# Global Template\n\nYou are Andy.\n',
+    );
+
+    // Act
+    await runRegister(repoDir, [
+      '--jid',
+      'dc:main',
+      '--name',
+      'Control',
+      '--trigger',
+      '@Andy',
+      '--folder',
+      'main',
+      '--channel',
+      'discord',
+      '--is-main',
+      '--assistant-name',
+      'Luna',
+    ]);
+
+    // Assert
+    expect(readGroupFile(repoDir, 'main', 'AGENT.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
+    );
+    expect(readGroupFile(repoDir, 'main', 'CLAUDE.md')).toBe(
+      '# Existing Main Memory\n\nKeep this control-room context.\n',
     );
   });
 
@@ -668,7 +848,9 @@ describe('register run memory seeding', () => {
 
     // Assert
     expect(
-      fs.existsSync(path.join(repoDir, 'groups', 'discord_general', 'AGENT.md')),
+      fs.existsSync(
+        path.join(repoDir, 'groups', 'discord_general', 'AGENT.md'),
+      ),
     ).toBe(false);
     expect(
       fs.existsSync(

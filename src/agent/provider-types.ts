@@ -16,6 +16,7 @@ export interface ProviderFileMaterialization {
   sourcePath?: string;
   targetPath: string;
   content?: string;
+  onlyIfMissing?: boolean;
 }
 
 export interface ProviderDirectorySync {
@@ -37,6 +38,7 @@ export interface PreparedSession {
   allowedStateRoots?: string[];
   files: ProviderFileMaterialization[];
   directorySyncs?: ProviderDirectorySync[];
+  fallbackProviderStateDirs?: string[];
   metadata?: Record<string, unknown>;
 }
 

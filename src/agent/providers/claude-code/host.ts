@@ -144,6 +144,7 @@ export function createClaudeCodeProvider(): AgentProvider {
               'settings.json',
             ),
             content: `${CLAUDE_SETTINGS}\n`,
+            onlyIfMissing: true,
           },
         ],
         directorySyncs: [
