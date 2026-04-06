@@ -111,10 +111,11 @@ function createSchema(database: Database.Database): void {
   // sessions テーブルのスキーマを group_folder → group_jid に移行。
   // 個人プロジェクトのため後方互換不要。旧テーブルが残っている場合は DROP して再作成。
   try {
-    const hasOldColumn = (database
-      .prepare(`PRAGMA table_info(sessions)`)
-      .all() as Array<{ name: string }>)
-      .some((col) => col.name === 'group_folder');
+    const hasOldColumn = (
+      database.prepare(`PRAGMA table_info(sessions)`).all() as Array<{
+        name: string;
+      }>
+    ).some((col) => col.name === 'group_folder');
     if (hasOldColumn) {
       database.exec(`DROP TABLE sessions`);
       database.exec(

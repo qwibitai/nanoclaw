@@ -67,6 +67,8 @@ describe('autoRegisterThread (via _setRegisteredGroups)', () => {
 
     expect(registeredGroups['dc:parent123']).toBeDefined();
     expect(registeredGroups['dc:parent123'].thread_defaults).toBeDefined();
-    expect(registeredGroups['dc:parent123'].thread_defaults!.type).toBe('thread');
+    expect(registeredGroups['dc:parent123'].thread_defaults!.type).toBe(
+      'thread',
+    );
   });
 });

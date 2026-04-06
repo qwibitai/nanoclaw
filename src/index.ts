@@ -59,7 +59,12 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { hasPrivilege, resolveGroupType } from './group-type.js';
-import { Channel, InboundMessage, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  InboundMessage,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // リファクタリング中の後方互換性のために再エクスポート
@@ -130,8 +135,9 @@ function autoRegisterThread(
   parent: RegisteredGroup,
 ): void {
   const td = parent.thread_defaults!;
-  const threadName =
-    msg.sender_name ? `Thread (from ${msg.sender_name})` : 'Thread';
+  const threadName = msg.sender_name
+    ? `Thread (from ${msg.sender_name})`
+    : 'Thread';
   const childGroup: RegisteredGroup = {
     name: threadName,
     folder: parent.folder,
