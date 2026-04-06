@@ -29,6 +29,11 @@ vi.mock('../group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn((folder: string) => `/tmp/test-groups/${folder}`),
 }));
 
+// Mock transcription module
+vi.mock('../transcription.js', () => ({
+  transcribeAudioBuffer: vi.fn().mockResolvedValue(null),
+}));
+
 
 // --- Grammy mock ---
 
@@ -78,6 +83,7 @@ vi.mock('grammy', () => ({
 
 import fs from 'fs';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
+import { transcribeAudioBuffer } from '../transcription.js';
 
 // --- Test helpers ---
 
@@ -195,9 +201,10 @@ describe('TelegramChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Mock fs operations used by downloadFile
+    // Mock fs operations used by downloadFile and transcription
     vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined);
     vi.spyOn(fs, 'writeFileSync').mockReturnValue(undefined);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('fake-audio-data') as any);
 
     // Mock global fetch for file downloads
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -795,6 +802,70 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content: '[Voice message] (/workspace/group/attachments/voice_1.oga)',
+        }),
+      );
+    });
+
+    it('transcribes voice message when OpenAI key is available', async () => {
+      vi.mocked(transcribeAudioBuffer).mockResolvedValueOnce('Hello this is a voice message');
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'voice/file_0.oga' });
+
+      const ctx = createMediaCtx({ extra: { voice: { file_id: 'voice_id' } } });
+      await triggerMediaMessage('message:voice', ctx);
+      await flushPromises();
+
+      expect(transcribeAudioBuffer).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Voice: Hello this is a voice message]',
+        }),
+      );
+    });
+
+    it('falls back to file path when transcription returns null', async () => {
+      vi.mocked(transcribeAudioBuffer).mockResolvedValueOnce(null);
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'voice/file_0.oga' });
+
+      const ctx = createMediaCtx({ extra: { voice: { file_id: 'voice_id' } } });
+      await triggerMediaMessage('message:voice', ctx);
+      await flushPromises();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Voice message] (/workspace/group/attachments/voice_1.oga)',
+        }),
+      );
+    });
+
+    it('falls back to failed message when transcription throws', async () => {
+      vi.mocked(transcribeAudioBuffer).mockRejectedValueOnce(new Error('API error'));
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.getFile.mockResolvedValueOnce({ file_path: 'voice/file_0.oga' });
+
+      const ctx = createMediaCtx({ extra: { voice: { file_id: 'voice_id' } } });
+      await triggerMediaMessage('message:voice', ctx);
+      await flushPromises();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Voice Message - transcription failed]',
         }),
       );
     });
