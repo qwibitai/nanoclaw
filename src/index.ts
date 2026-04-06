@@ -385,10 +385,9 @@ async function runAgent(
 
   try {
     // Resolve model override via keyword-based message routing (zero cost).
-    const routedModel =
-      group.messageRouting
-        ? resolveMessageRoutingModel(group.messageRouting, prompt)
-        : undefined;
+    const routedModel = group.messageRouting
+      ? resolveMessageRoutingModel(group.messageRouting, prompt)
+      : undefined;
 
     if (routedModel) {
       logger.info(

@@ -33,9 +33,9 @@ describe('resolveMessageRoutingModel', () => {
   });
 
   it('returns default when no rule matches', () => {
-    expect(
-      resolveMessageRoutingModel(config, 'Hello, how are you?'),
-    ).toBe('model-default');
+    expect(resolveMessageRoutingModel(config, 'Hello, how are you?')).toBe(
+      'model-default',
+    );
   });
 
   it('returns undefined when no rule matches and no default', () => {
