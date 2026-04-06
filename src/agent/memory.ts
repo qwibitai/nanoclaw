@@ -91,9 +91,9 @@ export interface FinalizeLegacyCanonicalMemoryResult {
 const LEGACY_CANONICAL_MEMORY_MARKER_FILE =
   '.canonical-memory-migration-v1.json';
 export const DEFAULT_GLOBAL_MEMORY_TEMPLATE_FINGERPRINT =
-  '44f4028d333e5b940485b12749dc8030460c6181105c12d71f7866589f7f1334';
+  '0c6dfe40779c66c3482cc95b77da15d734b72e0c08beb76384ebb7a2d6a98b14';
 export const DEFAULT_MAIN_MEMORY_TEMPLATE_FINGERPRINT =
-  'b7cee3ed414fa4d9e97c5a3bf3b754c608a874d817a7d6a09a6aa9c66e309616';
+  '8932ebe1982e5e8adfa5ec8b2e4ad42d47da53ef20f64ea425da129377d8319e';
 
 function normalizeMemoryContent(content: string): string {
   return content.replace(/\r\n/g, '\n');

@@ -8,8 +8,6 @@ CODEX_HOME_DIR="/home/vscode/.codex"
 export PATH="/home/vscode/.local/bin:${PATH}"
 
 declare -a REQUIRED_FILES=(
-  "/home/vscode/.codex/auth.json"
-  "/home/vscode/.codex/config.toml"
   "/home/vscode/.gitconfig"
 )
 
@@ -30,6 +28,11 @@ declare -a REQUIRED_COMMANDS=(
 
 declare -a OPTIONAL_DIRS=(
   "/home/vscode/.config/gh"
+)
+
+declare -a OPTIONAL_FILES=(
+  "/home/vscode/.codex/auth.json"
+  "/home/vscode/.codex/config.toml"
 )
 
 missing=0
@@ -112,6 +115,14 @@ for path in "${OPTIONAL_DIRS[@]}"; do
   fi
 done
 
+for path in "${OPTIONAL_FILES[@]}"; do
+  if [[ -f "${path}" ]]; then
+    echo "[ok] ${path}"
+  else
+    echo "[optional-missing] ${path}"
+  fi
+done
+
 if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     echo "[ok] docker compose"
@@ -132,6 +143,12 @@ if [[ "${missing}" -eq 1 ]]; then
   echo "Required devcontainer credentials or runtime directories are not available." >&2
   echo "Check .devcontainer/compose.yaml and confirm ~/.codex, ~/.ssh, and ~/.gitconfig exist on the host." >&2
   echo "Codex also requires ${CODEX_HOME_DIR} to be writable by the vscode user so it can persist runtime state." >&2
+fi
+
+if [[ ! -f "${CODEX_HOME_DIR}/auth.json" ]]; then
+  echo "Codex ChatGPT login cache is not available yet." >&2
+  echo "Run 'codex login' or 'codex login --device-auth' in this devcontainer before using the Codex provider." >&2
+  echo "If Codex is using the OS keyring on the host, set cli_auth_credentials_store = \"file\" in ~/.codex/config.toml or copy ~/.codex/auth.json into ${CODEX_HOME_DIR}/auth.json." >&2
 fi
 
 if [[ "${VERIFY_ONLY}" == "--verify-only" ]]; then

@@ -18,6 +18,29 @@ export function readEnvFile(keys: string[]): Record<string, string> {
     return {};
   }
 
+  return parseEnvContent(content, keys);
+}
+
+export function readEnvFileAt(
+  rootDir: string,
+  keys: string[],
+): Record<string, string> {
+  const envFile = path.join(rootDir, '.env');
+  let content: string;
+  try {
+    content = fs.readFileSync(envFile, 'utf-8');
+  } catch (err) {
+    logger.debug({ err }, '.env file not found, using defaults');
+    return {};
+  }
+
+  return parseEnvContent(content, keys);
+}
+
+function parseEnvContent(
+  content: string,
+  keys: string[],
+): Record<string, string> {
   const result: Record<string, string> = {};
   const wanted = new Set(keys);
 

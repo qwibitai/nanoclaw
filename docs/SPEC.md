@@ -401,10 +401,11 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 
 **`codex`**
 ```bash
-OPENAI_API_KEY=sk-...
-# or
-CODEX_API_KEY=sk-...
+# Optional override if your auth cache lives somewhere else:
+CODEX_AUTH_FILE=/absolute/path/to/auth.json
 ```
+
+Run `codex login` or `codex login --device-auth` in the same environment where NanoClaw runs. NanoClaw expects a file-backed ChatGPT login cache at `~/.codex/auth.json` by default, and does not use `OPENAI_API_KEY` or `CODEX_API_KEY` for the built-in Codex provider.
 
 Provider validation surfaces readiness through setup and verify flows, but providers do not control core mount, IPC, or container security policy.
 

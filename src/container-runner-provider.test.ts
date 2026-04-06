@@ -361,6 +361,283 @@ describe('container runner provider plumbing', () => {
     expect(spawnArgs).toContain(`${copiedRunnerDir}:/app/src`);
   });
 
+  it('runs provider session finalization after the container exits', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const finalizeSession = vi.fn();
+    const provider: AgentProvider = {
+      id: 'codex',
+      displayName: 'Codex',
+      capabilities: {
+        persistentSessions: true,
+        projectMemory: true,
+        remoteControl: false,
+        agentTeams: false,
+        providerSkills: false,
+      },
+      validateHost() {
+        return [];
+      },
+      prepareSession() {
+        return {
+          providerStateDir,
+          files: [],
+        };
+      },
+      buildContainerSpec() {
+        return {
+          mounts: [],
+          env: {},
+          workdir: '/workspace/group',
+        };
+      },
+      serializeRuntimeInput(ctx) {
+        return {
+          prompt: ctx.prompt,
+          sessionId: ctx.sessionId,
+          groupFolder: ctx.groupFolder,
+          chatJid: ctx.chatJid,
+          isMain: ctx.isMain,
+        };
+      },
+      finalizeSession,
+    };
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'done',
+      newSessionId: 'session-123',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+
+    // Assert
+    expect(result).toEqual({
+      status: 'success',
+      result: 'done',
+      newSessionId: 'session-123',
+    });
+    expect(finalizeSession).toHaveBeenCalledWith({
+      projectRoot: process.cwd(),
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+      preparedSession: {
+        providerStateDir,
+        files: [],
+      },
+    });
+  });
+
+  it('runs provider session finalization after an error result', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const finalizeSession = vi.fn();
+    const provider: AgentProvider = {
+      id: 'codex',
+      displayName: 'Codex',
+      capabilities: {
+        persistentSessions: true,
+        projectMemory: true,
+        remoteControl: false,
+        agentTeams: false,
+        providerSkills: false,
+      },
+      validateHost() {
+        return [];
+      },
+      prepareSession() {
+        return {
+          providerStateDir,
+          files: [],
+        };
+      },
+      buildContainerSpec() {
+        return {
+          mounts: [],
+          env: {},
+          workdir: '/workspace/group',
+        };
+      },
+      serializeRuntimeInput(ctx) {
+        return {
+          prompt: ctx.prompt,
+          sessionId: ctx.sessionId,
+          groupFolder: ctx.groupFolder,
+          chatJid: ctx.chatJid,
+          isMain: ctx.isMain,
+        };
+      },
+      finalizeSession,
+    };
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'error',
+      result: null,
+      error: 'provider failed',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+
+    // Assert
+    expect(result).toEqual({
+      status: 'error',
+      result: null,
+      error: 'provider failed',
+    });
+    expect(finalizeSession).toHaveBeenCalledWith({
+      projectRoot: process.cwd(),
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+      preparedSession: {
+        providerStateDir,
+        files: [],
+      },
+    });
+  });
+
+  it('runs provider session finalization only once when error and close both fire', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const finalizeSession = vi.fn();
+    const provider: AgentProvider = {
+      id: 'codex',
+      displayName: 'Codex',
+      capabilities: {
+        persistentSessions: true,
+        projectMemory: true,
+        remoteControl: false,
+        agentTeams: false,
+        providerSkills: false,
+      },
+      validateHost() {
+        return [];
+      },
+      prepareSession() {
+        return {
+          providerStateDir,
+          files: [],
+        };
+      },
+      buildContainerSpec() {
+        return {
+          mounts: [],
+          env: {},
+          workdir: '/workspace/group',
+        };
+      },
+      serializeRuntimeInput(ctx) {
+        return {
+          prompt: ctx.prompt,
+          sessionId: ctx.sessionId,
+          groupFolder: ctx.groupFolder,
+          chatJid: ctx.chatJid,
+          isMain: ctx.isMain,
+        };
+      },
+      finalizeSession,
+    };
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    fakeProc.emit('error', new Error('spawn failed'));
+    fakeProc.emit('close', 1);
+
+    const result = await resultPromise;
+
+    // Assert
+    expect(result).toEqual({
+      status: 'error',
+      result: null,
+      error: 'Container spawn error: spawn failed',
+    });
+    expect(finalizeSession).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves provider files that are marked onlyIfMissing', async () => {
     // Arrange
     const groupDir = path.join(groupsDir, 'test-group');
@@ -418,6 +695,66 @@ describe('container runner provider plumbing', () => {
     expect(fs.readFileSync(existingSettings, 'utf-8')).toBe(
       '{"provider":"custom"}\n',
     );
+  });
+
+  it('materializes provider files from explicitly allowed external source roots', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    const externalAuthRoot = path.join(tempRoot, 'external-auth');
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.mkdirSync(externalAuthRoot, { recursive: true });
+
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const authSourceFile = path.join(externalAuthRoot, 'auth.json');
+    fs.writeFileSync(authSourceFile, '{"auth":"chatgpt"}\n');
+
+    const provider = createPreparedSessionProvider({
+      providerStateDir,
+      allowedSourceRoots: [externalAuthRoot],
+      files: [
+        {
+          sourcePath: authSourceFile,
+          targetPath: path.join(providerStateDir, 'auth.json'),
+        },
+      ],
+    });
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: null,
+    });
+    fakeProc.emit('close', 0);
+    await resultPromise;
+
+    // Assert
+    expect(
+      fs.readFileSync(path.join(providerStateDir, 'auth.json'), 'utf-8'),
+    ).toBe('{"auth":"chatgpt"}\n');
   });
 
   it('preserves the cached agent runner source when the project copy is unchanged', async () => {

@@ -36,6 +36,7 @@ export interface PrepareSessionContext {
 export interface PreparedSession {
   providerStateDir: string;
   allowedStateRoots?: string[];
+  allowedSourceRoots?: string[];
   files: ProviderFileMaterialization[];
   directorySyncs?: ProviderDirectorySync[];
   fallbackProviderStateDirs?: string[];
@@ -52,6 +53,15 @@ export interface BuildContainerSpecContext {
   projectRoot: string;
   dataDir: string;
   groupFolder: string;
+  isMain: boolean;
+  preparedSession: PreparedSession;
+}
+
+export interface FinalizeSessionContext {
+  projectRoot: string;
+  dataDir: string;
+  groupFolder: string;
+  groupDir: string;
   isMain: boolean;
   preparedSession: PreparedSession;
 }
@@ -111,6 +121,7 @@ export interface AgentProvider {
   prepareSession(ctx: PrepareSessionContext): PreparedSession;
   buildContainerSpec(ctx: BuildContainerSpecContext): ProviderContainerSpec;
   serializeRuntimeInput(ctx: RuntimeInvocationContext): ProviderRuntimeInput;
+  finalizeSession?(ctx: FinalizeSessionContext): void | Promise<void>;
   startRemoteControl?(ctx: RemoteControlContext): Promise<RemoteControlResult>;
   stopRemoteControl?(): Promise<void>;
 }

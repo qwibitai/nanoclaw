@@ -45,6 +45,10 @@ function buildCodexConfig(
   const lines: string[] = [];
   const instructionsPath = input.isMain ? null : globalMemoryPath();
 
+  lines.push('forced_login_method = "chatgpt"');
+  lines.push('cli_auth_credentials_store = "file"');
+  lines.push('');
+
   if (instructionsPath) {
     lines.push(`model_instructions_file = ${tomlString(instructionsPath)}`);
     lines.push('');

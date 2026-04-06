@@ -86,9 +86,9 @@ This is the **main channel**, which has elevated privileges.
 Provider auth depends on the active runtime:
 
 - `claude-code`: `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
-- `codex`: `OPENAI_API_KEY` or `CODEX_API_KEY`
+- `codex`: `codex login` or `codex login --device-auth` with a file-backed `~/.codex/auth.json` cache
 
-OneCLI manages credentials — run `onecli --help`.
+OneCLI manages API credentials. Codex ChatGPT subscription auth is managed by the Codex CLI login cache.
 
 ## Container Mounts
 

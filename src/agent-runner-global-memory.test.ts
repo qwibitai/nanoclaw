@@ -49,7 +49,6 @@ function createRuntimeWorkspace() {
     loaderPath: path.join(root, 'mock-claude-sdk-loader.mjs'),
   };
 }
-
 function writeMockSdkLoader(
   loaderPath: string,
   compatibilityPath: string,

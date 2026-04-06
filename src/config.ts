@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 
 import { createProviderRegistry } from './agent/provider-registry.js';
+import { resolveCodexAuthFile } from './codex-auth.js';
 import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -9,6 +10,7 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'CODEX_AUTH_FILE',
   'DEFAULT_AGENT_PROVIDER',
   'ONECLI_URL',
   'TZ',
@@ -55,6 +57,7 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CODEX_AUTH_FILE = resolveCodexAuthFile(process.env, PROJECT_ROOT);
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(

@@ -520,7 +520,7 @@ describe('provider-scoped runtime sessions', () => {
     };
     getAllRegisteredGroups.mockReturnValue({ 'codex@g.us': startupGroup });
     getSession.mockImplementation(
-      (groupFolder: string, providerId: string | undefined) => {
+      (groupFolder: string | undefined, providerId: string | undefined) => {
         if (groupFolder !== 'codex-group') {
           return undefined;
         }
@@ -587,7 +587,7 @@ describe('provider-scoped runtime sessions', () => {
     };
     getAllRegisteredGroups.mockReturnValue({ 'codex@g.us': group });
     getSession.mockImplementation(
-      (groupFolder: string, providerId: string | undefined) => {
+      (groupFolder: string | undefined, providerId: string | undefined) => {
         if (groupFolder !== 'codex-group') {
           return undefined;
         }

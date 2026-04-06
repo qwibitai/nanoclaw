@@ -49,12 +49,14 @@ const path = require('node:path');
 
 const recordPath = process.env.NANOCLAW_CODEX_RECORD_FILE;
 const configPath = path.join(process.env.CODEX_HOME, 'config.toml');
+const authPath = path.join(process.env.CODEX_HOME, 'auth.json');
 const agentsPath = path.join(process.cwd(), 'AGENTS.md');
 const record = {
   argv: process.argv.slice(2),
   cwd: process.cwd(),
   codexHome: process.env.CODEX_HOME,
   config: fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null,
+  authCache: fs.existsSync(authPath) ? fs.readFileSync(authPath, 'utf8') : null,
   groupAgents: fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf8') : null,
 };
 fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
@@ -184,6 +186,8 @@ test('built-in Codex provider starts a new conversation with AGENTS memory, glob
       ).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
     ),
   );
+  assert.match(record.config, /forced_login_method = "chatgpt"/);
+  assert.match(record.config, /cli_auth_credentials_store = "file"/);
   assert.match(record.config, /\[mcp_servers\.nanoclaw\]/);
   assert.match(record.config, /command = "node"/);
   assert.match(record.config, /args = \["\/app\/dist\/ipc-mcp-stdio\.js"\]/);
@@ -240,4 +244,6 @@ test('built-in Codex provider resumes an existing conversation with the same dis
   assert.equal(record.argv.at(-2), 'codex-session-existing');
   assert.equal(record.argv.at(-1), 'Continue the existing task.');
   assert.equal(record.config.includes('model_instructions_file'), false);
+  assert.match(record.config, /forced_login_method = "chatgpt"/);
+  assert.match(record.config, /cli_auth_credentials_store = "file"/);
 });

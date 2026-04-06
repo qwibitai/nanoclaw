@@ -125,7 +125,7 @@ describe('provider documentation audit', () => {
           'Bundled `container/skills/` content is synced only for `claude-code` in v1.',
           '7. Router invokes the active provider runtime:',
           '8. Provider processes message:',
-          '| `@Assistant [message]` | `@Andy what\'s the weather?` | Talk to the active provider |',
+          "| `@Assistant [message]` | `@Andy what's the weather?` | Talk to the active provider |",
         ],
       },
       {
@@ -280,11 +280,15 @@ describe('provider documentation audit', () => {
       },
       {
         filePath: ['groups', 'main', 'AGENT.md'],
-        forbiddenSnippets: ['CLAUDE.md is the canonical memory file for this group.'],
+        forbiddenSnippets: [
+          'CLAUDE.md is the canonical memory file for this group.',
+        ],
       },
       {
         filePath: ['groups', 'main', 'CLAUDE.md'],
-        forbiddenSnippets: ['CLAUDE.md is the canonical memory file for this group.'],
+        forbiddenSnippets: [
+          'CLAUDE.md is the canonical memory file for this group.',
+        ],
       },
       {
         filePath: ['groups', 'global', 'AGENT.md'],
