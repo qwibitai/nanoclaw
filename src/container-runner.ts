@@ -537,7 +537,13 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
+    let settled = false;
     const resolveWithFinalization = (result: ContainerOutput) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
       Promise.resolve()
         .then(() => finalizePreparedProviderSession(preparedProvider, input))
         .catch((error) => {
