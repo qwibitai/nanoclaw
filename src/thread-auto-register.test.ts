@@ -2,7 +2,7 @@
  * thread 自動登録のテスト。
  * discord adapter の onMessage callback を経由した統合テスト的なアプローチ。
  * index.ts の autoRegisterThread は _autoRegisterThread としてエクスポートされ、
- * registeredGroups の状態変化とDB永続化を観察することでテストする。
+ * registeredGroups の状態変化と DB 永続化を観察することでテストする。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
