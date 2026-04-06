@@ -146,6 +146,97 @@ describe('codex host provider', () => {
     expect(fs.readFileSync(authFile, 'utf8')).toBe('{"refresh":"after"}\n');
   });
 
+  it('does not overwrite a newer host auth.json that changed after session preparation', async () => {
+    // Arrange
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-codex-host-provider-'),
+    );
+    tempRoots.push(tempRoot);
+
+    const projectRoot = process.cwd();
+    const dataDir = path.join(tempRoot, 'data');
+    const groupDir = path.join(tempRoot, 'groups', 'test-group');
+    const authFile = path.join(tempRoot, 'codex-auth', 'auth.json');
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.mkdirSync(path.dirname(authFile), { recursive: true });
+    fs.writeFileSync(authFile, '{"refresh":"before"}\n');
+    process.env.CODEX_AUTH_FILE = authFile;
+
+    const provider = createProviderRegistry().getProvider('codex');
+    const preparedSession = provider.prepareSession({
+      projectRoot,
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+    });
+    fs.writeFileSync(authFile, '{"refresh":"newer"}\n');
+    fs.mkdirSync(preparedSession.providerStateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(preparedSession.providerStateDir, 'auth.json'),
+      '{"refresh":"stale-session"}\n',
+    );
+
+    // Act
+    await provider.finalizeSession?.({
+      projectRoot,
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+      preparedSession,
+    });
+
+    // Assert
+    expect(fs.readFileSync(authFile, 'utf8')).toBe('{"refresh":"newer"}\n');
+  });
+
+  it('clears stale provider auth cache when the configured source auth file is missing', () => {
+    // Arrange
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-codex-host-provider-'),
+    );
+    tempRoots.push(tempRoot);
+
+    const projectRoot = process.cwd();
+    const dataDir = path.join(tempRoot, 'data');
+    const groupDir = path.join(tempRoot, 'groups', 'test-group');
+    const authFile = path.join(tempRoot, 'codex-auth', 'auth.json');
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.mkdirSync(providerStateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(providerStateDir, 'auth.json'),
+      '{"stale":true}\n',
+    );
+    process.env.CODEX_AUTH_FILE = authFile;
+
+    const provider = createProviderRegistry().getProvider('codex');
+
+    // Act
+    const preparedSession = provider.prepareSession({
+      projectRoot,
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+    });
+
+    // Assert
+    expect(preparedSession.files).toEqual([
+      {
+        sourcePath: path.join(groupDir, 'AGENT.md'),
+        targetPath: path.join(groupDir, 'AGENTS.md'),
+      },
+    ]);
+    expect(fs.existsSync(path.join(providerStateDir, 'auth.json'))).toBe(false);
+  });
+
   it('returns an explicit unsupported result for remote control', async () => {
     // Arrange
     const provider = createProviderRegistry().getProvider('codex');

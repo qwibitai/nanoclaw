@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -14,6 +15,7 @@ import type {
 const PROVIDER_ID = 'codex';
 const AUTH_CACHE_FILENAME = 'auth.json';
 const AUTH_SOURCE_METADATA_KEY = 'codexAuthSourceFile';
+const AUTH_SOURCE_HASH_METADATA_KEY = 'codexAuthSourceHash';
 
 function createRuntimeInput(
   ctx: RuntimeInvocationContext,
@@ -70,6 +72,18 @@ function getAuthSourceFile(
 ): string | undefined {
   const authSource = preparedSession.metadata?.[AUTH_SOURCE_METADATA_KEY];
   return typeof authSource === 'string' ? authSource : undefined;
+}
+
+function getAuthSourceHash(
+  preparedSession: PreparedSession,
+): string | undefined {
+  const authSourceHash =
+    preparedSession.metadata?.[AUTH_SOURCE_HASH_METADATA_KEY];
+  return typeof authSourceHash === 'string' ? authSourceHash : undefined;
+}
+
+function fingerprintContents(contents: Buffer): string {
+  return createHash('sha256').update(contents).digest('hex');
 }
 
 export function createCodexProvider(): AgentProvider {
@@ -153,6 +167,7 @@ export function createCodexProvider(): AgentProvider {
         PROVIDER_ID,
       );
       const authSourceFile = resolveCodexAuthFile(process.env, ctx.projectRoot);
+      const authTargetFile = path.join(providerStateDir, AUTH_CACHE_FILENAME);
       const files = [
         {
           sourcePath: path.join(ctx.groupDir, 'AGENT.md'),
@@ -164,12 +179,17 @@ export function createCodexProvider(): AgentProvider {
       const metadata: Record<string, unknown> = {};
 
       if (fs.existsSync(authSourceFile)) {
+        const authSourceContents = fs.readFileSync(authSourceFile);
         files.push({
           sourcePath: authSourceFile,
-          targetPath: path.join(providerStateDir, AUTH_CACHE_FILENAME),
+          targetPath: authTargetFile,
         });
         allowedSourceRoots.push(path.dirname(authSourceFile));
         metadata[AUTH_SOURCE_METADATA_KEY] = authSourceFile;
+        metadata[AUTH_SOURCE_HASH_METADATA_KEY] =
+          fingerprintContents(authSourceContents);
+      } else if (fs.existsSync(authTargetFile)) {
+        fs.rmSync(authTargetFile, { force: true });
       }
 
       return {
@@ -199,6 +219,7 @@ export function createCodexProvider(): AgentProvider {
     },
     finalizeSession(ctx) {
       const authSourceFile = getAuthSourceFile(ctx.preparedSession);
+      const authSourceHash = getAuthSourceHash(ctx.preparedSession);
       if (!authSourceFile) {
         return;
       }
@@ -212,11 +233,16 @@ export function createCodexProvider(): AgentProvider {
       }
 
       const refreshedContents = fs.readFileSync(refreshedAuthFile);
-      const existingContents = fs.existsSync(authSourceFile)
-        ? fs.readFileSync(authSourceFile)
-        : null;
+      if (!authSourceHash || !fs.existsSync(authSourceFile)) {
+        return;
+      }
 
-      if (existingContents && refreshedContents.equals(existingContents)) {
+      const existingContents = fs.readFileSync(authSourceFile);
+      if (refreshedContents.equals(existingContents)) {
+        return;
+      }
+
+      if (fingerprintContents(existingContents) !== authSourceHash) {
         return;
       }
 
