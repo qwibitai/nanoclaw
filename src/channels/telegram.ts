@@ -9,6 +9,7 @@ import {
   DEFAULT_MODEL,
   resolveModelAlias,
   loadModelAliases,
+  TIMEZONE,
   TRIGGER_PATTERN,
 } from '../config.js';
 import {
@@ -317,6 +318,17 @@ export class TelegramChannel implements Channel {
         return;
       }
 
+      const fmtTime = (iso: string | null | undefined): string => {
+        if (!iso) return '—';
+        return new Date(iso).toLocaleString('ja-JP', {
+          timeZone: TIMEZONE,
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
       const lines = tasks.map((t) => {
         const model = t.model ? `\`${t.model}\`` : '(default)';
         const prompt =
@@ -324,6 +336,7 @@ export class TelegramChannel implements Channel {
         return [
           `\`${t.id}\` | ${t.schedule_type} ${t.schedule_value} | ${t.status}`,
           `  Model: ${model}`,
+          `  Last: ${fmtTime(t.last_run)} | Next: ${fmtTime(t.next_run)}`,
           `  Prompt: ${prompt}`,
         ].join('\n');
       });

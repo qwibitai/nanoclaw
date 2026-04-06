@@ -12,6 +12,7 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   DEFAULT_MODEL: 'claude-sonnet-4-20250514',
+  TIMEZONE: 'Asia/Tokyo',
   TRIGGER_PATTERN: /^@Andy\b/i,
   resolveModelAlias: vi.fn((name: string) => {
     const aliases: Record<string, string> = {
@@ -57,6 +58,8 @@ vi.mock('../db.js', () => ({
           schedule_value: '0 */4 * * *',
           model: 'claude-haiku-4-20250514',
           status: 'active',
+          last_run: '2026-04-05T23:00:00.000Z',
+          next_run: '2026-04-06T03:00:00.000Z',
         },
         {
           id: 'task-456',
@@ -65,6 +68,8 @@ vi.mock('../db.js', () => ({
           schedule_value: '2026-04-10T09:00',
           model: null,
           status: 'active',
+          last_run: null,
+          next_run: '2026-04-10T00:00:00.000Z',
         },
       ];
     }
@@ -1735,6 +1740,8 @@ describe('TelegramChannel', () => {
       expect(replyText).toContain('task-456');
       expect(replyText).toContain('claude-haiku-4-20250514');
       expect(replyText).toContain('(default)');
+      expect(replyText).toContain('Last:');
+      expect(replyText).toContain('Next:');
     });
 
     it('shows empty message when no tasks', async () => {
