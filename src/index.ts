@@ -15,6 +15,8 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
+  WEBHOOK_ENABLED,
+  WEBHOOK_PORT,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -77,6 +79,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { startWebhookServer, stopWebhookServer } from './webhook.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -805,6 +808,7 @@ async function main(): Promise<void> {
     saveState();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    await stopWebhookServer();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -1061,6 +1065,51 @@ async function main(): Promise<void> {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
   });
+
+  // Incoming webhook: external systems can trigger the agent via HTTP POST
+  if (WEBHOOK_ENABLED) {
+    startWebhookServer(WEBHOOK_PORT, {
+      getMainGroupJid: () =>
+        Object.keys(registeredGroups).find(
+          (jid) => registeredGroups[jid].isMain === true,
+        ),
+      onWebhookMessage: (chatJid: string, text: string) => {
+        const msg: NewMessage = {
+          id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: chatJid,
+          sender: 'webhook',
+          sender_name: 'Webhook',
+          content: text,
+          timestamp: new Date().toISOString(),
+          is_from_me: true,
+        };
+        storeMessage(msg);
+
+        // Event-driven: pipe to active container or enqueue for a new one
+        const allPending = getMessagesSince(
+          chatJid,
+          getOrRecoverCursor(chatJid),
+          ASSISTANT_NAME,
+          MAX_MESSAGES_PER_PROMPT,
+        );
+        if (allPending.length > 0) {
+          const formatted = formatMessages(allPending, TIMEZONE);
+          if (queue.sendMessage(chatJid, formatted)) {
+            lastAgentTimestamp[chatJid] =
+              allPending[allPending.length - 1].timestamp;
+            saveState();
+            return;
+          }
+        }
+        queue.enqueueMessageCheck(chatJid);
+      },
+    }).catch((err) => {
+      logger.warn(
+        { err },
+        'Webhook server failed to start, continuing without it',
+      );
+    });
+  }
 }
 
 // Guard: only run when executed directly, not when imported by tests

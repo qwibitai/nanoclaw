@@ -13,6 +13,8 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'DEFAULT_MODEL',
   'TZ',
+  'WEBHOOK_ENABLED',
+  'WEBHOOK_PORT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -129,3 +131,11 @@ export function resolveModelAlias(nameOrId: string): string {
   const aliases = loadModelAliases();
   return aliases[nameOrId.toLowerCase()] || nameOrId;
 }
+
+// Incoming webhook (opt-in, disabled by default)
+export const WEBHOOK_ENABLED =
+  (process.env.WEBHOOK_ENABLED || envConfig.WEBHOOK_ENABLED) === 'true';
+export const WEBHOOK_PORT = parseInt(
+  process.env.WEBHOOK_PORT || envConfig.WEBHOOK_PORT || '8587',
+  10,
+);
