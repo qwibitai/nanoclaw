@@ -33,6 +33,48 @@ import { RegisteredGroup } from './types.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+/**
+ * Load external MCP server configs from .mcp.json.
+ * Rewrites localhost URLs to host.docker.internal so containers can reach host services.
+ */
+function loadExternalMcpServers(): Record<string, McpServerConfig> | undefined {
+  const mcpJsonPath = path.join(process.cwd(), '.mcp.json');
+  if (!fs.existsSync(mcpJsonPath)) return undefined;
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+    const servers: Record<string, McpServerConfig> = raw.mcpServers || {};
+    if (Object.keys(servers).length === 0) return undefined;
+
+    // Rewrite localhost URLs so the container can reach host services
+    for (const [name, config] of Object.entries(servers)) {
+      if (config.url) {
+        config.url = config.url
+          .replace(/localhost/g, 'host.docker.internal')
+          .replace(/127\.0\.0\.1/g, 'host.docker.internal');
+      }
+      logger.info({ name, type: config.type || 'stdio' }, 'Loaded external MCP server');
+    }
+
+    return servers;
+  } catch (err) {
+    logger.warn({ err }, 'Failed to load .mcp.json');
+    return undefined;
+  }
+}
+
+// Cache external MCP servers (loaded once at startup)
+const externalMcpServers = loadExternalMcpServers();
+
+export interface McpServerConfig {
+  type?: 'stdio' | 'sse' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -42,6 +84,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  externalMcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface ContainerOutput {
@@ -347,7 +390,11 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    // Inject external MCP server configs into container input
+    const containerInput = externalMcpServers
+      ? { ...input, externalMcpServers }
+      : input;
+    container.stdin.write(JSON.stringify(containerInput));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
