@@ -458,6 +458,93 @@ describe('container runner provider plumbing', () => {
     });
   });
 
+  it('does not run provider session finalization after an error result', async () => {
+    // Arrange
+    const groupDir = path.join(groupsDir, 'test-group');
+    fs.mkdirSync(groupDir, { recursive: true });
+    const providerStateDir = path.join(
+      dataDir,
+      'sessions',
+      'test-group',
+      'codex',
+    );
+    const finalizeSession = vi.fn();
+    const provider: AgentProvider = {
+      id: 'codex',
+      displayName: 'Codex',
+      capabilities: {
+        persistentSessions: true,
+        projectMemory: true,
+        remoteControl: false,
+        agentTeams: false,
+        providerSkills: false,
+      },
+      validateHost() {
+        return [];
+      },
+      prepareSession() {
+        return {
+          providerStateDir,
+          files: [],
+        };
+      },
+      buildContainerSpec() {
+        return {
+          mounts: [],
+          env: {},
+          workdir: '/workspace/group',
+        };
+      },
+      serializeRuntimeInput(ctx) {
+        return {
+          prompt: ctx.prompt,
+          sessionId: ctx.sessionId,
+          groupFolder: ctx.groupFolder,
+          chatJid: ctx.chatJid,
+          isMain: ctx.isMain,
+        };
+      },
+      finalizeSession,
+    };
+    const fakeProc = createFakeProcess();
+    const { runContainerAgent } = await loadSubject(
+      provider,
+      dataDir,
+      groupsDir,
+      fakeProc,
+    );
+
+    // Act
+    const resultPromise = runContainerAgent(
+      createProviderGroup(),
+      {
+        prompt: 'Ship the provider slice.',
+        groupFolder: 'test-group',
+        chatJid: 'test@g.us',
+        isMain: false,
+      },
+      () => {},
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    emitOutputMarker(fakeProc, {
+      status: 'error',
+      result: null,
+      error: 'provider failed',
+    });
+    fakeProc.emit('close', 0);
+
+    const result = await resultPromise;
+
+    // Assert
+    expect(result).toEqual({
+      status: 'error',
+      result: null,
+      error: 'provider failed',
+    });
+    expect(finalizeSession).not.toHaveBeenCalled();
+  });
+
   it('preserves provider files that are marked onlyIfMissing', async () => {
     // Arrange
     const groupDir = path.join(groupsDir, 'test-group');
