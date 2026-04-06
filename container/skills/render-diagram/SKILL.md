@@ -101,10 +101,10 @@ render_diagram(type: "html", title: "metrics", width: 1200, height: 400, content
 <!DOCTYPE html>
 <html><head><style>
   * { margin: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #fafafa; padding: 40px; }
-  h1 { font-size: 20px; font-weight: 600; color: #a1a1aa; margin-bottom: 24px; letter-spacing: -0.01em; }
+  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #ffffff; color: #18181b; padding: 40px; }
+  h1 { font-size: 20px; font-weight: 600; color: #71717a; margin-bottom: 24px; letter-spacing: -0.01em; }
   .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; }
+  .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
   .card .label { font-size: 12px; color: #71717a; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .card .value { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
   .card .delta { font-size: 13px; }
@@ -124,9 +124,9 @@ render_diagram(type: "html", title: "metrics", width: 1200, height: 400, content
 `)
 ```
 
-### Architecture — Vercel-style dark layout with mesh gradient
+### Architecture — clean layout with mesh gradient
 
-Uses layered radial gradients (the technique behind Apple, Stripe, and Vercel backgrounds). Nodes with subtle glow effects.
+Uses layered radial gradients at low opacity on a light base. Nodes with subtle shadows and borders.
 
 ```
 render_diagram(type: "html", title: "architecture", width: 1400, height: 900, content: `
@@ -135,25 +135,25 @@ render_diagram(type: "html", title: "architecture", width: 1400, height: 900, co
   * { margin: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-    color: #e2e8f0;
+    color: #1e293b;
     padding: 48px;
-    background: #050914;
+    background: #f8fafc;
     background-image:
-      radial-gradient(at 0% 0%, hsla(214, 60%, 16%, 0.8) 0px, transparent 50%),
-      radial-gradient(at 80% 100%, hsla(260, 40%, 12%, 0.6) 0px, transparent 50%);
+      radial-gradient(at 0% 0%, hsla(214, 60%, 80%, 0.3) 0px, transparent 50%),
+      radial-gradient(at 80% 100%, hsla(260, 40%, 85%, 0.25) 0px, transparent 50%);
   }
   h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.02em; }
   .sub { font-size: 13px; color: #64748b; margin-bottom: 40px; }
   .flow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
-  .node { background: rgba(15, 23, 42, 0.8); border: 1px solid #1e293b; border-radius: 14px; padding: 22px 28px; min-width: 150px; text-align: center; }
-  .node.accent { border-color: rgba(59, 130, 246, 0.4); box-shadow: 0 0 24px rgba(59, 130, 246, 0.08); }
+  .node { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 28px; min-width: 150px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .node.accent { border-color: rgba(37, 99, 235, 0.4); box-shadow: 0 1px 8px rgba(37, 99, 235, 0.1); }
   .node h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-  .node.accent h3 { color: #60a5fa; }
-  .node p { font-size: 12px; color: #475569; }
-  .arrow { color: #334155; font-size: 18px; }
+  .node.accent h3 { color: #2563eb; }
+  .node p { font-size: 12px; color: #64748b; }
+  .arrow { color: #d4d4d8; font-size: 18px; }
   .tier { display: flex; gap: 16px; margin-top: 32px; justify-content: center; }
   .tier .node { flex: 1; max-width: 200px; }
-  .section { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #334155; margin: 32px 0 12px; text-align: center; }
+  .section { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8; margin: 32px 0 12px; text-align: center; }
 </style></head>
 <body>
   <h1>System Architecture</h1>
@@ -193,18 +193,18 @@ render_diagram(type: "html", title: "comparison", width: 1200, height: 600, cont
 <!DOCTYPE html>
 <html><head><style>
   * { margin: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #e4e4e7; padding: 40px; }
+  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #fafafa; color: #18181b; padding: 40px; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
   .sub { font-size: 13px; color: #52525b; margin-bottom: 24px; }
-  table { width: 100%; border-collapse: separate; border-spacing: 0; background: #18181b; border-radius: 12px; overflow: hidden; border: 1px solid #27272a; }
-  th { font-size: 13px; font-weight: 600; padding: 14px 20px; text-align: left; background: #18181b; border-bottom: 1px solid #27272a; color: #a1a1aa; }
-  th.pick { color: #60a5fa; }
-  td { padding: 13px 20px; font-size: 14px; border-bottom: 1px solid rgba(39,39,42,0.5); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }
+  th { font-size: 13px; font-weight: 600; padding: 14px 20px; text-align: left; background: #ffffff; border-bottom: 1px solid #e2e8f0; color: #71717a; }
+  th.pick { color: #2563eb; }
+  td { padding: 13px 20px; font-size: 14px; border-bottom: 1px solid rgba(226,232,240,0.7); }
   tr:last-child td { border-bottom: none; }
   .feat { color: #71717a; font-weight: 500; }
   .y { color: #4ade80; } .n { color: #52525b; } .m { color: #facc15; }
-  .badge { font-size: 10px; padding: 2px 8px; border-radius: 99px; background: rgba(96,165,250,0.12); color: #60a5fa; margin-left: 6px; vertical-align: middle; font-weight: 600; }
-  .rec { background: rgba(96,165,250,0.03); }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 99px; background: rgba(37,99,235,0.1); color: #2563eb; margin-left: 6px; vertical-align: middle; font-weight: 600; }
+  .rec { background: rgba(37,99,235,0.03); }
 </style></head>
 <body>
   <h1>Vendor Evaluation</h1>
@@ -231,18 +231,18 @@ render_diagram(type: "html", title: "roadmap", width: 1200, height: 420, content
 <!DOCTYPE html>
 <html><head><style>
   * { margin: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #e4e4e7; padding: 48px; }
+  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #ffffff; color: #18181b; padding: 48px; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 36px; letter-spacing: -0.01em; }
   .timeline { position: relative; display: flex; justify-content: space-between; padding: 0 20px; }
-  .timeline::before { content: ''; position: absolute; top: 20px; left: 50px; right: 50px; height: 2px; background: linear-gradient(90deg, #3b82f6, #8b5cf6, #27272a 70%); }
+  .timeline::before { content: ''; position: absolute; top: 20px; left: 50px; right: 50px; height: 2px; background: linear-gradient(90deg, #3b82f6, #8b5cf6, #e2e8f0 70%); }
   .step { position: relative; text-align: center; flex: 1; }
   .dot { width: 40px; height: 40px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; position: relative; z-index: 1; }
   .done { background: #3b82f6; color: white; }
   .active { background: #8b5cf6; color: white; box-shadow: 0 0 20px rgba(139,92,246,0.4); }
-  .pending { background: #27272a; border: 2px solid #3f3f46; color: #52525b; }
+  .pending { background: #f4f4f5; border: 2px solid #d4d4d8; color: #a1a1aa; }
   .label { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .desc { font-size: 12px; color: #52525b; max-width: 130px; margin: 0 auto; line-height: 1.4; }
-  .date { font-size: 11px; color: #3f3f46; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .date { font-size: 11px; color: #a1a1aa; margin-top: 8px; font-variant-numeric: tabular-nums; }
 </style></head>
 <body>
   <h1>Product Roadmap</h1>
@@ -268,37 +268,37 @@ render_diagram(type: "html", title: "services", width: 1400, height: 800, conten
   * { margin: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-    color: #f0f0ff;
+    color: #1e293b;
     padding: 48px;
     min-height: 100vh;
-    background: #0c0a2a;
+    background: #f0f0ff;
     background-image:
-      radial-gradient(at 20% 30%, hsla(260, 80%, 40%, 0.4) 0px, transparent 50%),
-      radial-gradient(at 80% 70%, hsla(200, 80%, 30%, 0.3) 0px, transparent 50%),
-      radial-gradient(at 50% 90%, hsla(330, 60%, 30%, 0.2) 0px, transparent 50%);
+      radial-gradient(at 20% 30%, hsla(260, 80%, 85%, 0.5) 0px, transparent 50%),
+      radial-gradient(at 80% 70%, hsla(200, 80%, 85%, 0.4) 0px, transparent 50%),
+      radial-gradient(at 50% 90%, hsla(330, 60%, 90%, 0.3) 0px, transparent 50%);
   }
   h1 { font-size: 26px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
-  .sub { font-size: 13px; color: rgba(255,255,255,0.4); margin-bottom: 32px; }
+  .sub { font-size: 13px; color: rgba(0,0,0,0.4); margin-bottom: 32px; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
   .glass {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.7);
     backdrop-filter: blur(12px) saturate(180%);
     -webkit-backdrop-filter: blur(12px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid rgba(0,0,0,0.08);
     border-radius: 16px;
     padding: 28px;
   }
   .glass .icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 16px; color: white; }
   .glass h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
-  .glass p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.5); }
-  .glass .tag { display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 99px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.45); margin-top: 14px; }
+  .glass p { font-size: 13px; line-height: 1.6; color: rgba(0,0,0,0.5); }
+  .glass .tag { display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 99px; background: rgba(0,0,0,0.05); color: rgba(0,0,0,0.45); margin-top: 14px; }
   .i1 { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
   .i2 { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
   .i3 { background: linear-gradient(135deg, #06b6d4, #0e7490); }
   .i4 { background: linear-gradient(135deg, #f59e0b, #b45309); }
   .i5 { background: linear-gradient(135deg, #10b981, #047857); }
   .i6 { background: linear-gradient(135deg, #ef4444, #b91c1c); }
-  .divider { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,0.15); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; padding: 4px 0; }
+  .divider { grid-column: 1 / -1; text-align: center; color: rgba(0,0,0,0.15); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; padding: 4px 0; }
 </style></head>
 <body>
   <h1>Platform Services</h1>
@@ -325,17 +325,17 @@ render_diagram(type: "html", title: "process", width: 800, height: 800, content:
 <!DOCTYPE html>
 <html><head><style>
   * { margin: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #e4e4e7; padding: 40px; }
+  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #fafafa; color: #18181b; padding: 40px; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 28px; }
   .steps { position: relative; padding-left: 40px; }
-  .steps::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 2px; background: #27272a; }
+  .steps::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 2px; background: #e2e8f0; }
   .step { position: relative; margin-bottom: 28px; }
   .step:last-child { margin-bottom: 0; }
   .step .num { position: absolute; left: -40px; top: 0; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; z-index: 1; }
   .num.done { background: #3b82f6; color: white; }
   .num.active { background: #8b5cf6; color: white; box-shadow: 0 0 12px rgba(139,92,246,0.3); }
-  .num.pending { background: #27272a; color: #52525b; border: 2px solid #3f3f46; }
-  .step .content { background: #18181b; border: 1px solid #27272a; border-radius: 10px; padding: 16px 20px; }
+  .num.pending { background: #f4f4f5; color: #a1a1aa; border: 2px solid #d4d4d8; }
+  .step .content { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
   .step .title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
   .step .desc { font-size: 13px; color: #71717a; line-height: 1.5; }
   .step .meta { display: flex; gap: 8px; margin-top: 10px; }
@@ -368,17 +368,17 @@ render_diagram(type: "html", title: "announcement", width: 1200, height: 700, co
   * { margin: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-    background: #09090b;
-    color: #e4e4e7;
+    background: #ffffff;
+    color: #18181b;
     padding: 56px 48px;
     background-image:
-      radial-gradient(at 50% 0%, hsla(250, 80%, 30%, 0.25) 0px, transparent 60%);
+      radial-gradient(at 50% 0%, hsla(250, 80%, 90%, 0.3) 0px, transparent 60%);
   }
   .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #8b5cf6; font-weight: 600; margin-bottom: 12px; }
-  h1 { font-size: 36px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 12px; background: linear-gradient(135deg, #e4e4e7 0%, #a1a1aa 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  h1 { font-size: 36px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 12px; background: linear-gradient(135deg, #18181b 0%, #52525b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
   .lead { font-size: 16px; color: #71717a; line-height: 1.6; max-width: 560px; margin-bottom: 40px; }
   .benefits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .benefit { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; }
+  .benefit { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
   .benefit .num { font-size: 28px; font-weight: 800; margin-bottom: 8px; background: linear-gradient(135deg, #8b5cf6, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
   .benefit h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
   .benefit p { font-size: 13px; color: #71717a; line-height: 1.5; }
@@ -403,13 +403,13 @@ render_diagram(type: "html", title: "team", width: 1000, height: 600, content: `
 <!DOCTYPE html>
 <html><head><style>
   * { margin: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #e4e4e7; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+  body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #fafafa; color: #18181b; padding: 40px; display: flex; flex-direction: column; align-items: center; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 32px; }
   .row { display: flex; gap: 16px; justify-content: center; margin-bottom: 8px; position: relative; }
-  .connector { width: 2px; height: 24px; background: #27272a; margin: 0 auto; }
+  .connector { width: 2px; height: 24px; background: #e2e8f0; margin: 0 auto; }
   .branch { display: flex; gap: 16px; justify-content: center; position: relative; }
-  .branch::before { content: ''; position: absolute; top: -12px; left: 25%; right: 25%; height: 2px; background: #27272a; }
-  .person { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 16px 24px; text-align: center; min-width: 140px; }
+  .branch::before { content: ''; position: absolute; top: -12px; left: 25%; right: 25%; height: 2px; background: #e2e8f0; }
+  .person { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 24px; text-align: center; min-width: 140px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
   .person.lead { border-color: rgba(139,92,246,0.3); }
   .person .avatar { width: 36px; height: 36px; border-radius: 50%; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: white; }
   .a1 { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
@@ -466,9 +466,9 @@ render_diagram(type: "svg", title: "layers", width: 800, height: 500, background
 ## Design tips
 
 - **Match complexity to request** — quick question gets Mermaid; presentation-quality gets polished HTML
-- **Dark backgrounds** look best in chat apps — use `#09090b` (zinc-950) or `#0f172a` (slate-900) as base
-- **Mesh gradient backgrounds** — layer 2-3 `radial-gradient()` calls with `hsla()` colors at 0.2-0.4 opacity for depth without distraction
-- **Glassmorphism** — requires `backdrop-filter: blur(12px) saturate(180%)` with `-webkit-` prefix, a translucent `rgba()` background, and a colorful element behind the glass to be visible
+- **Light backgrounds with subtle borders and shadows** produce clean, professional visuals — use `#ffffff` (white), `#fafafa` (zinc-50), or `#f8fafc` (slate-50) as base
+- **Mesh gradient backgrounds** — layer 2-3 `radial-gradient()` calls with `hsla()` colors at 0.2-0.4 opacity on a light base for depth without distraction
+- **Glassmorphism** — requires `backdrop-filter: blur(12px) saturate(180%)` with `-webkit-` prefix, a translucent `rgba(255,255,255,0.7)` background, and a colorful element behind the glass to be visible
 - **Sizing** — set `width` and `height` to match content. Common sizes: dashboards 1200x600, architecture 1400x900, timelines 1200x420
-- **Color palette** — stick to 2-3 accent colors. Good combos: blue (#3b82f6) + purple (#8b5cf6), cyan (#06b6d4) + green (#10b981)
+- **Color palette** — stick to 2-3 accent colors. Good combos: blue (#2563eb) + purple (#8b5cf6), cyan (#06b6d4) + green (#10b981)
 - **Keep it focused** — 5-10 elements communicates better than 30. Tufte's principle: maximize data-ink ratio, minimize chartjunk
