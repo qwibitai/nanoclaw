@@ -9,6 +9,12 @@ type GroupType = 'override' | 'main' | 'chat' | 'thread';
 // 指定なし・不明な値 → 'chat' がデフォルト
 ```
 
+## この文書の位置づけ
+
+この文書は `GroupType` の **設計目標** を記述する。実装は段階的に追従しており、特に `thread` については「最終的に目指す姿」と「現状の実装」がまだ一致していない箇所がある。
+
+現状の実装では `thread` は主に非特権グループとして扱われ、権限面では `chat` に近い。`thread` が `chat` と明確に違う意味を持つのは、`thread_defaults` による自動登録、親からの設定継承、別 JID / 別 session を持つ派生 group というライフサイクルが揃ってから。
+
 ## 権限階層
 
 | type | サンドボックス | 権限 | ライフサイクル |
@@ -52,11 +58,13 @@ type GroupType = 'override' | 'main' | 'chat' | 'thread';
 ### `thread` — タスク実行スレッド
 
 - 制限付きコンテナで動作
-- コンテナのマウント設定で物理的にアクセス範囲を制限
 - メインからの委任タスクの実行など
 - スレッド単位で生成・破棄
+- Discord の「場所の型」ではなく、親 group から派生する作業単位として扱う
+- 親 group と別 JID / 別 Claude session を持つ
+- 将来的には通常 group 用設定と thread 用共有設定を切り替えられる前提で設計する
 
-**安全策**: コンテナのマウント設定で物理的にアクセス範囲を制限
+**安全策**: `thread` は `main` / `override` ではない非特権 group として扱い、昇格は親 group や IPC 認可で制御する
 
 ## グループモデルでの表現
 
@@ -76,7 +84,9 @@ type GroupType = 'override' | 'main' | 'chat' | 'thread';
 
 ## スレッド自動登録
 
-親チャネルに `thread_defaults` を設定し、スレッド作成時に `dc:{threadId}` で子グループを自動登録。親の設定を継承しつつ独自の `folder` と `CLAUDE.md` を持つ。
+親チャネルに `thread_defaults` を設定し、スレッド作成時に `dc:{threadId}` で子グループを自動登録する。親の設定を継承しつつ、親とは別の JID と Claude session を持つ。
+
+ここで重要なのは、「Discord 上で thread だから `type: 'thread'`」ではなく、**親 group が `thread_defaults` を持つときに、その thread を NanoClaw の派生 group として採用する**こと。単なる Discord thread の存在自体は、NanoClaw の `thread` を意味しない。
 
 ```ts
 // 親チャネル（テンプレート）
@@ -99,6 +109,18 @@ type GroupType = 'override' | 'main' | 'chat' | 'thread';
 4. **スレッド検知時の自動グループ登録ロジック**: Discord スレッド作成イベントをフックし、親の `thread_defaults` に基づいてグループを自動登録
 5. **スラッシュコマンド**: `/override-start`（オーバーライドスレッド作成）、`/override-end`（終了・アーカイブ）
 
+### 実装順序の推奨
+
+`thread` は段階的に入れる。
+
+1. Discord adapter が thread を正しく検知できるようにする
+2. 親 group の `thread_defaults` に基づいて子 group を自動登録する
+3. 子 group に独立した session を持たせる
+4. 将来的に thread 用共有設定を差し替えられる形にする
+5. 必要なら archive や cleanup をライフサイクルに追加する
+
+この順序なら、VRC-AI-Bot の PlaceType モデルを持ち込まずに、NanoClaw の「group 単位の会話分離と設定分離」という哲学のまま `thread` を成立させられる。
+
 ## 設定方法: DB + IPC 拡張
 
 `type` は既存の `isMain` と同じ方式で DB に保存する。`isMain: boolean` を `type: GroupType` に置き換える形。
@@ -111,7 +133,7 @@ ALTER TABLE registered_groups ADD COLUMN type TEXT DEFAULT 'chat';
 UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
 ```
 
-`isMain` カラムは互換性のため残し、読み込み時に `type` を優先する。将来的に削除。
+`is_main` DB カラムは互換性のため残し、読み込み時に `group_type` を優先する（`parseGroupType` のフォールバック）。TypeScript 側の `isMain` プロパティは削除済み。
 
 ### IPC での設定
 
@@ -127,6 +149,7 @@ UPDATE registered_groups SET type = 'main' WHERE is_main = 1;
   "group_type": "chat"
 }
 ```
+`trigger` はエージェントを起動するメッセージのプレフィックス文字列（例: `"!"` `"@Andy"` `"always"`）で、DB の `trigger_pattern` カラムに対応する。
 
 メインエージェントへの自然言語指示で設定する:
 
@@ -174,6 +197,8 @@ if (data.group_type === 'override') {
 | `main` | 制限なし（全許可） | Bash、ファイル操作等が必要 |
 | `chat` | `["Read"]` | 会話のみ。Read はCLAUDE.md等の読み込みに必要（副作用なし）。追加ツールは `agent_config` で明示的に付与 |
 | `thread` | `["Read"]` | タスクに必要なツールは `agent_config` or `thread_defaults` で付与。Read は最低限残す |
+
+`thread` に `chat` とは別の独立パーミッション階層を持たせることはこの文書の目的ではない。差分はまずライフサイクルと session 分離に置き、必要なツール差分は将来の thread 用共有設定で表現する。
 
 ### override のライフサイクル
 
