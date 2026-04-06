@@ -27,14 +27,20 @@ export function resolveCodexAuthFile(
   env: NodeJS.ProcessEnv,
   projectRoot: string,
 ): string {
-  const envFileKeys = readEnvFileAt(projectRoot, ['CODEX_AUTH_FILE']);
+  const envFileKeys = readEnvFileAt(projectRoot, [
+    'CODEX_AUTH_FILE',
+    'CODEX_HOME',
+  ]);
   const configuredPath =
     env.CODEX_AUTH_FILE?.trim() || envFileKeys.CODEX_AUTH_FILE?.trim();
-  const defaultPath = path.join(
-    env.HOME || os.homedir(),
-    '.codex',
-    'auth.json',
-  );
+  const configuredHome =
+    env.CODEX_HOME?.trim() || envFileKeys.CODEX_HOME?.trim();
+  const codexHome = configuredHome
+    ? path.isAbsolute(configuredHome)
+      ? configuredHome
+      : path.resolve(projectRoot, configuredHome)
+    : path.join(env.HOME || os.homedir(), '.codex');
+  const defaultPath = path.join(codexHome, 'auth.json');
   const authFilePath = configuredPath || defaultPath;
 
   return path.isAbsolute(authFilePath)
