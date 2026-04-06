@@ -7,6 +7,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   engine?: 'claude' | 'codex';
+  script?: string;
   secrets?: Record<string, string>;
 }
 

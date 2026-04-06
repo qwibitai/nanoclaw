@@ -26,7 +26,6 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
-  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -72,6 +71,8 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+const PROXY_BIND_HOST = '0.0.0.0';
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -668,6 +669,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    onTasksChanged: () => {},
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
