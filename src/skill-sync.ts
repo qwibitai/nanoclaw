@@ -15,6 +15,12 @@ export function syncSkills(srcDir: string, dstDir: string): void {
     const src = path.join(srcDir, entry);
     if (!fs.statSync(src).isDirectory()) continue;
     const dst = path.join(dstDir, entry);
-    fs.cpSync(src, dst, { recursive: true });
+    try {
+      fs.cpSync(src, dst, { recursive: true });
+    } catch (err: any) {
+      if (err?.code !== 'EACCES') throw err;
+      fs.rmSync(dst, { recursive: true, force: true });
+      fs.cpSync(src, dst, { recursive: true });
+    }
   }
 }

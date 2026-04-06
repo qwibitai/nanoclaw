@@ -68,6 +68,43 @@ describe('syncSkills', () => {
     );
   });
 
+  it('recovers from EACCES on read-only destination files', () => {
+    const src = path.join(tmpDir, 'src');
+    const dst = path.join(tmpDir, 'dst');
+
+    // Source skill with a nested file (simulates .git/objects/pack)
+    const srcPack = path.join(src, 'memory-search', '.git', 'objects', 'pack');
+    fs.mkdirSync(srcPack, { recursive: true });
+    fs.writeFileSync(path.join(srcPack, 'pack-abc.idx'), 'new-content');
+
+    // Pre-populate destination with read-only file
+    const dstPack = path.join(dst, 'memory-search', '.git', 'objects', 'pack');
+    fs.mkdirSync(dstPack, { recursive: true });
+    const dstFile = path.join(dstPack, 'pack-abc.idx');
+    fs.writeFileSync(dstFile, 'old-content');
+    fs.chmodSync(dstFile, 0o444);
+
+    syncSkills(src, dst);
+
+    expect(fs.readFileSync(dstFile, 'utf8')).toBe('new-content');
+  });
+
+  it('re-throws non-EACCES errors', () => {
+    const src = path.join(tmpDir, 'src');
+    const dst = path.join(tmpDir, 'dst');
+
+    // Destination is a file, not a directory → cpSync throws ENOTDIR/ERR_FS_CP
+    const skillDir = path.join(src, 'conflict');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'data.txt'), 'content');
+
+    // Block the destination path with a plain file so cpSync fails
+    fs.mkdirSync(dst, { recursive: true });
+    fs.writeFileSync(path.join(dst, 'conflict'), 'im a file not a dir');
+
+    expect(() => syncSkills(src, dst)).toThrow();
+  });
+
   it('copies multiple skill directories', () => {
     const src = path.join(tmpDir, 'src');
     const dst = path.join(tmpDir, 'dst');
