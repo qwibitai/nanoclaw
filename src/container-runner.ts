@@ -43,6 +43,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  /** Model override from keyword-based message routing (optional). */
+  model?: string;
 }
 
 export interface ContainerOutput {

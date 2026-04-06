@@ -14,6 +14,7 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { resolveMessageRoutingModel } from './message-routing.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -383,6 +384,19 @@ async function runAgent(
     : undefined;
 
   try {
+    // Resolve model override via keyword-based message routing (zero cost).
+    const routedModel =
+      group.messageRouting
+        ? resolveMessageRoutingModel(group.messageRouting, prompt)
+        : undefined;
+
+    if (routedModel) {
+      logger.info(
+        { group: group.name, model: routedModel },
+        'Message routing: selected model override',
+      );
+    }
+
     const output = await runContainerAgent(
       group,
       {
@@ -392,6 +406,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model: routedModel,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
