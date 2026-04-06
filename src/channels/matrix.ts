@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import sdk from 'matrix-js-sdk';
 
-import { ASSISTANT_NAME, DATA_DIR, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -12,6 +12,11 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+/** Persistent data directory — survives container restarts */
+const MATRIX_DATA_DIR = '/app/data';
+const MATRIX_CRYPTO_STORE_PATH = path.join(MATRIX_DATA_DIR, 'matrix-crypto-store');
+const MATRIX_DEVICE_ID_PATH = path.join(MATRIX_DATA_DIR, 'matrix-device-id');
 
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
@@ -63,38 +68,58 @@ export class MatrixChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    // First, discover the device ID via whoami so E2EE can bind to it
-    const tempClient = sdk.createClient({
-      baseUrl: this.homeserverUrl,
-      accessToken: this.accessToken,
-      userId: this.botUserId,
-    });
-    const whoami = await tempClient.whoami();
-    const deviceId = whoami.device_id;
-    tempClient.stopClient();
+    fs.mkdirSync(MATRIX_DATA_DIR, { recursive: true });
+
+    // Reuse a previously persisted device ID so the crypto identity survives
+    // restarts. If none exists, discover it via whoami and persist it.
+    let deviceId: string | undefined;
+    try {
+      deviceId = fs.readFileSync(MATRIX_DEVICE_ID_PATH, 'utf-8').trim() || undefined;
+      if (deviceId) {
+        logger.info({ deviceId }, 'Matrix device ID loaded from disk');
+      }
+    } catch {
+      // No persisted device ID yet — will discover below
+    }
 
     if (!deviceId) {
-      logger.warn(
-        'Matrix: whoami did not return a device_id — E2EE will be unavailable',
-      );
+      const tempClient = sdk.createClient({
+        baseUrl: this.homeserverUrl,
+        accessToken: this.accessToken,
+        userId: this.botUserId,
+      });
+      const whoami = await tempClient.whoami();
+      deviceId = whoami.device_id || undefined;
+      tempClient.stopClient();
+
+      if (deviceId) {
+        fs.writeFileSync(MATRIX_DEVICE_ID_PATH, deviceId, 'utf-8');
+        logger.info({ deviceId }, 'Matrix device ID discovered and persisted');
+      } else {
+        logger.warn(
+          'Matrix: whoami did not return a device_id — E2EE will be unavailable',
+        );
+      }
     }
 
     this.client = sdk.createClient({
       baseUrl: this.homeserverUrl,
       accessToken: this.accessToken,
       userId: this.botUserId,
-      deviceId: deviceId || undefined,
+      deviceId,
     });
 
     // Initialise Rust crypto for E2EE support
     if (deviceId) {
-      const cryptoDir = path.join(DATA_DIR, 'matrix-crypto-store');
-      fs.mkdirSync(cryptoDir, { recursive: true });
+      fs.mkdirSync(MATRIX_CRYPTO_STORE_PATH, { recursive: true });
       await this.client.initRustCrypto({
         useIndexedDB: false,
-        cryptoDatabasePrefix: cryptoDir,
+        cryptoDatabasePrefix: MATRIX_CRYPTO_STORE_PATH,
       });
-      logger.info({ cryptoDir, deviceId }, 'Matrix E2EE crypto initialised');
+      logger.info(
+        { cryptoDir: MATRIX_CRYPTO_STORE_PATH, deviceId },
+        'Matrix E2EE crypto initialised',
+      );
     }
 
     // Auto-accept room invites
