@@ -65,14 +65,10 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
-// Content block types for Claude vision (matches SDK ContentBlockParam types)
-type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
-type TextBlock = { type: 'text'; text: string };
-type ImageBlock = {
-  type: 'image';
-  source: { type: 'base64'; media_type: ImageMediaType; data: string };
-};
-type ContentBlock = TextBlock | ImageBlock;
+// Supported image MIME types (used to identify image attachments)
+const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+]);
 
 const IPC_INPUT_SUBDIR = process.env.IPC_INPUT_SUBDIR;
 if (!IPC_INPUT_SUBDIR) {
@@ -155,7 +151,7 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(content: string | ContentBlock[]): void {
+  push(content: string): void {
     this.queue.push({
       type: 'user',
       message: { role: 'user', content },
@@ -674,96 +670,38 @@ function buildMcpServers(
   return servers;
 }
 
-// Supported image MIME types for Claude vision
-const IMAGE_MIME_TYPES = new Set([
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-]);
-
 /**
- * Detect actual image MIME type from file magic bytes.
- * Falls back to the provided mimeType if detection fails.
- */
-function detectImageMimeType(data: Buffer, declaredMime: string): ImageMediaType {
-  if (data.length < 8) return declaredMime as ImageMediaType;
-  // PNG: 89 50 4E 47
-  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47) return 'image/png';
-  // JPEG: FF D8 FF
-  if (data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) return 'image/jpeg';
-  // GIF: 47 49 46 38
-  if (data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x38) return 'image/gif';
-  // WebP: RIFF....WEBP
-  if (data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
-      data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) return 'image/webp';
-  return declaredMime as ImageMediaType;
-}
-
-/**
- * Build prompt content with interleaved image content blocks.
- * If there are no image attachments, returns the plain text prompt.
- * Otherwise, returns a ContentBlock[] with text and image blocks.
- *
- * Document attachments are referenced as file paths (agent reads with tools).
+ * Builds the prompt with attachment references.
+ * All attachments (images and documents) are referenced as file paths so the
+ * agent reads them via the Read tool. This is the pattern Claude Code supports
+ * natively — the SDK/CLI does not reliably pass base64 image content blocks
+ * in user messages through to the API.
  */
 function buildPromptContent(
   prompt: string,
   attachments?: ContainerAttachment[],
-): string | ContentBlock[] {
+): string {
+  log(`buildPromptContent called: attachments=${attachments?.length ?? 0}`);
   if (!attachments || attachments.length === 0) return prompt;
 
-  const blocks: ContentBlock[] = [];
-  let hasImageBlocks = false;
-
-  // Start with the text prompt
-  blocks.push({ type: 'text', text: prompt });
+  const parts: string[] = [prompt];
 
   for (const att of attachments) {
     if (IMAGE_MIME_TYPES.has(att.mimeType)) {
-      // Read file and base64-encode for Claude vision
-      try {
-        if (!fs.existsSync(att.containerPath)) {
-          log(`Attachment file not found: ${att.containerPath}`);
-          blocks.push({
-            type: 'text',
-            text: `[Image attachment "${att.filename}" not available]`,
-          });
-          continue;
-        }
-        const data = fs.readFileSync(att.containerPath);
-        const actualMime = detectImageMimeType(data, att.mimeType);
-        if (actualMime !== att.mimeType) {
-          log(`MIME type mismatch: declared=${att.mimeType}, actual=${actualMime} for ${att.filename}`);
-        }
-        blocks.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: actualMime,
-            data: data.toString('base64'),
-          },
-        });
-        hasImageBlocks = true;
-      } catch (err) {
-        log(`Failed to read image attachment ${att.containerPath}: ${err}`);
-        blocks.push({
-          type: 'text',
-          text: `[Image attachment "${att.filename}" could not be loaded]`,
-        });
+      // Reference image file path — agent uses the Read tool (which supports images natively)
+      if (!fs.existsSync(att.containerPath)) {
+        log(`Attachment file not found: ${att.containerPath}`);
+        parts.push(`[Image attachment "${att.filename}" not available]`);
+      } else {
+        parts.push(`[Image "${att.filename}" attached at: ${att.containerPath} — use the Read tool to view it]`);
       }
     } else {
       // Non-image attachments: reference as file path for agent to read
-      blocks.push({
-        type: 'text',
-        text: `[Attached file "${att.filename}" available at: ${att.containerPath}]`,
-      });
+      parts.push(`[Attached file "${att.filename}" available at: ${att.containerPath}]`);
     }
   }
 
-  // If no actual image blocks were created, fall back to plain text
-  if (!hasImageBlocks) {
-    return blocks.map(b => b.type === 'text' ? b.text : '').join('\n');
-  }
-
-  return blocks;
+  return parts.join('\n');
 }
 
 /**
@@ -829,7 +767,7 @@ interface QueryContext {
 }
 
 async function runQuery(
-  prompt: string | ContentBlock[],
+  prompt: string,
   sessionId: string | undefined,
   ctx: QueryContext,
   resumeAt?: string,
@@ -857,7 +795,7 @@ async function runQuery(
     }
     const messages = drainIpcInput();
     for (const msg of messages) {
-      log(`Piping IPC message into active query (${msg.text.length} chars)`);
+      log(`Piping IPC message into active query (${msg.text.length} chars, attachments=${msg.attachments?.length ?? 0})`);
       const content = buildPromptContent(msg.text, msg.attachments);
       stream.push(content);
       hasPipedSinceLastOutput = true;
@@ -1225,6 +1163,10 @@ async function main(): Promise<void> {
   }
   // Merge any pending IPC messages (and their attachments) into the initial prompt
   const allAttachments = containerInput.attachments ? [...containerInput.attachments] : [];
+  log(`Attachments from stdin: ${containerInput.attachments?.length ?? 0}, paths: ${(containerInput.attachments || []).map(a => a.containerPath).join(', ') || 'none'}`);
+  for (const att of allAttachments) {
+    log(`  ${att.filename} (${att.mimeType}) exists=${fs.existsSync(att.containerPath)} path=${att.containerPath}`);
+  }
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
@@ -1337,7 +1279,7 @@ async function main(): Promise<void> {
   // --- End slash command handling ---
 
   // Build initial prompt content with attachments (images → base64 content blocks)
-  let prompt: string | ContentBlock[] = buildPromptContent(
+  let prompt: string = buildPromptContent(
     promptText,
     allAttachments.length > 0 ? allAttachments : undefined,
   );

@@ -895,6 +895,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       });
     }
   }
+  if (containerAttachments.length > 0) {
+    logger.info(
+      {
+        group: group.name,
+        count: containerAttachments.length,
+        files: containerAttachments.map((a) => `${a.filename} (${a.mimeType})`),
+      },
+      'Passing attachments to container',
+    );
+  }
 
   // Advance cursor in-memory so concurrent checks for this group won't
   // re-fetch these messages while the container is running. We deliberately

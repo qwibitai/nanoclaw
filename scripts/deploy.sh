@@ -33,6 +33,22 @@ if ! npm run build >> "$LOG" 2>&1; then
   exit 1
 fi
 
+# Rebuild container image if any container/ files changed since the current image was built
+IMAGE_CREATED=$(docker inspect nanoclaw-agent --format '{{.Created}}' 2>/dev/null | cut -d. -f1 | tr 'T' ' ')
+if [ -n "$IMAGE_CREATED" ]; then
+  CONTAINER_CHANGES=$(git diff --name-only "$(git log -1 --before="$IMAGE_CREATED" --format=%H)" HEAD -- container/ 2>/dev/null)
+else
+  CONTAINER_CHANGES="no-image"
+fi
+if [ -n "$CONTAINER_CHANGES" ]; then
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Container files changed, rebuilding image..." >> "$LOG"
+  write_status "running" "container build" ""
+  if ! ./container/build.sh >> "$LOG" 2>&1; then
+    write_status "failed" "container build" "Container image build failed"
+    exit 1
+  fi
+fi
+
 echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Build complete, restarting..." >> "$LOG"
 
 # Write success status BEFORE restart — systemctl restart kills this script's
