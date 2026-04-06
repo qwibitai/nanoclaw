@@ -258,8 +258,7 @@ export function createCodexProvider(): AgentProvider {
         return;
       }
 
-      fs.mkdirSync(path.dirname(authSourceFile), { recursive: true });
-      fs.copyFileSync(refreshedAuthFile, authSourceFile);
+      fs.writeFileSync(authSourceFile, refreshedContents);
     },
     async startRemoteControl() {
       return {

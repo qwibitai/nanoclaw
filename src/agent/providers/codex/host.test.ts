@@ -285,6 +285,60 @@ process.exit(status.status);
     expect(fs.readFileSync(authFile, 'utf8')).toBe('{"refresh":"before"}\n');
   });
 
+  it('preserves host auth.json permissions when syncing refreshed credentials', async () => {
+    // Arrange
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanoclaw-codex-host-provider-'),
+    );
+    tempRoots.push(tempRoot);
+
+    const projectRoot = process.cwd();
+    const dataDir = path.join(tempRoot, 'data');
+    const groupDir = path.join(tempRoot, 'groups', 'test-group');
+    const authFile = path.join(tempRoot, 'codex-auth', 'auth.json');
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.mkdirSync(path.dirname(authFile), { recursive: true });
+    fs.writeFileSync(authFile, '{"refresh":"before"}\n');
+    fs.chmodSync(authFile, 0o600);
+    installFakeCodexCli(tempRoot, {
+      '{"refresh":"after"}\n': {
+        status: 0,
+        text: 'Logged in using ChatGPT',
+      },
+    });
+    process.env.CODEX_AUTH_FILE = authFile;
+
+    const provider = createProviderRegistry().getProvider('codex');
+    const preparedSession = provider.prepareSession({
+      projectRoot,
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+    });
+    fs.mkdirSync(preparedSession.providerStateDir, { recursive: true });
+    const refreshedAuthFile = path.join(
+      preparedSession.providerStateDir,
+      'auth.json',
+    );
+    fs.writeFileSync(refreshedAuthFile, '{"refresh":"after"}\n');
+    fs.chmodSync(refreshedAuthFile, 0o644);
+
+    // Act
+    await provider.finalizeSession?.({
+      projectRoot,
+      dataDir,
+      groupFolder: 'test-group',
+      groupDir,
+      isMain: false,
+      preparedSession,
+    });
+
+    // Assert
+    expect(fs.readFileSync(authFile, 'utf8')).toBe('{"refresh":"after"}\n');
+    expect(fs.statSync(authFile).mode & 0o777).toBe(0o600);
+  });
+
   it('clears stale provider auth cache when the configured source auth file is missing', () => {
     // Arrange
     const tempRoot = fs.mkdtempSync(
