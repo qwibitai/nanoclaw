@@ -524,7 +524,10 @@ async function runAgent(
   let finalPrompt = prompt;
   if (pendingModelNotification[chatJid]) {
     logger.info(
-      { group: group.name, notification: pendingModelNotification[chatJid].slice(0, 80) },
+      {
+        group: group.name,
+        notification: pendingModelNotification[chatJid].slice(0, 80),
+      },
       'Injecting model switch notification',
     );
     finalPrompt = `${pendingModelNotification[chatJid]}\n\n${prompt}`;
@@ -818,6 +821,62 @@ async function main(): Promise<void> {
     }
 
     const modelName = parts[2] || undefined;
+
+    // Validate Claude model name
+    if (provider === 'claude' && modelName) {
+      const validClaude = [
+        'sonnet',
+        'opus',
+        'haiku',
+        'claude-sonnet-4-6',
+        'claude-opus-4-6',
+        'claude-haiku-4-5',
+        'claude-sonnet-4-5',
+        'claude-opus-4-5',
+      ];
+      if (!validClaude.includes(modelName.toLowerCase())) {
+        await channel.sendMessage(
+          chatJid,
+          `Unknown Claude model "${modelName}". Available: ${validClaude.join(', ')}`,
+        );
+        return;
+      }
+    }
+
+    // Validate Ollama model exists before switching
+    if (provider === 'ollama' && modelName) {
+      try {
+        const ollamaHost =
+          process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+        const resp = await fetch(`${ollamaHost}/api/tags`);
+        if (resp.ok) {
+          const data = (await resp.json()) as {
+            models?: Array<{ name: string }>;
+          };
+          const available = data.models?.map((m) => m.name) || [];
+          // Match with or without :latest tag
+          const found = available.some(
+            (n) =>
+              n === modelName ||
+              n === `${modelName}:latest` ||
+              n.replace(':latest', '') === modelName,
+          );
+          if (!found) {
+            const list = available
+              .map((n) => n.replace(':latest', ''))
+              .join(', ');
+            await channel.sendMessage(
+              chatJid,
+              `Model "${modelName}" not found. Available: ${list}`,
+            );
+            return;
+          }
+        }
+      } catch {
+        // Can't reach Ollama — let it fail at container time
+      }
+    }
+
     const previousProvider = group.containerConfig?.modelProvider || 'claude';
     const providerChanged = previousProvider !== provider;
 
