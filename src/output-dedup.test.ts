@@ -139,6 +139,7 @@ describe('streaming output', () => {
   function simulateStreamingOutput(
     results: Array<{ result: string | null; partial?: boolean; time?: number }>,
     channel: StreamChannel,
+    options?: { hasPendingMessages?: boolean },
   ): { outputSentToUser: boolean } {
     let lastSentText: string | null = null;
     let streamMessageId: number | null = null;
@@ -171,6 +172,11 @@ describe('streaming output', () => {
         } else {
           if (now - lastEditTime < EDIT_THROTTLE_MS) continue;
           if (text === lastSentText) continue;
+          if (options?.hasPendingMessages) {
+            streamMessageId = null;
+            streamingFailed = true;
+            continue;
+          }
           if (text.length > 4000) {
             streamingFailed = true;
             continue;
@@ -191,7 +197,7 @@ describe('streaming output', () => {
       // Final result
       if (streamMessageId !== null) {
         if (text && text !== lastSentText) {
-          if (!streamingFailed && text.length <= 4096) {
+          if (!streamingFailed && text.length <= 4096 && !options?.hasPendingMessages) {
             channel.editMessage('jid', streamMessageId, text);
           } else {
             channel.sendMessage('jid', text);
@@ -446,6 +452,49 @@ describe('streaming output', () => {
       'jid',
       'Complete response',
     );
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('switches to sendMessage when pending messages arrive during partial streaming', () => {
+    const channel = makeChannel();
+
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'First chunk', partial: true, time: 0 },
+        { result: 'Second chunk', partial: true, time: 2000 }, // hasPendingMessages → reset
+        { result: 'Third chunk', partial: true, time: 4000 }, // skipped (streamingFailed)
+        { result: 'Complete response', partial: false, time: 6000 },
+      ],
+      channel,
+      { hasPendingMessages: true },
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    // Second partial triggers pending check → streamingFailed, no edit
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    // Final uses sendMessage because streamingFailed
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Complete response');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('final result uses sendMessage when pending messages exist even if streaming succeeded', () => {
+    const channel = makeChannel();
+
+    // hasPendingMessages only affects the final delivery (streamingFailed stays false
+    // because the first partial doesn't go through the pending check path)
+    const { outputSentToUser } = simulateStreamingOutput(
+      [
+        { result: 'Streamed text', partial: true, time: 0 },
+        { result: 'Final text', partial: false, time: 2000 },
+      ],
+      channel,
+      { hasPendingMessages: true },
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    // Final: streamingFailed=false but hasPendingMessages=true → sendMessage
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Final text');
+    expect(channel.editMessage).not.toHaveBeenCalled();
     expect(outputSentToUser).toBe(true);
   });
 

@@ -188,6 +188,12 @@ export class GroupQueue {
     state.lastResponseSentAt = Date.now();
   }
 
+  /** Check if new messages arrived while the container is active. */
+  hasPendingMessages(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.pendingMessages === true;
+  }
+
   /** Check if the agent sent a response recently (within withinMs, default 10s). */
   isRecentResponseSent(groupJid: string, withinMs: number = 10000): boolean {
     const state = this.getGroup(groupJid);

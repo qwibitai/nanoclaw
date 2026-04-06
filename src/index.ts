@@ -352,6 +352,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             const now = Date.now();
             if (now - lastEditTime < EDIT_THROTTLE_MS) return;
             if (text === lastSentText) return;
+            // Conversation moved on — stop editing the old message, deliver final as new
+            if (queue.hasPendingMessages(chatJid)) {
+              streamMessageId = null;
+              streamingFailed = true;
+              resetIdleTimer();
+              return;
+            }
             if (text.length > 4000) {
               // Too long for streaming edits — let final sendMessage handle it
               streamingFailed = true;
@@ -385,7 +392,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           clearInterval(typingKeepalive);
           if (cleanText && cleanText !== lastSentText) {
             try {
-              if (!streamingFailed && cleanText.length <= 4096) {
+              if (!streamingFailed && cleanText.length <= 4096 && !queue.hasPendingMessages(chatJid)) {
                 await channel.editMessage!(chatJid, streamMessageId, cleanText);
               } else {
                 await channel.sendMessage(chatJid, cleanText);
