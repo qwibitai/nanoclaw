@@ -1,9 +1,11 @@
 import {
+  ChannelType,
   Client,
   Events,
   GatewayIntentBits,
   Message,
   TextChannel,
+  ThreadChannel,
 } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -15,8 +17,22 @@ import {
   InboundMessage,
   OnChatMetadata,
   OnInboundMessage,
+  PlaceType,
   RegisteredGroup,
 } from '../types.js';
+
+/** Discord channel type から PlaceType を解決する */
+function resolvePlaceType(channel: Message['channel']): PlaceType {
+  if (channel.isThread()) {
+    if (channel.type === ChannelType.PrivateThread) return 'private_thread';
+    if (channel.parent?.type === ChannelType.GuildForum) {
+      return 'forum_post_thread';
+    }
+    return 'public_thread';
+  }
+  if (channel.type === ChannelType.GuildAnnouncement) return 'guild_announcement';
+  return 'guild_text';
+}
 
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
@@ -50,6 +66,7 @@ export class DiscordChannel implements Channel {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
 
+      const isThread = message.channel.isThread();
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;
       let content = message.content;
@@ -64,10 +81,22 @@ export class DiscordChannel implements Channel {
       // Determine chat name
       let chatName: string;
       if (message.guild) {
-        const textChannel = message.channel as TextChannel;
-        chatName = `${message.guild.name} #${textChannel.name}`;
+        if (isThread && message.channel.isThread()) {
+          const thread = message.channel as ThreadChannel;
+          const parentName = thread.parent?.name || 'unknown';
+          chatName = `${message.guild.name} #${parentName} > ${thread.name}`;
+        } else {
+          const textChannel = message.channel as TextChannel;
+          chatName = `${message.guild.name} #${textChannel.name}`;
+        }
       } else {
         chatName = senderName;
+      }
+
+      // Resolve parent JID for thread messages
+      let parentJid: string | undefined;
+      if (isThread && message.channel.isThread() && message.channel.parentId) {
+        parentJid = `dc:${message.channel.parentId}`;
       }
 
       // Translate Discord @bot mentions into TRIGGER_PATTERN format.
@@ -142,19 +171,34 @@ export class DiscordChannel implements Channel {
         isGroup,
       );
 
-      // Only deliver full message for registered groups
+      // Only deliver full message for registered groups.
+      // Exception: thread messages from channels whose parent has thread_defaults
+      // are allowed through so index.ts can auto-register the thread group.
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
-        logger.debug(
-          { chatJid, chatName },
-          'Message from unregistered Discord channel',
-        );
-        return;
+        if (parentJid) {
+          const parentGroup = this.opts.registeredGroups()[parentJid];
+          if (parentGroup?.thread_defaults) {
+            // Auto-registration candidate — fall through to deliver the message
+          } else {
+            logger.debug(
+              { chatJid, chatName },
+              'Message from unregistered Discord thread (no parent thread_defaults)',
+            );
+            return;
+          }
+        } else {
+          logger.debug(
+            { chatJid, chatName },
+            'Message from unregistered Discord channel',
+          );
+          return;
+        }
       }
 
       // Deliver message — startMessageLoop() will pick it up.
       // InboundMessage extends NewMessage with Discord-specific metadata
-      // (place_type, actor_role, is_thread) that is callback-only and not persisted.
+      // (place_type, actor_role, is_thread, parent_jid) that is callback-only and not persisted.
       const inbound: InboundMessage = {
         id: msgId,
         chat_jid: chatJid,
@@ -163,9 +207,10 @@ export class DiscordChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
-        place_type: 'guild_text',
+        place_type: resolvePlaceType(message.channel),
         actor_role: 'owner',
-        is_thread: false,
+        is_thread: isThread,
+        parent_jid: parentJid,
       };
       this.opts.onMessage(chatJid, inbound);
 

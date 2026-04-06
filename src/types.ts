@@ -50,6 +50,13 @@ export type ActorRole = 'owner' | 'admin' | 'user';
 /** グループの権限タイプ */
 export type GroupType = 'override' | 'main' | 'chat' | 'thread';
 
+/** thread 自動登録時に子 group へ継承するデフォルト設定 */
+export interface ThreadDefaults {
+  type?: GroupType; // デフォルト 'thread'
+  requiresTrigger?: boolean;
+  containerConfig?: ContainerConfig;
+}
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
@@ -58,6 +65,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // デフォルト: グループの場合は true、個人チャットの場合は false
   type?: GroupType; // 未指定時は 'chat' として扱う
+  thread_defaults?: ThreadDefaults; // 設定時、thread message を受信した際に子 group を自動登録する
   channel_mode?: 'chat' | 'url_watch' | 'admin_control';
   chat_behavior?: 'ambient_room_chat' | 'directed_help_chat';
 }
@@ -82,6 +90,8 @@ export interface InboundMessage extends NewMessage {
   place_type?: PlaceType;
   actor_role?: ActorRole;
   is_thread?: boolean;
+  /** Discord thread の親チャンネル JID。callback 専用で DB には保存されない。 */
+  parent_jid?: string;
 }
 
 export interface ScheduledTask {

@@ -152,9 +152,10 @@ async function runTask(
   let error: string | null = null;
 
   // グループコンテキストモードの場合、グループの現在のセッションを使用します
+  // session キーは group_jid（Phase 3 で group_folder から変更）
   const sessions = deps.getSessions();
   const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+    task.context_mode === 'group' ? sessions[task.chat_jid] : undefined;
 
   // タスクが結果を出力した後、速やかにコンテナを閉じます。
   // タスクはシングルターン（1往復）であり、クエリループがタイムアウトするまで

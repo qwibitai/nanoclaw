@@ -6,10 +6,13 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getAllSessions,
   getMessagesSince,
   getNewMessages,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -497,5 +500,74 @@ describe('registered group type', () => {
       const groups = getAllRegisteredGroups();
       expect(groups[jid].type).toBe(t);
     }
+  });
+
+  it('persists thread_defaults through set/get round-trip', () => {
+    setRegisteredGroup('dc:parent123', {
+      name: 'Parent Channel',
+      folder: 'discord_main',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      type: 'main',
+      thread_defaults: {
+        type: 'thread',
+        requiresTrigger: false,
+        containerConfig: { timeout: 120000 },
+      },
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['dc:parent123'];
+    expect(group).toBeDefined();
+    expect(group.thread_defaults).toBeDefined();
+    expect(group.thread_defaults!.type).toBe('thread');
+    expect(group.thread_defaults!.requiresTrigger).toBe(false);
+    expect(group.thread_defaults!.containerConfig?.timeout).toBe(120000);
+  });
+
+  it('returns undefined thread_defaults when not set', () => {
+    setRegisteredGroup('dc:nocfg', {
+      name: 'No Config',
+      folder: 'discord_nocfg',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['dc:nocfg'].thread_defaults).toBeUndefined();
+  });
+});
+
+// --- Session accessors (jid-keyed) ---
+
+describe('session accessors', () => {
+  it('sets and retrieves session by jid', () => {
+    setSession('dc:123456789', 'sess-abc');
+    expect(getSession('dc:123456789')).toBe('sess-abc');
+  });
+
+  it('returns undefined for unknown jid', () => {
+    expect(getSession('dc:unknown')).toBeUndefined();
+  });
+
+  it('overwrites existing session', () => {
+    setSession('dc:111', 'sess-old');
+    setSession('dc:111', 'sess-new');
+    expect(getSession('dc:111')).toBe('sess-new');
+  });
+
+  it('getAllSessions returns all sessions keyed by jid', () => {
+    setSession('dc:aaa', 'sess-1');
+    setSession('dc:bbb', 'sess-2');
+    const sessions = getAllSessions();
+    expect(sessions['dc:aaa']).toBe('sess-1');
+    expect(sessions['dc:bbb']).toBe('sess-2');
+  });
+
+  it('parent and thread groups have independent sessions', () => {
+    setSession('dc:parent', 'parent-sess');
+    setSession('dc:thread', 'thread-sess');
+    expect(getSession('dc:parent')).toBe('parent-sess');
+    expect(getSession('dc:thread')).toBe('thread-sess');
   });
 });

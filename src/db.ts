@@ -12,6 +12,7 @@ import {
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
+  ThreadDefaults,
 } from './types.js';
 
 /** DB の group_type / is_main から GroupType を解決する */
@@ -93,7 +94,7 @@ function createSchema(database: Database.Database): void {
       value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
+      group_jid TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
@@ -106,6 +107,23 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1
     );
   `);
+
+  // sessions テーブルのスキーマを group_folder → group_jid に移行。
+  // 個人プロジェクトのため後方互換不要。旧テーブルが残っている場合は DROP して再作成。
+  try {
+    const hasOldColumn = (database
+      .prepare(`PRAGMA table_info(sessions)`)
+      .all() as Array<{ name: string }>)
+      .some((col) => col.name === 'group_folder');
+    if (hasOldColumn) {
+      database.exec(`DROP TABLE sessions`);
+      database.exec(
+        `CREATE TABLE IF NOT EXISTS sessions (group_jid TEXT PRIMARY KEY, session_id TEXT NOT NULL)`,
+      );
+    }
+  } catch {
+    /* テーブルが存在しないか、すでに移行済み */
+  }
 
   // context_mode カラムが存在しない場合は追加（既存 DB のマイグレーション）
   try {
@@ -149,6 +167,15 @@ function createSchema(database: Database.Database): void {
     );
     database.exec(
       `UPDATE registered_groups SET group_type = 'main' WHERE is_main = 1`,
+    );
+  } catch {
+    /* カラムはすでに存在します */
+  }
+
+  // thread_defaults カラムが存在しない場合は追加
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN thread_defaults TEXT`,
     );
   } catch {
     /* カラムはすでに存在します */
@@ -547,27 +574,29 @@ export function setRouterState(key: string, value: string): void {
 }
 
 // --- セッション・アクセッサー ---
+// sessions テーブルのキーは group_jid（例: dc:123456789）。
+// Phase 3 でセッション分離を group 単位に変更した。
 
-export function getSession(groupFolder: string): string | undefined {
+export function getSession(groupJid: string): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
+    .prepare('SELECT session_id FROM sessions WHERE group_jid = ?')
+    .get(groupJid) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
-export function setSession(groupFolder: string, sessionId: string): void {
+export function setSession(groupJid: string, sessionId: string): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_jid, session_id) VALUES (?, ?)',
+  ).run(groupJid, sessionId);
 }
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+    .prepare('SELECT group_jid, session_id FROM sessions')
+    .all() as Array<{ group_jid: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
-    result[row.group_folder] = row.session_id;
+    result[row.group_jid] = row.session_id;
   }
   return result;
 }
@@ -590,6 +619,7 @@ export function getRegisteredGroup(
         requires_trigger: number | null;
         is_main: number | null;
         group_type: string | null;
+        thread_defaults: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -613,6 +643,9 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     type: groupType,
+    thread_defaults: row.thread_defaults
+      ? (JSON.parse(row.thread_defaults) as ThreadDefaults)
+      : undefined,
   };
 }
 
@@ -630,8 +663,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   }
   const groupType = VALID_GROUP_TYPES.has(rawType) ? rawType : 'chat';
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, group_type, thread_defaults)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -642,6 +675,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     groupType === 'main' || groupType === 'override' ? 1 : 0,
     groupType,
+    group.thread_defaults ? JSON.stringify(group.thread_defaults) : null,
   );
 }
 
@@ -656,6 +690,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     requires_trigger: number | null;
     is_main: number | null;
     group_type: string | null;
+    thread_defaults: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -678,6 +713,9 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       type: groupType,
+      thread_defaults: row.thread_defaults
+        ? (JSON.parse(row.thread_defaults) as ThreadDefaults)
+        : undefined,
     };
   }
   return result;

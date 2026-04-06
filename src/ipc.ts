@@ -9,7 +9,7 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { hasPrivilege, VALID_GROUP_TYPES } from './group-type.js';
 import { logger } from './logger.js';
-import { GroupType, RegisteredGroup } from './types.js';
+import { GroupType, RegisteredGroup, ThreadDefaults } from './types.js';
 
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
@@ -179,6 +179,7 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     group_type?: string;
+    thread_defaults?: ThreadDefaults;
   },
   sourceGroup: string, // IPC ディレクトリから検証された識別情報
   isPrivileged: boolean, // main または override の特権を持つか
@@ -463,6 +464,7 @@ export async function processTaskIpc(
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
           type: groupType,
+          thread_defaults: data.thread_defaults,
         });
         logger.info(
           { jid: data.jid, folder: data.folder, groupType, sourceGroup },
