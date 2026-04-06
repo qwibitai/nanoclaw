@@ -1068,7 +1068,9 @@ async function main(): Promise<void> {
       } else {
         await channel.sendMessage(
           jid,
-          caption ? `[Image: ${imagePath}] ${caption}` : `[Image: ${imagePath}]`,
+          caption
+            ? `[Image: ${imagePath}] ${caption}`
+            : `[Image: ${imagePath}]`,
         );
       }
     },

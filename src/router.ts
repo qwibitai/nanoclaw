@@ -51,10 +51,7 @@ export function stripUnclosedInternalTag(text: string): string {
  * - Always: model special tokens (<|user|>, etc.) and closed <internal> pairs
  * - Final only: unclosed <internal> tags (during streaming, these may be incomplete)
  */
-export function stripModelArtifacts(
-  text: string,
-  isFinal: boolean,
-): string {
+export function stripModelArtifacts(text: string, isFinal: boolean): string {
   let result = stripModelTokens(text);
   result = stripInternalTags(result);
   if (isFinal) {
