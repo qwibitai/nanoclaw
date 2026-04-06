@@ -620,8 +620,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
-  const rawType =
-    group.type ?? ((group as { isMain?: boolean }).isMain ? 'main' : 'chat');
+  const rawType = group.type ?? 'chat';
   // JSON 移行や外部入力経由で不正値が混入する可能性があるため、書き込み前に検証する
   if (!VALID_GROUP_TYPES.has(rawType)) {
     logger.warn(
