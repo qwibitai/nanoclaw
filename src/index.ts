@@ -127,7 +127,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
 /**
  * thread message を受信したとき、parent group の thread_defaults に基づいて
- * 子 group を自動登録する。登録できた場合は true を返す。
+ * 子 group を自動登録する。
  */
 function autoRegisterThread(
   chatJid: string,
@@ -178,6 +178,9 @@ export function _setRegisteredGroups(
 ): void {
   registeredGroups = groups;
 }
+
+/** @internal - テスト用にエクスポート */
+export const _autoRegisterThread = autoRegisterThread;
 
 /**
  * グループのすべての保留中メッセージを処理します。
