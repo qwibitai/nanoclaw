@@ -164,12 +164,23 @@ function buildVolumeMounts(
     !Array.isArray(settingsContent.env)
       ? (settingsContent.env as Record<string, unknown>)
       : {};
-  const sanitizedExistingEnv: Record<string, string> = Object.fromEntries(
-    Object.entries(existingEnv).filter(
-      (e): e is [string, string] => typeof e[1] === 'string',
-    ),
-  );
-  settingsContent.env = { ...defaultSettingsEnv, ...sanitizedExistingEnv };
+  const dangerousEnvKeys = new Set(['__proto__', 'constructor', 'prototype']);
+  const sanitizedExistingEnv = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(existingEnv)) {
+    if (typeof value === 'string' && !dangerousEnvKeys.has(key)) {
+      sanitizedExistingEnv[key] = value;
+    }
+  }
+  const mergedEnv = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(defaultSettingsEnv)) {
+    if (!dangerousEnvKeys.has(key)) {
+      mergedEnv[key] = value;
+    }
+  }
+  for (const [key, value] of Object.entries(sanitizedExistingEnv)) {
+    mergedEnv[key] = value;
+  }
+  settingsContent.env = mergedEnv;
   // permissions を groupType に基づいて常に同期する
   // （既存環境のアップグレードや groupType 変更時も反映されるようにするため）
   const allowedTools = getDefaultAllowedTools(groupType);
