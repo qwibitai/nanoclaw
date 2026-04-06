@@ -39,7 +39,7 @@ IPC_DIR = NANOCLAW_DIR / "data" / "ipc" / "atlas_main" / "messages"
 
 # Config
 POLL_INTERVAL = 5  # seconds
-TASK_TIMEOUT = 300  # 5 minutes max per task
+TASK_TIMEOUT = 600  # 10 minutes max per task
 MAX_OUTPUT_SIZE = 50_000  # chars to keep in result summary
 AUTH_ERROR_PATTERNS = ["authentication_error", "OAuth token has expired", "401", "token expired"]
 OUTAGE_ERROR_PATTERNS = [
@@ -483,11 +483,40 @@ def process_task(task_path: Path) -> None:
         log(f"  project: {project_dir}")
         log(f"  prompt: {prompt[:100]}...")
 
-        # Tier validation
+        # Tier validation (must apply to ALL task types including missions)
         if tier >= 4:
             write_result(task_id, entity, "rejected", 1,
                          "Tier 4 tasks are CEO-only. Cannot execute autonomously.",
                          [], False)
+            task_path.unlink()
+            return
+
+        # --- MISSION TASK ROUTING ---
+        # If task type is "mission", delegate to mission_executor module
+        if task.get("type") == "mission":
+            try:
+                import sys as _m_sys
+                _m_sys.path.insert(0, str(Path.home() / ".atlas" / "lib"))
+                # SSRF scan on mission prompts
+                import re as _mission_re
+                from ssrf import validate_endpoint_url as _m_validate
+                _m_urls = _mission_re.findall(r'https?://[^\s\"\'<>]+', prompt)
+                for _m_url in _m_urls:
+                    _m_validate(_m_url)
+                from mission_executor import process_mission
+                mission_result = process_mission(task, log_fn=log)
+                write_result(task_id, entity,
+                             mission_result.get("status", "error"), 0,
+                             json.dumps(mission_result, indent=2),
+                             [], False)
+                if callback_group:
+                    summary = f"Mission {task_id}: {mission_result.get('status')}"
+                    outputs = mission_result.get("outputs", {})
+                    summary += f" | {len([v for v in outputs.values() if v])}/{len(outputs)} outputs"
+                    send_telegram_result(callback_group, summary, task_id, entity)
+            except Exception as e:
+                log(f"Mission execution error: {e}")
+                write_result(task_id, entity, "error", 1, str(e), [], False)
             task_path.unlink()
             return
 
@@ -500,6 +529,30 @@ def process_task(task_path: Path) -> None:
             return
 
 
+
+        # --- SSRF PROTECTION ---
+        # Scan prompt for URLs resolving to private/internal addresses.
+        # Blocks prompt injection like "fetch http://localhost:3002"
+        try:
+            import re as _re
+            import sys as _ssrf_sys
+            _ssrf_sys.path.insert(0, str(Path.home() / ".atlas" / "lib"))
+            from ssrf import validate_endpoint_url
+            urls_in_prompt = _re.findall(r'https?://[^\s\"\'<>]+', prompt)
+            for url in urls_in_prompt:
+                validate_endpoint_url(url)
+            if urls_in_prompt:
+                log(f"  SSRF check passed: {len(urls_in_prompt)} URL(s) validated")
+        except ValueError as ssrf_err:
+            log(f"  SSRF BLOCKED: {ssrf_err}")
+            write_result(task_id, entity, "rejected", 1,
+                         f"SSRF protection: {ssrf_err}",
+                         [], False)
+            task_path.unlink()
+            return
+        except ImportError:
+            log("  WARNING: ssrf module not found, skipping URL validation")
+
         # --- MULTI-PROVIDER ROUTING ---
         # If the task specifies a task_type that matches the routing table,
         # try atlas.route() first. This sends research to Sonar, classification
@@ -510,6 +563,7 @@ def process_task(task_path: Path) -> None:
             "classification", "extraction",
             "market_signal", "social_monitoring", "cron_check",
             "document_summary",
+            "mechanical_code", "scaffold", "code_review", "judgment_code",
         }
         if task_type in ROUTE_ELIGIBLE_TYPES:
             try:
@@ -634,6 +688,16 @@ def process_task(task_path: Path) -> None:
             "commits": new_commits,
             "pushed": pushed,
         })
+
+
+        # --- Performance tracking (GStack adoption #6) ---
+        try:
+            import sys as _perf_sys
+            _perf_sys.path.insert(0, str(Path.home() / ".atlas" / "lib"))
+            from performance_tracker import track as perf_track
+            perf_track("task", task_id, duration_ms / 1000.0, entity=entity, model=model)
+        except Exception as e:
+            log(f"  Performance tracking error (non-blocking): {e}")
 
         log(f"Task {task_id} completed: {status} in {duration_ms}ms "
             f"| commits={len(new_commits)} pushed={pushed}")
