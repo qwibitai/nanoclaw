@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, EffortLevel, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, Query, HookCallback, PreCompactHookInput, PreToolUseHookInput, EffortLevel, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerAttachment {
@@ -84,6 +84,23 @@ const IPC_POLL_MS = 500;
 let sdkEnvRef: Record<string, string | undefined> = {};
 // Tracks the previous model for one-shot switches (revert after query completes).
 let pendingOneshotRevert: string | null | undefined;
+// Active Query handle for mid-query setModel() calls via IPC.
+let activeQuery: Query | null = null;
+// Last model alias sent via setModel() — skip redundant calls when unchanged.
+let lastSetModelAlias: string | undefined;
+
+/**
+ * Convert a full model ID to the CLI alias that setModel() expects.
+ * The SDK subprocess recognises short aliases (opus, sonnet[1m], haiku)
+ * but may silently ignore full IDs like "claude-opus-4-6[1m]".
+ */
+function toCliAlias(model: string): string {
+  if (model.startsWith('claude-opus-4')) return model.includes('[1m]') ? 'opus[1m]' : 'opus';
+  if (model.startsWith('claude-sonnet-4')) return model.includes('[1m]') ? 'sonnet[1m]' : 'sonnet';
+  if (model.startsWith('claude-haiku')) return 'haiku';
+  log(`toCliAlias: unrecognized model "${model}", passing through as-is`);
+  return model;
+}
 
 /**
  * Returns channel-type-specific message formatting instructions based on the JID prefix.
@@ -494,6 +511,13 @@ function drainIpcInput(): IpcMessage[] {
             pendingOneshotRevert = sdkEnvRef['CLAUDE_CODE_USE_MODEL'] || null;
           }
           sdkEnvRef['CLAUDE_CODE_USE_MODEL'] = data.model;
+          if (activeQuery) {
+            const alias = toCliAlias(data.model);
+            activeQuery.setModel(alias).catch(err =>
+              log(`setModel(${alias}) failed: ${err instanceof Error ? err.message : String(err)}`),
+            );
+            lastSetModelAlias = alias;
+          }
           log(`Model switched via IPC: ${data.model}${data.oneshot ? ' (one-shot)' : ''}`);
         } else if (data.type === 'effort_switch' && data.effort) {
           sdkEnvRef['CLAUDE_CODE_USE_EFFORT'] = data.effort;
@@ -762,7 +786,7 @@ interface QueryContext {
   mcpServerPath: string;
   containerInput: ContainerInput;
   sdkEnv: Record<string, string | undefined>;
-  systemPromptOption: { type: 'preset'; preset: 'claude_code'; append: string } | undefined;
+  buildSystemPrompt: (model?: string) => { type: 'preset'; preset: 'claude_code'; append: string } | undefined;
   plugins: Array<{ type: 'local'; path: string }>;
 }
 
@@ -772,7 +796,10 @@ async function runQuery(
   ctx: QueryContext,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
-  const { mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins } = ctx;
+  const { mcpServerPath, containerInput, sdkEnv, buildSystemPrompt, plugins } = ctx;
+  // Rebuild system prompt with current model (may differ from startup if IPC switched it)
+  const currentModel = sdkEnv['CLAUDE_CODE_USE_MODEL'] || containerInput.model;
+  const systemPromptOption = buildSystemPrompt(currentModel);
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -845,7 +872,8 @@ async function runQuery(
     log(`Using effort: ${effort}`);
   }
 
-  for await (const message of query({
+  // Capture the Query handle so drainIpcInput() can call setModel() mid-query.
+  const q: Query = query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
@@ -856,8 +884,6 @@ async function runQuery(
       allowedTools: buildAllowedTools(containerInput.tools),
       disallowedTools: buildDisallowedTools(containerInput.tools),
       env: sdkEnv,
-      // Read model/effort from sdkEnv (mutated by IPC model_switch/effort_switch),
-      // not from containerInput which is static from launch time.
       ...(sdkEnv['CLAUDE_CODE_USE_MODEL'] ? { model: sdkEnv['CLAUDE_CODE_USE_MODEL'] } : {}),
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -869,8 +895,22 @@ async function runQuery(
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName, containerInput.threadId)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSelfApprovalBlockHook(), createBlockSnowflakeConnectorHook(), createSanitizeBashHook()] }],
       },
+    },
+  });
+
+  activeQuery = q;
+
+  // Apply model to the subprocess if it changed since the last setModel() call.
+  if (currentModel) {
+    const alias = toCliAlias(currentModel);
+    if (alias !== lastSetModelAlias) {
+      await q.setModel(alias);
+      lastSetModelAlias = alias;
+      log(`setModel(${alias}) applied at query start`);
     }
-  })) {
+  }
+
+  for await (const message of q) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
@@ -983,10 +1023,24 @@ async function runQuery(
       });
       lastAssistantText = '';
       hasPipedSinceLastOutput = false;
+
+      // Revert one-shot model switch after the turn's result is emitted.
+      if (pendingOneshotRevert !== undefined) {
+        sdkEnvRef['CLAUDE_CODE_USE_MODEL'] = pendingOneshotRevert || undefined;
+        const revertAlias = pendingOneshotRevert ? toCliAlias(pendingOneshotRevert) : 'default';
+        activeQuery?.setModel(revertAlias).catch(err =>
+          log(`setModel revert failed: ${err instanceof Error ? err.message : String(err)}`),
+        );
+        lastSetModelAlias = revertAlias;
+        log(`One-shot model reverted to: ${revertAlias}`);
+        pendingOneshotRevert = undefined;
+      }
     }
   }
 
   ipcPolling = false;
+  activeQuery = null;
+
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
@@ -1127,10 +1181,6 @@ async function main(): Promise<void> {
   const identityNote = containerInput.assistantName
     ? `Your name is ${containerInput.assistantName}. Messages in the conversation history may include is_from_me="true" (your own previous messages) and is_bot="true" (messages from any bot). A message with is_bot="true" but without is_from_me="true" is from a different bot — not you. When referencing or tagging yourself, always use the name "${containerInput.assistantName}".`
     : undefined;
-  // Inject model identity so the agent can report it accurately
-  const modelNote = containerInput.model
-    ? `You are running on model: ${containerInput.model}. If the user asks what model you are using, report this accurately.`
-    : undefined;
   // Inject default tone profile at boot — full file content, read once.
   // Same pattern as claude.ai's Personalize instructions: static system prompt block.
   // The get_tone_profile tool is still available for overrides (loading a different profile)
@@ -1145,11 +1195,20 @@ async function main(): Promise<void> {
       toneNote = `Your default tone profile is "${containerInput.tone}" (no profile file found — use this as a style hint). Use the get_tone_profile tool to load profiles for email drafts or tone overrides.`;
     }
   }
-  const systemPromptParts = [globalClaudeMd, channelFormatting, identityNote, modelNote, toneNote].filter(Boolean);
-  const systemPromptOption = systemPromptParts.length > 0
-    ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptParts.join('\n\n') }
-    : undefined;
+  // Static system prompt parts (everything except model identity, which changes per query)
+  const staticPromptParts = [globalClaudeMd, channelFormatting, identityNote, toneNote].filter(Boolean);
 
+  // Build the full system prompt with the current model identity.
+  // Called per runQuery() so the model note reflects IPC model switches.
+  function buildSystemPrompt(model?: string) {
+    const modelNote = model
+      ? `You are running on model: ${model}. If the user asks what model you are using, report this accurately.`
+      : undefined;
+    const parts = [...staticPromptParts, ...(modelNote ? [modelNote] : [])];
+    return parts.length > 0
+      ? { type: 'preset' as const, preset: 'claude_code' as const, append: parts.join('\n\n') }
+      : undefined;
+  }
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
@@ -1305,7 +1364,7 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
-  const queryCtx: QueryContext = { mcpServerPath, containerInput, sdkEnv, systemPromptOption, plugins };
+  const queryCtx: QueryContext = { mcpServerPath, containerInput, sdkEnv, buildSystemPrompt, plugins };
   let resumeAt: string | undefined;
   try {
     while (true) {
