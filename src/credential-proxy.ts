@@ -52,71 +52,73 @@ export function startCredentialProxy(
       });
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-       try {
-        const body = Buffer.concat(chunks);
-        const headers: Record<string, string | number | string[] | undefined> =
-          {
+        try {
+          const body = Buffer.concat(chunks);
+          const headers: Record<
+            string,
+            string | number | string[] | undefined
+          > = {
             ...(req.headers as Record<string, string>),
             host: upstreamUrl.host,
             'content-length': body.length,
           };
 
-        // Strip hop-by-hop headers that must not be forwarded by proxies
-        delete headers['connection'];
-        delete headers['keep-alive'];
-        delete headers['transfer-encoding'];
+          // Strip hop-by-hop headers that must not be forwarded by proxies
+          delete headers['connection'];
+          delete headers['keep-alive'];
+          delete headers['transfer-encoding'];
 
-        if (authMode === 'api-key') {
-          // API key mode: inject x-api-key on every request
-          delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-        } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
-          if (headers['authorization']) {
-            delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+          if (authMode === 'api-key') {
+            // API key mode: inject x-api-key on every request
+            delete headers['x-api-key'];
+            headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+          } else {
+            // OAuth mode: replace placeholder Bearer token with the real one
+            // only when the container actually sends an Authorization header
+            // (exchange request + auth probes). Post-exchange requests use
+            // x-api-key only, so they pass through without token injection.
+            if (headers['authorization']) {
+              delete headers['authorization'];
+              if (oauthToken) {
+                headers['authorization'] = `Bearer ${oauthToken}`;
+              }
             }
           }
-        }
 
-        const upstream = makeRequest(
-          {
-            hostname: upstreamUrl.hostname,
-            port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
-            method: req.method,
-            headers,
-          } as RequestOptions,
-          (upRes) => {
-            res.writeHead(upRes.statusCode!, upRes.headers);
-            upRes.pipe(res);
-          },
-        );
-
-        upstream.on('error', (err) => {
-          logger.error(
-            { err, url: req.url },
-            'Credential proxy upstream error',
+          const upstream = makeRequest(
+            {
+              hostname: upstreamUrl.hostname,
+              port: upstreamUrl.port || (isHttps ? 443 : 80),
+              path: req.url,
+              method: req.method,
+              headers,
+            } as RequestOptions,
+            (upRes) => {
+              res.writeHead(upRes.statusCode!, upRes.headers);
+              upRes.pipe(res);
+            },
           );
-          if (!res.headersSent) {
-            res.writeHead(502);
-            res.end('Bad Gateway');
-          }
-        });
 
-        upstream.write(body);
-        upstream.end();
-       } catch (err) {
-        logger.error({ err, url: req.url }, 'Credential proxy handler error');
-        if (!res.headersSent) {
-          res.writeHead(500);
-          res.end('Internal proxy error');
+          upstream.on('error', (err) => {
+            logger.error(
+              { err, url: req.url },
+              'Credential proxy upstream error',
+            );
+            if (!res.headersSent) {
+              res.writeHead(502);
+              res.end('Bad Gateway');
+            }
+          });
+
+          upstream.write(body);
+          upstream.end();
+        } catch (err) {
+          logger.error({ err, url: req.url }, 'Credential proxy handler error');
+          if (!res.headersSent) {
+            res.writeHead(500);
+            res.end('Internal proxy error');
+          }
         }
-       }
       });
     });
 

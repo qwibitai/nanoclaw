@@ -4,7 +4,10 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { execSync } from 'child_process';
+
+import { ASSISTANT_NAME, DATA_DIR, TRIGGER_PATTERN } from '../config.js';
+import { deleteSession } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -90,7 +93,10 @@ export class TelegramChannel implements Channel {
       const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
       const resp = await fetch(fileUrl);
       if (!resp.ok) {
-        logger.warn({ fileId, status: resp.status }, 'Telegram file download failed');
+        logger.warn(
+          { fileId, status: resp.status },
+          'Telegram file download failed',
+        );
         return null;
       }
 
@@ -132,9 +138,117 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Command to reset session
+    this.bot.command('new', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('Chat not registered.');
+        return;
+      }
+
+      // Stop running container for this group
+      try {
+        const list = execSync('container list 2>/dev/null', {
+          encoding: 'utf-8',
+        });
+        for (const line of list.split('\n')) {
+          if (line.includes(`nanoclaw-${group.folder}-`)) {
+            const name = line.trim().split(/\s+/)[0];
+            if (name) {
+              execSync(`container stop ${name} 2>/dev/null`);
+              logger.info({ group: group.name, container: name }, '/new: container stopped');
+            }
+          }
+        }
+      } catch {
+        // No container running — that's fine
+      }
+
+      // Delete session JSONL files
+      const projectDir = path.join(
+        DATA_DIR, 'sessions', group.folder,
+        '.claude', 'projects', '-workspace-group',
+      );
+      if (fs.existsSync(projectDir)) {
+        for (const f of fs.readdirSync(projectDir)) {
+          if (f.endsWith('.jsonl')) {
+            fs.unlinkSync(path.join(projectDir, f));
+          }
+        }
+      }
+
+      // Clear session ID from DB
+      deleteSession(group.folder);
+      logger.info({ group: group.name }, '/new: session reset');
+      ctx.reply('Session reset. Next message starts fresh.');
+    });
+
+    // Command to show session status
+    this.bot.command('status', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('Chat not registered.');
+        return;
+      }
+
+      const projectDir = path.join(
+        DATA_DIR, 'sessions', group.folder,
+        '.claude', 'projects', '-workspace-group',
+      );
+      if (!fs.existsSync(projectDir)) {
+        ctx.reply('No active session.');
+        return;
+      }
+
+      const jsonlFiles = fs.readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
+      if (jsonlFiles.length === 0) {
+        ctx.reply('No active session.');
+        return;
+      }
+
+      // Read last assistant entry with usage from the most recent JSONL
+      const filePath = path.join(projectDir, jsonlFiles[jsonlFiles.length - 1]);
+      const lines = fs.readFileSync(filePath, 'utf-8').trim().split('\n');
+
+      let model = '?';
+      let contextTokens = 0;
+      let cacheRead = 0;
+      let cacheCreation = 0;
+
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const obj = JSON.parse(lines[i]);
+          if (obj.type === 'assistant' && obj.message?.usage) {
+            const u = obj.message.usage;
+            model = obj.message.model || '?';
+            cacheRead = u.cache_read_input_tokens || 0;
+            cacheCreation = u.cache_creation_input_tokens || 0;
+            contextTokens = (u.input_tokens || 0) + cacheRead + cacheCreation;
+            break;
+          }
+        } catch {
+          // skip malformed lines
+        }
+      }
+
+      const contextK = Math.round(contextTokens / 1000);
+      const maxK = 200;
+      const pct = Math.round((contextTokens / (maxK * 1000)) * 100);
+      const total = cacheRead + cacheCreation;
+      const hitRate = total > 0 ? Math.round((cacheRead / total) * 100) : 0;
+
+      ctx.reply(
+        `🧠 Model: ${model}\n📚 Context: ~${contextK}k/${maxK}k (${pct}%)\n🗄️ Cache: ${hitRate}% hit`,
+      );
+    });
+
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping', 'new', 'status']);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
@@ -349,6 +463,12 @@ export class TelegramChannel implements Channel {
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
+          this.bot!.api.setMyCommands([
+            { command: 'new', description: 'Reset session' },
+            { command: 'status', description: 'Show context usage' },
+            { command: 'chatid', description: 'Show chat ID' },
+            { command: 'ping', description: 'Check if bot is online' },
+          ]).catch((err) => logger.warn({ err }, 'Failed to set bot commands'));
           console.log(`\n  Telegram bot: @${botInfo.username}`);
           console.log(
             `  Send /chatid to the bot to get a chat's registration ID\n`,
