@@ -291,6 +291,87 @@ export class TelegramChannel implements Channel {
       }
     });
 
+    // Command to search smart playlists from Music Store
+    this.bot!.command('music', async (ctx) => {
+      const args = ((ctx.match as string) || '').trim();
+      if (!args) {
+        await ctx.reply(
+          'Usage: /music mood:chill bpm:120-140 energy:high key:Am\n' +
+            'Filters can be used individually or combined.',
+        );
+        return;
+      }
+
+      // Parse filter arguments
+      const filters: Record<string, any> = {};
+
+      const moodMatch = args.match(/mood:(\S+)/i);
+      if (moodMatch) filters.mood = moodMatch[1];
+
+      const bpmMatch = args.match(/bpm:(\S+)/i);
+      if (bpmMatch) {
+        const rangeMatch = bpmMatch[1].match(/^(\d+)-(\d+)$/);
+        if (rangeMatch) {
+          filters.bpm_min = parseInt(rangeMatch[1], 10);
+          filters.bpm_max = parseInt(rangeMatch[2], 10);
+        } else {
+          const val = parseInt(bpmMatch[1], 10);
+          if (!isNaN(val)) filters.bpm = val;
+        }
+      }
+
+      const energyMatch = args.match(/energy:(\S+)/i);
+      if (energyMatch) filters.energy = energyMatch[1];
+
+      const keyMatch = args.match(/key:(\S+)/i);
+      if (keyMatch) filters.key = keyMatch[1];
+
+      const musicStoreUrl =
+        process.env.MUSIC_STORE_URL || 'http://localhost:3022';
+
+      try {
+        const resp = await fetch(
+          `${musicStoreUrl}/api/v1/playlists/smart`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(filters),
+          },
+        );
+        if (!resp.ok) throw new Error(`Music Store returned ${resp.status}`);
+
+        const data = (await resp.json()) as {
+          tracks: Array<{
+            title: string;
+            artist: string;
+            bpm?: number;
+            mood?: string;
+          }>;
+        };
+
+        const tracks = data.tracks || [];
+        if (tracks.length === 0) {
+          await ctx.reply('No tracks found matching those filters.');
+          return;
+        }
+
+        const display = tracks.slice(0, 10);
+        const lines = display.map(
+          (t, i) =>
+            `${i + 1}. ${t.title} — ${t.artist}` +
+            (t.bpm ? ` [${t.bpm} BPM]` : '') +
+            (t.mood ? ` (${t.mood})` : ''),
+        );
+        const totalNote =
+          tracks.length > 10 ? `\n\n(${tracks.length} total matches)` : '';
+
+        await ctx.reply(lines.join('\n') + totalNote);
+      } catch (err) {
+        logger.error({ err }, 'Music command error');
+        await ctx.reply('Music Store is offline — try again later.');
+      }
+    });
+
     this.bot!.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;

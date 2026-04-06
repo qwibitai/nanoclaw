@@ -291,6 +291,250 @@ describe('TelegramChannel', () => {
     });
   });
 
+  describe('/music command', () => {
+    function getMusicHandler(bot: any) {
+      const call = bot.command.mock.calls.find(
+        (c: any) => c[0] === 'music',
+      );
+      return call?.[1];
+    }
+
+    it('shows usage when called with no args', async () => {
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      const ctx = {
+        match: '',
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Usage:'),
+      );
+    });
+
+    it('parses mood filter and calls Music Store API', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tracks: [
+            { title: 'Chill Vibes', artist: 'DJ Test', bpm: 100, mood: 'chill' },
+          ],
+        }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      const ctx = {
+        match: 'mood:chill',
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/playlists/smart'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ mood: 'chill' }),
+        }),
+      );
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Chill Vibes'),
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('parses bpm range format (120-140)', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }] }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      await handler({
+        match: 'bpm:120-140',
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: JSON.stringify({ bpm_min: 120, bpm_max: 140 }),
+        }),
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('parses single bpm value', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks: [{ title: 'Beat', artist: 'A', bpm: 130 }] }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      await handler({
+        match: 'bpm:130',
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: JSON.stringify({ bpm: 130 }),
+        }),
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('parses combined filters', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks: [{ title: 'T', artist: 'A' }] }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      await handler({
+        match: 'mood:chill bpm:120-140 energy:high key:Am',
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: JSON.stringify({
+            mood: 'chill',
+            bpm_min: 120,
+            bpm_max: 140,
+            energy: 'high',
+            key: 'Am',
+          }),
+        }),
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('caps display at 10 tracks and shows total count', async () => {
+      const tracks = Array.from({ length: 15 }, (_, i) => ({
+        title: `Track ${i + 1}`,
+        artist: 'Artist',
+        bpm: 120,
+        mood: 'chill',
+      }));
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      const ctx = {
+        match: 'mood:chill',
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+
+      const replyText = ctx.reply.mock.calls[0][0] as string;
+      expect(replyText).toContain('1. Track 1');
+      expect(replyText).toContain('10. Track 10');
+      expect(replyText).not.toContain('11. Track 11');
+      expect(replyText).toContain('(15 total matches)');
+
+      fetchSpy.mockRestore();
+    });
+
+    it('returns friendly message for no results', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks: [] }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      const ctx = {
+        match: 'mood:angry',
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(
+        'No tracks found matching those filters.',
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('returns error message for API failures', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 500,
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      const ctx = {
+        match: 'mood:chill',
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await handler(ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(
+        'Music Store is offline — try again later.',
+      );
+
+      fetchSpy.mockRestore();
+    });
+
+    it('uses MUSIC_STORE_URL env var', async () => {
+      process.env.MUSIC_STORE_URL = 'http://music.example.com';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tracks: [] }),
+      } as Response);
+
+      const ch = new TelegramChannel('token123', makeOpts());
+      await ch.connect();
+
+      const handler = getMusicHandler(lastBotInstance);
+      await handler({
+        match: 'mood:chill',
+        reply: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://music.example.com/api/v1/playlists/smart',
+        expect.any(Object),
+      );
+
+      delete process.env.MUSIC_STORE_URL;
+      fetchSpy.mockRestore();
+    });
+  });
+
   describe('sendMessage', () => {
     it('sends message via bot API', async () => {
       const ch = new TelegramChannel('token123', makeOpts());
