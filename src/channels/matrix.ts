@@ -15,7 +15,10 @@ import {
 
 /** Persistent data directory — survives container restarts */
 const MATRIX_DATA_DIR = '/app/data';
-const MATRIX_CRYPTO_STORE_PATH = path.join(MATRIX_DATA_DIR, 'matrix-crypto-store');
+const MATRIX_CRYPTO_STORE_PATH = path.join(
+  MATRIX_DATA_DIR,
+  'matrix-crypto-store',
+);
 const MATRIX_DEVICE_ID_PATH = path.join(MATRIX_DATA_DIR, 'matrix-device-id');
 
 export interface MatrixChannelOpts {
@@ -74,7 +77,8 @@ export class MatrixChannel implements Channel {
     // restarts. If none exists, discover it via whoami and persist it.
     let deviceId: string | undefined;
     try {
-      deviceId = fs.readFileSync(MATRIX_DEVICE_ID_PATH, 'utf-8').trim() || undefined;
+      deviceId =
+        fs.readFileSync(MATRIX_DEVICE_ID_PATH, 'utf-8').trim() || undefined;
       if (deviceId) {
         logger.info({ deviceId }, 'Matrix device ID loaded from disk');
       }
