@@ -158,7 +158,10 @@ export class TelegramChannel implements Channel {
             const name = line.trim().split(/\s+/)[0];
             if (name) {
               execSync(`container stop ${name} 2>/dev/null`);
-              logger.info({ group: group.name, container: name }, '/new: container stopped');
+              logger.info(
+                { group: group.name, container: name },
+                '/new: container stopped',
+              );
             }
           }
         }
@@ -168,8 +171,12 @@ export class TelegramChannel implements Channel {
 
       // Delete session JSONL files
       const projectDir = path.join(
-        DATA_DIR, 'sessions', group.folder,
-        '.claude', 'projects', '-workspace-group',
+        DATA_DIR,
+        'sessions',
+        group.folder,
+        '.claude',
+        'projects',
+        '-workspace-group',
       );
       if (fs.existsSync(projectDir)) {
         for (const f of fs.readdirSync(projectDir)) {
@@ -196,15 +203,21 @@ export class TelegramChannel implements Channel {
       }
 
       const projectDir = path.join(
-        DATA_DIR, 'sessions', group.folder,
-        '.claude', 'projects', '-workspace-group',
+        DATA_DIR,
+        'sessions',
+        group.folder,
+        '.claude',
+        'projects',
+        '-workspace-group',
       );
       if (!fs.existsSync(projectDir)) {
         ctx.reply('No active session.');
         return;
       }
 
-      const jsonlFiles = fs.readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
+      const jsonlFiles = fs
+        .readdirSync(projectDir)
+        .filter((f) => f.endsWith('.jsonl'));
       if (jsonlFiles.length === 0) {
         ctx.reply('No active session.');
         return;
