@@ -211,9 +211,10 @@ export function startCredentialProxy(
               headers,
             } as RequestOptions,
             async (upRes) => {
+              const upstreamStatusCode = upRes.statusCode ?? 502;
               // For non-401 or API-key mode, stream directly (fast path)
-              if (upRes.statusCode !== 401 || authMode !== 'oauth') {
-                res.writeHead(upRes.statusCode!, upRes.headers);
+              if (upstreamStatusCode !== 401 || authMode !== 'oauth') {
+                res.writeHead(upstreamStatusCode, upRes.headers);
                 upRes.pipe(res);
                 return;
               }
@@ -270,7 +271,7 @@ export function startCredentialProxy(
                     headers: retryHeaders,
                   } as RequestOptions,
                   (retryRes) => {
-                    res.writeHead(retryRes.statusCode!, retryRes.headers);
+                    res.writeHead(retryRes.statusCode ?? 502, retryRes.headers);
                     retryRes.pipe(res);
                   },
                 );

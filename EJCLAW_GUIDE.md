@@ -1,7 +1,7 @@
 # EJClaw 가이드라인
 
 NanoClaw 커스터마이징 시 [phj1081/EJClaw](https://github.com/phj1081/EJClaw) 를 참고 가이드라인으로 활용한다.
-로컬 클론: `/Users/eunu03/ejclaw`
+로컬 클론: `~/path/to/ejclaw`
 
 ---
 
@@ -96,6 +96,6 @@ CREATE TABLE registered_groups (
 
 ## 새 기능 추가 시 참고 순서
 
-1. EJClaw 해당 기능 구현체 먼저 확인 (`/Users/eunu03/ejclaw/src/`)
+1. EJClaw 해당 기능 구현체 먼저 확인 (`~/path/to/ejclaw/src/`)
 2. NanoClaw 구조에 맞게 적용 (컨테이너 → host runner, Codex → Gemini/Copilot)
 3. DB 변경 시 EJClaw의 마이그레이션 패턴 참고 (`src/db.ts`)

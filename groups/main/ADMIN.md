@@ -10,10 +10,12 @@
 
 이 문서의 기준 환경:
 
-- 프로젝트 루트: `/Users/eunu03/nanoclaw`
-- 메인 관리자 채널 JID: `dc:1486643476467683491`
-- 메인 그룹 폴더: `discord_main`
-- launchd 서비스 이름: `com.nanoclaw`
+- `PROJECT_ROOT=/path/to/nanoclaw`
+- `MAIN_JID=dc:<main-admin-channel-id>`
+- `MAIN_GROUP_FOLDER=discord_main`
+- `SERVICE_NAME=com.nanoclaw`
+
+아래 예시는 이 값을 shell 변수로 export 하거나 직접 문자열 치환해서 사용한다.
 
 운영 원칙:
 
@@ -37,7 +39,7 @@
 ### launchd 상태
 
 ```bash
-launchctl print gui/$(id -u)/com.nanoclaw
+launchctl print gui/$(id -u)/$SERVICE_NAME
 ```
 
 중요하게 볼 것:
@@ -46,7 +48,7 @@ launchctl print gui/$(id -u)/com.nanoclaw
 - `pid = ...`
 - `last exit code = (never exited)` 또는 최근 비정상 종료 코드
 - `program = /opt/homebrew/bin/node`
-- `arguments = /Users/eunu03/nanoclaw/dist/index.js`
+- `arguments = $PROJECT_ROOT/dist/index.js`
 
 ### 프로세스 확인
 
@@ -57,8 +59,8 @@ ps -axo pid,ppid,etime,command | rg "dist/index.js|agent-runner|codex-runner|cop
 ### 로그
 
 ```bash
-tail -n 120 /Users/eunu03/nanoclaw/logs/nanoclaw.log
-tail -n 120 /Users/eunu03/nanoclaw/logs/nanoclaw.error.log
+tail -n 120 "$PROJECT_ROOT/logs/nanoclaw.log"
+tail -n 120 "$PROJECT_ROOT/logs/nanoclaw.error.log"
 ```
 
 주요 패턴:
@@ -75,12 +77,12 @@ tail -n 120 /Users/eunu03/nanoclaw/logs/nanoclaw.error.log
 
 DB 파일:
 
-- `/Users/eunu03/nanoclaw/store/messages.db`
+- `$PROJECT_ROOT/store/messages.db`
 
 ### 등록된 채널 / 에이전트
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   select jid, name, folder, agent_type, is_main, paused_until
   from registered_groups
   order by jid, agent_type;
@@ -97,7 +99,7 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 ### 라우터 커서 상태
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   select key, value from router_state;
 "
 ```
@@ -117,10 +119,10 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 ### 최근 메시지
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   select id, chat_jid, sender_name, content, timestamp, is_bot_message
   from messages
-  where chat_jid = 'dc:1486643476467683491'
+  where chat_jid = '$MAIN_JID'
   order by timestamp desc
   limit 20;
 "
@@ -131,7 +133,7 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 ### 세션 상태
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   select group_folder, agent_type, session_id
   from sessions
   order by group_folder, agent_type;
@@ -147,7 +149,7 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 ### work_items 상태
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   select id, group_folder, chat_jid, agent_type, status, delivery_attempts, last_error, created_at, updated_at
   from work_items
   order by id desc
@@ -187,7 +189,7 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 대응:
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   delete from sessions where agent_type = 'codex';
 "
 ```
@@ -216,10 +218,10 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 대응:
 
 ```bash
-cd /Users/eunu03/nanoclaw
+cd "$PROJECT_ROOT"
 npm run setup -- --step service
-launchctl bootout gui/$(id -u)/com.nanoclaw || true
-launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.nanoclaw.plist"
+launchctl bootout gui/$(id -u)/$SERVICE_NAME || true
+launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 ```
 
 ## Recovery Procedures
@@ -227,11 +229,11 @@ launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.nanoclaw.plist"
 ### 코드 변경 반영
 
 ```bash
-cd /Users/eunu03/nanoclaw
+cd "$PROJECT_ROOT"
 npm run build
 npm run build:runners
-launchctl bootout gui/$(id -u)/com.nanoclaw || true
-launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.nanoclaw.plist"
+launchctl bootout gui/$(id -u)/$SERVICE_NAME || true
+launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 ```
 
 ### 미처리 메시지 재복구
@@ -241,9 +243,9 @@ launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.nanoclaw.plist"
 예시:
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   update router_state
-  set value = json_set(value, '$.\"dc:1486664547094892644\"', '2026-03-31T09:45:13.161Z')
+  set value = json_set(value, '$.\"'"$MAIN_JID"'\"', '2026-03-31T09:45:13.161Z')
   where key = 'last_agent_timestamp';
 "
 ```
@@ -253,7 +255,7 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 ### Codex 세션 초기화
 
 ```bash
-sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
+sqlite3 "$PROJECT_ROOT/store/messages.db" "
   delete from sessions where agent_type = 'codex';
 "
 ```
@@ -306,16 +308,16 @@ sqlite3 /Users/eunu03/nanoclaw/store/messages.db "
 
 ## Files Worth Knowing
 
-- 서비스 로그: `/Users/eunu03/nanoclaw/logs/nanoclaw.log`
-- 서비스 에러 로그: `/Users/eunu03/nanoclaw/logs/nanoclaw.error.log`
-- DB: `/Users/eunu03/nanoclaw/store/messages.db`
-- 메인 그룹 지시문: `/Users/eunu03/nanoclaw/groups/main/CLAUDE.md`
-- 이 문서: `/Users/eunu03/nanoclaw/groups/main/ADMIN.md`
-- 관리자 스킬: `/Users/eunu03/nanoclaw/container/skills/nanoclaw-admin/SKILL.md`
-- 상태 스킬: `/Users/eunu03/nanoclaw/container/skills/status/SKILL.md`
-- Discord 채널 분기: `/Users/eunu03/nanoclaw/src/channels/discord.ts`
-- 메시지 루프: `/Users/eunu03/nanoclaw/src/index.ts`
-- paired room 오케스트레이션: `/Users/eunu03/nanoclaw/src/services/paired-room-service.ts`
+- 서비스 로그: `$PROJECT_ROOT/logs/nanoclaw.log`
+- 서비스 에러 로그: `$PROJECT_ROOT/logs/nanoclaw.error.log`
+- DB: `$PROJECT_ROOT/store/messages.db`
+- 메인 그룹 지시문: `$PROJECT_ROOT/groups/main/CLAUDE.md`
+- 이 문서: `$PROJECT_ROOT/groups/main/ADMIN.md`
+- 관리자 스킬: `$PROJECT_ROOT/container/skills/nanoclaw-admin/SKILL.md`
+- 상태 스킬: `$PROJECT_ROOT/container/skills/status/SKILL.md`
+- Discord 채널 분기: `$PROJECT_ROOT/src/channels/discord.ts`
+- 메시지 루프: `$PROJECT_ROOT/src/index.ts`
+- paired room 오케스트레이션: `$PROJECT_ROOT/src/services/paired-room-service.ts`
 
 ## Recommended Admin Workflow
 
