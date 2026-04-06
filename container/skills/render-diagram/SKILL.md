@@ -1,7 +1,6 @@
 ---
 name: render-diagram
 description: Render polished diagrams and visuals as PNG images using Mermaid, HTML, or SVG via the render_diagram tool. Use instead of ASCII art when a professional visual would be more effective.
-allowed-tools: mcp__nanoclaw__render_diagram
 ---
 
 # Rendering Diagrams
