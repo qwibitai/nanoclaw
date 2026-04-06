@@ -23,8 +23,11 @@ const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 // GroupType を変更した場合はこのファイルも更新すること。
 const allowedGroupTypes = new Set(['override', 'main', 'chat', 'thread']);
 const rawGroupType = process.env.NANOCLAW_GROUP_TYPE;
-const groupTypeCandidate = rawGroupType ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
-const groupType = allowedGroupTypes.has(groupTypeCandidate) ? groupTypeCandidate : 'chat';
+const groupTypeCandidate =
+  rawGroupType ?? (process.env.NANOCLAW_IS_MAIN === '1' ? 'main' : 'chat');
+const groupType = allowedGroupTypes.has(groupTypeCandidate)
+  ? groupTypeCandidate
+  : 'chat';
 const isPrivileged = groupType === 'main' || groupType === 'override';
 
 function writeIpcFile(dir: string, data: object): string {
@@ -51,7 +54,12 @@ server.tool(
   '実行中に、ユーザーまたはグループに即座にメッセージを送信します。進捗状況の報告や、複数のメッセージを送信する場合に使用してください。このツールは複数回呼び出すことができます。',
   {
     text: z.string().describe('送信するメッセージ本文'),
-    sender: z.string().optional().describe('あなたの役割/識別名（例: "調査員"）。設定すると、Telegram では専用のボットからのメッセージとして表示されます。'),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'あなたの役割/識別名（例: "調査員"）。設定すると、Telegram では専用のボットからのメッセージとして表示されます。',
+      ),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -65,7 +73,9 @@ server.tool(
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'メッセージを送信しました。' }] };
+    return {
+      content: [{ type: 'text' as const, text: 'メッセージを送信しました。' }],
+    };
   },
 );
 
@@ -93,11 +103,33 @@ server.tool(
 \u2022 interval: 実行間のミリ秒数（例：5分なら "300000"、1時間なら "3600000"）
 \u2022 once: "Z" サフィックスなしのローカル時間（例: "2026-02-01T15:30:00"）。UTC/Z サフィックスは使用しないでください。`,
   {
-    prompt: z.string().describe('タスク実行時にエージェントがすべきこと。isolated モードの場合は、ここに必要なすべてのコンテキストを含めてください。'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=特定の時刻に定期実行、interval=指定したミリ秒ごと、once=特定の時刻に一度だけ実行'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: "300000" などのミリ秒 | once: "2026-02-01T15:30:00" などのローカルタイムスタンプ（Zサフィックス禁止！）'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=チャット履歴とメモリを使用して実行、isolated=新規セッション（プロンプトにコンテキストを含めること）'),
-    target_group_jid: z.string().optional().describe('(特権グループ（main/override）のみ) タスクをスケジュールする対象グループの JID。デフォルトは現在のグループ。'),
+    prompt: z
+      .string()
+      .describe(
+        'タスク実行時にエージェントがすべきこと。isolated モードの場合は、ここに必要なすべてのコンテキストを含めてください。',
+      ),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .describe(
+        'cron=特定の時刻に定期実行、interval=指定したミリ秒ごと、once=特定の時刻に一度だけ実行',
+      ),
+    schedule_value: z
+      .string()
+      .describe(
+        'cron: "*/5 * * * *" | interval: "300000" などのミリ秒 | once: "2026-02-01T15:30:00" などのローカルタイムスタンプ（Zサフィックス禁止！）',
+      ),
+    context_mode: z
+      .enum(['group', 'isolated'])
+      .default('group')
+      .describe(
+        'group=チャット履歴とメモリを使用して実行、isolated=新規セッション（プロンプトにコンテキストを含めること）',
+      ),
+    target_group_jid: z
+      .string()
+      .optional()
+      .describe(
+        '(特権グループ（main/override）のみ) タスクをスケジュールする対象グループの JID。デフォルトは現在のグループ。',
+      ),
   },
   async (args) => {
     // IPC 書き出し前に schedule_value を検証
@@ -106,7 +138,12 @@ server.tool(
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `無効な cron です: "${args.schedule_value}"。"0 9 * * *" (毎日午前9時) や "*/5 * * * *" (5分おき) のような形式を使用してください。` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `無効な cron です: "${args.schedule_value}"。"0 9 * * *" (毎日午前9時) や "*/5 * * * *" (5分おき) のような形式を使用してください。`,
+            },
+          ],
           isError: true,
         };
       }
@@ -114,28 +151,47 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `無効なインターバルです: "${args.schedule_value}"。正のミリ秒を指定してください（例: 5分なら "300000"）。` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `無効なインターバルです: "${args.schedule_value}"。正のミリ秒を指定してください（例: 5分なら "300000"）。`,
+            },
+          ],
           isError: true,
         };
       }
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+      if (
+        /[Zz]$/.test(args.schedule_value) ||
+        /[+-]\d{2}:\d{2}$/.test(args.schedule_value)
+      ) {
         return {
-          content: [{ type: 'text' as const, text: `タイムスタンプはタイムゾーンサフィックスなしのローカル時間である必要があります。"${args.schedule_value}" が指定されました。"2026-02-01T15:30:00" のような形式を使用してください。` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `タイムスタンプはタイムゾーンサフィックスなしのローカル時間である必要があります。"${args.schedule_value}" が指定されました。"2026-02-01T15:30:00" のような形式を使用してください。`,
+            },
+          ],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `無効なタイムスタンプです: "${args.schedule_value}"。"2026-02-01T15:30:00" のようなローカル時間の形式を使用してください。` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `無効なタイムスタンプです: "${args.schedule_value}"。"2026-02-01T15:30:00" のようなローカル時間の形式を使用してください。`,
+            },
+          ],
           isError: true,
         };
       }
     }
 
     // 特権以外のグループは自分自身に対してのみスケジュール可能
-    const targetJid = isPrivileged && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid =
+      isPrivileged && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -154,7 +210,12 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `タスク ${taskId} をスケジュールしました: ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `タスク ${taskId} をスケジュールしました: ${args.schedule_type} - ${args.schedule_value}`,
+        },
+      ],
     };
   },
 );
@@ -168,30 +229,65 @@ server.tool(
 
     try {
       if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'スケジュールされたタスクは見つかりませんでした。' }] };
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'スケジュールされたタスクは見つかりませんでした。',
+            },
+          ],
+        };
       }
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
       const tasks = isPrivileged
         ? allTasks
-        : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
+        : allTasks.filter(
+            (t: { groupFolder: string }) => t.groupFolder === groupFolder,
+          );
 
       if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'スケジュールされたタスクは見つかりませんでした。' }] };
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'スケジュールされたタスクは見つかりませんでした。',
+            },
+          ],
+        };
       }
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
+          (t: {
+            id: string;
+            prompt: string;
+            schedule_type: string;
+            schedule_value: string;
+            status: string;
+            next_run: string;
+          }) =>
             `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `スケジュールされたタスク:\n${formatted}` }] };
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `スケジュールされたタスク:\n${formatted}`,
+          },
+        ],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `タスクの読み込みエラー: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `タスクの読み込みエラー: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   },
@@ -211,7 +307,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の一時停止をリクエストしました。` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `タスク ${args.task_id} の一時停止をリクエストしました。`,
+        },
+      ],
+    };
   },
 );
 
@@ -229,7 +332,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の再開をリクエストしました。` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `タスク ${args.task_id} の再開をリクエストしました。`,
+        },
+      ],
+    };
   },
 );
 
@@ -247,7 +357,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} のキャンセルをリクエストしました。` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `タスク ${args.task_id} のキャンセルをリクエストしました。`,
+        },
+      ],
+    };
   },
 );
 
@@ -257,18 +374,32 @@ server.tool(
   {
     task_id: z.string().describe('更新するタスクの ID'),
     prompt: z.string().optional().describe('タスクの新しいプロンプト'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('新しいスケジュールタイプ'),
-    schedule_value: z.string().optional().describe('新しいスケジュール値（形式については schedule_task を参照）'),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .optional()
+      .describe('新しいスケジュールタイプ'),
+    schedule_value: z
+      .string()
+      .optional()
+      .describe('新しいスケジュール値（形式については schedule_task を参照）'),
   },
   async (args) => {
     // スケジュール値が提供されている場合は検証
-    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+    if (
+      args.schedule_type === 'cron' ||
+      (!args.schedule_type && args.schedule_value)
+    ) {
       if (args.schedule_value) {
         try {
           CronExpressionParser.parse(args.schedule_value);
         } catch {
           return {
-            content: [{ type: 'text' as const, text: `無効な cron です: "${args.schedule_value}"。` }],
+            content: [
+              {
+                type: 'text' as const,
+                text: `無効な cron です: "${args.schedule_value}"。`,
+              },
+            ],
             isError: true,
           };
         }
@@ -278,7 +409,12 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `無効なインターバルです: "${args.schedule_value}"。` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `無効なインターバルです: "${args.schedule_value}"。`,
+            },
+          ],
           isError: true,
         };
       }
@@ -291,12 +427,21 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
-    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.schedule_type !== undefined)
+      data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined)
+      data.schedule_value = args.schedule_value;
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `タスク ${args.task_id} の更新をリクエストしました。` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `タスク ${args.task_id} の更新をリクエストしました。`,
+        },
+      ],
+    };
   },
 );
 
@@ -306,20 +451,39 @@ server.tool(
 
 グループの JID を見つけるには available_groups.json を使用してください。フォルダ名はチャネルプレフィックス付きの "{channel}_{group-name}" 形式にする必要があります（例: "whatsapp_family-chat", "telegram_dev-team", "discord_general"）。グループ名の部分にはハイフン付きの小文字を使用してください。`,
   {
-    jid: z.string().describe('チャットの JID（例: "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456"）'),
+    jid: z
+      .string()
+      .describe(
+        'チャットの JID（例: "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456"）',
+      ),
     name: z.string().describe('グループの表示名'),
-    folder: z.string().describe('チャネルプレフィックス付きのフォルダ名（例: "whatsapp_family-chat", "telegram_dev-team"）'),
+    folder: z
+      .string()
+      .describe(
+        'チャネルプレフィックス付きのフォルダ名（例: "whatsapp_family-chat", "telegram_dev-team"）',
+      ),
     trigger: z.string().describe('トリガーワード（例: "@Andy"）'),
+    group_type: z
+      .enum(['main', 'chat', 'thread'])
+      .optional()
+      .describe(
+        'グループの権限タイプ（デフォルト: "chat"）。"main"=特権、"chat"=通常会話、"thread"=タスク実行',
+      ),
   },
   async (args) => {
     if (!isPrivileged) {
       return {
-        content: [{ type: 'text' as const, text: '新しいグループの登録は特権グループ（main/override）のみが可能です。' }],
+        content: [
+          {
+            type: 'text' as const,
+            text: '新しいグループの登録は特権グループ（main/override）のみが可能です。',
+          },
+        ],
         isError: true,
       };
     }
 
-    const data = {
+    const data: Record<string, unknown> = {
       type: 'register_group',
       jid: args.jid,
       name: args.name,
@@ -327,11 +491,19 @@ server.tool(
       trigger: args.trigger,
       timestamp: new Date().toISOString(),
     };
+    if (args.group_type !== undefined) {
+      data.group_type = args.group_type;
+    }
 
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `グループ "${args.name}" を登録しました。即座にメッセージの受信が開始されます。` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `グループ "${args.name}" を登録しました（type: ${args.group_type ?? 'chat'}）。即座にメッセージの受信が開始されます。`,
+        },
+      ],
     };
   },
 );
