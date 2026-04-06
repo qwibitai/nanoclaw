@@ -272,7 +272,8 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isPrivileged = hasPrivilege(group);
+  const groupType = resolveGroupType(group);
+  const isPrivileged = groupType === 'main' || groupType === 'override';
   const sessionId = sessions[group.folder];
 
   // コンテナが読み取るためのタスクスナップショットを更新（グループでフィルタリング）
@@ -314,7 +315,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        groupType: resolveGroupType(group),
+        groupType,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
