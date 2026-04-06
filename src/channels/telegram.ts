@@ -2,7 +2,7 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 
-import { Api, Bot, InputFile } from 'grammy';
+import { Api, Bot, InlineKeyboard, InputFile } from 'grammy';
 
 import {
   ASSISTANT_NAME,
@@ -14,6 +14,7 @@ import {
 } from '../config.js';
 import {
   setGroupModel,
+  setGroupEffort,
   deleteSession,
   getTaskById,
   getTasksForGroup,
@@ -232,6 +233,182 @@ export class TelegramChannel implements Channel {
       });
     });
 
+    // Command to view/change thinking effort via inline keyboard
+    const VALID_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+
+    const buildEffortTargetKeyboard = () =>
+      new InlineKeyboard()
+        .text('This group', 'effort:target:group')
+        .text('Task', 'effort:target:task');
+
+    const buildEffortLevelKeyboard = (
+      current: string | undefined,
+      prefix: string,
+    ) => {
+      const kb = new InlineKeyboard();
+      for (const level of VALID_EFFORTS) {
+        const label = current === level ? `${level}` : level;
+        kb.text(label, `${prefix}:${level}`);
+      }
+      kb.row().text('Reset', `${prefix}:reset`).text('Back', 'effort:back');
+      return kb;
+    };
+
+    this.bot.command('effort', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const current = group.effort || 'default';
+      ctx.reply(`Effort: \`${current}\`\nSelect target:`, {
+        parse_mode: 'Markdown',
+        reply_markup: buildEffortTargetKeyboard(),
+      });
+    });
+
+    // Handle all effort callback queries
+    this.bot.callbackQuery(/^effort:/, (ctx) => {
+      const data = ctx.callbackQuery.data;
+      if (!ctx.chat) {
+        ctx.answerCallbackQuery();
+        return;
+      }
+      const chatJid = `tg:${ctx.chat.id}`;
+      const groups = this.opts.registeredGroups();
+      const group = groups[chatJid];
+
+      if (!group) {
+        ctx.answerCallbackQuery('This chat is not registered.');
+        return;
+      }
+
+      // effort:back — return to target selection
+      if (data === 'effort:back') {
+        const current = group.effort || 'default';
+        ctx.editMessageText(`Effort: \`${current}\`\nSelect target:`, {
+          parse_mode: 'Markdown',
+          reply_markup: buildEffortTargetKeyboard(),
+        });
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      // effort:target:group — show effort level picker for group
+      if (data === 'effort:target:group') {
+        const current = group.effort || 'default';
+        ctx.editMessageText(`Group effort (current: \`${current}\`)`, {
+          parse_mode: 'Markdown',
+          reply_markup: buildEffortLevelKeyboard(group.effort, 'effort:group'),
+        });
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      // effort:target:task — show task list
+      if (data === 'effort:target:task') {
+        const tasks = getTasksForGroup(group.folder);
+        if (tasks.length === 0) {
+          ctx.editMessageText('No tasks for this group.', {
+            reply_markup: new InlineKeyboard().text(
+              'Back',
+              'effort:back',
+            ),
+          });
+          ctx.answerCallbackQuery();
+          return;
+        }
+        const kb = new InlineKeyboard();
+        for (const t of tasks) {
+          const label = `${t.id}${t.effort ? ` [${t.effort}]` : ''}`;
+          kb.text(label, `effort:task:${t.id}`).row();
+        }
+        kb.text('Back', 'effort:back');
+        ctx.editMessageText('Select a task:', {
+          reply_markup: kb,
+        });
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      // effort:group:<level|reset> — set group effort
+      const groupMatch = data.match(/^effort:group:([\w]+)$/);
+      if (groupMatch) {
+        const value = groupMatch[1];
+        if (value === 'reset') {
+          setGroupEffort(chatJid, null);
+          group.effort = undefined;
+          ctx.editMessageText('Effort reset to default.', {
+            parse_mode: 'Markdown',
+          });
+        } else {
+          setGroupEffort(chatJid, value);
+          group.effort = value;
+          ctx.editMessageText(`Effort set to \`${value}\`.`, {
+            parse_mode: 'Markdown',
+          });
+        }
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      // effort:task:<id> — show effort picker for a task
+      const taskSelectMatch = data.match(/^effort:task:([^:]+)$/);
+      if (taskSelectMatch) {
+        const taskId = taskSelectMatch[1];
+        const task = getTaskById(taskId);
+        if (!task) {
+          ctx.answerCallbackQuery('Task not found.');
+          return;
+        }
+        const current = task.effort || 'default';
+        ctx.editMessageText(
+          `Task \`${taskId}\` effort (current: \`${current}\`)`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: buildEffortLevelKeyboard(
+              task.effort || undefined,
+              `effort:tset:${taskId}`,
+            ),
+          },
+        );
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      // effort:tset:<id>:<level|reset> — set task effort
+      const taskSetMatch = data.match(/^effort:tset:([^:]+):([\w]+)$/);
+      if (taskSetMatch) {
+        const [, taskId, value] = taskSetMatch;
+        const task = getTaskById(taskId);
+        if (!task) {
+          ctx.answerCallbackQuery('Task not found.');
+          return;
+        }
+        if (value === 'reset') {
+          updateTask(taskId, { effort: null });
+          ctx.editMessageText(`Task \`${taskId}\` effort reset to default.`, {
+            parse_mode: 'Markdown',
+          });
+        } else {
+          updateTask(taskId, { effort: value });
+          ctx.editMessageText(
+            `Task \`${taskId}\` effort set to \`${value}\`.`,
+            {
+              parse_mode: 'Markdown',
+            },
+          );
+        }
+        ctx.answerCallbackQuery();
+        return;
+      }
+
+      ctx.answerCallbackQuery();
+    });
+
     // Command to show system status
     this.bot.command('status', (ctx) => {
       const chatJid = `tg:${ctx.chat.id}`;
@@ -256,6 +433,7 @@ export class TelegramChannel implements Channel {
         `Uptime: ${uptime}`,
         `Active containers: ${status.activeContainers}`,
         `Model: \`${model}\``,
+        `Effort: \`${group.effort || 'default'}\``,
         `Session: ${sessionId ? `\`${sessionId.slice(0, 12)}...\`` : 'none'}`,
       ];
 
@@ -350,6 +528,7 @@ export class TelegramChannel implements Channel {
       'chatid',
       'ping',
       'model',
+      'effort',
       'status',
       'compact',
       'clear',
@@ -573,6 +752,7 @@ export class TelegramChannel implements Channel {
       { command: 'chatid', description: 'Show chat ID for registration' },
       { command: 'ping', description: 'Check bot status' },
       { command: 'model', description: 'View or change the AI model' },
+      { command: 'effort', description: 'Set thinking effort level' },
       { command: 'status', description: 'Show system status' },
       { command: 'compact', description: 'Compact conversation context' },
       { command: 'clear', description: 'Clear conversation session' },

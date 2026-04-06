@@ -45,6 +45,7 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   model?: string;
+  effort?: string;
 }
 
 export interface ContainerOutput {

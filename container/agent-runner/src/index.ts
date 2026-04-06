@@ -57,6 +57,7 @@ interface ContainerInput {
   assistantName?: string;
   script?: string;
   model?: string;
+  effort?: string;
 }
 
 interface ContainerOutput {
@@ -541,6 +542,8 @@ async function runQuery(
     prompt: stream,
     options: {
       model: containerInput.model || undefined,
+      thinking: { type: 'adaptive' },
+      effort: (containerInput.effort as 'low' | 'medium' | 'high' | 'max') || undefined,
       cwd: WORKSPACE_GROUP,
       pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || undefined,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,

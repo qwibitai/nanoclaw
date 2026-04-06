@@ -41,6 +41,7 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
   model?: string; // Per-group model override (e.g. "claude-opus-4-20250514")
+  effort?: string; // Per-group thinking effort ('low' | 'medium' | 'high' | 'max')
 }
 
 export interface NewMessage {
@@ -72,6 +73,7 @@ export interface ScheduledTask {
   last_result: string | null;
   silent?: boolean | number;
   model?: string | null;
+  effort?: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
 }

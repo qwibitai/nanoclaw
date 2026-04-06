@@ -196,6 +196,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
         model: task.model || group.model || DEFAULT_MODEL,
+        effort: task.effort || group.effort || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

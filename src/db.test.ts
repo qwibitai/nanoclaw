@@ -12,6 +12,7 @@ import {
   getRegisteredGroup,
   getTaskById,
   setGroupModel,
+  setGroupEffort,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -824,5 +825,122 @@ describe('scheduled task model', () => {
 
     updateTask('task-model-4', { model: null });
     expect(getTaskById('task-model-4')!.model).toBeFalsy();
+  });
+});
+
+// --- Group effort ---
+
+describe('group effort', () => {
+  it('persists effort through setRegisteredGroup', () => {
+    setRegisteredGroup('tg:400', {
+      name: 'EffortGroup',
+      folder: 'telegram_effort',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      effort: 'high',
+    });
+
+    const group = getRegisteredGroup('tg:400');
+    expect(group!.effort).toBe('high');
+  });
+
+  it('setGroupEffort updates effort for existing group', () => {
+    setRegisteredGroup('tg:401', {
+      name: 'EffortUpdate',
+      folder: 'telegram_effort_update',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    setGroupEffort('tg:401', 'max');
+    const group = getRegisteredGroup('tg:401');
+    expect(group!.effort).toBe('max');
+  });
+
+  it('setGroupEffort clears effort when set to null', () => {
+    setRegisteredGroup('tg:402', {
+      name: 'EffortClear',
+      folder: 'telegram_effort_clear',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      effort: 'low',
+    });
+
+    setGroupEffort('tg:402', null);
+    const group = getRegisteredGroup('tg:402');
+    expect(group!.effort).toBeUndefined();
+  });
+
+  it('getAllRegisteredGroups includes effort', () => {
+    setRegisteredGroup('tg:403', {
+      name: 'EffortAll',
+      folder: 'telegram_effort_all',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      effort: 'medium',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['tg:403'].effort).toBe('medium');
+  });
+});
+
+// --- ScheduledTask effort ---
+
+describe('scheduled task effort', () => {
+  it('persists effort through create/get round-trip', () => {
+    createTask({
+      id: 'task-effort-1',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'test effort',
+      schedule_type: 'cron',
+      schedule_value: '0 * * * *',
+      context_mode: 'isolated',
+      effort: 'high',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-effort-1');
+    expect(task!.effort).toBe('high');
+  });
+
+  it('updateTask changes effort', () => {
+    createTask({
+      id: 'task-effort-2',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'updatable effort',
+      schedule_type: 'cron',
+      schedule_value: '0 * * * *',
+      context_mode: 'isolated',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-effort-2', { effort: 'low' });
+    expect(getTaskById('task-effort-2')!.effort).toBe('low');
+  });
+
+  it('updateTask clears effort with null', () => {
+    createTask({
+      id: 'task-effort-3',
+      group_folder: 'telegram_test',
+      chat_jid: 'tg:100',
+      prompt: 'clearable effort',
+      schedule_type: 'cron',
+      schedule_value: '0 * * * *',
+      context_mode: 'isolated',
+      effort: 'max',
+      next_run: '2026-01-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    updateTask('task-effort-3', { effort: null });
+    expect(getTaskById('task-effort-3')!.effort).toBeFalsy();
   });
 });

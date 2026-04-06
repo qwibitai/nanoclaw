@@ -541,6 +541,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         model: group.model || DEFAULT_MODEL,
+        effort: group.effort,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),

@@ -32,6 +32,7 @@ vi.mock('../config.js', () => ({
 // Mock db functions used by /model and /tasks commands
 vi.mock('../db.js', () => ({
   setGroupModel: vi.fn(),
+  setGroupEffort: vi.fn(),
   deleteSession: vi.fn(),
   getTaskById: vi.fn((id: string) => {
     if (id === 'task-123') {
@@ -110,9 +111,22 @@ vi.mock('grammy', () => ({
       this.path = path;
     }
   },
+  InlineKeyboard: class MockInlineKeyboard {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    buttons: any[][] = [[]];
+    text(label: string, data: string) {
+      this.buttons[this.buttons.length - 1].push({ text: label, callback_data: data });
+      return this;
+    }
+    row() {
+      this.buttons.push([]);
+      return this;
+    }
+  },
   Bot: class MockBot {
     token: string;
     commandHandlers = new Map<string, Handler>();
+    callbackQueryHandlers: Array<{ pattern: RegExp | string; handler: Handler }> = [];
     filterHandlers = new Map<string, Handler[]>();
     errorHandler: Handler | null = null;
 
@@ -132,6 +146,10 @@ vi.mock('grammy', () => ({
 
     command(name: string, handler: Handler) {
       this.commandHandlers.set(name, handler);
+    }
+
+    callbackQuery(pattern: RegExp | string, handler: Handler) {
+      this.callbackQueryHandlers.push({ pattern, handler });
     }
 
     on(filter: string, handler: Handler) {
@@ -154,7 +172,7 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import { setGroupModel, deleteSession, updateTask } from '../db.js';
+import { setGroupModel, setGroupEffort, deleteSession, updateTask } from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -326,6 +344,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().commandHandlers.has('chatid')).toBe(true);
       expect(currentBot().commandHandlers.has('ping')).toBe(true);
       expect(currentBot().commandHandlers.has('model')).toBe(true);
+      expect(currentBot().commandHandlers.has('effort')).toBe(true);
       expect(currentBot().commandHandlers.has('status')).toBe(true);
       expect(currentBot().commandHandlers.has('compact')).toBe(true);
       expect(currentBot().commandHandlers.has('clear')).toBe(true);
@@ -334,6 +353,7 @@ describe('TelegramChannel', () => {
         { command: 'chatid', description: 'Show chat ID for registration' },
         { command: 'ping', description: 'Check bot status' },
         { command: 'model', description: 'View or change the AI model' },
+        { command: 'effort', description: 'Set thinking effort level' },
         { command: 'status', description: 'Show system status' },
         { command: 'compact', description: 'Compact conversation context' },
         { command: 'clear', description: 'Clear conversation session' },
@@ -1865,6 +1885,214 @@ describe('TelegramChannel', () => {
       expect(ctx.reply).toHaveBeenCalledWith(
         expect.stringContaining('Usage'),
         expect.any(Object),
+      );
+    });
+  });
+
+  // --- /effort command ---
+
+  describe('/effort command', () => {
+    function findCallbackHandler(pattern: RegExp) {
+      const bot = currentBot();
+      const entry = bot.callbackQueryHandlers.find(
+        (h: { pattern: RegExp | string }) =>
+          h.pattern instanceof RegExp && h.pattern.source === pattern.source,
+      );
+      return entry?.handler;
+    }
+
+    it('registers the effort command and callback handler', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      expect(currentBot().commandHandlers.has('effort')).toBe(true);
+      expect(currentBot().callbackQueryHandlers.length).toBeGreaterThan(0);
+    });
+
+    it('/effort shows current effort and target selection keyboard', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = currentBot().commandHandlers.get('effort')!;
+      const ctx = {
+        chat: { id: 100200300 },
+        message: { text: '/effort' },
+        reply: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('default'),
+        expect.objectContaining({
+          parse_mode: 'Markdown',
+          reply_markup: expect.anything(),
+        }),
+      );
+    });
+
+    it('effort:target:group shows effort level picker', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:target:group' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Group effort'),
+        expect.objectContaining({ reply_markup: expect.anything() }),
+      );
+      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+    });
+
+    it('effort:group:high sets group effort', async () => {
+      const groups: Record<string, { name: string; folder: string; trigger: string; added_at: string; effort?: string }> = {
+        'tg:100200300': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:group:high' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(setGroupEffort).toHaveBeenCalledWith('tg:100200300', 'high');
+      expect(groups['tg:100200300'].effort).toBe('high');
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('high'),
+        expect.any(Object),
+      );
+    });
+
+    it('effort:group:reset clears group effort', async () => {
+      const groups = {
+        'tg:100200300': {
+          name: 'Test Group',
+          folder: 'test-group',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+          effort: 'high',
+        },
+      };
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => groups),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:group:reset' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(setGroupEffort).toHaveBeenCalledWith('tg:100200300', null);
+      expect(groups['tg:100200300'].effort).toBeUndefined();
+    });
+
+    it('effort:target:task shows task list', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:target:task' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        'Select a task:',
+        expect.objectContaining({ reply_markup: expect.anything() }),
+      );
+    });
+
+    it('effort:task:<id> shows effort picker for task', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:task:task-123' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('task-123'),
+        expect.objectContaining({ reply_markup: expect.anything() }),
+      );
+    });
+
+    it('effort:tset:<id>:low sets task effort', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:tset:task-123:low' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(updateTask).toHaveBeenCalledWith('task-123', { effort: 'low' });
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('low'),
+        expect.any(Object),
+      );
+    });
+
+    it('effort:back returns to target selection', async () => {
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+
+      const handler = findCallbackHandler(/^effort:/)!;
+      const ctx = {
+        callbackQuery: { data: 'effort:back' },
+        chat: { id: 100200300 },
+        editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+      };
+
+      await handler(ctx);
+
+      expect(ctx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Select target'),
+        expect.objectContaining({ reply_markup: expect.anything() }),
       );
     });
   });
