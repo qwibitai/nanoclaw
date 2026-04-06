@@ -50,9 +50,12 @@ export type ActorRole = 'owner' | 'admin' | 'user';
 /** グループの権限タイプ */
 export type GroupType = 'override' | 'main' | 'chat' | 'thread';
 
+/** thread 自動登録で許可する非特権 group タイプ */
+export type ThreadDefaultGroupType = 'chat' | 'thread';
+
 /** thread 自動登録時に子 group へ継承するデフォルト設定 */
 export interface ThreadDefaults {
-  type?: GroupType; // デフォルト 'thread'
+  type?: ThreadDefaultGroupType; // デフォルト 'thread'
   requiresTrigger?: boolean;
   containerConfig?: ContainerConfig;
 }
