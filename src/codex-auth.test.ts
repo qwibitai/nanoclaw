@@ -3,12 +3,12 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { execFileSyncMock } = vi.hoisted(() => ({
-  execFileSyncMock: vi.fn(),
+const { spawnSyncMock } = vi.hoisted(() => ({
+  spawnSyncMock: vi.fn(),
 }));
 
 vi.mock('child_process', () => ({
-  execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
+  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
 }));
 
 describe('codex auth inspection', () => {
@@ -34,7 +34,7 @@ describe('codex auth inspection', () => {
       process.env.HOME = originalHome;
     }
 
-    execFileSyncMock.mockReset();
+    spawnSyncMock.mockReset();
     vi.resetModules();
 
     while (tempDirs.length > 0) {
@@ -52,7 +52,7 @@ describe('codex auth inspection', () => {
     const authFile = path.join(homeDir, '.codex', 'auth.json');
     fs.mkdirSync(path.dirname(authFile), { recursive: true });
     fs.writeFileSync(authFile, 'chatgpt-cache\n');
-    execFileSyncMock.mockImplementation(
+    spawnSyncMock.mockImplementation(
       (
         _command: string,
         _args: string[],
@@ -62,7 +62,11 @@ describe('codex auth inspection', () => {
         const copiedAuthFile = path.join(codexHome!, 'auth.json');
         expect(fs.existsSync(copiedAuthFile)).toBe(true);
         expect(fs.readFileSync(copiedAuthFile, 'utf8')).toBe('chatgpt-cache\n');
-        return 'Logged in using ChatGPT\n';
+        return {
+          status: 0,
+          stdout: '',
+          stderr: 'Logged in using ChatGPT\n',
+        };
       },
     );
 
@@ -85,7 +89,11 @@ describe('codex auth inspection', () => {
     // Arrange
     const { repoDir, homeDir } = createTempRepo();
     process.env.HOME = homeDir;
-    execFileSyncMock.mockReturnValue('Not logged in\n');
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: '',
+      stderr: 'Not logged in\n',
+    });
 
     // Act
     const { inspectCodexAuth } = await import('./codex-auth.js');
@@ -109,7 +117,7 @@ describe('codex auth inspection', () => {
     const authFile = path.join(homeDir, '.codex', 'auth.json');
     fs.mkdirSync(path.dirname(authFile), { recursive: true });
     fs.writeFileSync(authFile, 'api-key-cache\n');
-    execFileSyncMock.mockImplementation(
+    spawnSyncMock.mockImplementation(
       (
         _command: string,
         _args: string[],
@@ -119,7 +127,11 @@ describe('codex auth inspection', () => {
         expect(
           fs.readFileSync(path.join(codexHome!, 'auth.json'), 'utf8'),
         ).toBe('api-key-cache\n');
-        return 'Logged in using API key\n';
+        return {
+          status: 0,
+          stdout: '',
+          stderr: 'Logged in using an API key - OpenAI\n',
+        };
       },
     );
 
@@ -134,7 +146,7 @@ describe('codex auth inspection', () => {
       cliAvailable: true,
       loginMethod: 'api_key',
       loginSource: 'file',
-      statusText: 'Logged in using API key',
+      statusText: 'Logged in using an API key - OpenAI',
     });
   });
 
@@ -142,7 +154,11 @@ describe('codex auth inspection', () => {
     // Arrange
     const { repoDir, homeDir } = createTempRepo();
     process.env.HOME = homeDir;
-    execFileSyncMock.mockReturnValue('Logged in using ChatGPT\n');
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      stdout: '',
+      stderr: 'Logged in using ChatGPT\n',
+    });
 
     // Act
     const { inspectCodexAuth } = await import('./codex-auth.js');

@@ -7,25 +7,25 @@ import Database from 'better-sqlite3';
 
 const {
   emitStatus,
-  execFileSyncMock,
   execSyncMock,
   getPlatform,
   getServiceManager,
   hasSystemd,
   isRoot,
+  spawnSyncMock,
 } = vi.hoisted(() => ({
   emitStatus: vi.fn(),
-  execFileSyncMock: vi.fn(),
   execSyncMock: vi.fn(),
   getPlatform: vi.fn(() => 'linux'),
   getServiceManager: vi.fn(() => 'none'),
   hasSystemd: vi.fn(() => false),
   isRoot: vi.fn(() => false),
+  spawnSyncMock: vi.fn(),
 }));
 
 vi.mock('child_process', () => ({
-  execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
   execSync: (...args: unknown[]) => execSyncMock(...args),
+  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
 }));
 
 vi.mock('../src/logger.js', () => ({
@@ -147,8 +147,8 @@ describe('verify provider readiness', () => {
       process.env.HOME = originalHome;
     }
     emitStatus.mockReset();
-    execFileSyncMock.mockReset();
     execSyncMock.mockReset();
+    spawnSyncMock.mockReset();
     getPlatform.mockReset();
     getPlatform.mockReturnValue('linux');
     getServiceManager.mockReset();
@@ -190,7 +190,11 @@ describe('verify provider readiness', () => {
       }
       throw new Error(`Unexpected command: ${command}`);
     });
-    execFileSyncMock.mockReturnValue('Logged in using ChatGPT\n');
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      stdout: '',
+      stderr: 'Logged in using ChatGPT\n',
+    });
 
     // Act
     const status = await runVerify(repoDir);
@@ -248,7 +252,11 @@ describe('verify provider readiness', () => {
       }
       throw new Error(`Unexpected command: ${command}`);
     });
-    execFileSyncMock.mockReturnValue('Logged in using ChatGPT\n');
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      stdout: '',
+      stderr: 'Logged in using ChatGPT\n',
+    });
     const originalProviderEnv = Object.fromEntries(
       providerEnvKeys.map((key) => [key, process.env[key]]),
     ) as Record<(typeof providerEnvKeys)[number], string | undefined>;
@@ -324,7 +332,11 @@ describe('verify provider readiness', () => {
       }
       throw new Error(`Unexpected command: ${command}`);
     });
-    execFileSyncMock.mockReturnValue('Not logged in\n');
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: '',
+      stderr: 'Not logged in\n',
+    });
     vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
     // Act

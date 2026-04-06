@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -6,7 +6,7 @@ import path from 'path';
 import { readEnvFileAt } from './env.js';
 
 const CHATGPT_LOGIN_STATUS = 'Logged in using ChatGPT';
-const API_KEY_LOGIN_STATUS = 'Logged in using API key';
+const API_KEY_LOGIN_STATUS = 'Logged in using an API key';
 const NOT_LOGGED_IN_STATUS = 'Not logged in';
 const TEMP_CONFIG = 'cli_auth_credentials_store = "file"\n';
 
@@ -132,11 +132,30 @@ function buildInspectionError(
 }
 
 function runCodexLoginStatus(env: NodeJS.ProcessEnv): string {
-  return execFileSync('codex', ['login', 'status'], {
+  const result = spawnSync('codex', ['login', 'status'], {
     env,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  });
+  if (result.error) {
+    throw result.error;
+  }
+
+  const statusText = [result.stdout, result.stderr]
+    .filter((chunk): chunk is string => Boolean(chunk))
+    .join('\n')
+    .trim();
+
+  if (result.status === 0) {
+    return statusText;
+  }
+
+  if (result.status === 1 && statusText.length > 0) {
+    return statusText;
+  }
+
+  throw new Error(
+    statusText || `codex login status exited with code ${result.status ?? -1}`,
+  );
 }
 
 function parseCodexLoginMethod(statusText: string): CodexLoginMethod {
