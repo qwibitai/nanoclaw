@@ -142,6 +142,15 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 The credential system depends on the container runtime chosen in step 3.
 
+**CCR detection:** Check if `@musistudio/claude-code-router` is installed globally:
+```bash
+npm list -g @musistudio/claude-code-router --depth=0 2>/dev/null || echo "not_found"
+```
+If the package is found, ask: "Which provider do you want to use for Claude API?"
+1. **Anthropic** — description: "Use direct Anthropic API."
+2. **Claude Code Router** — description: "Use CCR as a local proxy. Skip to section 4c."
+If CCR is chosen, jump to section 4c. If Anthropic is chosen, continue with section 4a.
+
 ### 4a. Docker → OneCLI
 
 Install OneCLI and its CLI tool:
