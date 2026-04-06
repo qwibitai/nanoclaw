@@ -192,6 +192,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Persist uv cache (Python toolchain + package downloads) across container runs.
+  // Without this, every container re-downloads Python and re-installs all packages.
+  const uvCacheDir = path.join(DATA_DIR, 'sessions', group.folder, 'uv-cache');
+  fs.mkdirSync(uvCacheDir, { recursive: true });
+  mounts.push({
+    hostPath: uvCacheDir,
+    containerPath: '/home/node/.local/share/uv',
+    readonly: false,
+  });
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
