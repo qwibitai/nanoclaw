@@ -87,6 +87,9 @@ function createTestOpts(
         added_at: '2024-01-01T00:00:00.000Z',
       },
     })),
+    groupsDir: '/tmp/agentlite-test/groups',
+    assistantName: 'Andy',
+    triggerPattern: /^@Andy\b/i,
     ...overrides,
   };
 }

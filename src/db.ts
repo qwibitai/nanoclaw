@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -13,6 +12,8 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+let assistantName: string;
+let dataDir: string;
 
 export function createSchema(database: Database.Database): void {
   database.exec(`
@@ -101,7 +102,7 @@ export function createSchema(database: Database.Database): void {
     // Backfill: mark existing bot messages that used the content prefix pattern
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
-      .run(`${ASSISTANT_NAME}:%`);
+      .run(`${assistantName}:%`);
   } catch {
     /* column already exists */
   }
@@ -141,8 +142,15 @@ export function createSchema(database: Database.Database): void {
   }
 }
 
-export function initDatabase(): void {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
+export function initDatabase(opts: {
+  storeDir: string;
+  dataDir: string;
+  assistantName: string;
+}): void {
+  assistantName = opts.assistantName;
+  dataDir = opts.dataDir;
+
+  const dbPath = path.join(opts.storeDir, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
@@ -154,6 +162,7 @@ export function initDatabase(): void {
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
 export function _initTestDatabase(): void {
+  assistantName = assistantName || 'TestBot';
   db = new Database(':memory:');
   createSchema(db);
 }
@@ -638,7 +647,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 function migrateJsonState(): void {
   const migrateFile = (filename: string) => {
-    const filePath = path.join(DATA_DIR, filename);
+    const filePath = path.join(dataDir, filename);
     if (!fs.existsSync(filePath)) return null;
     try {
       const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));

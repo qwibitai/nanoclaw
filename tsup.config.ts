@@ -2,8 +2,8 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: {
-    sdk: 'src/sdk.ts',
-    'channels/telegram': 'src/channels/telegram.ts',
+    'api/sdk': 'src/api/sdk.ts',
+    'api/channels/telegram': 'src/api/channels/telegram.ts',
   },
   format: ['cjs'],
   outDir: 'dist',

@@ -1,10 +1,7 @@
 import fs from 'fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock config before importing the module under test
-vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/agentlite-rc-test',
-}));
+const TEST_DATA_DIR = '/tmp/agentlite-rc-test';
 
 // Mock child_process
 const spawnMock = vi.fn();
@@ -33,7 +30,7 @@ function createMockProcess(pid = 12345) {
 }
 
 describe('remote-control', () => {
-  const STATE_FILE = _getStateFilePath();
+  const STATE_FILE = _getStateFilePath(TEST_DATA_DIR);
   let readFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let writeFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let unlinkSyncSpy: ReturnType<typeof vi.spyOn>;
@@ -89,7 +86,12 @@ describe('remote-control', () => {
         'Session URL: https://claude.ai/code?bridge=env_abc123\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      const result = await startRemoteControl('user1', 'tg:123', '/project');
+      const result = await startRemoteControl(
+        'user1',
+        'tg:123',
+        '/project',
+        TEST_DATA_DIR,
+      );
 
       expect(result).toEqual({
         ok: true,
@@ -109,7 +111,7 @@ describe('remote-control', () => {
       stdoutFileContent = 'https://claude.ai/code?bridge=env_test\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
       const spawnCall = spawnMock.mock.calls[0];
       const options = spawnCall[2];
@@ -125,7 +127,7 @@ describe('remote-control', () => {
       stdoutFileContent = 'https://claude.ai/code?bridge=env_test\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
       // Two openSync calls (stdout + stderr), two closeSync calls
       expect(openSyncSpy).toHaveBeenCalledTimes(2);
@@ -138,7 +140,7 @@ describe('remote-control', () => {
       stdoutFileContent = 'https://claude.ai/code?bridge=env_save\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
       expect(writeFileSyncSpy).toHaveBeenCalledWith(
         STATE_FILE,
@@ -152,10 +154,15 @@ describe('remote-control', () => {
       stdoutFileContent = 'https://claude.ai/code?bridge=env_existing\n';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
       // Second call should return existing URL without spawning
-      const result = await startRemoteControl('user2', 'tg:456', '/project');
+      const result = await startRemoteControl(
+        'user2',
+        'tg:456',
+        '/project',
+        TEST_DATA_DIR,
+      );
       expect(result).toEqual({
         ok: true,
         url: 'https://claude.ai/code?bridge=env_existing',
@@ -173,7 +180,7 @@ describe('remote-control', () => {
         .spyOn(process, 'kill')
         .mockImplementation((() => true) as any);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_first\n';
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
       // Old process (11111) is dead, new process (22222) is alive
       killSpy.mockImplementation(((pid: number, sig: any) => {
@@ -184,7 +191,12 @@ describe('remote-control', () => {
       }) as any);
 
       stdoutFileContent = 'https://claude.ai/code?bridge=env_second\n';
-      const result = await startRemoteControl('user1', 'tg:123', '/project');
+      const result = await startRemoteControl(
+        'user1',
+        'tg:123',
+        '/project',
+        TEST_DATA_DIR,
+      );
 
       expect(result).toEqual({
         ok: true,
@@ -203,7 +215,12 @@ describe('remote-control', () => {
         throw new Error('ESRCH');
       }) as any);
 
-      const result = await startRemoteControl('user1', 'tg:123', '/project');
+      const result = await startRemoteControl(
+        'user1',
+        'tg:123',
+        '/project',
+        TEST_DATA_DIR,
+      );
       expect(result).toEqual({
         ok: false,
         error: 'Process exited before producing URL',
@@ -217,7 +234,12 @@ describe('remote-control', () => {
       stdoutFileContent = 'no url here';
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      const promise = startRemoteControl('user1', 'tg:123', '/project');
+      const promise = startRemoteControl(
+        'user1',
+        'tg:123',
+        '/project',
+        TEST_DATA_DIR,
+      );
 
       // Advance past URL_TIMEOUT_MS (30s), with enough steps for polls
       for (let i = 0; i < 160; i++) {
@@ -238,7 +260,12 @@ describe('remote-control', () => {
         throw new Error('ENOENT');
       });
 
-      const result = await startRemoteControl('user1', 'tg:123', '/project');
+      const result = await startRemoteControl(
+        'user1',
+        'tg:123',
+        '/project',
+        TEST_DATA_DIR,
+      );
       expect(result).toEqual({
         ok: false,
         error: 'Failed to start: ENOENT',
@@ -257,9 +284,9 @@ describe('remote-control', () => {
         .spyOn(process, 'kill')
         .mockImplementation((() => true) as any);
 
-      await startRemoteControl('user1', 'tg:123', '/project');
+      await startRemoteControl('user1', 'tg:123', '/project', TEST_DATA_DIR);
 
-      const result = stopRemoteControl();
+      const result = stopRemoteControl(TEST_DATA_DIR);
       expect(result).toEqual({ ok: true });
       expect(killSpy).toHaveBeenCalledWith(55555, 'SIGTERM');
       expect(unlinkSyncSpy).toHaveBeenCalledWith(STATE_FILE);
@@ -267,7 +294,7 @@ describe('remote-control', () => {
     });
 
     it('returns error when no session is active', () => {
-      const result = stopRemoteControl();
+      const result = stopRemoteControl(TEST_DATA_DIR);
       expect(result).toEqual({
         ok: false,
         error: 'No active Remote Control session',
@@ -292,7 +319,7 @@ describe('remote-control', () => {
       }) as any);
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
 
       const active = getActiveSession();
       expect(active).not.toBeNull();
@@ -316,7 +343,7 @@ describe('remote-control', () => {
         throw new Error('ESRCH');
       }) as any);
 
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
 
       expect(getActiveSession()).toBeNull();
       expect(unlinkSyncSpy).toHaveBeenCalled();
@@ -324,7 +351,7 @@ describe('remote-control', () => {
 
     it('does nothing if no state file exists', () => {
       // readFileSyncSpy default throws ENOENT for .json
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
       expect(getActiveSession()).toBeNull();
     });
 
@@ -334,7 +361,7 @@ describe('remote-control', () => {
         return '';
       }) as any);
 
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
 
       expect(getActiveSession()).toBeNull();
       expect(unlinkSyncSpy).toHaveBeenCalled();
@@ -357,10 +384,10 @@ describe('remote-control', () => {
         .spyOn(process, 'kill')
         .mockImplementation((() => true) as any);
 
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
       expect(getActiveSession()).not.toBeNull();
 
-      const result = stopRemoteControl();
+      const result = stopRemoteControl(TEST_DATA_DIR);
       expect(result).toEqual({ ok: true });
       expect(killSpy).toHaveBeenCalledWith(77777, 'SIGTERM');
       expect(unlinkSyncSpy).toHaveBeenCalled();
@@ -381,17 +408,20 @@ describe('remote-control', () => {
       }) as any);
       vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
 
-      restoreRemoteControl();
+      restoreRemoteControl(TEST_DATA_DIR);
 
-      return startRemoteControl('user2', 'tg:456', '/project').then(
-        (result) => {
-          expect(result).toEqual({
-            ok: true,
-            url: 'https://claude.ai/code?bridge=env_restored',
-          });
-          expect(spawnMock).not.toHaveBeenCalled();
-        },
-      );
+      return startRemoteControl(
+        'user2',
+        'tg:456',
+        '/project',
+        TEST_DATA_DIR,
+      ).then((result) => {
+        expect(result).toEqual({
+          ok: true,
+          url: 'https://claude.ai/code?bridge=env_restored',
+        });
+        expect(spawnMock).not.toHaveBeenCalled();
+      });
     });
   });
 });

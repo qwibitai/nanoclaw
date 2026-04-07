@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
 
 interface RemoteControlSession {
@@ -18,19 +17,21 @@ let activeSession: RemoteControlSession | null = null;
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
 const URL_POLL_MS = 200;
-// Computed lazily — DATA_DIR is set by applyConfig() after import time.
-const stateFile = () => path.join(DATA_DIR, 'remote-control.json');
-const stdoutFile = () => path.join(DATA_DIR, 'remote-control.stdout');
-const stderrFile = () => path.join(DATA_DIR, 'remote-control.stderr');
+const stateFile = (dataDir: string) =>
+  path.join(dataDir, 'remote-control.json');
+const stdoutFile = (dataDir: string) =>
+  path.join(dataDir, 'remote-control.stdout');
+const stderrFile = (dataDir: string) =>
+  path.join(dataDir, 'remote-control.stderr');
 
-function saveState(session: RemoteControlSession): void {
-  fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
-  fs.writeFileSync(stateFile(), JSON.stringify(session));
+function saveState(dataDir: string, session: RemoteControlSession): void {
+  fs.mkdirSync(path.dirname(stateFile(dataDir)), { recursive: true });
+  fs.writeFileSync(stateFile(dataDir), JSON.stringify(session));
 }
 
-function clearState(): void {
+function clearState(dataDir: string): void {
   try {
-    fs.unlinkSync(stateFile());
+    fs.unlinkSync(stateFile(dataDir));
   } catch {
     // ignore
   }
@@ -49,10 +50,10 @@ function isProcessAlive(pid: number): boolean {
  * Restore session from disk on startup.
  * If the process is still alive, adopt it. Otherwise, clean up.
  */
-export function restoreRemoteControl(): void {
+export function restoreRemoteControl(dataDir: string): void {
   let data: string;
   try {
-    data = fs.readFileSync(stateFile(), 'utf-8');
+    data = fs.readFileSync(stateFile(dataDir), 'utf-8');
   } catch {
     return;
   }
@@ -66,10 +67,10 @@ export function restoreRemoteControl(): void {
         'Restored Remote Control session from previous run',
       );
     } else {
-      clearState();
+      clearState(dataDir);
     }
   } catch {
-    clearState();
+    clearState(dataDir);
   }
 }
 
@@ -83,14 +84,15 @@ export function _resetForTesting(): void {
 }
 
 /** @internal — exported for testing only */
-export function _getStateFilePath(): string {
-  return stateFile();
+export function _getStateFilePath(dataDir: string): string {
+  return stateFile(dataDir);
 }
 
 export async function startRemoteControl(
   sender: string,
   chatJid: string,
   cwd: string,
+  dataDir: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   if (activeSession) {
     // Verify the process is still alive
@@ -99,14 +101,14 @@ export async function startRemoteControl(
     }
     // Process died — clean up and start a new one
     activeSession = null;
-    clearState();
+    clearState(dataDir);
   }
 
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
   // This prevents SIGPIPE when AgentLite restarts.
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const stdoutFd = fs.openSync(stdoutFile(), 'w');
-  const stderrFd = fs.openSync(stderrFile(), 'w');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const stdoutFd = fs.openSync(stdoutFile(dataDir), 'w');
+  const stderrFd = fs.openSync(stderrFile(dataDir), 'w');
 
   let proc;
   try {
@@ -153,7 +155,7 @@ export async function startRemoteControl(
       // Check for URL in stdout file
       let content = '';
       try {
-        content = fs.readFileSync(stdoutFile(), 'utf-8');
+        content = fs.readFileSync(stdoutFile(dataDir), 'utf-8');
       } catch {
         // File might not have content yet
       }
@@ -168,7 +170,7 @@ export async function startRemoteControl(
           startedAt: new Date().toISOString(),
         };
         activeSession = session;
-        saveState(session);
+        saveState(dataDir, session);
 
         logger.info(
           { url: match[0], pid, sender, chatJid },
@@ -203,7 +205,7 @@ export async function startRemoteControl(
   });
 }
 
-export function stopRemoteControl():
+export function stopRemoteControl(dataDir: string):
   | {
       ok: true;
     }
@@ -219,7 +221,7 @@ export function stopRemoteControl():
     // already dead
   }
   activeSession = null;
-  clearState();
+  clearState(dataDir);
   logger.info({ pid }, 'Remote Control session stopped');
   return { ok: true };
 }

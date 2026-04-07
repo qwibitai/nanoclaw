@@ -2,12 +2,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 import { GroupQueue } from './group-queue.js';
 
-// Mock config to control concurrency limit
-vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/agentlite-test-data',
-  MAX_CONCURRENT_CONTAINERS: 2,
-}));
-
 // Mock fs operations used by sendMessage/closeStdin
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -27,7 +21,10 @@ describe('GroupQueue', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    queue = new GroupQueue();
+    queue = new GroupQueue({
+      dataDir: '/tmp/agentlite-test-data',
+      maxConcurrent: 2,
+    });
   });
 
   afterEach(() => {

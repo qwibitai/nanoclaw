@@ -5,22 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import {
-  CONTAINER_MAX_OUTPUT_SIZE,
-  CONTAINER_TIMEOUT,
-  DATA_DIR,
-  GROUPS_DIR,
-  IDLE_TIMEOUT,
-  ONECLI_URL,
-  TIMEZONE,
-} from './config.js';
-import {
-  BOX_IMAGE,
-  BOX_ROOTFS_PATH,
-  BOX_MEMORY_MIB,
-  BOX_CPUS,
-  PACKAGE_ROOT,
-} from './config.js';
+import type { RuntimeConfig } from './runtime-config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { spawnBox } from './box-runtime.js';
@@ -30,11 +15,13 @@ import { copyDirRecursive } from './utils.js';
 
 // Lazy OneCLI — dynamically imported so it's not a hard dependency
 let _onecli: any = null;
-async function getOneCLI(): Promise<any> {
-  if (!_onecli) {
+let _onecliUrl: string | null = null;
+async function getOneCLI(onecliUrl: string): Promise<any> {
+  if (!_onecli || _onecliUrl !== onecliUrl) {
     try {
       const { OneCLI } = await import('@onecli-sh/sdk');
-      _onecli = new OneCLI({ url: ONECLI_URL });
+      _onecli = new OneCLI({ url: onecliUrl });
+      _onecliUrl = onecliUrl;
     } catch {
       return null;
     }
@@ -89,13 +76,12 @@ export interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
-  groupsDir?: string,
-  dataDir?: string,
+  groupsDir: string,
+  dataDir: string,
+  packageRoot: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const groupDir = resolveGroupFolderPath(group.folder, groupsDir);
-  const effectiveGroupsDir = groupsDir ?? GROUPS_DIR;
-  const effectiveDataDir = dataDir ?? DATA_DIR;
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -136,7 +122,7 @@ function buildVolumeMounts(
 
     // Global memory directory (read-only for non-main)
     // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(effectiveGroupsDir, 'global');
+    const globalDir = path.join(groupsDir, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
         hostPath: globalDir,
@@ -149,7 +135,7 @@ function buildVolumeMounts(
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
-    effectiveDataDir,
+    dataDir,
     'sessions',
     group.folder,
     '.claude',
@@ -180,7 +166,7 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(PACKAGE_ROOT, 'container', 'skills');
+  const skillsSrc = path.join(packageRoot, 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
@@ -212,13 +198,13 @@ function buildVolumeMounts(
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
-    PACKAGE_ROOT,
+    packageRoot,
     'container',
     'agent-runner',
     'src',
   );
   const groupAgentRunnerDir = path.join(
-    effectiveDataDir,
+    dataDir,
     'sessions',
     group.folder,
     'agent-runner-src',
@@ -252,9 +238,10 @@ function buildVolumeMounts(
  */
 async function extractOnecliEnv(
   containerName: string,
+  onecliUrl: string,
   agentIdentifier?: string,
 ): Promise<Record<string, string>> {
-  const onecli = await getOneCLI();
+  const onecli = await getOneCLI(onecliUrl);
   if (!onecli) {
     logger.warn(
       { containerName },
@@ -299,6 +286,7 @@ interface BoxConfig {
  */
 async function buildBoxConfig(
   containerName: string,
+  rc: RuntimeConfig,
   agentIdentifier?: string,
 ): Promise<BoxConfig> {
   // Use SDK-provided credential resolver if set, else OneCLI gateway
@@ -306,12 +294,16 @@ async function buildBoxConfig(
   if (_credentialResolver) {
     credentialEnv = await _credentialResolver();
   } else {
-    credentialEnv = await extractOnecliEnv(containerName, agentIdentifier);
+    credentialEnv = await extractOnecliEnv(
+      containerName,
+      rc.onecliUrl,
+      agentIdentifier,
+    );
   }
 
   const env: Record<string, string> = {
     ...credentialEnv,
-    TZ: TIMEZONE,
+    TZ: rc.timezone,
     AGENT_BROWSER_EXECUTABLE_PATH: '/usr/bin/chromium',
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
   };
@@ -336,19 +328,24 @@ async function buildBoxConfig(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
+  rc: RuntimeConfig,
   onProcess: (boxName: string, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
-  const groupDir = resolveGroupFolderPath(group.folder, input.groupsDir);
+  const groupsDir = input.groupsDir ?? path.join(rc.workdir, 'groups');
+  const dataDir = input.dataDir ?? path.join(rc.workdir, 'data');
+
+  const groupDir = resolveGroupFolderPath(group.folder, groupsDir);
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(
     group,
     input.isMain,
-    input.groupsDir,
-    input.dataDir,
+    groupsDir,
+    dataDir,
+    rc.packageRoot,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const instancePrefix = input.instanceName ? `${input.instanceName}-` : '';
@@ -360,14 +357,15 @@ export async function runContainerAgent(
 
   const { env: boxEnv, user: userStr } = await buildBoxConfig(
     containerName,
+    rc,
     agentIdentifier,
   );
 
   const boxOptions = {
-    image: BOX_IMAGE,
-    rootfsPath: BOX_ROOTFS_PATH || undefined,
-    memoryMib: BOX_MEMORY_MIB,
-    cpus: BOX_CPUS,
+    image: rc.boxImage,
+    rootfsPath: rc.boxRootfsPath || undefined,
+    memoryMib: rc.boxMemoryMib,
+    cpus: rc.boxCpus,
     user: userStr,
   };
 
@@ -405,6 +403,7 @@ export async function runContainerAgent(
     boxEnv,
     userStr,
     JSON.stringify(input),
+    rc,
   );
   if ('status' in spawnResult) return spawnResult; // error
   const { box, execution } = spawnResult;
@@ -423,8 +422,8 @@ export async function runContainerAgent(
 
   // Timeout handling
   let timedOut = false;
-  const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-  const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+  const configTimeout = group.containerConfig?.timeout || rc.containerTimeout;
+  const timeoutMs = Math.max(configTimeout, rc.idleTimeout + 30_000);
 
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const killOnTimeout = async () => {
@@ -458,7 +457,7 @@ export async function runContainerAgent(
 
         // Accumulate for logging
         if (!stdoutTruncated) {
-          const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+          const remaining = rc.containerMaxOutputSize - stdout.length;
           if (line.length > remaining) {
             stdout += line.slice(0, remaining);
             stdoutTruncated = true;
@@ -523,7 +522,7 @@ export async function runContainerAgent(
         // Don't reset timeout on stderr — SDK writes debug logs continuously.
         // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
         if (stderrTruncated) continue;
-        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
+        const remaining = rc.containerMaxOutputSize - stderr.length;
         if (line.length > remaining) {
           stderr += line.slice(0, remaining);
           stderrTruncated = true;
@@ -755,7 +754,7 @@ export function writeTasksSnapshot(
     status: string;
     next_run: string | null;
   }>,
-  dataDir?: string,
+  dataDir: string,
 ): void {
   // Write filtered tasks to the group's IPC directory
   const groupIpcDir = resolveGroupIpcPath(groupFolder, dataDir);
@@ -787,7 +786,7 @@ export function writeGroupsSnapshot(
   isMain: boolean,
   groups: AvailableGroup[],
   _registeredJids: Set<string>,
-  dataDir?: string,
+  dataDir: string,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder, dataDir);
   fs.mkdirSync(groupIpcDir, { recursive: true });

@@ -12,8 +12,22 @@ import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
-import { MOUNT_ALLOWLIST, MOUNT_ALLOWLIST_PATH } from './config.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
+
+// Mount allowlist is injected by the caller (Agent), not read from globals.
+let _mountAllowlist: MountAllowlist | null = null;
+let _mountAllowlistPath = '';
+
+/** Set the mount allowlist source. Called by Agent at startup. */
+export function setMountAllowlistSource(
+  allowlist: MountAllowlist | null,
+  filePath?: string,
+): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+  _mountAllowlist = allowlist;
+  _mountAllowlistPath = filePath ?? '';
+}
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -65,16 +79,16 @@ export function loadMountAllowlist(): MountAllowlist | null {
   try {
     let allowlist: MountAllowlist;
 
-    if (MOUNT_ALLOWLIST !== null) {
+    if (_mountAllowlist !== null) {
       // SDK mode: use the in-memory allowlist passed via options
-      allowlist = { ...MOUNT_ALLOWLIST };
-    } else if (MOUNT_ALLOWLIST_PATH && fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
+      allowlist = { ..._mountAllowlist };
+    } else if (_mountAllowlistPath && fs.existsSync(_mountAllowlistPath)) {
       // CLI mode: load from file
-      const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
+      const content = fs.readFileSync(_mountAllowlistPath, 'utf-8');
       allowlist = JSON.parse(content) as MountAllowlist;
     } else {
-      allowlistLoadError = MOUNT_ALLOWLIST_PATH
-        ? `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`
+      allowlistLoadError = _mountAllowlistPath
+        ? `Mount allowlist not found at ${_mountAllowlistPath}`
         : 'No mount allowlist configured';
       logger.warn(
         { reason: allowlistLoadError },
@@ -105,7 +119,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     cachedAllowlist = allowlist;
     logger.info(
       {
-        source: MOUNT_ALLOWLIST !== null ? 'options' : MOUNT_ALLOWLIST_PATH,
+        source: _mountAllowlist !== null ? 'options' : _mountAllowlistPath,
         allowedRoots: allowlist.allowedRoots.length,
         blockedPatterns: allowlist.blockedPatterns.length,
       },
@@ -117,7 +131,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
     allowlistLoadError = err instanceof Error ? err.message : String(err);
     logger.error(
       {
-        source: MOUNT_ALLOWLIST !== null ? 'options' : MOUNT_ALLOWLIST_PATH,
+        source: _mountAllowlist !== null ? 'options' : _mountAllowlistPath,
         error: allowlistLoadError,
       },
       'Failed to load mount allowlist - additional mounts will be BLOCKED',
@@ -248,8 +262,8 @@ export function validateMount(
   if (allowlist === null) {
     return {
       allowed: false,
-      reason: MOUNT_ALLOWLIST_PATH
-        ? `No mount allowlist configured at ${MOUNT_ALLOWLIST_PATH}`
+      reason: _mountAllowlistPath
+        ? `No mount allowlist configured at ${_mountAllowlistPath}`
         : 'No mount allowlist configured — pass mountAllowlist in AgentLiteOptions or set a file path',
     };
   }

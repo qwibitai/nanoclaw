@@ -1,12 +1,13 @@
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import type { RuntimeConfig } from './runtime-config.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -27,14 +28,17 @@ import { RegisteredGroup, ScheduledTask } from './types.js';
  *
  * Co-authored-by: @community-pr-601
  */
-export function computeNextRun(task: ScheduledTask): string | null {
+export function computeNextRun(
+  task: ScheduledTask,
+  timezone: string,
+): string | null {
   if (task.schedule_type === 'once') return null;
 
   const now = Date.now();
 
   if (task.schedule_type === 'cron') {
     const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
+      tz: timezone,
     });
     return interval.next().toISOString();
   }
@@ -62,6 +66,10 @@ export function computeNextRun(task: ScheduledTask): string | null {
 }
 
 export interface SchedulerDependencies {
+  assistantName: string;
+  schedulerPollInterval: number;
+  timezone: string;
+  runtimeConfig: RuntimeConfig;
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
@@ -81,7 +89,10 @@ async function runTask(
   const startTime = Date.now();
   let groupDir: string;
   try {
-    groupDir = resolveGroupFolderPath(task.group_folder);
+    groupDir = resolveGroupFolderPath(
+      task.group_folder,
+      path.join(deps.runtimeConfig.workdir, 'groups'),
+    );
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
@@ -143,6 +154,7 @@ async function runTask(
       status: t.status,
       next_run: t.next_run,
     })),
+    path.join(deps.runtimeConfig.workdir, 'data'),
   );
 
   let result: string | null = null;
@@ -177,8 +189,9 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
+        assistantName: deps.assistantName,
       },
+      deps.runtimeConfig,
       (boxName, containerName) =>
         deps.onProcess(
           task.chat_jid,
@@ -233,7 +246,7 @@ async function runTask(
     error,
   });
 
-  const nextRun = computeNextRun(task);
+  const nextRun = computeNextRun(task, deps.timezone);
   const resultSummary = error
     ? `Error: ${error}`
     : result
@@ -274,7 +287,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       logger.error({ err }, 'Error in scheduler loop');
     }
 
-    setTimeout(loop, SCHEDULER_POLL_INTERVAL);
+    setTimeout(loop, deps.schedulerPollInterval);
   };
 
   loop();

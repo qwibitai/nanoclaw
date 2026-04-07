@@ -10,11 +10,11 @@ describe('package exports', () => {
   // --- ESM exports ---
 
   describe('ESM', () => {
-    it('exports AgentLite from root', async () => {
-      const sdkPath = path.resolve(distDir, 'sdk.js');
+    it('exports createAgentLite from root', async () => {
+      const sdkPath = path.resolve(distDir, 'api', 'sdk.js');
       const mod = await import(sdkPath);
-      expect(mod.AgentLite).toBeDefined();
-      expect(typeof mod.AgentLite).toBe('function');
+      expect(mod.createAgentLite).toBeDefined();
+      expect(typeof mod.createAgentLite).toBe('function');
     });
 
     it('exports TelegramChannel from channels/telegram', async () => {
@@ -40,8 +40,8 @@ describe('package exports', () => {
   // --- CJS exports ---
 
   describe('CJS', () => {
-    it('dist/sdk.cjs exists', () => {
-      expect(existsSync(path.join(distDir, 'sdk.cjs'))).toBe(true);
+    it('dist/api/sdk.cjs exists', () => {
+      expect(existsSync(path.join(distDir, 'api', 'sdk.cjs'))).toBe(true);
     });
 
     it('dist/channels/telegram.cjs exists', () => {
@@ -50,17 +50,17 @@ describe('package exports', () => {
       );
     });
 
-    it('sdk.cjs exports AgentLite via require()', () => {
+    it('sdk.cjs exports createAgentLite via require()', () => {
       const result = execFileSync(
         'node',
         [
           '-e',
-          'const m = require("./dist/sdk.cjs"); console.log(JSON.stringify(Object.keys(m)))',
+          'const m = require("./dist/api/sdk.cjs"); console.log(JSON.stringify(Object.keys(m)))',
         ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
       const keys = JSON.parse(result.trim());
-      expect(keys).toContain('AgentLite');
+      expect(keys).toContain('createAgentLite');
     });
 
     it('channels/telegram.cjs exports TelegramChannel via require()', () => {

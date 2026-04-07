@@ -3,22 +3,21 @@
   "version": "1.2.25",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
-  "main": "dist/sdk.js",
+  "main": "dist/api/sdk.js",
   "bin": {
     "agentlite": "dist/cli.js"
   },
   "exports": {
     ".": {
-      "types": "./dist/sdk.d.ts",
-      "import": "./dist/sdk.js",
-      "require": "./dist/sdk.cjs",
-      "default": "./dist/sdk.js"
+      "types": "./dist/api/sdk.d.ts",
+      "import": "./dist/api/sdk.js",
+      "require": "./dist/api/sdk.cjs",
+      "default": "./dist/api/sdk.js"
     },
     "./channels/telegram": {
-      "types": "./dist/channels/telegram.d.ts",
-      "import": "./dist/channels/telegram.js",
-      "require": "./dist/channels/telegram.cjs",
-      "default": "./dist/channels/telegram.js"
+      "types": "./dist/api/channels/telegram.d.ts",
+      "import": "./dist/api/channels/telegram.js",
+      "default": "./dist/api/channels/telegram.js"
     }
   },
   "scripts": {
