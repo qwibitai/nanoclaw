@@ -7,6 +7,7 @@
 
 import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import yaml from 'yaml';
 import { z } from 'zod';
@@ -162,23 +163,73 @@ function taskFilePath(id: number): string {
 /**
  * Stage files, commit, and push to remote. Best-effort — failures are logged
  * as warnings but never block the caller.
+ *
+ * Uses git plumbing (read-tree / update-index / commit-tree) against a
+ * temporary index so the working tree and submodule pointers are never
+ * touched. This avoids the old `pull --rebase --autostash` path, which was
+ * fragile on the Mac Mini when the `nanoclaw` submodule pointer drifted
+ * between working tree and index (autostash would lose or fail to reapply
+ * the drift). See docs/task-56-fix-task-push/decision.md.
  */
 function commitAndPush(message: string, files: string[]): void {
+  const maxAttempts = 3;
   try {
-    git(`add ${files.map((f) => `"${f}"`).join(' ')}`);
-    git(`commit -m "${message}"`);
-    // Pull --rebase before push to handle commits from other machines.
-    // --autostash handles dirty working tree (e.g. submodule pointer drift).
-    try {
-      git('pull --rebase --autostash');
-    } catch {
-      logger.warn(
-        { message },
-        'Git pull --rebase failed, attempting push anyway',
-      );
+    git('fetch origin main');
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const parent = git('rev-parse origin/main');
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigma-idx-'));
+      const tmpIndex = path.join(tmpDir, 'index');
+      try {
+        const env = { ...process.env, GIT_INDEX_FILE: tmpIndex };
+        const run = (args: string): string =>
+          execSync(`git ${args}`, {
+            cwd: repoDir,
+            env,
+            encoding: 'utf-8',
+            timeout: 30_000,
+          }).trim();
+
+        // Seed temp index from origin/main's tree, then stage task files
+        // from the working tree into it.
+        run(`read-tree ${parent}`);
+        for (const f of files) {
+          run(`update-index --add "${f}"`);
+        }
+        const tree = run('write-tree');
+
+        // commit-tree doesn't need the temp index, but keeping env is fine.
+        const escaped = message.replace(/"/g, '\\"');
+        const commit = execSync(
+          `git commit-tree ${tree} -p ${parent} -m "${escaped}"`,
+          { cwd: repoDir, encoding: 'utf-8', timeout: 30_000 },
+        ).trim();
+
+        try {
+          git(`push origin ${commit}:main`);
+        } catch (pushErr) {
+          if (attempt < maxAttempts) {
+            logger.info(
+              { message, attempt },
+              'Push rejected (likely race), re-fetching and retrying',
+            );
+            git('fetch origin main');
+            continue;
+          }
+          throw pushErr;
+        }
+
+        // Fast-forward local main so subsequent operations see the new commit.
+        git(`update-ref refs/heads/main ${commit}`);
+        logger.info({ message, commit }, 'Git commit and push succeeded');
+        return;
+      } finally {
+        try {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch {
+          // ignore
+        }
+      }
     }
-    git('push');
-    logger.info({ message }, 'Git commit and push succeeded');
   } catch (err) {
     logger.warn({ message, err }, 'Failed to commit/push to git');
   }
