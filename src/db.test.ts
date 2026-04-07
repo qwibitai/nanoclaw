@@ -109,6 +109,58 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(1);
   });
 
+  it('round-trips reply_to context through storage and retrieval', () => {
+    storeChatMetadata('tg:1', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-reply',
+      chat_jid: 'tg:1',
+      sender: '7',
+      sender_name: 'Boris',
+      content: 'sounds good',
+      timestamp: '2024-01-01T00:00:10.000Z',
+      is_from_me: false,
+      reply_to: {
+        id: '42',
+        sender_name: 'Rachel',
+        content: 'pizza tonight?',
+      },
+    });
+
+    const messages = getMessagesSince(
+      'tg:1',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].reply_to).toEqual({
+      id: '42',
+      sender_name: 'Rachel',
+      content: 'pizza tonight?',
+    });
+  });
+
+  it('omits reply_to on retrieval when not stored', () => {
+    storeChatMetadata('tg:2', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-plain',
+      chat_jid: 'tg:2',
+      sender: '7',
+      sender_name: 'Boris',
+      content: 'hi',
+      timestamp: '2024-01-01T00:00:10.000Z',
+      is_from_me: false,
+    });
+
+    const messages = getMessagesSince(
+      'tg:2',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages[0].reply_to).toBeUndefined();
+  });
+
   it('upserts on duplicate id+chat_jid', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 

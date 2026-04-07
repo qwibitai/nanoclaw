@@ -46,6 +46,12 @@ export interface RegisteredGroup {
   bot?: string; // Named bot for channels with multiple bot identities (e.g., Telegram)
 }
 
+export interface ReplyContext {
+  id: string;
+  sender_name: string;
+  content: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -55,6 +61,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  // Snapshot of the message this one is replying to, when the channel
+  // exposes a native reply concept (e.g. Telegram's reply_to_message).
+  reply_to?: ReplyContext;
 }
 
 export interface ScheduledTask {

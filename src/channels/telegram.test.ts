@@ -77,6 +77,7 @@ import {
   TelegramChannel,
   TelegramChannelOpts,
   parseBotConfig,
+  extractReplyContext,
 } from './telegram.js';
 
 // --- Test helpers ---
@@ -121,6 +122,7 @@ function createTextCtx(overrides: {
   messageId?: number;
   date?: number;
   entities?: any[];
+  replyTo?: any;
 }) {
   const chatId = overrides.chatId ?? 100200300;
   const chatType = overrides.chatType ?? 'group';
@@ -140,6 +142,7 @@ function createTextCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
+      reply_to_message: overrides.replyTo,
     },
     me: { username: 'bot_piptoken' },
     reply: vi.fn(),
@@ -246,6 +249,65 @@ describe('parseBotConfig', () => {
       { name: 'pip', token: 'token1' },
       { name: 'pickle', token: 'token2' },
     ]);
+  });
+});
+
+describe('extractReplyContext', () => {
+  it('returns undefined for nullish input', () => {
+    expect(extractReplyContext(undefined)).toBeUndefined();
+    expect(extractReplyContext(null)).toBeUndefined();
+  });
+
+  it('extracts text reply with sender first_name', () => {
+    const result = extractReplyContext({
+      message_id: 99,
+      from: { id: 1, first_name: 'Boris' },
+      text: 'what time?',
+    });
+    expect(result).toEqual({
+      id: '99',
+      sender_name: 'Boris',
+      content: 'what time?',
+    });
+  });
+
+  it('falls back to caption for media replies', () => {
+    const result = extractReplyContext({
+      message_id: 7,
+      from: { first_name: 'Alice' },
+      photo: [{ file_id: 'abc' }],
+      caption: 'check this out',
+    });
+    expect(result?.content).toBe('check this out');
+  });
+
+  it('uses [Photo] placeholder when reply target is photo with no caption', () => {
+    const result = extractReplyContext({
+      message_id: 8,
+      from: { first_name: 'Alice' },
+      photo: [{ file_id: 'abc' }],
+    });
+    expect(result?.content).toBe('[Photo]');
+  });
+
+  it('truncates long content with ellipsis', () => {
+    const longText = 'x'.repeat(800);
+    const result = extractReplyContext({
+      message_id: 1,
+      from: { first_name: 'A' },
+      text: longText,
+    });
+    expect(result?.content.length).toBe(501);
+    expect(result?.content.endsWith('…')).toBe(true);
+  });
+
+  it('falls back to username when first_name missing', () => {
+    const result = extractReplyContext({
+      message_id: 1,
+      from: { username: 'pip_bot' },
+      text: 'hi',
+    });
+    expect(result?.sender_name).toBe('pip_bot');
   });
 });
 
@@ -399,6 +461,50 @@ describe('TelegramChannel', () => {
           timestamp: '2024-01-01T00:00:00.000Z',
         }),
       );
+    });
+  });
+
+  // --- Reply context ---
+
+  describe('reply_to context', () => {
+    it('attaches reply_to when text message replies to another text', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel(singleBotConfigs(), opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'sounds good',
+        replyTo: {
+          message_id: 42,
+          from: { id: 7, first_name: 'Rachel' },
+          text: 'pizza tonight?',
+        },
+      });
+      await triggerTextMessage(lastBot(), ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: 'sounds good',
+          reply_to: {
+            id: '42',
+            sender_name: 'Rachel',
+            content: 'pizza tonight?',
+          },
+        }),
+      );
+    });
+
+    it('omits reply_to when there is no reply', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel(singleBotConfigs(), opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: 'just a message' });
+      await triggerTextMessage(lastBot(), ctx);
+
+      const call = (opts.onMessage as any).mock.calls[0][1];
+      expect(call.reply_to).toBeUndefined();
     });
   });
 

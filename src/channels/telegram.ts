@@ -13,7 +13,62 @@ import {
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
+  ReplyContext,
 } from '../types.js';
+
+/** Cap on stored reply snapshot length so the prompt doesn't bloat. */
+const REPLY_SNAPSHOT_MAX = 500;
+
+/**
+ * Build a compact snapshot of a Telegram reply target so Pip can see what
+ * the user is replying to. Returns undefined if no usable content exists.
+ */
+export function extractReplyContext(
+  replyMsg: any | undefined,
+): ReplyContext | undefined {
+  if (!replyMsg) return undefined;
+
+  const senderName =
+    replyMsg.from?.first_name ||
+    replyMsg.from?.username ||
+    replyMsg.from?.id?.toString() ||
+    'Unknown';
+
+  let content = '';
+  if (replyMsg.text) {
+    content = replyMsg.text;
+  } else if (replyMsg.caption) {
+    content = replyMsg.caption;
+  } else if (replyMsg.photo) {
+    content = '[Photo]';
+  } else if (replyMsg.video) {
+    content = '[Video]';
+  } else if (replyMsg.voice) {
+    content = '[Voice message]';
+  } else if (replyMsg.audio) {
+    content = '[Audio]';
+  } else if (replyMsg.document) {
+    content = `[Document: ${replyMsg.document.file_name || 'file'}]`;
+  } else if (replyMsg.sticker) {
+    content = `[Sticker ${replyMsg.sticker.emoji || ''}]`.trim();
+  } else if (replyMsg.location) {
+    content = '[Location]';
+  } else if (replyMsg.contact) {
+    content = '[Contact]';
+  } else {
+    return undefined;
+  }
+
+  if (content.length > REPLY_SNAPSHOT_MAX) {
+    content = content.slice(0, REPLY_SNAPSHOT_MAX) + '…';
+  }
+
+  return {
+    id: replyMsg.message_id?.toString() ?? '',
+    sender_name: senderName,
+    content,
+  };
+}
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -92,10 +147,7 @@ function markdownLinksToHtml(text: string): string | null {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function sendTelegramMessage(
@@ -315,6 +367,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        reply_to: extractReplyContext(ctx.message.reply_to_message),
       });
 
       logger.info(
@@ -354,6 +407,7 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
+        reply_to: extractReplyContext(ctx.message.reply_to_message),
       });
     };
 
