@@ -359,6 +359,8 @@ export class DiscordChannel implements Channel {
           const cmd = interaction as ChatInputCommandInteraction;
           if (cmd.commandName === 'deploy') {
             await this.handleDeployCommand(cmd);
+          } else if (cmd.commandName === 'update-container') {
+            await this.handleUpdateContainerCommand(cmd);
           }
         }
       } catch (err) {
@@ -1112,6 +1114,11 @@ export class DiscordChannel implements Channel {
             name: 'deploy',
             description: 'Pull, build, and restart NanoClaw from latest main',
           },
+          {
+            name: 'update-container',
+            description:
+              'Audit container packages and synced upstream files for drift',
+          },
         ],
       });
       logger.info('Discord slash commands registered (guild-only)');
@@ -1152,6 +1159,105 @@ export class DiscordChannel implements Channel {
     await interaction.deferReply();
     await interaction.editReply('Deploying latest main...');
     this.runDetachedDeploy(interaction);
+  }
+
+  /**
+   * Inject a synthetic message into the inbound pipeline so the agent
+   * processes a slash-command-originated prompt as if the user had typed it.
+   */
+  private injectMessage(
+    interaction: ChatInputCommandInteraction,
+    prompt: string,
+  ): void {
+    const parentId = DiscordChannel.getInteractionParentId(interaction);
+    const jid = parentId ? `dc:${parentId}` : `dc:${interaction.channelId}`;
+    this.opts.onMessage(jid, {
+      id: interaction.id,
+      chat_jid: jid,
+      sender: interaction.user.id,
+      sender_name: interaction.user.username,
+      content: prompt,
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+    });
+  }
+
+  private async handleUpdateContainerCommand(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
+    await interaction.deferReply();
+    await interaction.editReply(
+      'Auditing container packages and synced upstream files...',
+    );
+
+    const prompt =
+      '@' +
+      resolveAssistantName() +
+      ' Run the container update audit.\n\n' +
+      '## Step 1 — Detect Dockerfile package drift\n' +
+      'Read /workspace/project/container/Dockerfile and extract every pinned version:\n' +
+      '- npm: packages with @x.y.z in `npm install -g`\n' +
+      '- pip: packages with ==x.y.z in `pip install`\n' +
+      '- ARG: lines like `ARG PACKAGE_VERSION=x.y.z`\n' +
+      '- Snowflake .deb: SNOW_VERSION ARG\n\n' +
+      'For each, check the latest available version:\n' +
+      '- npm: `npm view <pkg> version`\n' +
+      '- pip: `curl -s https://pypi.org/pypi/<pkg>/json | jq -r .info.version`\n' +
+      '- GitHub release ARGs: `gh release view --repo <owner>/<repo> --json tagName -q .tagName` for:\n' +
+      '  RENDER_VERSION → render-oss/cli, RAILWAY_VERSION → railwayapp/cli, SUPABASE_VERSION → supabase/cli\n' +
+      '- SNOW_VERSION: check https://sfc-repo.snowflakecomputing.com/snowflake-cli/linux_aarch64/index.html\n\n' +
+      '## Step 2 — Detect upstream-synced file drift\n' +
+      'Read /workspace/plugins/bootstrap/plugins/workflow/skills/team-qa/references/CODEX-SOURCES.md ' +
+      'to find verbatim copies of files from openai/codex-plugin-cc and their pinned upstream commit SHAs ' +
+      '(table format: file | upstream path | pinned SHA | last synced).\n\n' +
+      'For each entry, fetch the latest upstream commit SHA touching that path:\n' +
+      '`gh api "repos/openai/codex-plugin-cc/commits?path=<upstream-path>&per_page=1" --jq ".[0].sha"`\n\n' +
+      'If the latest SHA differs from the pinned SHA, the file has drifted.\n\n' +
+      '## Step 3 — Present a unified audit table\n' +
+      'Show ALL items in one table:\n' +
+      '| Item | Kind | Current | Latest | Status |\n' +
+      'Status: ✅ up to date, ⬆️ outdated.\n' +
+      'Below the table, summarize: "N items outdated: <names>".\n' +
+      'Then ask: "Update all, specific ones, or skip?"\n\n' +
+      '## Step 4 — Apply updates (after user confirms)\n\n' +
+      '### Dockerfile package bumps\n' +
+      '/workspace/project is mounted read-write.\n' +
+      '1. Edit /workspace/project/container/Dockerfile in place — update the pinned versions.\n' +
+      '2. cd /workspace/project && git checkout -b chore/container-pins-$(date +%Y%m%d-%H%M)\n' +
+      '3. git add container/Dockerfile && git commit -m "chore(container): bump <packages> to latest"\n' +
+      '4. git push -u origin HEAD\n' +
+      '5. gh pr create --title "chore(container): bump <packages>" --body "..." --base main\n' +
+      '6. After review, gh pr merge --squash --delete-branch\n' +
+      'The next nanoclaw-update.timer run (08:00 daily) will pull and rebuild the image (the auto-update ' +
+      'script detects container/ changes and runs ./container/build.sh automatically).\n\n' +
+      '### Upstream-synced file resync (Codex prompts/schemas)\n' +
+      '/workspace/plugins/bootstrap is mounted READ-ONLY, so you must push via the upstream repo:\n' +
+      '1. /workspace/plugins/codex is mounted with the latest pulled by nanoclaw-plugins-update.timer — ' +
+      'read the new file content directly from there ' +
+      '(e.g. /workspace/plugins/codex/plugins/codex/prompts/adversarial-review.md).\n' +
+      '2. Get the new SHA: `gh api "repos/openai/codex-plugin-cc/commits?path=<path>&per_page=1" --jq ".[0].sha"`\n' +
+      '3. Clone the bootstrap repo to a writable temp dir:\n' +
+      '   `gh repo clone davekim917/bootstrap /tmp/bootstrap-update`\n' +
+      '4. Copy the new file content into ' +
+      '/tmp/bootstrap-update/plugins/workflow/skills/team-qa/references/<local-name>\n' +
+      '5. CRITICAL — verify the resynced file still contains all template placeholders ' +
+      '({{TARGET_LABEL}}, {{USER_FOCUS}}, {{REVIEW_INPUT}}). If any are missing, ABORT and report — ' +
+      'Validator E depends on these markers.\n' +
+      "6. Update the SHA pin row in CODEX-SOURCES.md to the new SHA and today's date.\n" +
+      '7. Bump plugins/workflow/.claude-plugin/plugin.json `version` (patch bump for resync).\n' +
+      '8. cd /tmp/bootstrap-update && git checkout -b chore/codex-resync-$(date +%Y%m%d-%H%M)\n' +
+      '9. git add -A && git commit -m "chore(team-qa): resync codex <files> to <short-sha>"\n' +
+      '10. git push -u origin HEAD && gh pr create --title "..." --body "..." --base main\n' +
+      '11. After merge, nanoclaw-plugins-update.timer will pull within the hour and the resync goes live.\n\n' +
+      '## Important notes\n' +
+      '- Show diffs before committing each repo. Ask for explicit approval per repo.\n' +
+      '- The two repos (nanoclaw + bootstrap) are independent — separate PRs, separate merges.\n' +
+      '- If everything is up to date, say so in one line and stop. Do not create empty PRs.\n' +
+      '- The Dockerfile rebuild happens automatically at next 08:00 — DO NOT manually run ' +
+      './container/build.sh from inside the container (you cannot run docker from inside a container ' +
+      'and the host script handles it).';
+
+    this.injectMessage(interaction, prompt);
   }
 
   private runDetachedDeploy(interaction: ChatInputCommandInteraction): void {
