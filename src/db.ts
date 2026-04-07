@@ -356,12 +356,7 @@ interface MessageRow {
 
 /** Lift reply_to_* columns into a `reply_to` sub-object on NewMessage. */
 function hydrateMessage(row: MessageRow): NewMessage {
-  const {
-    reply_to_id,
-    reply_to_sender_name,
-    reply_to_content,
-    ...rest
-  } = row;
+  const { reply_to_id, reply_to_sender_name, reply_to_content, ...rest } = row;
   const msg: NewMessage = {
     ...rest,
     is_from_me: !!row.is_from_me,

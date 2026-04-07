@@ -139,7 +139,9 @@ describe('formatMessages', () => {
       TZ,
     );
     expect(result).toContain('<reply_to sender="A &amp; B">');
-    expect(result).toContain('&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;');
+    expect(result).toContain(
+      '&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;',
+    );
   });
 
   it('omits reply_to tag when message has no reply context', () => {
