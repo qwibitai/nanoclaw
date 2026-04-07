@@ -67,6 +67,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import type { AvailableGroup } from './container-runner.js';
 
 import type { Agent } from './api/agent.js';
+import type { RegisterGroupOptions } from './api/group.js';
 
 export { type Agent };
 
@@ -292,20 +293,37 @@ export class AgentImpl
     return [...this._channels.values()];
   }
 
-  // ─── Internal group management ───────────────────────────────────
+  // ─── Group management ────────────────────────────────────────────
 
-  /** @internal Register a group (called by IPC, not by users). */
-  registerGroup(jid: string, group: RegisteredGroup): void {
+  /** Register a group for message processing. Only after start(). */
+  async registerGroup(
+    jid: string,
+    options: RegisterGroupOptions,
+  ): Promise<void> {
+    if (!this._started) throw new Error('Call start() before registerGroup()');
+
     let groupDir: string;
     try {
-      groupDir = resolveGroupFolderPath(group.folder, this.config.groupsDir);
+      groupDir = resolveGroupFolderPath(
+        options.folder,
+        this.config.groupsDir,
+      );
     } catch (err) {
       logger.warn(
-        { jid, folder: group.folder, err },
+        { jid, folder: options.folder, err },
         'Rejecting group with invalid folder',
       );
       return;
     }
+
+    const group: RegisteredGroup = {
+      name: options.name,
+      folder: options.folder,
+      trigger: options.trigger,
+      added_at: new Date().toISOString(),
+      containerConfig: options.containerConfig,
+      requiresTrigger: options.requiresTrigger,
+    };
 
     this._registeredGroups[jid] = group;
     setRegisteredGroup(jid, group);
@@ -315,6 +333,11 @@ export class AgentImpl
       { jid, name: group.name, folder: group.folder, agent: this.name },
       'Group registered',
     );
+    this.emit('group.registered', {
+      jid,
+      name: group.name,
+      folder: group.folder,
+    });
   }
 
   // ─── OneCLI ──────────────────────────────────────────────────────
