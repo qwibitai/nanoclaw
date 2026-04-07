@@ -35,9 +35,11 @@ export type {
   GroupRegisteredEvent,
 } from './events.js';
 export type {
+  AvailableGroup,
   RegisterGroupOptions,
   ContainerConfig,
   AdditionalMount,
+  RegisteredGroup,
 } from './group.js';
 
 import type { Agent } from './agent.js';

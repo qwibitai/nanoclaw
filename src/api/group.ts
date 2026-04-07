@@ -1,5 +1,5 @@
 /**
- * Public types for group registration.
+ * Public group types for registration and discovery.
  */
 
 /** A host directory mount specification. */
@@ -18,6 +18,38 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   /** Container timeout in milliseconds. Default: 300000 (5 minutes). */
   timeout?: number;
+}
+
+/** A registered group returned by the Agent API. */
+export interface RegisteredGroup {
+  /** Stable group/chat identifier from the channel. */
+  jid: string;
+  /** Human-readable group name. */
+  name: string;
+  /** Folder name for group data. */
+  folder: string;
+  /** Trigger pattern that activates the agent in this group. */
+  trigger: string;
+  /** ISO timestamp when the group was registered. */
+  added_at: string;
+  /** Container configuration overrides. */
+  containerConfig?: ContainerConfig;
+  /** Whether a trigger is required to activate. */
+  requiresTrigger?: boolean;
+  /** Whether this is the main control group. */
+  isMain?: boolean;
+}
+
+/** A discovered group/chat returned by the Agent API. */
+export interface AvailableGroup {
+  /** Stable group/chat identifier from the channel. */
+  jid: string;
+  /** Human-readable name from chat metadata. */
+  name: string;
+  /** ISO timestamp of the most recent activity. */
+  lastActivity: string;
+  /** Whether this group is currently registered with the agent. */
+  isRegistered: boolean;
 }
 
 /** Options for registering a group with an Agent. */
