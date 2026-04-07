@@ -755,13 +755,18 @@ function migrateJsonState(): void {
   }
 
   // sessions.json のマイグレーション
+  // sessions テーブルのキーは group_jid（例: dc:123、tg:456）。
+  // 旧形式はフォルダ名がキーだったため、JID 形式のエントリのみ移行する。
+  const JID_PREFIX_RE = /^[a-z]{2,}:/;
   const sessions = migrateFile('sessions.json') as Record<
     string,
     string
   > | null;
   if (sessions) {
-    for (const [folder, sessionId] of Object.entries(sessions)) {
-      setSession(folder, sessionId);
+    for (const [key, sessionId] of Object.entries(sessions)) {
+      if (JID_PREFIX_RE.test(key)) {
+        setSession(key, sessionId);
+      }
     }
   }
 
