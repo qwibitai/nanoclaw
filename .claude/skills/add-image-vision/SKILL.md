@@ -52,8 +52,8 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm run build
 npx vitest run src/image.test.ts
 ```
 
@@ -90,5 +90,5 @@ All tests must pass and build must be clean before proceeding.
 ## Troubleshooting
 
 - **"Image - download failed"**: Check WhatsApp connection stability. The download may timeout on slow connections.
-- **"Image - processing failed"**: Sharp may not be installed correctly. Run `npm ls sharp` to verify.
+- **"Image - processing failed"**: Sharp may not be installed correctly. Run `pnpm ls sharp` to verify.
 - **Agent doesn't mention image content**: Check container logs for "Loaded image" messages. If missing, ensure agent-runner source was synced to group caches.

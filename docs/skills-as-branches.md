@@ -124,6 +124,8 @@ git fetch upstream skill/discord
 git merge upstream/skill/discord
 ```
 
+The SKILL.md includes these commands as part of the setup flow.
+
 ### Applying multiple skills
 
 ```bash
@@ -622,7 +624,7 @@ The update skill gets simpler with the branch-based approach. The old skills eng
 
 **What's removed:**
 - Skill replay step (was needed by the old skills engine to re-apply skills after core update)
-- Re-running structured operations (npm deps, env vars — these are part of git history now)
+- Re-running structured operations (pnpm deps, env vars — these are part of git history now)
 
 **What's added:**
 - Optional step at the end: "Check for skill updates?" which runs the `/update-skills` logic

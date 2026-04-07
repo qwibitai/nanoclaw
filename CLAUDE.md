@@ -53,8 +53,8 @@ Before creating a PR, adding a skill, or preparing any contribution, you MUST re
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
+pnpm run dev         # Run with hot reload
+pnpm run build       # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
@@ -73,7 +73,7 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
+**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && pnpm run build`) to install it. Existing auth credentials and groups are preserved.
 
 ## Container Build Cache
 

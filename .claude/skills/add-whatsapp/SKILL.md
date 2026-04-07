@@ -84,8 +84,8 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm run build
 npx vitest run src/channels/whatsapp.test.ts
 ```
 
@@ -123,7 +123,7 @@ For QR code in terminal:
 npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
 ```
 
-Tell the user to run `npm run auth` in another terminal, then:
+Tell the user to run `pnpm run auth` in another terminal, then:
 
 > 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
 > 2. Scan the QR code displayed in the terminal
@@ -257,7 +257,7 @@ npx tsx setup/index.ts --step register \
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Restart the service:
@@ -347,18 +347,18 @@ This fetches all group names from WhatsApp. Runs automatically every 24 hours.
 
 ## After Setup
 
-If running `npm run dev` while the service is active:
+If running `pnpm run dev` while the service is active:
 
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
+pnpm run dev
 # When done testing:
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 # Linux:
 # systemctl --user stop nanoclaw
-# npm run dev
+# pnpm run dev
 # systemctl --user start nanoclaw
 ```
 
@@ -369,4 +369,4 @@ To remove WhatsApp integration:
 1. Delete auth credentials: `rm -rf store/auth/`
 2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
 3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+4. Rebuild and restart: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)

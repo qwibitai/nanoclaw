@@ -231,10 +231,10 @@ Ask them to let you know when done.
 ## Phase 4: Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ```
 
-If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `npm install` first.
+If build fails, diagnose and fix. Common issue: `@onecli-sh/sdk` not installed — run `pnpm install` first.
 
 Restart the service:
 - macOS (launchd): `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`

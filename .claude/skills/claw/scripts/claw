@@ -191,7 +191,7 @@ def run_container(runtime: str, image: str, payload: dict,
     def stream_stderr():
         for raw in proc.stderr:
             line = raw.decode(errors="replace").rstrip()
-            if line.startswith("npm notice"):
+            if line.startswith("npm notice") or line.startswith("pnpm notice"):
                 continue
             stderr_lines.append(line)
             print(line, file=sys.stderr)

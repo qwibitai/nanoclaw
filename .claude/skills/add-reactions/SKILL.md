@@ -60,8 +60,8 @@ npx tsx scripts/migrate-reactions.ts
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+ppnpm run build
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -71,7 +71,7 @@ All tests must pass and build must be clean before proceeding.
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Linux:

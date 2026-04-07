@@ -73,7 +73,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
-npm run build
+pnpm run build
 npx vitest run src/channels/emacs.test.ts
 ```
 
@@ -158,7 +158,7 @@ If `EMACS_CHANNEL_PORT` was changed from the default, also add:
 ### Restart NanoClaw
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -246,18 +246,18 @@ If NanoClaw is cloned elsewhere, update the `load`/`load-file` path in your Emac
 
 ## After Setup
 
-If running `npm run dev` while the service is active:
+If running `pnpm run dev` while the service is active:
 
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
+pnpm run dev
 # When done testing:
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 # Linux:
 # systemctl --user stop nanoclaw
-# npm run dev
+# pnpm run dev
 # systemctl --user start nanoclaw
 ```
 
@@ -286,4 +286,4 @@ To remove the Emacs channel:
 3. Remove the NanoClaw block from your Emacs config file
 4. Remove Emacs registration from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid = 'emacs:default'"`
 5. Remove `EMACS_CHANNEL_PORT` and `EMACS_AUTH_TOKEN` from `.env` if set
-6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+6. Rebuild: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)

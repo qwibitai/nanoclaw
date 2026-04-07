@@ -26,7 +26,7 @@ Before using this skill, ensure:
 1. **NanoClaw is installed and running** - WhatsApp connected, service active
 2. **Dependencies installed**:
    ```bash
-   npm ls playwright dotenv-cli || npm install playwright dotenv-cli
+   pnpm ls playwright dotenv-cli || pnpm install playwright dotenv-cli
    ```
 3. **CHROME_PATH configured** in `.env` (if Chrome is not at default location):
    ```bash
@@ -48,7 +48,7 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: Output shows "COPY .claude/skills/x-integration/agent.ts"
 
 # 3. Rebuild host and restart service
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 # Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
@@ -225,7 +225,7 @@ COPY container/agent-runner/package*.json ./
 COPY container/agent-runner/ ./
 ```
 
-Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN npm run build`:
+Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN pnpm run build`:
 ```dockerfile
 # Copy skill MCP tools
 COPY .claude/skills/x-integration/agent.ts ./src/skills/x-integration/
@@ -271,7 +271,7 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ### 4. Restart Service
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```

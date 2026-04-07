@@ -2,7 +2,7 @@
   "sandbox": {
     "network": {
       "allowedDomains": [
-        "npm.registry.com",
+        "registry.npmjs.org",
         "us.i.posthog.com"
       ]
     }

@@ -237,7 +237,7 @@ For API key: add to `.env`:
 echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
 ```
 
-Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
+Verify the proxy starts: `pnpm run dev` should show "Credential proxy listening" in the logs.
 
 ## 5. Set Up Channels
 
@@ -266,7 +266,7 @@ Each skill will:
 **After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
 
 ```bash
-npm install && npm run build
+pnpm install && pnpm run build
 ```
 
 If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
@@ -313,7 +313,7 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
-- SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
+- SERVICE=stopped → `pnpm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4 (Docker: check `onecli secrets list`; Apple Container: check `.env` for credentials)
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)

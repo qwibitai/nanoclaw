@@ -30,7 +30,7 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Conflict resolution**: opens only conflicted files, resolves the conflict markers, keeps your local customizations intact.
 
-**Validation**: runs `npm run build` and `npm test`.
+**Validation**: runs `pnpm run build` and `pnpm test`.
 
 **Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
@@ -175,8 +175,8 @@ If it gets messy (more than 3 rounds of conflicts):
 
 # Step 5: Validation
 Run:
-- `npm run build`
-- `npm test` (do not fail the flow if tests are not configured)
+- `pnpm run build`
+- `pnpm test` (do not fail the flow if tests are not configured)
 
 If build fails:
 - Show the error.
@@ -234,7 +234,7 @@ Tell the user:
 - Backup branch also exists: `backup/pre-update-<HASH>-<TIMESTAMP>`
 - Restart the service to apply changes:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
-  - If running manually: restart `npm run dev`
+  - If running manually: restart `pnpm run dev`
 
 
 ## Diagnostics

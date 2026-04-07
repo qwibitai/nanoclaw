@@ -87,7 +87,7 @@ async function syncGroups(projectRoot: string): Promise<void> {
   logger.info('Building TypeScript');
   let buildOk = false;
   try {
-    execSync('npm run build', {
+    execSync('pnpm run build', {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

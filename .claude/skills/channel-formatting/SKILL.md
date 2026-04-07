@@ -74,8 +74,8 @@ This merge adds:
 ### Validate
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm run build
 npx vitest run src/formatting.test.ts
 ```
 
@@ -86,7 +86,7 @@ All 73 tests should pass and the build should be clean before continuing.
 ### Rebuild and restart
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -133,5 +133,5 @@ git checkout upstream/main -- src/router.ts
 # Revert the index.ts sendMessage call sites to plain formatOutbound(rawText)
 # (edit manually or: git checkout upstream/main -- src/index.ts)
 
-npm run build
+pnpm run build
 ```

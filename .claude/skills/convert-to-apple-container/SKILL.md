@@ -80,8 +80,8 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -172,7 +172,7 @@ Expected: Both operations succeed.
 ### Full integration test
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 

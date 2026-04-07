@@ -57,7 +57,7 @@ The same files conflict every time:
 | File | Resolution |
 |------|------------|
 | `package.json` | Take main's version + keep fork/branch-specific deps |
-| `package-lock.json` | `git checkout main -- package-lock.json && npm install` |
+| `pnpm-lock.yaml` | `git checkout main -- pnpm-lock.yaml && pnpm install --frozen-lockfile` |
 | `.env.example` | Combine: main's entries + fork/branch-specific entries |
 | `repo-tokens/badge.svg` | Take main's version (auto-generated) |
 

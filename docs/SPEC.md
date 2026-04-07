@@ -404,7 +404,7 @@ Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_
 Set the `ASSISTANT_NAME` environment variable:
 
 ```bash
-ASSISTANT_NAME=Bot npm start
+ASSISTANT_NAME=Bot pnpm start
 ```
 
 Or edit the default in `src/config.ts`. This changes:
@@ -779,7 +779,7 @@ chmod 700 groups/
 
 Run manually for verbose output:
 ```bash
-npm run dev
+pnpm run dev
 # or
 node dist/index.js
 ```

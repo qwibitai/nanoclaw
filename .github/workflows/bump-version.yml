@@ -20,10 +20,12 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
 
+      - uses: pnpm/action-setup@v4
+
       - name: Bump patch version
         run: |
-          npm version patch --no-git-tag-version
-          git add package.json package-lock.json
+          pnpm version patch --no-git-tag-version
+          git add package.json
           git diff --cached --quiet && exit 0
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

@@ -49,7 +49,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Validate
 
 ```bash
-npm run build
+pnpm run build
 npx vitest run src/channels/whatsapp.test.ts
 ```
 

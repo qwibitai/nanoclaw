@@ -31,7 +31,7 @@ export async function run(_args: string[]): Promise<void> {
   // Build first
   logger.info('Building TypeScript');
   try {
-    execSync('npm run build', {
+    execSync('pnpm run build', {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

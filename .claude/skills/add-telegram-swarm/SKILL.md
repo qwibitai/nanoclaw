@@ -319,7 +319,7 @@ Also add `TELEGRAM_BOT_POOL` to the launchd plist (`~/Library/LaunchAgents/com.n
 ### Step 7: Rebuild and Restart
 
 ```bash
-npm run build
+pnpm run build
 ./container/build.sh  # Required — MCP tool changed
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
@@ -381,4 +381,4 @@ To remove Agent Swarm support while keeping basic Telegram:
 5. Remove `sender` param from MCP tool in `container/agent-runner/src/ipc-mcp-stdio.ts`
 6. Remove Agent Teams section from group CLAUDE.md files
 7. Remove `TELEGRAM_BOT_POOL` from `.env`, `data/env/env`, and launchd plist/systemd unit
-8. Rebuild: `npm run build && ./container/build.sh && launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist` (macOS) or `npm run build && ./container/build.sh && systemctl --user restart nanoclaw` (Linux)
+8. Rebuild: `pnpm run build && ./container/build.sh && launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist` (macOS) or `pnpm run build && ./container/build.sh && systemctl --user restart nanoclaw` (Linux)
