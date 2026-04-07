@@ -1,8 +1,9 @@
 /**
- * ChannelDriver — user-facing interface for messaging platform adapters.
+ * ChannelDriver + ChannelDriverFactory — user-facing channel interfaces.
  *
- * Implement this to connect AgentLite to a messaging platform
- * (Telegram, Slack, Discord, custom UI, etc.).
+ * Users provide a ChannelDriverFactory. The SDK calls it with config
+ * (callbacks) at agent.start() or agent.addChannel() time. The factory
+ * returns a ChannelDriver. The SDK wraps it into the internal Channel.
  */
 
 /** What a channel implementor provides. */
@@ -10,14 +11,14 @@ export interface ChannelDriver {
   /** Send a message to a chat. Called by the agent VM when it responds. */
   send(chatId: string, text: string): Promise<void>;
 
-  /**
-   * Start receiving messages. The SDK calls this once at agent.start().
-   * Call `onMessage` whenever an inbound message arrives.
-   */
-  start(onMessage: OnMessage): Promise<void>;
+  /** Start receiving messages. Called once by the SDK. */
+  start(): Promise<void>;
 
   /** Stop receiving messages and clean up resources. */
   stop(): Promise<void>;
+
+  /** Return true if this driver handles the given JID. */
+  ownsJid(jid: string): boolean;
 
   /** Optional: get the channel's identity (bot name, username). */
   identity?(): Promise<ChannelIdentity>;
@@ -26,15 +27,37 @@ export interface ChannelDriver {
   setTyping?(chatId: string, on: boolean): Promise<void>;
 }
 
-/** Callback for delivering inbound messages to the agent. */
-export type OnMessage = (chatId: string, message: Message) => void;
+/** Config the SDK provides to the factory at channel creation time. */
+export interface ChannelDriverConfig {
+  onMessage: (chatJid: string, msg: InboundMessage) => void;
+  onChatMetadata: (
+    chatJid: string,
+    timestamp: string,
+    name?: string,
+    channel?: string,
+    isGroup?: boolean,
+  ) => void;
+  registeredGroups: () => Record<string, unknown>;
+}
+
+/**
+ * Factory function that creates a ChannelDriver.
+ * Called by the SDK with config — returns a driver instance.
+ */
+export type ChannelDriverFactory = (
+  config: ChannelDriverConfig,
+) => ChannelDriver | Promise<ChannelDriver>;
 
 /** An inbound message from a messaging platform. */
-export interface Message {
+export interface InboundMessage {
+  chat_jid: string;
   sender: string;
   content: string;
   timestamp: string;
-  senderName?: string;
+  is_from_me: boolean;
+  is_bot_message?: boolean;
+  sender_name?: string;
+  attachments?: string[];
 }
 
 export interface ChannelIdentity {

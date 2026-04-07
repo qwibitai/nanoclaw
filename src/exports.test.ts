@@ -29,7 +29,7 @@ describe('package exports', () => {
       expect(typeof mod.telegram).toBe('function');
     });
 
-    it('telegram() returns a ChannelDriver-compatible object', async () => {
+    it('telegram() returns a ChannelDriverFactory function', async () => {
       const telegramPath = path.resolve(
         distDir,
         'api',
@@ -37,10 +37,8 @@ describe('package exports', () => {
         'telegram.js',
       );
       const mod = await import(telegramPath);
-      const driver = mod.telegram({ token: 'test-token' });
-      expect(driver).toBeDefined();
-      expect(driver._type).toBe('telegram');
-      expect(driver._opts.token).toBe('test-token');
+      const factory = mod.telegram({ token: 'test-token' });
+      expect(typeof factory).toBe('function');
     });
   });
 
@@ -83,16 +81,16 @@ describe('package exports', () => {
       expect(keys).toContain('telegram');
     });
 
-    it('CJS telegram() returns ChannelDriver-compatible object', () => {
+    it('CJS telegram() returns a factory function', () => {
       const result = execFileSync(
         'node',
         [
           '-e',
-          'const { telegram } = require("./dist/api/channels/telegram.cjs"); const d = telegram({ token: "test" }); console.log(d._type)',
+          'const { telegram } = require("./dist/api/channels/telegram.cjs"); const f = telegram({ token: "test" }); console.log(typeof f)',
         ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
-      expect(result.trim()).toBe('telegram');
+      expect(result.trim()).toBe('function');
     });
   });
 });

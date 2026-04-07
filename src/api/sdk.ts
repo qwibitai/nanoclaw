@@ -4,10 +4,13 @@
  * @example
  * ```typescript
  * import { createAgentLite } from '@boxlite-ai/agentlite';
+ * import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
  *
  * const agentlite = await createAgentLite({ workdir: './data' });
- * const agent = agentlite.createAgent('main', { name: 'Andy' });
- * agent.addChannel('telegram', telegramDriver);
+ * const agent = agentlite.createAgent('main', {
+ *   name: 'Andy',
+ *   channels: { telegram: telegram({ token: process.env.TG_TOKEN! }) },
+ * });
  * await agent.start();
  * ```
  */
@@ -20,9 +23,9 @@ export type {
 export type { Agent } from './agent.js';
 export type {
   ChannelDriver,
+  ChannelDriverFactory,
+  ChannelDriverConfig,
   ChannelIdentity,
-  Message,
-  OnMessage,
 } from './channel-driver.js';
 export type { MountAllowlist, AllowedRoot } from './mount.js';
 

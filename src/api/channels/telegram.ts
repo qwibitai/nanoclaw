@@ -4,41 +4,44 @@
  * @example
  * ```typescript
  * import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
- * agent.addChannel('telegram', telegram({ token: process.env.TG_TOKEN! }));
+ *
+ * const agent = agentlite.createAgent('main', {
+ *   channels: { telegram: telegram({ token: process.env.TG_TOKEN! }) },
+ * });
  * ```
  */
 
-import type { ChannelDriver } from '../channel-driver.js';
+import type { ChannelDriverFactory } from '../channel-driver.js';
 
 /** Options for the Telegram channel. */
 export interface TelegramOptions {
   /** Telegram bot token from BotFather. */
   token: string;
+  /** Assistant name for trigger matching. Default: 'Andy' */
+  assistantName?: string;
+  /** Groups directory for file downloads. Default: '' */
+  groupsDir?: string;
 }
 
 /**
- * Create a Telegram channel driver.
- * Internally wraps the TelegramChannel implementation — all details hidden.
+ * Create a Telegram channel driver factory.
+ * The factory is called by the SDK at agent.start() time with callbacks.
  */
-export function telegram(opts: TelegramOptions): ChannelDriver {
-  // Return a lazy proxy — the real TelegramChannel is created when
-  // the agent calls start(). This keeps the internal implementation
-  // out of the user-facing module graph at import time.
-  return {
-    _type: 'telegram' as const,
-    _opts: opts,
-  } as unknown as ChannelDriver;
-}
+export function telegram(opts: TelegramOptions): ChannelDriverFactory {
+  const assistantName = opts.assistantName ?? 'Andy';
+  const escaped = assistantName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const triggerPattern = new RegExp(`^@${escaped}\\b`, 'i');
 
-// Internal: used by agent-impl to detect and unwrap telegram config
-/** @internal */
-export function isTelegramConfig(
-  driver: unknown,
-): driver is { _type: 'telegram'; _opts: TelegramOptions } {
-  return (
-    typeof driver === 'object' &&
-    driver !== null &&
-    '_type' in driver &&
-    (driver as { _type: string })._type === 'telegram'
-  );
+  return async (config) => {
+    const { TelegramChannel } = await import('../../channels/telegram.js');
+    const channel = new TelegramChannel(opts.token, {
+      onMessage: config.onMessage as any,
+      onChatMetadata: config.onChatMetadata as any,
+      registeredGroups: config.registeredGroups as any,
+      groupsDir: opts.groupsDir ?? '',
+      assistantName,
+      triggerPattern,
+    });
+    return channel as any;
+  };
 }
