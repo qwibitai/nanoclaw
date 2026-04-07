@@ -39,6 +39,7 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getTopicMessages,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -218,7 +219,10 @@ export function _setRegisteredGroups(
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
+async function processGroupMessages(
+  chatJid: string,
+  threadId?: string,
+): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
@@ -230,20 +234,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  const missedMessages = getMessagesSince(
+  // Build prompt from topic-isolated context (cursor-independent).
+  const topicMessages = getTopicMessages(
     chatJid,
-    getOrRecoverCursor(chatJid),
+    threadId,
     ASSISTANT_NAME,
     MAX_MESSAGES_PER_PROMPT,
   );
+  if (topicMessages.length === 0) return true;
 
-  if (missedMessages.length === 0) return true;
-
-  // For non-main groups, check if trigger is required and present
+  // For non-main groups, check if trigger is present in this topic
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
+    const hasTrigger = topicMessages.some(
       (m) =>
         triggerPattern.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
@@ -251,18 +255,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  queue.setReplyThread(chatJid, missedMessages[missedMessages.length - 1]?.thread_id);
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(topicMessages, TIMEZONE);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  // Advance cursor past this topic's messages (prevents re-dispatch)
+  const latestTimestamp = topicMessages[topicMessages.length - 1].timestamp;
+  if (latestTimestamp > (lastAgentTimestamp[chatJid] || '')) {
+    lastAgentTimestamp[chatJid] = latestTimestamp;
+    saveState();
+  }
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, threadId, messageCount: topicMessages.length },
     'Processing messages',
   );
 
@@ -273,10 +276,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug(
-        { group: group.name },
+        { group: group.name, threadId },
         'Idle timeout, closing container stdin',
       );
-      queue.closeStdin(chatJid);
+      queue.closeStdin(chatJid, threadId);
     }, IDLE_TIMEOUT);
   };
 
@@ -284,39 +287,40 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text, queue.getReplyThread(chatJid));
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text, threadId);
+          outputSentToUser = true;
+        }
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid, threadId);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    threadId,
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
@@ -324,17 +328,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       );
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
-    logger.warn(
-      { group: group.name },
-      'Agent error, rolled back message cursor for retry',
-    );
     return false;
   }
 
   return true;
+}
+
+function sessionKey(folder: string, threadId?: string | null): string {
+  return threadId ? `${folder}:topic:${threadId}` : folder;
 }
 
 async function runAgent(
@@ -342,9 +343,11 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  threadId?: string | null,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sKey = sessionKey(group.folder, threadId);
+  const sessionId = sessions[sKey];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -376,8 +379,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sKey] = output.newSessionId;
+          setSession(sKey, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -393,15 +396,22 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        threadId: threadId ?? undefined,
       },
       (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          threadId,
+        ),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sKey] = output.newSessionId;
+      setSession(sKey, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -468,21 +478,6 @@ async function startMessageLoop(): Promise<void> {
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const triggerPattern = getTriggerPattern(group.trigger);
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                triggerPattern.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-            );
-            if (!hasTrigger) continue;
-          }
-
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
@@ -493,26 +488,63 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          if (queue.sendMessage(chatJid, formatted)) {
-            const lastMsg = messagesToSend[messagesToSend.length - 1];
-            queue.setReplyThread(chatJid, lastMsg.thread_id);
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] = lastMsg.timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+          // Group by topic — each topic dispatches independently
+          const byTopic = new Map<string | undefined, NewMessage[]>();
+          for (const m of messagesToSend) {
+            const tid = m.thread_id ?? undefined;
+            const arr = byTopic.get(tid) || [];
+            arr.push(m);
+            byTopic.set(tid, arr);
+          }
+
+          for (const [threadId, topicMsgs] of byTopic) {
+            // For non-main groups, only act on trigger messages in this topic
+            if (needsTrigger) {
+              const triggerPattern = getTriggerPattern(group.trigger);
+              const allowlistCfg = loadSenderAllowlist();
+              const hasTrigger = topicMsgs.some(
+                (m) =>
+                  triggerPattern.test(m.content.trim()) &&
+                  (m.is_from_me ||
+                    isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
               );
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+              if (!hasTrigger) continue;
+            }
+
+            // Try to pipe to the active container for this topic
+            if (
+              queue.sendMessage(
+                chatJid,
+                formatMessages(topicMsgs, TIMEZONE),
+                threadId,
+              )
+            ) {
+              logger.debug(
+                { chatJid, threadId, count: topicMsgs.length },
+                'Piped messages to active container',
+              );
+              channel
+                .setTyping?.(chatJid, true)
+                ?.catch((err) =>
+                  logger.warn(
+                    { chatJid, err },
+                    'Failed to set typing indicator',
+                  ),
+                );
+            } else {
+              // No active container for this topic — enqueue
+              queue.enqueueMessageCheck(chatJid, threadId);
+            }
+          }
+
+          // Advance cursor past all dispatched messages
+          if (messagesToSend.length > 0) {
+            const latest = messagesToSend[messagesToSend.length - 1].timestamp;
+            if (latest > (lastAgentTimestamp[chatJid] || '')) {
+              lastAgentTimestamp[chatJid] = latest;
+              saveState();
+            }
           }
         }
       }
@@ -535,13 +567,17 @@ function recoverPendingMessages(): void {
       ASSISTANT_NAME,
       MAX_MESSAGES_PER_PROMPT,
     );
-    if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
+    if (pending.length === 0) continue;
+
+    // Group by topic so each gets its own container
+    const topics = new Set(pending.map((m) => m.thread_id ?? undefined));
+    for (const threadId of topics) {
+      queue.enqueueMessageCheck(chatJid, threadId);
     }
+    logger.info(
+      { group: group.name, pendingCount: pending.length, topics: topics.size },
+      'Recovery: found unprocessed messages',
+    );
   }
 }
 

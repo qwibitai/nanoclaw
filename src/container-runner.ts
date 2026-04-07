@@ -42,6 +42,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  threadId?: string;
 }
 
 export interface ContainerOutput {
@@ -60,6 +61,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  threadId?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -161,10 +163,21 @@ function buildVolumeMounts(
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
+    readonly: false,
+  });
+
+  // Per-topic IPC input: each topic gets its own input directory so
+  // simultaneous topic containers don't read each other's messages.
+  // The overlay mount shadows /workspace/ipc/input/ from the parent mount.
+  const inputSubdir = threadId ? `input-${threadId}` : 'input';
+  const inputDir = path.join(groupIpcDir, inputSubdir);
+  fs.mkdirSync(inputDir, { recursive: true });
+  mounts.push({
+    hostPath: inputDir,
+    containerPath: '/workspace/ipc/input',
     readonly: false,
   });
 
@@ -285,7 +298,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.threadId);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName, input.isMain);
