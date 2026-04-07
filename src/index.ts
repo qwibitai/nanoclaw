@@ -145,7 +145,7 @@ function autoRegisterThread(
     added_at: new Date().toISOString(),
     containerConfig: td.containerConfig ?? parent.containerConfig,
     requiresTrigger: td.requiresTrigger ?? parent.requiresTrigger,
-    type: 'thread',
+    type: td.type ?? 'thread',
   };
   registerGroup(chatJid, childGroup);
   logger.info(
