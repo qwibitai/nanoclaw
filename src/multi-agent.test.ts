@@ -56,22 +56,13 @@ describe('Multi-agent isolation', () => {
     expect(alice.config.dataDir).not.toBe(bob.config.dataDir);
   });
 
-  it('two agents have independent channel maps', () => {
+  it('addChannel rejects before start', async () => {
     const alice = createAgent('alice');
-    const bob = createAgent('bob');
+    const mockFactory = () => ({});
 
-    const mockChannel = {
-      name: 'mock',
-      connect: async () => {},
-      disconnect: async () => {},
-      sendMessage: async () => {},
-      isConnected: () => false,
-      ownsJid: () => false,
-    };
-
-    alice.addChannel('test', mockChannel as any);
-    expect(alice.channels.size).toBe(1);
-    expect(bob.channels.size).toBe(0);
+    await expect(alice.addChannel('test', mockFactory as any)).rejects.toThrow(
+      'Call start() before addChannel()',
+    );
   });
 
   it('agents can be created and deleted independently', () => {

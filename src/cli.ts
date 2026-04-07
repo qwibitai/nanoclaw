@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 /**
  * AgentLite CLI entry point.
- *
- * Uses the AgentLite SDK just like any other consumer.
  */
 
 import { installProcessHandlers, logger } from './logger.js';
@@ -21,17 +19,22 @@ async function main(): Promise<void> {
   const platformOpts = buildOptionsFromEnv();
   const agentOpts = buildAgentOptionsFromEnv();
 
+  // Pre-start channels go in options
+  const channels: Record<string, ReturnType<typeof telegram>> = {};
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    channels.telegram = telegram({
+      token: process.env.TELEGRAM_BOT_TOKEN,
+      assistantName: agentOpts.name,
+    });
+  }
+
   const agentlite = await createAgentLite(platformOpts);
 
   const instanceName = process.env.AGENTLITE_INSTANCE || 'main';
-  const agent = agentlite.createAgent(instanceName, agentOpts);
-
-  if (process.env.TELEGRAM_BOT_TOKEN) {
-    agent.addChannel(
-      'telegram',
-      telegram({ token: process.env.TELEGRAM_BOT_TOKEN }),
-    );
-  }
+  const agent = agentlite.createAgent(instanceName, {
+    ...agentOpts,
+    channels,
+  });
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');

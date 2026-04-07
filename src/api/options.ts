@@ -2,7 +2,7 @@
  * Public option types for AgentLite consumers.
  */
 
-import type { ChannelDriver } from './channel-driver.js';
+import type { ChannelDriverFactory } from './channel-driver.js';
 import type { MountAllowlist } from './mount.js';
 
 /** Resolves credentials to env vars injected into agent containers. */
@@ -30,6 +30,6 @@ export interface AgentOptions {
   credentials?: CredentialResolver;
   /** Mount allowlist for container security. Blocks all mounts if not provided. */
   mountAllowlist?: MountAllowlist;
-  /** Initial channels to connect. Can also be added later via agent.addChannel(). */
-  channels?: Record<string, ChannelDriver>;
+  /** Initial channels. Factories are called at agent.start() time. */
+  channels?: Record<string, ChannelDriverFactory>;
 }

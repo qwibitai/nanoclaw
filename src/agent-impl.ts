@@ -15,8 +15,11 @@ import { EventEmitter } from 'events';
 import type { AgentConfig } from './agent-config.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { AgentOptions } from './api/options.js';
-import type { ChannelDriver } from './api/channel-driver.js';
-import { isTelegramConfig } from './api/channels/telegram.js';
+import type {
+  ChannelDriver,
+  ChannelDriverFactory,
+  ChannelDriverConfig,
+} from './api/channel-driver.js';
 import type { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -103,35 +106,28 @@ export class AgentImpl extends EventEmitter implements Agent {
     return this.config.agentName;
   }
 
-  /** Connected channels (read-only). */
-  get channels(): ReadonlyMap<string, ChannelDriver> {
-    // Internal Channel is a superset of ChannelDriver — safe to expose as the narrower type
-    return this._channels as unknown as ReadonlyMap<string, ChannelDriver>;
-  }
-
   // ─── Public API ──────────────────────────────────────────────────
 
   /**
-   * Add a channel. Accepts both user-facing ChannelDriver and internal Channel.
-   * Can be called before or after start().
+   * Add a channel via factory. Only after start().
+   * Calls the factory with SDK config, stores the channel, connects it.
    */
-  addChannel(key: string, driver: ChannelDriver): void {
+  async addChannel(key: string, factory: ChannelDriverFactory): Promise<void> {
+    if (!this._started) {
+      throw new Error('Call start() before addChannel()');
+    }
     if (this._channels.has(key)) {
       throw new Error(
         `Channel "${key}" already registered on agent "${this.name}"`,
       );
     }
-    this._channels.set(key, driver as unknown as Channel);
-
-    if (this._started) {
-      const ch = this._channels.get(key)!;
-      this._connectChannel(key, ch).catch((err) =>
-        logger.error(
-          { err, channel: key, agent: this.name },
-          'Failed to connect channel',
-        ),
-      );
-    }
+    const config = this._buildDriverConfig();
+    const driver = await factory(config);
+    const channel: Channel = { name: key, ...driver };
+    this._channels.set(key, channel);
+    await channel.connect();
+    logger.info({ channel: key, agent: this.name }, 'Channel connected');
+    this.emit('channel.connected', { key });
   }
 
   /**
@@ -183,21 +179,11 @@ export class AgentImpl extends EventEmitter implements Agent {
 
     restoreRemoteControl(this.config.dataDir);
 
-    // Add initial channels from constructor options
+    // Connect initial channels from constructor options via factories
     if (this._options?.channels) {
-      for (const [key, channel] of Object.entries(this._options.channels)) {
-        if (!this._channels.has(key)) {
-          this._channels.set(key, channel as unknown as Channel);
-        }
+      for (const [key, factory] of Object.entries(this._options.channels)) {
+        await this.addChannel(key, factory);
       }
-    }
-
-    // Resolve driver configs into real channels (e.g. telegram({ token }) → TelegramChannel)
-    await this._resolveDrivers();
-
-    // Connect all channels
-    for (const [key, channel] of this._channels) {
-      await this._connectChannel(key, channel);
     }
 
     if (this._channels.size > 0) {
@@ -225,33 +211,17 @@ export class AgentImpl extends EventEmitter implements Agent {
 
   // ─── Channel helpers ─────────────────────────────────────────────
 
-  /**
-   * Resolve ChannelDriver configs (lazy proxies from factory functions)
-   * into real internal Channel instances. Called once at start().
-   */
-  private async _resolveDrivers(): Promise<void> {
+  /** Build the config object passed to ChannelDriverFactory. */
+  private _buildDriverConfig(): ChannelDriverConfig {
     const handler = this.buildDefaultChannelHandler();
-    for (const [key, maybeConfig] of this._channels) {
-      if (isTelegramConfig(maybeConfig)) {
-        const { TelegramChannel } = await import('./channels/telegram.js');
-        const channel = new TelegramChannel(maybeConfig._opts.token, {
-          ...handler,
-          groupsDir: this.config.groupsDir,
-          assistantName: this.config.assistantName,
-          triggerPattern: this.config.triggerPattern,
-        });
-        this._channels.set(key, channel);
-      }
-      // Future built-in channels: add more checks here (isSlackConfig, etc.)
-    }
-  }
-
-  private async _connectChannel(key: string, channel: Channel): Promise<void> {
-    // Build channel callbacks — used by legacy channels that need ChannelOpts.
-    const _handler = this.buildDefaultChannelHandler();
-    await channel.connect();
-    logger.info({ channel: key, agent: this.name }, 'Channel connected');
-    this.emit('channel.connected', { key });
+    return {
+      onMessage: handler.onMessage as ChannelDriverConfig['onMessage'],
+      onChatMetadata: handler.onChatMetadata,
+      registeredGroups: handler.registeredGroups as () => Record<
+        string,
+        unknown
+      >,
+    };
   }
 
   /** Build default channel handler — stores messages, intercepts remote control. */
