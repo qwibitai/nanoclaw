@@ -12,13 +12,29 @@ This is the **structural-integrity counterpart** to `date-reminders`, which scan
 
 ## How to send the report — READ THIS CAREFULLY
 
-**Emit the full report as your final text response.** That is the ONLY way to deliver the message. The nanoclaw scheduler automatically forwards your final text response to the chat — you don't need to do anything else.
+The nanoclaw scheduler automatically forwards your **final assistant text message** to the Pip Admin chat verbatim. Whatever you write in that final message IS the Telegram message Boris receives. There is no other delivery mechanism.
 
-**Do NOT call `send_message`, `mcp__nanoclaw__send_message`, or any other messaging tool** inside this skill. Doing so will cause **duplicate messages** — one from your explicit tool call, and one from the scheduler auto-forwarding your final text. The report is the last thing you say, full stop.
+**This has two critical consequences:**
 
-**Always emit a final text response** — never finish silently. On a fully healthy vault, emit the brief healthy-week message. On error, emit a message that starts with `vault-maintenance error:`. Silence means Boris sees nothing and can't tell whether the job ran.
+### Consequence 1 — your final message must contain ONLY the report
 
-**This contradicts the `date-reminders` precedent** which says "If no upcoming dates are found, output nothing." Don't pattern-match the wrong rule — vault-maintenance always speaks, and it speaks via its final response, never via an explicit send tool.
+The last thing you type, the text that ends your turn, must be **exclusively** the report. No preamble. No reasoning. No "Now let me analyze:" or "Here's what I found:" or "Step 5 wikilinks:". No bullet-by-bullet walkthroughs of your intermediate thinking. No "Report sent" or "Done" at the end.
+
+Your final message must start with the first character of the report (`*Vault maintenance — N files scanned*` or `🌿 Vault is healthy — N files scanned, no issues found.` or `vault-maintenance error: ...`) and end with the last character of the report. Nothing else.
+
+**Do all your analysis silently.** Use tool calls for every step — Read, Grep, Glob, Edit. The agent harness shows your tool use to Boris only as reasoning traces, not as chat messages. But your final text message — the one you emit after all tool calls are complete — becomes the chat message verbatim. **Treat every word of your final message as text Boris will read on his phone.** If you wouldn't want it in a Telegram message, don't write it there.
+
+If you catch yourself about to explain what you did or what you're about to do in the final message — stop. Delete the preamble. Leave only the report.
+
+### Consequence 2 — NEVER call `send_message` or any messaging tool
+
+Do NOT call `send_message`, `mcp__nanoclaw__send_message`, or any other tool that sends messages to chat. The scheduler's auto-forward of your final text is the ONLY delivery mechanism you should use. Calling a messaging tool on top of that will produce **duplicate messages**.
+
+### Consequence 3 — always emit a final text message
+
+Never finish silently. On a fully healthy vault, emit the brief healthy-week message as your final text. On error, emit a message starting with `vault-maintenance error:`. Silence means Boris sees nothing and can't tell whether the job ran.
+
+**This contradicts the `date-reminders` precedent** which says "output nothing on empty." Don't pattern-match the wrong rule — vault-maintenance always speaks, and it speaks only through its final text message.
 
 ## Steps
 
@@ -116,7 +132,7 @@ This makes failures observable through the same chat path as success. Don't swal
 
 ## Compose the report
 
-The report goes to the **Pip Admin** chat via the scheduler's auto-forward of your final text response — **not** via any explicit send tool (see "How to send the report" above). Use Telegram formatting (not markdown):
+The report goes to the **Pip Admin** chat via the scheduler's auto-forward of your final text message — **not** via any explicit send tool (see "How to send the report" above). Use Telegram formatting (not markdown):
 
 - `*bold*` with single asterisks for the header and section names
 - Bullet points with the bullet character (`- `)
@@ -124,7 +140,9 @@ The report goes to the **Pip Admin** chat via the scheduler's auto-forward of yo
 
 **Always include the total file count scanned**, in both the healthy and the unhealthy paths. Silent under-scans (where the glob returned fewer files than expected but more than 5) are easier to spot when the count is visible every week.
 
-**The report IS your final response.** Do not prefix it with narration like "Here is the report:" or suffix it with summaries like "Report sent." The report itself, alone, is what you emit as your last message.
+**The report IS your final message, alone.** Your final message must start with the first character of the report and end with the last character. No preamble ("Now let me compose the report:"). No reasoning summary ("Based on my analysis:"). No trailing commentary ("Report sent."). Just the report.
+
+Before you emit your final message, mentally check: does it start with `*Vault maintenance` (or `🌿 Vault is healthy` or `vault-maintenance error:`)? If not, delete everything before that header.
 
 ### Healthy-week message
 
