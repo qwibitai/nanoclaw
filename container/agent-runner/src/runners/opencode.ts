@@ -326,6 +326,11 @@ export class OpenCodeRunner {
 
   close(): void {
     this.server.close();
+    // Explicitly close the SSE stream so its underlying HTTP socket is released.
+    // We use manual .next() iteration (not for-await) to keep the stream alive
+    // across multiple queries — so generator.return() is never called automatically.
+    // Without this, the open socket keeps the Node.js event loop alive indefinitely.
+    this.stream.return?.(undefined);
   }
 }
 
