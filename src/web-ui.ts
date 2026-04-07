@@ -441,6 +441,25 @@ export function startWebUI(
       return;
     }
 
+    // Live agent activity stream. Single-page HTML that subscribes to the
+    // SSE feed and renders thinking, tool calls, and responses grouped by
+    // session. Stream-only (no persistence). Served unauthenticated; the
+    // API calls it makes (/events, /api/*) enforce auth themselves.
+    if (pathname === '/stream' && req.method === 'GET') {
+      const htmlPath = path.resolve(process.cwd(), 'src', 'web-ui.html');
+      if (fs.existsSync(htmlPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+        });
+        fs.createReadStream(htmlPath).pipe(res);
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Stream view HTML not found');
+      }
+      return;
+    }
+
     // Auth-exempt endpoints (must be reachable before any user exists)
     const authExempt =
       pathname === '/api/auth/setup' ||
