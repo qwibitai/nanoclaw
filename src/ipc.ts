@@ -9,13 +9,59 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { hasPrivilege, VALID_GROUP_TYPES } from './group-type.js';
 import { logger } from './logger.js';
-import { GroupType, RegisteredGroup, ThreadDefaults } from './types.js';
+import {
+  GroupType,
+  RegisteredGroup,
+  ThreadDefaultGroupType,
+  ThreadDefaults,
+} from './types.js';
 
 function parseIpcGroupType(value: unknown): GroupType | null {
   if (typeof value === 'string' && VALID_GROUP_TYPES.has(value)) {
     return value as GroupType;
   }
   return null;
+}
+
+const VALID_THREAD_DEFAULT_TYPES: ReadonlySet<string> = new Set([
+  'chat',
+  'thread',
+]);
+
+function parseIpcThreadDefaultType(
+  value: unknown,
+): ThreadDefaultGroupType | null {
+  if (typeof value === 'string' && VALID_THREAD_DEFAULT_TYPES.has(value)) {
+    return value as ThreadDefaultGroupType;
+  }
+  return null;
+}
+
+/**
+ * thread_defaults を IPC 入力から検証して返す。
+ * type が不正または特権値の場合は null を返す。
+ */
+function validateThreadDefaults(
+  raw: unknown,
+  sourceGroup: string,
+): ThreadDefaults | null | false {
+  if (raw == null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    logger.warn({ sourceGroup }, 'Invalid thread_defaults: not an object');
+    return false;
+  }
+  const td = raw as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(td, 'type')) {
+    const parsedType = parseIpcThreadDefaultType(td.type);
+    if (!parsedType) {
+      logger.warn(
+        { sourceGroup, type: td.type },
+        'Invalid or privileged thread_defaults.type in register_group request',
+      );
+      return false;
+    }
+  }
+  return raw as ThreadDefaults;
 }
 
 export interface IpcDeps {
@@ -456,6 +502,13 @@ export async function processTaskIpc(
           break;
         }
         const groupType = parsedGroupType ?? 'chat';
+        const validatedThreadDefaults = validateThreadDefaults(
+          data.thread_defaults,
+          sourceGroup,
+        );
+        if (validatedThreadDefaults === false) {
+          break;
+        }
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
@@ -464,7 +517,7 @@ export async function processTaskIpc(
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
           type: groupType,
-          thread_defaults: data.thread_defaults,
+          thread_defaults: validatedThreadDefaults ?? undefined,
         });
         logger.info(
           { jid: data.jid, folder: data.folder, groupType, sourceGroup },
