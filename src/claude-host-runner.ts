@@ -76,7 +76,11 @@ function readClaudeUserSettingsEnv(): Record<string, string> {
 }
 
 function hasValidLocalClaudeCredentials(): boolean {
-  const credentialsFile = path.join(os.homedir(), '.claude', '.credentials.json');
+  const credentialsFile = path.join(
+    os.homedir(),
+    '.claude',
+    '.credentials.json',
+  );
   if (!fs.existsSync(credentialsFile)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(credentialsFile, 'utf-8')) as {
@@ -94,7 +98,11 @@ function hasValidLocalClaudeCredentials(): boolean {
 }
 
 function getLocalClaudeOauthAccessToken(): string | undefined {
-  const credentialsFile = path.join(os.homedir(), '.claude', '.credentials.json');
+  const credentialsFile = path.join(
+    os.homedir(),
+    '.claude',
+    '.credentials.json',
+  );
   if (!fs.existsSync(credentialsFile)) return undefined;
   try {
     const data = JSON.parse(fs.readFileSync(credentialsFile, 'utf-8')) as {
@@ -187,8 +195,11 @@ function prepareClaudeHostEnvironment(
     'CLAUDE_EFFORT',
   ] as const) {
     if (key === 'CLAUDE_CODE_OAUTH_TOKEN') {
-      const value = localClaudeOauthAccessToken
-        || (shouldUseEnvClaudeOauthOverride ? envVars[key] || process.env[key] : undefined);
+      const value =
+        localClaudeOauthAccessToken ||
+        (shouldUseEnvClaudeOauthOverride
+          ? envVars[key] || process.env[key]
+          : undefined);
       if (value) env[key] = value;
       continue;
     }
@@ -237,7 +248,7 @@ export async function runClaudeHostAgent(
       status: 'error',
       result: null,
       error:
-        'Claude host runner is not built. Run `cd runners/agent-runner && npm install && npm run build`.',
+        'Claude host runner is not built. Run `cd container/agent-runner && npm install && npm run build`.',
     };
   }
 
@@ -274,7 +285,10 @@ export async function runClaudeHostAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error({ group: group.name, processName }, 'Claude host runner timed out');
+      logger.error(
+        { group: group.name, processName },
+        'Claude host runner timed out',
+      );
       proc.kill('SIGTERM');
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
@@ -323,7 +337,10 @@ export async function runClaudeHostAgent(
           outputChain = outputChain.then(() => onOutput(parsed));
         } catch (err) {
           if (!isSyntaxError(err)) throw err;
-          logger.warn({ group: group.name, err }, 'Failed to parse Claude runner output');
+          logger.warn(
+            { group: group.name, err },
+            'Failed to parse Claude runner output',
+          );
         }
       }
     });
@@ -397,10 +414,15 @@ export async function runClaudeHostAgent(
         return;
       }
 
-      const rawOutput = stdout.replace(
-        new RegExp(`${OUTPUT_START_MARKER}[\\s\\S]*?${OUTPUT_END_MARKER}`, 'g'),
-        '',
-      ).trim();
+      const rawOutput = stdout
+        .replace(
+          new RegExp(
+            `${OUTPUT_START_MARKER}[\\s\\S]*?${OUTPUT_END_MARKER}`,
+            'g',
+          ),
+          '',
+        )
+        .trim();
       if (code !== 0) {
         outputChain.then(() =>
           resolve({

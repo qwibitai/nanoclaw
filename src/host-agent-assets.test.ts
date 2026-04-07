@@ -51,7 +51,10 @@ describe('host agent assets', () => {
       path.join(groupDir, '.mcp.json'),
       JSON.stringify({
         mcpServers: {
-          github: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
+          github: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-github'],
+          },
         },
       }),
     );
@@ -65,7 +68,10 @@ describe('host agent assets', () => {
       mcpServers: {
         notion: { command: 'npx', args: ['-y', '@notionhq/notion-mcp-server'] },
         tavily: { command: 'npx', args: ['-y', 'tavily-mcp'] },
-        github: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
+        github: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-github'],
+        },
       },
     });
   });
@@ -74,7 +80,12 @@ describe('host agent assets', () => {
     const projectRoot = makeTempDir('nanoclaw-root-');
     const fakeHome = makeTempDir('nanoclaw-home-');
     const groupDir = path.join(projectRoot, 'groups', 'gemini-room');
-    const containerSkillDir = path.join(projectRoot, 'container', 'skills', 'status');
+    const containerSkillDir = path.join(
+      projectRoot,
+      'container',
+      'skills',
+      'status',
+    );
     const homeSkillDir = path.join(fakeHome, '.agents', 'skills', 'custom');
 
     fs.mkdirSync(groupDir, { recursive: true });
@@ -120,7 +131,11 @@ describe('host agent assets', () => {
 
     const settings = JSON.parse(
       fs.readFileSync(path.join(groupDir, '.gemini', 'settings.json'), 'utf-8'),
-    ) as { skillsSupport?: boolean; mcpServers?: Record<string, unknown>; mcp?: { allowed?: string[] } };
+    ) as {
+      skillsSupport?: boolean;
+      mcpServers?: Record<string, unknown>;
+      mcp?: { allowed?: string[] };
+    };
 
     expect(settings.skillsSupport).toBe(true);
     expect(settings.mcpServers).toHaveProperty('tavily');
@@ -131,8 +146,8 @@ describe('host agent assets', () => {
     });
     expect(settings.mcpServers).toHaveProperty('github');
     expect(
-      (settings.mcpServers?.github as { headers?: { Authorization?: string } }).headers
-        ?.Authorization,
+      (settings.mcpServers?.github as { headers?: { Authorization?: string } })
+        .headers?.Authorization,
     ).toBe('Bearer $GITHUB_MCP_PAT');
     expect(settings.mcp?.allowed).toContain('tavily');
     expect(settings.mcp?.allowed).toContain('notion');
@@ -143,8 +158,16 @@ describe('host agent assets', () => {
     expect(
       fs.readFileSync(path.join(groupDir, '.gemini', '.env'), 'utf-8'),
     ).toContain('GEMINI_API_KEY=gemini_test_key');
-    expect(fs.existsSync(path.join(groupDir, '.agents', 'skills', 'custom', 'SKILL.md'))).toBe(false);
-    expect(fs.existsSync(path.join(groupDir, '.agents', 'skills', 'status', 'SKILL.md'))).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(groupDir, '.agents', 'skills', 'custom', 'SKILL.md'),
+      ),
+    ).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(groupDir, '.agents', 'skills', 'status', 'SKILL.md'),
+      ),
+    ).toBe(true);
     expect(fs.existsSync(path.join(groupDir, '.gemini', 'skills'))).toBe(false);
   });
 
@@ -152,7 +175,12 @@ describe('host agent assets', () => {
     const projectRoot = makeTempDir('nanoclaw-root-');
     const fakeHome = makeTempDir('nanoclaw-home-');
     const groupDir = path.join(projectRoot, 'groups', 'copilot-room');
-    const containerSkillDir = path.join(projectRoot, 'container', 'skills', 'status');
+    const containerSkillDir = path.join(
+      projectRoot,
+      'container',
+      'skills',
+      'status',
+    );
     const homeSkillDir = path.join(fakeHome, '.agents', 'skills', 'custom');
 
     fs.mkdirSync(groupDir, { recursive: true });
@@ -195,8 +223,16 @@ describe('host agent assets', () => {
     }
 
     const copilotConfig = JSON.parse(
-      fs.readFileSync(path.join(fakeHome, '.copilot', 'mcp-config.json'), 'utf-8'),
-    ) as { mcpServers?: Record<string, { type?: string; url?: string; command?: string }> };
+      fs.readFileSync(
+        path.join(fakeHome, '.copilot', 'mcp-config.json'),
+        'utf-8',
+      ),
+    ) as {
+      mcpServers?: Record<
+        string,
+        { type?: string; url?: string; command?: string }
+      >;
+    };
 
     expect(copilotConfig.mcpServers?.tavily).toMatchObject({
       type: 'local',
@@ -207,10 +243,14 @@ describe('host agent assets', () => {
       command: 'npx',
     });
     expect(
-      fs.existsSync(path.join(groupDir, '.claude', 'skills', 'status', 'SKILL.md')),
+      fs.existsSync(
+        path.join(groupDir, '.claude', 'skills', 'status', 'SKILL.md'),
+      ),
     ).toBe(true);
     expect(
-      fs.existsSync(path.join(groupDir, '.claude', 'skills', 'custom', 'SKILL.md')),
+      fs.existsSync(
+        path.join(groupDir, '.claude', 'skills', 'custom', 'SKILL.md'),
+      ),
     ).toBe(false);
     expect(
       fs.readFileSync(path.join(groupDir, 'copilot-instructions.md'), 'utf-8'),

@@ -247,7 +247,10 @@ export class GroupQueue {
       }, 5000);
       return true;
     } catch (err) {
-      logger.warn({ groupJid, reason, err }, 'Failed to kill active group process');
+      logger.warn(
+        { groupJid, reason, err },
+        'Failed to kill active group process',
+      );
       return false;
     }
   }

@@ -29,7 +29,10 @@ function writeJsonFile(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
 }
 
-function upsertEnvFile(filePath: string, envVars: Record<string, string>): void {
+function upsertEnvFile(
+  filePath: string,
+  envVars: Record<string, string>,
+): void {
   const existing = fs.existsSync(filePath)
     ? fs.readFileSync(filePath, 'utf-8').split(/\r?\n/)
     : [];
@@ -88,7 +91,8 @@ function syncSelectedSkillDirectories(
       if (!allowedNames.has(entry)) continue;
       const srcPath = path.join(source, entry);
       const dstPath = path.join(destination, entry);
-      if (!fs.existsSync(srcPath) || !fs.statSync(srcPath).isDirectory()) continue;
+      if (!fs.existsSync(srcPath) || !fs.statSync(srcPath).isDirectory())
+        continue;
       const samePath = srcPath === dstPath;
       const sameRealPath =
         fs.existsSync(dstPath) &&
@@ -147,7 +151,9 @@ function getProjectMcpConfigPaths(groupDir: string): string[] {
     path.join(groupDir, '.mcp.json'),
     path.join(groupDir, '.mcp.local.json'),
   ];
-  return candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
+  return candidates.filter(
+    (candidate, index) => candidates.indexOf(candidate) === index,
+  );
 }
 
 function loadTavilyApiKey(): string | null {
@@ -155,9 +161,17 @@ function loadTavilyApiKey(): string | null {
   return env.TAVILY_API_KEY || process.env.TAVILY_API_KEY || null;
 }
 
-function getLegacyTavilyServer(groupDir: string): Record<string, unknown> | null {
+function getLegacyTavilyServer(
+  groupDir: string,
+): Record<string, unknown> | null {
   const tavilyKeyFile = path.join(groupDir, '.tavily-key');
-  const tavilyBin = path.join(groupDir, 'node_modules', 'tavily-mcp', 'build', 'index.js');
+  const tavilyBin = path.join(
+    groupDir,
+    'node_modules',
+    'tavily-mcp',
+    'build',
+    'index.js',
+  );
   if (!fs.existsSync(tavilyKeyFile) || !fs.existsSync(tavilyBin)) return null;
   const tavilyKey = fs.readFileSync(tavilyKeyFile, 'utf-8').trim();
   if (!tavilyKey) return null;
@@ -168,7 +182,9 @@ function getLegacyTavilyServer(groupDir: string): Record<string, unknown> | null
   };
 }
 
-function withInjectedTavilyEnv(server: Record<string, unknown>): Record<string, unknown> {
+function withInjectedTavilyEnv(
+  server: Record<string, unknown>,
+): Record<string, unknown> {
   const tavilyKey = loadTavilyApiKey();
   if (!tavilyKey || typeof server.command !== 'string') return server;
   const env =
@@ -189,7 +205,13 @@ function withInjectedTavilyEnv(server: Record<string, unknown>): Record<string, 
 
 function loadNotionToken(): string | null {
   const env = readEnvFile(['NOTION_TOKEN', 'NOTION_API_KEY']);
-  return env.NOTION_TOKEN || env.NOTION_API_KEY || process.env.NOTION_TOKEN || process.env.NOTION_API_KEY || null;
+  return (
+    env.NOTION_TOKEN ||
+    env.NOTION_API_KEY ||
+    process.env.NOTION_TOKEN ||
+    process.env.NOTION_API_KEY ||
+    null
+  );
 }
 
 function getNotionServer(): Record<string, unknown> {
@@ -240,7 +262,10 @@ function getGithubServerConfig(): Record<string, unknown> {
 
 export function buildMergedMcpConfig(groupDir: string): McpConfig | null {
   const merged = collectMcpConfigs(getProjectMcpConfigPaths(groupDir));
-  if (merged.mcpServers?.tavily && typeof merged.mcpServers.tavily === 'object') {
+  if (
+    merged.mcpServers?.tavily &&
+    typeof merged.mcpServers.tavily === 'object'
+  ) {
     merged.mcpServers = {
       ...merged.mcpServers,
       tavily: withInjectedTavilyEnv(
@@ -264,7 +289,10 @@ export function buildMergedMcpConfig(groupDir: string): McpConfig | null {
     : null;
 }
 
-function buildGeminiWorkspaceSettings(existing: Record<string, unknown>, groupDir: string) {
+function buildGeminiWorkspaceSettings(
+  existing: Record<string, unknown>,
+  groupDir: string,
+) {
   const mergedMcpConfig = buildMergedMcpConfig(groupDir);
   const githubPat = loadGithubPat();
   const geminiMcpServers = {
@@ -276,9 +304,7 @@ function buildGeminiWorkspaceSettings(existing: Record<string, unknown>, groupDi
       : {}),
   };
   const existingMcp = (
-    existing.mcp && typeof existing.mcp === 'object'
-      ? existing.mcp
-      : {}
+    existing.mcp && typeof existing.mcp === 'object' ? existing.mcp : {}
   ) as Record<string, unknown>;
 
   return {
@@ -345,7 +371,10 @@ export function prepareGeminiWorkspace(groupDir: string): void {
   writeJsonFile(settingsPath, buildGeminiWorkspaceSettings(existing, groupDir));
 }
 
-function toCopilotMcpServerConfig(serverName: string, serverConfig: Record<string, unknown>) {
+function toCopilotMcpServerConfig(
+  serverName: string,
+  serverConfig: Record<string, unknown>,
+) {
   if (typeof serverConfig.command === 'string') {
     return {
       type: 'local',
@@ -368,10 +397,7 @@ function toCopilotMcpServerConfig(serverName: string, serverConfig: Record<strin
   if (!url) return null;
 
   return {
-    type:
-      typeof serverConfig.httpUrl === 'string'
-        ? 'http'
-        : 'http',
+    type: typeof serverConfig.httpUrl === 'string' ? 'http' : 'http',
     url,
     headers:
       serverConfig.headers && typeof serverConfig.headers === 'object'
@@ -382,7 +408,9 @@ function toCopilotMcpServerConfig(serverName: string, serverConfig: Record<strin
   };
 }
 
-export function buildCopilotAdditionalMcpConfig(groupDir: string): string | null {
+export function buildCopilotAdditionalMcpConfig(
+  groupDir: string,
+): string | null {
   const merged = buildMergedMcpConfig(groupDir);
   if (!merged?.mcpServers) return null;
 
@@ -413,12 +441,19 @@ export function prepareCopilotWorkspace(groupDir: string): void {
   );
 
   const systemMdPath = path.join(groupDir, 'SYSTEM.md');
-  const copilotInstructionsPath = path.join(groupDir, 'copilot-instructions.md');
+  const copilotInstructionsPath = path.join(
+    groupDir,
+    'copilot-instructions.md',
+  );
   if (fs.existsSync(systemMdPath)) {
     fs.copyFileSync(systemMdPath, copilotInstructionsPath);
   }
 
-  const copilotConfigPath = path.join(os.homedir(), '.copilot', 'mcp-config.json');
+  const copilotConfigPath = path.join(
+    os.homedir(),
+    '.copilot',
+    'mcp-config.json',
+  );
   const existing = readJsonFile<McpConfig>(copilotConfigPath) || {};
   const normalizedText = buildCopilotAdditionalMcpConfig(groupDir);
   const normalized = normalizedText

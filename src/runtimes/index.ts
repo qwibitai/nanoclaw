@@ -1,13 +1,7 @@
 import { ChildProcess } from 'child_process';
 
-import {
-  ClaudeHostInput,
-  runClaudeHostAgent,
-} from '../claude-host-runner.js';
-import {
-  CodexHostInput,
-  runCodexHostAgent,
-} from '../codex-host-runner.js';
+import { ClaudeHostInput, runClaudeHostAgent } from '../claude-host-runner.js';
+import { CodexHostInput, runCodexHostAgent } from '../codex-host-runner.js';
 import {
   ContainerInput,
   ContainerOutput,
@@ -28,9 +22,7 @@ export interface AgentRuntime {
 }
 
 export interface AgentRuntimeRunInput
-  extends ContainerInput,
-    ClaudeHostInput,
-    CodexHostInput {
+  extends ContainerInput, ClaudeHostInput, CodexHostInput {
   group: RegisteredGroup;
   onProcess?: (
     proc: ChildProcess,

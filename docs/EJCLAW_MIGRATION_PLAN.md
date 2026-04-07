@@ -3,9 +3,9 @@
 `nanoclaw`를 Apple Container 중심 구조에서 `EJClaw` 스타일의 host-runner 중심 구조로 전환하기 위한 계획 문서다.
 
 기준 레퍼런스:
-- 현재 저장소: `/Users/eunu03/nanoclaw`
-- 참고 구현: `/Users/eunu03/ejclaw`
-- 참고 메모: [EJCLAW_GUIDE.md](/Users/eunu03/nanoclaw/EJCLAW_GUIDE.md)
+- 현재 저장소: `<repo-root>/nanoclaw`
+- 참고 구현: `~/path/to/ejclaw`
+- 참고 메모: [EJCLAW_GUIDE.md](../EJCLAW_GUIDE.md)
 
 ## 목표
 
@@ -72,7 +72,7 @@ Shared concepts:
 - `registered_groups`와 `sessions`는 이미 `agent_type` 다중 등록 구조를 갖고 있다.
 - Discord 채널은 `claude-code`, `gemini`, `copilot`, `codex` 라우팅이 가능하다.
 - `codex`는 현재 host runner 경로로 일부 추가되었다.
-- Claude는 여전히 [container-runner.ts](/Users/eunu03/nanoclaw/src/container-runner.ts)와 [container-runtime.ts](/Users/eunu03/nanoclaw/src/container-runtime.ts)에 의존한다.
+- Claude는 여전히 [container-runner.ts](../src/container-runner.ts)와 [container-runtime.ts](../src/container-runtime.ts)에 의존한다.
 - 서비스 부팅 초기에 컨테이너 런타임 실패 시 전체 앱이 종료된다.
 
 ## 단계별 계획
@@ -100,7 +100,7 @@ Shared concepts:
 - `ContainerClaudeRuntime` 구현체 분리
 - `HostCliRuntime` 또는 `HostAgentRuntime` 공통 구현 도입
 - `CodexRuntime`, `GeminiRuntime`, `CopilotRuntime`는 host runtime 계층으로 정리
-- [index.ts](/Users/eunu03/nanoclaw/src/index.ts)의 직접 분기를 runtime dispatch로 치환
+- [index.ts](../src/index.ts)의 직접 분기를 runtime dispatch로 치환
 
 권장 인터페이스 예시:
 
@@ -128,7 +128,7 @@ interface AgentRuntime {
 - Claude를 컨테이너 없이도 실행할 수 있게 만든다.
 
 작업:
-- `EJClaw`의 [agent-runner.ts](/Users/eunu03/ejclaw/src/agent-runner.ts)와 runner 디렉터리 구조를 참고해 `nanoclaw`용 Claude host runner 추가
+- `EJClaw`의 `~/path/to/ejclaw/src/agent-runner.ts`와 runner 디렉터리 구조를 참고해 `nanoclaw`용 Claude host runner 추가
 - 세션 지속성 구현
 - streaming output marker 또는 동등한 프로토콜 도입
 - 현재 IPC 기반 mid-turn message injection이 필요하면 host runner에 같은 방식으로 연결
@@ -155,7 +155,7 @@ interface AgentRuntime {
 - 컨테이너 부재가 전체 서비스 부팅 실패로 이어지지 않게 만든다.
 
 작업:
-- [container-runtime.ts](/Users/eunu03/nanoclaw/src/container-runtime.ts)의 fatal startup 경로 제거 또는 optional화
+- [container-runtime.ts](../src/container-runtime.ts)의 fatal startup 경로 제거 또는 optional화
 - Claude가 host runner로 등록된 경우 container check를 건너뛰게 변경
 - 서비스 시작 시 “필요한 runtime만 검사”하도록 분리
 

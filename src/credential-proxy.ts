@@ -191,9 +191,10 @@ export function startCredentialProxy(
 
         (async () => {
           // Fresh OAuth token for this request
-          const freshToken = authMode === 'oauth'
-            ? (readClaudeCredentials() || oauthToken)
-            : undefined;
+          const freshToken =
+            authMode === 'oauth'
+              ? readClaudeCredentials() || oauthToken
+              : undefined;
 
           const headers = buildHeaders(
             req.headers as Record<string, string>,
@@ -210,9 +211,10 @@ export function startCredentialProxy(
               headers,
             } as RequestOptions,
             async (upRes) => {
+              const upstreamStatusCode = upRes.statusCode ?? 502;
               // For non-401 or API-key mode, stream directly (fast path)
-              if (upRes.statusCode !== 401 || authMode !== 'oauth') {
-                res.writeHead(upRes.statusCode!, upRes.headers);
+              if (upstreamStatusCode !== 401 || authMode !== 'oauth') {
+                res.writeHead(upstreamStatusCode, upRes.headers);
                 upRes.pipe(res);
                 return;
               }
@@ -227,7 +229,7 @@ export function startCredentialProxy(
                   const parsed = JSON.parse(bodyStr);
                   isExpired =
                     parsed?.error?.type === 'authentication_error' &&
-                    (parsed?.error?.message as string ?? '')
+                    ((parsed?.error?.message as string) ?? '')
                       .toLowerCase()
                       .includes('expired');
                 } catch (err) {
@@ -243,7 +245,9 @@ export function startCredentialProxy(
                 }
 
                 // Attempt token refresh and retry once
-                logger.warn('Detected expired OAuth token — refreshing and retrying');
+                logger.warn(
+                  'Detected expired OAuth token — refreshing and retrying',
+                );
                 const newToken = await refreshClaudeOAuthToken();
                 if (!newToken) {
                   // Refresh failed — return original 401
@@ -267,7 +271,7 @@ export function startCredentialProxy(
                     headers: retryHeaders,
                   } as RequestOptions,
                   (retryRes) => {
-                    res.writeHead(retryRes.statusCode!, retryRes.headers);
+                    res.writeHead(retryRes.statusCode ?? 502, retryRes.headers);
                     retryRes.pipe(res);
                   },
                 );

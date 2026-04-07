@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "build:runners": "npm --prefix runners/agent-runner run build && npm --prefix runners/codex-runner run build",
+    "build:agent-runner": "npm --prefix container/agent-runner run build",
+    "build:runners": "npm run build:agent-runner",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

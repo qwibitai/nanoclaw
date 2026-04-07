@@ -28,7 +28,11 @@ export function writeShutdownContext(
   signal: string,
 ): void {
   if (groups.length === 0) return;
-  const ctx: RestartContext = { groups, signal, timestamp: new Date().toISOString() };
+  const ctx: RestartContext = {
+    groups,
+    signal,
+    timestamp: new Date().toISOString(),
+  };
   fs.mkdirSync(STORE_DIR, { recursive: true });
   fs.writeFileSync(CONTEXT_FILE, JSON.stringify(ctx, null, 2));
 }
@@ -36,7 +40,9 @@ export function writeShutdownContext(
 export function consumeRestartContext(): RestartContext | null {
   if (!fs.existsSync(CONTEXT_FILE)) return null;
   try {
-    const ctx = JSON.parse(fs.readFileSync(CONTEXT_FILE, 'utf-8')) as RestartContext;
+    const ctx = JSON.parse(
+      fs.readFileSync(CONTEXT_FILE, 'utf-8'),
+    ) as RestartContext;
     fs.unlinkSync(CONTEXT_FILE);
     return ctx;
   } catch (err) {
@@ -50,7 +56,11 @@ export function consumeRestartContext(): RestartContext | null {
   }
 }
 
-export function buildRestartAnnouncement(group: InterruptedGroup, signal: string): string {
-  const verb = group.status === 'processing' ? 'was being processed' : 'was queued';
+export function buildRestartAnnouncement(
+  group: InterruptedGroup,
+  signal: string,
+): string {
+  const verb =
+    group.status === 'processing' ? 'was being processed' : 'was queued';
   return `⚠️ Service restarted (${signal}). A task in **${group.groupName}** ${verb} and may have been interrupted. Please re-send if needed.`;
 }

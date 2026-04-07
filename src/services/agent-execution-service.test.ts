@@ -7,7 +7,8 @@ const mockReadModelSwitchHandoff = vi.fn<
 >(() => null);
 
 vi.mock('../runtimes/index.js', () => ({
-  getAgentType: (group: { agentType?: string }) => group.agentType || 'claude-code',
+  getAgentType: (group: { agentType?: string }) =>
+    group.agentType || 'claude-code',
   requiresContainerRuntime: () => false,
   resolveAgentRuntime: () => ({
     run: (...args: unknown[]) => mockRuntimeRun(...args),

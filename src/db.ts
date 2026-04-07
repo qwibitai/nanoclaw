@@ -152,9 +152,7 @@ function createSchema(database: Database.Database): void {
 
   // Add paused_until column for /pause command support
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`);
   } catch {
     /* column already exists */
   }
@@ -201,9 +199,7 @@ function createSchema(database: Database.Database): void {
 
   // Backfill paused_until again after the registered_groups table rewrite above.
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`);
   } catch {
     /* column already exists */
   }
@@ -666,21 +662,33 @@ export function setRouterState(key: string, value: string): void {
 // --- Session accessors ---
 
 /** Get session ID for any agent type. */
-export function getAgentSession(groupFolder: string, agentType: string): string | undefined {
+export function getAgentSession(
+  groupFolder: string,
+  agentType: string,
+): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?')
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?',
+    )
     .get(groupFolder, agentType) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
 /** Store session ID for any agent type. */
-export function setAgentSession(groupFolder: string, agentType: string, sessionId: string): void {
+export function setAgentSession(
+  groupFolder: string,
+  agentType: string,
+  sessionId: string,
+): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, agent_type, session_id) VALUES (?, ?, ?)',
   ).run(groupFolder, agentType, sessionId);
 }
 
-export function deleteAgentSession(groupFolder: string, agentType: string): void {
+export function deleteAgentSession(
+  groupFolder: string,
+  agentType: string,
+): void {
   db.prepare(
     'DELETE FROM sessions WHERE group_folder = ? AND agent_type = ?',
   ).run(groupFolder, agentType);
@@ -760,7 +768,9 @@ export function setActiveAgentSessionLabel(
 
 export function getSession(groupFolder: string): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?')
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?',
+    )
     .get(groupFolder, 'claude-code') as { session_id: string } | undefined;
   return row?.session_id;
 }
@@ -773,7 +783,9 @@ export function setSession(groupFolder: string, sessionId: string): void {
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions WHERE agent_type = ?')
+    .prepare(
+      'SELECT group_folder, session_id FROM sessions WHERE agent_type = ?',
+    )
     .all('claude-code') as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
@@ -823,7 +835,10 @@ export function getRegisteredGroup(
     .get(jid, agentType) as RawGroupRow | undefined;
   if (!row) return undefined;
   if (!isValidGroupFolder(row.folder)) {
-    logger.warn({ jid, folder: row.folder }, 'Skipping registered group with invalid folder');
+    logger.warn(
+      { jid, folder: row.folder },
+      'Skipping registered group with invalid folder',
+    );
     return undefined;
   }
   return { jid: row.jid, ...rowToGroup(row) };
@@ -877,7 +892,10 @@ export function getAllRegisteredGroups(
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
     if (!isValidGroupFolder(row.folder)) {
-      logger.warn({ jid: row.jid, folder: row.folder }, 'Skipping registered group with invalid folder');
+      logger.warn(
+        { jid: row.jid, folder: row.folder },
+        'Skipping registered group with invalid folder',
+      );
       continue;
     }
     // When no filter: first row wins per JID (prefer claude-code, then others)
@@ -910,17 +928,21 @@ export function getRegisteredAgentTypesForJid(jid: string): string[] {
  */
 export function getAllGroupsForJid(jid: string): RegisteredGroup[] {
   const rows = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ? ORDER BY agent_type')
+    .prepare(
+      'SELECT * FROM registered_groups WHERE jid = ? ORDER BY agent_type',
+    )
     .all(jid) as RawGroupRow[];
-  return rows
-    .filter((r) => isValidGroupFolder(r.folder))
-    .map(rowToGroup);
+  return rows.filter((r) => isValidGroupFolder(r.folder)).map(rowToGroup);
 }
 
 // --- Pause accessors ---
 
 /** Set or clear the pause timestamp for a specific agent in a channel. */
-export function setGroupPause(jid: string, agentType: string, pausedUntil: string | null): void {
+export function setGroupPause(
+  jid: string,
+  agentType: string,
+  pausedUntil: string | null,
+): void {
   db.prepare(
     'UPDATE registered_groups SET paused_until = ? WHERE jid = ? AND agent_type = ?',
   ).run(pausedUntil, jid, agentType);
@@ -929,7 +951,9 @@ export function setGroupPause(jid: string, agentType: string, pausedUntil: strin
 /** Returns true if the agent is currently paused (pausedUntil is in the future). */
 export function isGroupPaused(jid: string, agentType: string): boolean {
   const row = db
-    .prepare('SELECT paused_until FROM registered_groups WHERE jid = ? AND agent_type = ?')
+    .prepare(
+      'SELECT paused_until FROM registered_groups WHERE jid = ? AND agent_type = ?',
+    )
     .get(jid, agentType) as { paused_until: string | null } | undefined;
   if (!row?.paused_until) return false;
   return new Date() < new Date(row.paused_until);
@@ -951,10 +975,22 @@ export interface WorkItem {
   delivered_at: string | null;
 }
 
-export function createWorkItem(item: Pick<WorkItem, 'group_folder' | 'chat_jid' | 'agent_type' | 'result_payload'>): number {
-  const result = db.prepare(
-    `INSERT INTO work_items (group_folder, chat_jid, agent_type, result_payload) VALUES (?, ?, ?, ?)`,
-  ).run(item.group_folder, item.chat_jid, item.agent_type, item.result_payload);
+export function createWorkItem(
+  item: Pick<
+    WorkItem,
+    'group_folder' | 'chat_jid' | 'agent_type' | 'result_payload'
+  >,
+): number {
+  const result = db
+    .prepare(
+      `INSERT INTO work_items (group_folder, chat_jid, agent_type, result_payload) VALUES (?, ?, ?, ?)`,
+    )
+    .run(
+      item.group_folder,
+      item.chat_jid,
+      item.agent_type,
+      item.result_payload,
+    );
   return result.lastInsertRowid as number;
 }
 
@@ -974,7 +1010,9 @@ export function markWorkItemFailed(id: number, error: string): void {
 
 export function getUndeliveredWorkItems(): WorkItem[] {
   return db
-    .prepare(`SELECT * FROM work_items WHERE status IN ('produced', 'delivery_retry') ORDER BY created_at`)
+    .prepare(
+      `SELECT * FROM work_items WHERE status IN ('produced', 'delivery_retry') ORDER BY created_at`,
+    )
     .all() as WorkItem[];
 }
 

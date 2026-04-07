@@ -17,7 +17,9 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 // Docker Desktop routes host.docker.internal → loopback inside its VM.
 export const CONTAINER_HOST_GATEWAY =
   process.env.CONTAINER_HOST_GATEWAY ||
-  (CONTAINER_RUNTIME_BIN === 'container' ? '192.168.64.1' : 'host.docker.internal');
+  (CONTAINER_RUNTIME_BIN === 'container'
+    ? '192.168.64.1'
+    : 'host.docker.internal');
 
 /**
  * Address the credential proxy binds to.
@@ -142,7 +144,11 @@ export function cleanupOrphans(): void {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
       } catch (err) {
-        if (!isErrnoException(err, 'ESRCH')) throw err;
+        if (isErrnoException(err, 'ESRCH')) continue;
+        logger.warn(
+          { err, name },
+          'Failed to stop orphaned container; continuing',
+        );
       }
     }
     if (orphans.length > 0) {

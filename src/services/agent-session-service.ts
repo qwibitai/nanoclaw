@@ -66,7 +66,11 @@ export class AgentSessionService {
     agentType: string,
     label: string,
   ): NamedSession | undefined {
-    const named = this.repository.getNamedSession(groupFolder, agentType, label);
+    const named = this.repository.getNamedSession(
+      groupFolder,
+      agentType,
+      label,
+    );
     if (!named) return undefined;
     this.repository.setActiveLabel(groupFolder, agentType, label);
     this.sessionState[groupFolder] = named.session_id;

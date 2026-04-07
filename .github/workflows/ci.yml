@@ -4,8 +4,16 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,13 +21,28 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            container/agent-runner/package-lock.json
       - run: npm ci
 
       - name: Format check
         run: npm run format:check
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install agent runner dependencies
+        run: npm --prefix container/agent-runner ci
+
+      - name: Build agent runner
+        run: npm run build:agent-runner
 
       - name: Tests
-        run: npx vitest run
+        run: npm test
