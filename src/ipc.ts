@@ -3,7 +3,6 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -11,6 +10,9 @@ import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
+  dataDir: string;
+  ipcPollInterval: number;
+  timezone: string;
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
@@ -34,7 +36,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
   }
   ipcWatcherRunning = true;
 
-  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+  const ipcBaseDir = path.join(deps.dataDir, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
@@ -47,7 +49,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       });
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+      setTimeout(processIpcFiles, deps.ipcPollInterval);
       return;
     }
 
@@ -147,7 +149,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
-    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+    setTimeout(processIpcFiles, deps.ipcPollInterval);
   };
 
   processIpcFiles();
@@ -216,7 +218,7 @@ export async function processTaskIpc(
         if (scheduleType === 'cron') {
           try {
             const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: TIMEZONE,
+              tz: deps.timezone,
             });
             nextRun = interval.next().toISOString();
           } catch {
@@ -370,7 +372,7 @@ export async function processTaskIpc(
             try {
               const interval = CronExpressionParser.parse(
                 updatedTask.schedule_value,
-                { tz: TIMEZONE },
+                { tz: deps.timezone },
               );
               updates.next_run = interval.next().toISOString();
             } catch {

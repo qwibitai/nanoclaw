@@ -9,15 +9,8 @@ import path from 'path';
 
 import { JsBoxlite } from '@boxlite-ai/boxlite';
 
-import {
-  BOX_IMAGE,
-  BOX_ROOTFS_PATH,
-  BOX_MEMORY_MIB,
-  BOX_CPUS,
-  CONTAINER_TIMEOUT,
-  IDLE_TIMEOUT,
-} from './config.js';
 import { logger } from './logger.js';
+import type { RuntimeConfig } from './runtime-config.js';
 
 type BoxliteRuntime = InstanceType<typeof JsBoxlite>;
 
@@ -144,6 +137,7 @@ export async function spawnBox(
   boxEnv: Record<string, string>,
   userStr: string | undefined,
   stdinData: string,
+  rtConfig: RuntimeConfig,
 ): Promise<SpawnResult | SpawnErrorResult> {
   const runtime = getRuntime();
   const envArray = Object.entries(boxEnv).map(([key, value]) => ({
@@ -156,15 +150,15 @@ export async function spawnBox(
     // Use local OCI layout if available (from container/build.sh), else pull from registry.
     // Check for oci-layout file to distinguish a valid OCI directory from an empty one.
     const useLocalRootfs =
-      BOX_ROOTFS_PATH &&
-      fs.existsSync(path.join(BOX_ROOTFS_PATH, 'oci-layout'));
+      rtConfig.boxRootfsPath &&
+      fs.existsSync(path.join(rtConfig.boxRootfsPath, 'oci-layout'));
     box = await runtime.create(
       {
-        image: useLocalRootfs ? undefined : BOX_IMAGE,
-        rootfsPath: useLocalRootfs ? BOX_ROOTFS_PATH : undefined,
+        image: useLocalRootfs ? undefined : rtConfig.boxImage,
+        rootfsPath: useLocalRootfs ? rtConfig.boxRootfsPath : undefined,
         autoRemove: true,
-        memoryMib: BOX_MEMORY_MIB,
-        cpus: BOX_CPUS,
+        memoryMib: rtConfig.boxMemoryMib,
+        cpus: rtConfig.boxCpus,
         volumes: mounts.map((m) => ({
           hostPath: m.hostPath,
           guestPath: m.containerPath,
@@ -193,8 +187,8 @@ export async function spawnBox(
   let execution;
   try {
     const timeoutSecs = Math.max(
-      Math.floor(CONTAINER_TIMEOUT / 1000),
-      Math.floor((IDLE_TIMEOUT + 30_000) / 1000),
+      Math.floor(rtConfig.containerTimeout / 1000),
+      Math.floor((rtConfig.idleTimeout + 30_000) / 1000),
     );
 
     execution = await box.exec(

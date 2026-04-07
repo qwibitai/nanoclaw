@@ -1,6 +1,5 @@
 import fs from 'fs';
 
-import { SENDER_ALLOWLIST_PATH } from './config.js';
 import { logger } from './logger.js';
 
 export interface ChatAllowlistEntry {
@@ -33,7 +32,8 @@ function isValidEntry(entry: unknown): entry is ChatAllowlistEntry {
 export function loadSenderAllowlist(
   pathOverride?: string,
 ): SenderAllowlistConfig {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
+  if (!pathOverride) return DEFAULT_CONFIG;
+  const filePath = pathOverride;
 
   let raw: string;
   try {

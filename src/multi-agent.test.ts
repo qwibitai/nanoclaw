@@ -1,0 +1,140 @@
+/**
+ * Multi-agent tests — verifies the two-level API:
+ * AgentLite creates multiple Agents with isolated state.
+ */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { AgentImpl } from './agent-impl.js';
+import { buildAgentConfig } from './agent-config.js';
+import { buildRuntimeConfig } from './runtime-config.js';
+
+let tmpDir: string;
+const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
+
+function createAgent(name: string): AgentImpl {
+  const config = buildAgentConfig(
+    name,
+    { workdir: path.join(tmpDir, 'agents', name) },
+    tmpDir,
+  );
+  return new AgentImpl(config, rtConfig);
+}
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlite-multi-'));
+});
+
+afterEach(() => {
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+});
+
+describe('Multi-agent isolation', () => {
+  it('two agents have independent names', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+    expect(alice.name).toBe('alice');
+    expect(bob.name).toBe('bob');
+  });
+
+  it('two agents have independent workdir paths', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+
+    expect(alice.config.workdir).toContain('alice');
+    expect(bob.config.workdir).toContain('bob');
+    expect(alice.config.workdir).not.toBe(bob.config.workdir);
+    expect(alice.config.storeDir).not.toBe(bob.config.storeDir);
+    expect(alice.config.groupsDir).not.toBe(bob.config.groupsDir);
+    expect(alice.config.dataDir).not.toBe(bob.config.dataDir);
+  });
+
+  it('two agents have independent channel maps', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+
+    const mockChannel = {
+      name: 'mock',
+      connect: async () => {},
+      disconnect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => false,
+      ownsJid: () => false,
+    };
+
+    alice.addChannel('test', mockChannel as any);
+    expect(alice.channels.size).toBe(1);
+    expect(bob.channels.size).toBe(0);
+  });
+
+  it('agents can be created and deleted independently', () => {
+    const agents = new Map<string, AgentImpl>();
+
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+    const charlie = createAgent('charlie');
+
+    agents.set('alice', alice);
+    agents.set('bob', bob);
+    agents.set('charlie', charlie);
+
+    expect(agents.size).toBe(3);
+
+    // Delete bob
+    agents.delete('bob');
+    expect(agents.size).toBe(2);
+    expect(agents.has('alice')).toBe(true);
+    expect(agents.has('bob')).toBe(false);
+    expect(agents.has('charlie')).toBe(true);
+  });
+
+  it('agent configs are immutable and independent', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+
+    // Default assistant name for both
+    expect(alice.config.assistantName).toBe('Andy');
+    expect(bob.config.assistantName).toBe('Andy');
+
+    // But paths are different
+    expect(alice.config.workdir).not.toBe(bob.config.workdir);
+  });
+
+  it('custom assistant names per agent', () => {
+    const aliceConfig = buildAgentConfig(
+      'alice',
+      { name: 'Alice', workdir: path.join(tmpDir, 'agents', 'alice') },
+      tmpDir,
+    );
+    const bobConfig = buildAgentConfig(
+      'bob',
+      { name: 'Bob', workdir: path.join(tmpDir, 'agents', 'bob') },
+      tmpDir,
+    );
+
+    const alice = new AgentImpl(aliceConfig, rtConfig);
+    const bob = new AgentImpl(bobConfig, rtConfig);
+
+    expect(alice.config.assistantName).toBe('Alice');
+    expect(bob.config.assistantName).toBe('Bob');
+    expect(alice.config.triggerPattern.test('@Alice hello')).toBe(true);
+    expect(alice.config.triggerPattern.test('@Bob hello')).toBe(false);
+    expect(bob.config.triggerPattern.test('@Bob hello')).toBe(true);
+  });
+
+  it('shared RuntimeConfig across agents', () => {
+    const alice = createAgent('alice');
+    const bob = createAgent('bob');
+
+    // Both share the same runtime config reference
+    expect(alice.runtimeConfig).toBe(bob.runtimeConfig);
+    expect(alice.runtimeConfig.boxImage).toBe(bob.runtimeConfig.boxImage);
+  });
+});

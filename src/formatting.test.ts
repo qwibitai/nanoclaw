@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+const ASSISTANT_NAME = 'Andy';
+const TRIGGER_PATTERN = /^@Andy\b/i;
 import {
   escapeXml,
   formatMessages,

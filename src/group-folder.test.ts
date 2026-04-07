@@ -1,17 +1,15 @@
 import path from 'path';
 
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('./config.js', () => ({
-  GROUPS_DIR: '/tmp/agentlite-test/groups',
-  DATA_DIR: '/tmp/agentlite-test/data',
-}));
+import { describe, expect, it } from 'vitest';
 
 import {
   isValidGroupFolder,
   resolveGroupFolderPath,
   resolveGroupIpcPath,
 } from './group-folder.js';
+
+const TEST_GROUPS_DIR = '/tmp/agentlite-test/groups';
+const TEST_DATA_DIR = '/tmp/agentlite-test/data';
 
 describe('group folder validation', () => {
   it('accepts normal group folder names', () => {
@@ -28,21 +26,23 @@ describe('group folder validation', () => {
   });
 
   it('resolves safe paths under groups directory', () => {
-    const resolved = resolveGroupFolderPath('family-chat');
+    const resolved = resolveGroupFolderPath('family-chat', TEST_GROUPS_DIR);
     expect(resolved.endsWith(`${path.sep}groups${path.sep}family-chat`)).toBe(
       true,
     );
   });
 
   it('resolves safe paths under data ipc directory', () => {
-    const resolved = resolveGroupIpcPath('family-chat');
+    const resolved = resolveGroupIpcPath('family-chat', TEST_DATA_DIR);
     expect(
       resolved.endsWith(`${path.sep}data${path.sep}ipc${path.sep}family-chat`),
     ).toBe(true);
   });
 
   it('throws for unsafe folder names', () => {
-    expect(() => resolveGroupFolderPath('../../etc')).toThrow();
-    expect(() => resolveGroupIpcPath('/tmp')).toThrow();
+    expect(() =>
+      resolveGroupFolderPath('../../etc', TEST_GROUPS_DIR),
+    ).toThrow();
+    expect(() => resolveGroupIpcPath('/tmp', TEST_DATA_DIR)).toThrow();
   });
 });

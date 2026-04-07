@@ -39,6 +39,26 @@ describe('task scheduler', () => {
     );
 
     startSchedulerLoop({
+      assistantName: 'Andy',
+      schedulerPollInterval: 60000,
+      timezone: 'UTC',
+      runtimeConfig: {
+        packageRoot: '/tmp/agentlite-test-pkg',
+        workdir: '/tmp/agentlite-test',
+        boxImage: 'agentlite-agent:latest',
+        boxRootfsPath: '',
+        boxMemoryMib: 2048,
+        boxCpus: 2,
+        maxConcurrentContainers: 5,
+        containerTimeout: 1800000,
+        containerMaxOutputSize: 10485760,
+        idleTimeout: 1800000,
+        onecliUrl: 'http://localhost:10254',
+        timezone: 'UTC',
+        pollInterval: 2000,
+        schedulerPollInterval: 60000,
+        ipcPollInterval: 1000,
+      },
       registeredGroups: () => ({}),
       getSessions: () => ({}),
       queue: { enqueueTask } as any,
@@ -69,7 +89,7 @@ describe('task scheduler', () => {
       created_at: '2026-01-01T00:00:00.000Z',
     };
 
-    const nextRun = computeNextRun(task);
+    const nextRun = computeNextRun(task, 'UTC');
     expect(nextRun).not.toBeNull();
 
     // Should be anchored to scheduledTime + 60s, NOT Date.now() + 60s
@@ -93,7 +113,7 @@ describe('task scheduler', () => {
       created_at: '2026-01-01T00:00:00.000Z',
     };
 
-    expect(computeNextRun(task)).toBeNull();
+    expect(computeNextRun(task, 'UTC')).toBeNull();
   });
 
   it('computeNextRun skips missed intervals without infinite loop', () => {
@@ -117,7 +137,7 @@ describe('task scheduler', () => {
       created_at: '2026-01-01T00:00:00.000Z',
     };
 
-    const nextRun = computeNextRun(task);
+    const nextRun = computeNextRun(task, 'UTC');
     expect(nextRun).not.toBeNull();
     // Must be in the future
     expect(new Date(nextRun!).getTime()).toBeGreaterThan(Date.now());

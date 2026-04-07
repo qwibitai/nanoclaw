@@ -4,21 +4,8 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 const OUTPUT_START_MARKER = '---AGENTLITE_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---AGENTLITE_OUTPUT_END---';
 
-// Mock config
-vi.mock('./config.js', () => ({
-  PACKAGE_ROOT: '/tmp/agentlite-test-package',
-  BOX_IMAGE: 'agentlite-agent:latest',
-  BOX_ROOTFS_PATH: '',
-  BOX_MEMORY_MIB: 2048,
-  BOX_CPUS: 2,
-  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
-  CONTAINER_TIMEOUT: 1800000, // 30min
-  DATA_DIR: '/tmp/agentlite-test-data',
-  GROUPS_DIR: '/tmp/agentlite-test-groups',
-  IDLE_TIMEOUT: 1800000, // 30min
-  ONECLI_URL: 'http://localhost:10254',
-  TIMEZONE: 'America/Los_Angeles',
-}));
+// runtime-config no longer exports PACKAGE_ROOT — it's in RuntimeConfig
+vi.mock('./runtime-config.js', () => ({}));
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -158,7 +145,26 @@ vi.mock('./box-runtime.js', () => ({
 }));
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import type { RuntimeConfig } from './runtime-config.js';
 import type { RegisteredGroup } from './types.js';
+
+const testRuntimeConfig: RuntimeConfig = {
+  packageRoot: '/tmp/agentlite-test-package',
+  workdir: '/tmp/agentlite-test',
+  boxImage: 'agentlite-agent:latest',
+  boxRootfsPath: '',
+  boxMemoryMib: 2048,
+  boxCpus: 2,
+  maxConcurrentContainers: 5,
+  containerTimeout: 1800000, // 30min
+  containerMaxOutputSize: 10485760,
+  idleTimeout: 1800000, // 30min
+  onecliUrl: 'http://localhost:10254',
+  timezone: 'America/Los_Angeles',
+  pollInterval: 2000,
+  schedulerPollInterval: 60000,
+  ipcPollInterval: 1000,
+};
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -201,6 +207,7 @@ describe('container-runner with BoxLite', () => {
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
+      testRuntimeConfig,
       () => {},
       onOutput,
     );
@@ -245,6 +252,7 @@ describe('container-runner with BoxLite', () => {
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
+      testRuntimeConfig,
       () => {},
       onOutput,
     );
@@ -272,6 +280,7 @@ describe('container-runner with BoxLite', () => {
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
+      testRuntimeConfig,
       () => {},
       onOutput,
     );

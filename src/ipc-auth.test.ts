@@ -52,6 +52,9 @@ beforeEach(() => {
   setRegisteredGroup('third@g.us', THIRD_GROUP);
 
   deps = {
+    dataDir: '/tmp/test-ipc',
+    ipcPollInterval: 1000,
+    timezone: 'UTC',
     sendMessage: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {

@@ -4,11 +4,9 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -20,6 +18,9 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  groupsDir: string;
+  assistantName: string;
+  triggerPattern: RegExp;
 }
 
 /**
@@ -76,7 +77,7 @@ export class TelegramChannel implements Channel {
         return null;
       }
 
-      const groupDir = resolveGroupFolderPath(groupFolder);
+      const groupDir = resolveGroupFolderPath(groupFolder, this.opts.groupsDir);
       const attachDir = path.join(groupDir, 'attachments');
       fs.mkdirSync(attachDir, { recursive: true });
 
@@ -132,7 +133,7 @@ export class TelegramChannel implements Channel {
 
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
-      ctx.reply(`${ASSISTANT_NAME} is online.`);
+      ctx.reply(`${this.opts.assistantName} is online.`);
     });
 
     // Telegram bot commands handled above — skip them in the general handler
@@ -173,8 +174,8 @@ export class TelegramChannel implements Channel {
           ? senderName
           : (ctx.chat as any).title || chatJid;
 
-      // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
-      // Telegram @mentions (e.g., @andy_ai_bot) won't match TRIGGER_PATTERN
+      // Translate Telegram @bot_username mentions into this.opts.triggerPattern format.
+      // Telegram @mentions (e.g., @andy_ai_bot) won't match this.opts.triggerPattern
       // (e.g., ^@Andy\b), so we prepend the trigger when the bot is @mentioned.
       const botUsername = ctx.me?.username?.toLowerCase();
       if (botUsername) {
@@ -188,8 +189,8 @@ export class TelegramChannel implements Channel {
           }
           return false;
         });
-        if (isBotMentioned && !TRIGGER_PATTERN.test(content)) {
-          content = `@${ASSISTANT_NAME} ${content}`;
+        if (isBotMentioned && !this.opts.triggerPattern.test(content)) {
+          content = `@${this.opts.assistantName} ${content}`;
         }
       }
 
@@ -280,7 +281,7 @@ export class TelegramChannel implements Channel {
         const msgId = ctx.message.message_id.toString();
         const filename =
           opts.filename ||
-          `${placeholder.replace(/[\[\] ]/g, '').toLowerCase()}_${msgId}`;
+          `${placeholder.replace(/[[\] ]/g, '').toLowerCase()}_${msgId}`;
         this.downloadFile(opts.fileId, group.folder, filename).then(
           (filePath) => {
             if (filePath) {
@@ -428,7 +429,10 @@ export class TelegramChannel implements Channel {
   }
 }
 
-registerChannel('telegram', (opts: ChannelOpts) => {
+/** Factory for creating a TelegramChannel from env-based token. */
+export function createTelegramFromEnv(
+  opts: Omit<TelegramChannelOpts, never>,
+): TelegramChannel | null {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
@@ -437,4 +441,4 @@ registerChannel('telegram', (opts: ChannelOpts) => {
     return null;
   }
   return new TelegramChannel(token, opts);
-});
+}

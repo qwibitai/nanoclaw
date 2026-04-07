@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import { _initTestDatabase, storeChatMetadata } from './db.js';
-import { AgentLiteInstance } from './instance.js';
+import { AgentImpl } from './agent-impl.js';
+import { buildAgentConfig } from './agent-config.js';
+import { buildRuntimeConfig } from './runtime-config.js';
 
-const testInstance = new AgentLiteInstance('test', {});
+const agentConfig = buildAgentConfig('test', undefined, '/tmp/agentlite-test');
+const runtimeConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
+const testInstance = new AgentImpl(agentConfig, runtimeConfig);
 
 beforeEach(() => {
   _initTestDatabase();

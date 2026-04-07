@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+
+const DEFAULT_MAX_CONCURRENT = 5;
 
 interface QueuedTask {
   id: string;
@@ -33,9 +34,11 @@ export class GroupQueue {
     null;
   private shuttingDown = false;
   private _dataDir: string;
+  private _maxConcurrent: number;
 
-  constructor(opts?: { dataDir?: string }) {
-    this._dataDir = opts?.dataDir ?? DATA_DIR;
+  constructor(opts: { dataDir: string; maxConcurrent?: number }) {
+    this._dataDir = opts.dataDir;
+    this._maxConcurrent = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
   }
 
   private getGroup(groupJid: string): GroupState {
@@ -72,7 +75,7 @@ export class GroupQueue {
       return;
     }
 
-    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+    if (this.activeCount >= this._maxConcurrent) {
       state.pendingMessages = true;
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
@@ -113,7 +116,7 @@ export class GroupQueue {
       return;
     }
 
-    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+    if (this.activeCount >= this._maxConcurrent) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
@@ -322,7 +325,7 @@ export class GroupQueue {
   private drainWaiting(): void {
     while (
       this.waitingGroups.length > 0 &&
-      this.activeCount < MAX_CONCURRENT_CONTAINERS
+      this.activeCount < this._maxConcurrent
     ) {
       const nextJid = this.waitingGroups.shift()!;
       const state = this.getGroup(nextJid);

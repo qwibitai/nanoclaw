@@ -4,21 +4,26 @@ SDK for running Claude agents in isolated BoxLite VMs with messaging channel int
 
 ## Quick Context
 
-Single Node.js process. The `AgentLite` SDK class is the public API — register channels and groups, then start. Messages route to Claude Agent SDK running in BoxLite VMs (hardware-isolated). Each group has isolated filesystem and memory.
+Single Node.js process. Two-level API: `createAgentLite()` returns a platform instance, `agentlite.createAgent()` creates per-project agents. Messages route to Claude Agent SDK running in BoxLite VMs (hardware-isolated). Each group has isolated filesystem and memory. Public types live in `src/api/`, implementation is hidden.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/sdk.ts` | AgentLite SDK class (public API, library entry point) |
-| `src/orchestrator.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/api/sdk.ts` | Public API: `createAgentLite()`, `AgentLite` interface |
+| `src/api/agent.ts` | Public API: `Agent` interface |
+| `src/api/channel-driver.ts` | Public API: `ChannelDriver` interface |
+| `src/api/options.ts` | Public API: `AgentLiteOptions`, `AgentOptions` |
+| `src/api/channels/telegram.ts` | Public API: `telegram()` factory |
+| `src/agentlite-impl.ts` | AgentLite implementation (not exported) |
+| `src/agent-impl.ts` | Agent implementation: channels, message loop, groups |
+| `src/agent-config.ts` | Immutable per-agent config (paths, identity, credentials) |
+| `src/runtime-config.ts` | Immutable shared runtime config (box, timeouts) |
 | `src/cli.ts` | CLI entry point (bin): process handlers, channel auto-discovery |
 | `src/box-runtime.ts` | BoxLite VM runtime management |
 | `src/container-runner.ts` | Spawns agent VMs with volume mounts |
-| `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
