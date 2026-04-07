@@ -22,6 +22,7 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import type { MessageLogger } from './message-logger.js';
 import { formatMessages } from './router.js';
 import { triggerSchedulerCheck } from './task-scheduler.js';
 import { RegisteredGroup } from './types.js';
@@ -31,7 +32,6 @@ const ALLOWED_TASK_MODELS = new Set([
   'claude-sonnet-4-6',
   'claude-opus-4-6',
 ]);
-
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
@@ -47,6 +47,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  messageLogger: MessageLogger;
 }
 
 let ipcWatcherRunning = false;
@@ -271,7 +272,19 @@ export async function processTaskIpc(
       ) {
         // Resolve the target group from JID
         const targetJid = data.targetJid as string;
-        const targetGroupEntry = registeredGroups[targetJid];
+        let targetGroupEntry = registeredGroups[targetJid];
+
+        // Topic-aware fallback: "telegram:pm-agent:241" -> try "telegram:pm-agent"
+        if (!targetGroupEntry && targetJid.startsWith('telegram:')) {
+          const baseJid = targetJid.split(':').slice(0, 2).join(':');
+          targetGroupEntry = registeredGroups[baseJid];
+          if (targetGroupEntry) {
+            logger.debug(
+              { targetJid, baseJid },
+              'Resolved topic JID to base Telegram group',
+            );
+          }
+        }
 
         if (!targetGroupEntry) {
           logger.warn(
@@ -283,8 +296,14 @@ export async function processTaskIpc(
 
         const targetFolder = targetGroupEntry.folder;
 
-        // Authorization: non-main groups can only schedule for themselves
-        if (!isMain && targetFolder !== sourceGroup) {
+        // Authorization: non-main groups can only schedule for themselves.
+        // Topic IPC dirs (e.g. telegram_pm-agent_241) belong to their parent group.
+        const sourceBase = sourceGroup.replace(/_\d+$/, '');
+        if (
+          !isMain &&
+          targetFolder !== sourceGroup &&
+          targetFolder !== sourceBase
+        ) {
           logger.warn(
             { sourceGroup, targetFolder },
             'Unauthorized schedule_task attempt blocked',
@@ -338,8 +357,8 @@ export async function processTaskIpc(
             ? data.context_mode
             : 'isolated';
 
-        // ── Google Chat conversation history injection ──
-        // For interactive Google Chat messages (gchat-msg-* tasks), store
+        // ── Conversation history injection (Google Chat + Telegram) ──
+        // For interactive chat messages (gchat-msg-* / tg-msg-* tasks), store
         // the inbound message in the messages DB and prepend recent
         // conversation history to the prompt. This ensures Holly has
         // context even when spawned in a fresh container.
@@ -348,13 +367,23 @@ export async function processTaskIpc(
         // the same thread are included in history. This prevents topic
         // pollution when multiple Chat threads are active simultaneously.
         let enrichedPrompt = data.prompt;
-        if (taskId.startsWith('gchat-msg-') && data.senderName) {
+        if (
+          (taskId.startsWith('gchat-msg-') || taskId.startsWith('tg-msg-')) &&
+          data.senderName
+        ) {
           const now = new Date().toISOString();
-          const msgId = `gchat-in-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const msgPrefix = taskId.startsWith('tg-msg-') ? 'tg-in' : 'gchat-in';
+          const msgId = `${msgPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const threadId = data.threadId || null;
 
           // Ensure chat metadata exists (foreign key constraint)
-          storeChatMetadata(targetJid, now, undefined, 'google-chat');
+          const ipcChannel =
+            targetJid.startsWith('gchat:') || targetJid.startsWith('spaces/')
+              ? 'google-chat'
+              : targetJid.startsWith('telegram:')
+                ? 'telegram'
+                : 'whatsapp';
+          storeChatMetadata(targetJid, now, undefined, ipcChannel);
 
           // Store the inbound message with thread context
           storeMessage({
@@ -367,6 +396,19 @@ export async function processTaskIpc(
             is_from_me: false,
             is_bot_message: false,
             thread_id: threadId ?? undefined,
+          });
+
+          // Also persist to memory.db for cross-session search
+          deps.messageLogger.logMessage({
+            id: msgId,
+            chat_jid: targetJid,
+            thread_id: threadId ?? null,
+            sender: data.senderEmail || data.senderName || 'unknown',
+            sender_name: data.senderName || 'Craig',
+            channel: ipcChannel,
+            direction: 'inbound',
+            content: data.messageText || '',
+            timestamp: now,
           });
 
           // Fetch recent conversation history scoped to this thread.
@@ -397,7 +439,7 @@ export async function processTaskIpc(
               sender: data.senderName,
               threadId: threadId || 'none',
             },
-            'Google Chat message stored with thread-scoped conversation history',
+            'Message stored with thread-scoped conversation history',
           );
         }
 
@@ -529,7 +571,10 @@ export async function processTaskIpc(
           } else if (ALLOWED_TASK_MODELS.has(data.model)) {
             updates.model = data.model;
           } else {
-            logger.warn({ model: data.model }, 'Invalid model value in update_task, ignoring');
+            logger.warn(
+              { model: data.model },
+              'Invalid model value in update_task, ignoring',
+            );
           }
         }
 
