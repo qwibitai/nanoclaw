@@ -5,14 +5,13 @@ An SDK for running Claude agents in isolated BoxLite VMs with messaging channel 
 ## SDK Usage
 
 ```typescript
-import { AgentLite } from '@boxlite-ai/agentlite';
-import { TelegramChannel } from '@boxlite-ai/agentlite/channels/telegram';
+import { createAgentLite } from '@boxlite-ai/agentlite';
+import { telegram } from '@boxlite-ai/agentlite/channels/telegram';
 
-const agent_lite = new AgentLite();
-await agent_lite.start();
-
-await agent_lite.registerChannel(new TelegramChannel({ token: process.env.TELEGRAM_BOT_TOKEN }));
-agent_lite.registerGroup('tg:7123844036', { name: 'Main', isMain: true });
+const agentlite = await createAgentLite({ workdir: './data' });
+const agent = agentlite.createAgent('main', { name: 'Andy' });
+agent.addChannel('telegram', telegram({ token: process.env.TELEGRAM_BOT_TOKEN! }));
+await agent.start();
 ```
 
 ## Quick Start
@@ -69,15 +68,16 @@ Single Node.js process. Channels register dynamically via the SDK. Agents execut
 For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
-- `src/sdk.ts` - AgentLite SDK class (public API)
-- `src/orchestrator.ts` - Orchestrator: state, message loop, agent invocation
+- `src/api/sdk.ts` - Public API: `createAgentLite()`, `AgentLite` interface
+- `src/api/agent.ts` - Public API: `Agent` interface
+- `src/api/channel-driver.ts` - Public API: `ChannelDriver` interface
+- `src/agentlite-impl.ts` - AgentLite implementation (hidden from consumers)
+- `src/agent-impl.ts` - Agent implementation: message loop, channels, groups
 - `src/box-runtime.ts` - BoxLite VM runtime management
 - `src/container-runner.ts` - Spawns streaming agent VMs
-- `src/channels/registry.ts` - Channel registry
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
 

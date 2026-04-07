@@ -17,23 +17,30 @@ describe('package exports', () => {
       expect(typeof mod.createAgentLite).toBe('function');
     });
 
-    it('exports TelegramChannel from channels/telegram', async () => {
-      const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
+    it('exports telegram factory from channels/telegram', async () => {
+      const telegramPath = path.resolve(
+        distDir,
+        'api',
+        'channels',
+        'telegram.js',
+      );
       const mod = await import(telegramPath);
-      expect(mod.TelegramChannel).toBeDefined();
-      expect(typeof mod.TelegramChannel).toBe('function');
+      expect(mod.telegram).toBeDefined();
+      expect(typeof mod.telegram).toBe('function');
     });
 
-    it('TelegramChannel accepts positional args', async () => {
-      const telegramPath = path.resolve(distDir, 'channels', 'telegram.js');
+    it('telegram() returns a ChannelDriver-compatible object', async () => {
+      const telegramPath = path.resolve(
+        distDir,
+        'api',
+        'channels',
+        'telegram.js',
+      );
       const mod = await import(telegramPath);
-      const noopOpts = {
-        onMessage: () => {},
-        onChatMetadata: () => {},
-        registeredGroups: () => ({}),
-      };
-      const channel = new mod.TelegramChannel('test', noopOpts);
-      expect(channel.name).toBe('telegram');
+      const driver = mod.telegram({ token: 'test-token' });
+      expect(driver).toBeDefined();
+      expect(driver._type).toBe('telegram');
+      expect(driver._opts.token).toBe('test-token');
     });
   });
 
@@ -44,10 +51,10 @@ describe('package exports', () => {
       expect(existsSync(path.join(distDir, 'api', 'sdk.cjs'))).toBe(true);
     });
 
-    it('dist/channels/telegram.cjs exists', () => {
-      expect(existsSync(path.join(distDir, 'channels', 'telegram.cjs'))).toBe(
-        true,
-      );
+    it('dist/api/channels/telegram.cjs exists', () => {
+      expect(
+        existsSync(path.join(distDir, 'api', 'channels', 'telegram.cjs')),
+      ).toBe(true);
     });
 
     it('sdk.cjs exports createAgentLite via require()', () => {
@@ -63,25 +70,25 @@ describe('package exports', () => {
       expect(keys).toContain('createAgentLite');
     });
 
-    it('channels/telegram.cjs exports TelegramChannel via require()', () => {
+    it('channels/telegram.cjs exports telegram factory via require()', () => {
       const result = execFileSync(
         'node',
         [
           '-e',
-          'const m = require("./dist/channels/telegram.cjs"); console.log(JSON.stringify(Object.keys(m)))',
+          'const m = require("./dist/api/channels/telegram.cjs"); console.log(JSON.stringify(Object.keys(m)))',
         ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
       const keys = JSON.parse(result.trim());
-      expect(keys).toContain('TelegramChannel');
+      expect(keys).toContain('telegram');
     });
 
-    it('CJS TelegramChannel accepts positional args', () => {
+    it('CJS telegram() returns ChannelDriver-compatible object', () => {
       const result = execFileSync(
         'node',
         [
           '-e',
-          'const { TelegramChannel } = require("./dist/channels/telegram.cjs"); const opts = { onMessage(){}, onChatMetadata(){}, registeredGroups(){ return {} } }; const ch = new TelegramChannel("test", opts); console.log(ch.name)',
+          'const { telegram } = require("./dist/api/channels/telegram.cjs"); const d = telegram({ token: "test" }); console.log(d._type)',
         ],
         { cwd: repoRoot, encoding: 'utf-8' },
       );
