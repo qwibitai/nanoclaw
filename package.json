@@ -23,8 +23,9 @@
   "dependencies": {
     "@onecli-sh/sdk": "^0.2.0",
     "better-sqlite3": "11.10.0",
-    "matrix-js-sdk": "^41.2.0",
-    "cron-parser": "5.5.0"
+    "cron-parser": "5.5.0",
+    "fake-indexeddb": "^6.2.5",
+    "matrix-js-sdk": "^41.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

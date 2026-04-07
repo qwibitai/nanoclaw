@@ -1,5 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+
+// Polyfill IndexedDB for Node.js — the matrix-sdk-crypto-wasm Rust crypto
+// store requires an IndexedDB implementation. Must be imported before
+// matrix-js-sdk so globalThis.indexedDB is available when the WASM module loads.
+import 'fake-indexeddb/auto';
+
 import sdk from 'matrix-js-sdk';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -15,11 +21,17 @@ import {
 
 /** Persistent data directory — survives container restarts */
 const MATRIX_DATA_DIR = '/app/data';
-const MATRIX_CRYPTO_STORE_PATH = path.join(
-  MATRIX_DATA_DIR,
-  'matrix-crypto-store',
-);
 const MATRIX_DEVICE_ID_PATH = path.join(MATRIX_DATA_DIR, 'matrix-device-id');
+
+/**
+ * Crypto store prefix for IndexedDB databases created by the Rust SDK.
+ * The WASM crypto module stores Olm account keys, Megolm sessions, and device
+ * lists in IndexedDB (provided by fake-indexeddb in Node.js). These databases
+ * live in-process memory — on restart, the SDK re-negotiates Megolm sessions
+ * using the same device ID (persisted to disk), so Synapse recognises the
+ * device and shares room keys automatically.
+ */
+const MATRIX_CRYPTO_DB_PREFIX = 'matrix-crypto-nanoclaw';
 
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
@@ -71,7 +83,17 @@ export class MatrixChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    // Ensure the persistent data directory exists and is writable.
+    // Device ID must survive restarts for E2EE key continuity.
     fs.mkdirSync(MATRIX_DATA_DIR, { recursive: true });
+    try {
+      fs.accessSync(MATRIX_DATA_DIR, fs.constants.W_OK);
+    } catch {
+      throw new Error(
+        `Matrix data directory ${MATRIX_DATA_DIR} is not writable — ` +
+          'E2EE keys will be lost on restart. Fix permissions or volume mount.',
+      );
+    }
 
     // Reuse a previously persisted device ID so the crypto identity survives
     // restarts. If none exists, discover it via whoami and persist it.
@@ -113,15 +135,16 @@ export class MatrixChannel implements Channel {
       deviceId,
     });
 
-    // Initialise Rust crypto for E2EE support
+    // Initialise Rust crypto for E2EE support.
+    // The WASM module stores keys in IndexedDB (polyfilled by fake-indexeddb).
+    // Using a named prefix creates persistent databases within the process.
+    // On restart, the same device ID lets Synapse re-share room keys.
     if (deviceId) {
-      fs.mkdirSync(MATRIX_CRYPTO_STORE_PATH, { recursive: true });
       await this.client.initRustCrypto({
-        useIndexedDB: false,
-        cryptoDatabasePrefix: MATRIX_CRYPTO_STORE_PATH,
+        cryptoDatabasePrefix: MATRIX_CRYPTO_DB_PREFIX,
       });
       logger.info(
-        { cryptoDir: MATRIX_CRYPTO_STORE_PATH, deviceId },
+        { cryptoDbPrefix: MATRIX_CRYPTO_DB_PREFIX, deviceId },
         'Matrix E2EE crypto initialised',
       );
     }
