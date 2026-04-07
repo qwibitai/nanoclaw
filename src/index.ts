@@ -847,7 +847,10 @@ async function main(): Promise<void> {
         }
       }
     } catch (err) {
-      logger.error({ err, chatJid }, 'Failed to read session for context report');
+      logger.error(
+        { err, chatJid },
+        'Failed to read session for context report',
+      );
     }
 
     // Try to detect the model's effective context window
@@ -857,8 +860,7 @@ async function main(): Promise<void> {
     if (provider === 'ollama') {
       const model = group.containerConfig?.ollamaModel || 'unknown';
       try {
-        const ollamaHost =
-          process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+        const ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
         const resp = await fetch(`${ollamaHost}/api/show`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -911,9 +913,7 @@ async function main(): Promise<void> {
       `  Context window: ${contextWindow.toLocaleString()}${contextSource}`,
       `  Usage: ${pct}%`,
       `  Compaction threshold: ${compactionThreshold.toLocaleString()} (80%)`,
-      willCompactSoon
-        ? `  ⚠ Will compact on next turn`
-        : `  ✓ Below threshold`,
+      willCompactSoon ? `  ⚠ Will compact on next turn` : `  ✓ Below threshold`,
       `  Last provider: ${lastProvider}`,
       `  Session: ${sessionId}`,
     ];
@@ -944,10 +944,7 @@ async function main(): Promise<void> {
       'Compaction queued. It will run on the next message you send.',
     );
 
-    logger.info(
-      { chatJid, group: group.name },
-      'Force compaction queued',
-    );
+    logger.info({ chatJid, group: group.name }, 'Force compaction queued');
   }
 
   async function handleModelSwitch(
