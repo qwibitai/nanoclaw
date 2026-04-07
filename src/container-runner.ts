@@ -232,9 +232,7 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function parseContainerOutput(
-  stdout: string,
-): ContainerOutput | null {
+function parseContainerOutput(stdout: string): ContainerOutput | null {
   const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
   const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
 
@@ -693,7 +691,8 @@ export async function runContainerAgent(
       resolve({
         status: 'error',
         result: null,
-        error: 'Failed to parse container output: missing or invalid sentinel JSON',
+        error:
+          'Failed to parse container output: missing or invalid sentinel JSON',
       });
     });
 
