@@ -304,10 +304,7 @@ export class AgentImpl
 
     let groupDir: string;
     try {
-      groupDir = resolveGroupFolderPath(
-        options.folder,
-        this.config.groupsDir,
-      );
+      groupDir = resolveGroupFolderPath(options.folder, this.config.groupsDir);
     } catch (err) {
       logger.warn(
         { jid, folder: options.folder, err },
