@@ -88,36 +88,6 @@ WRAPPER
   export PATH="/tmp/bin:$PATH"
 fi
 
-# Codex plugin sandbox override: Codex's inner bwrap sandbox can't create
-# nested user namespaces inside Docker without --privileged. Since this
-# container IS the outer sandbox, bypass Codex's inner sandbox by patching
-# the companion lib to use "danger-full-access". Codex documents this flag
-# as "intended solely for running in environments that are externally
-# sandboxed", which matches our situation exactly.
-# The plugin mount at /workspace/plugins/codex is read-only, so we copy it
-# to a writable location, patch there, and override CLAUDE_PLUGINS_ROOT to
-# point at an effective view (symlinks to the other plugins + patched codex).
-if [ -d /workspace/plugins/codex ]; then
-  mkdir -p /tmp/codex-patched /tmp/plugins-effective
-  cp -r /workspace/plugins/codex/. /tmp/codex-patched/
-  # All "read-only" and "workspace-write" strings in these two files are
-  # sandbox assignments — verified safe to blanket-replace.
-  sed -i -e 's|"read-only"|"danger-full-access"|g' \
-         -e 's|"workspace-write"|"danger-full-access"|g' \
-         /tmp/codex-patched/plugins/codex/scripts/lib/codex.mjs \
-         /tmp/codex-patched/plugins/codex/scripts/codex-companion.mjs
-  for dir in /workspace/plugins/*; do
-    name=$(basename "$dir")
-    if [ "$name" = "codex" ]; then
-      ln -sfn /tmp/codex-patched /tmp/plugins-effective/codex
-    else
-      ln -sfn "$dir" "/tmp/plugins-effective/$name"
-    fi
-  done
-  export CLAUDE_PLUGINS_ROOT=/tmp/plugins-effective
-  echo "[entrypoint] Codex sandbox patched (danger-full-access); CLAUDE_PLUGINS_ROOT=$CLAUDE_PLUGINS_ROOT" >&2
-fi
-
 # Index git repos in workspace for GitNexus code intelligence.
 # gitnexus analyze is fast when up-to-date (~0.5s), re-indexes only if stale.
 # Skip AGENTS.md/CLAUDE.md generation to avoid modifying tracked files.
