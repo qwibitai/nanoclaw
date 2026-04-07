@@ -301,6 +301,41 @@ describe('container-runner timeout behavior', () => {
     await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
   });
 
+  it('uses the last structured output block when multiple markers are emitted', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify({
+        status: 'success',
+        result: null,
+        newSessionId: 'session-early',
+      })}\n${OUTPUT_END_MARKER}\n`,
+    );
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify({
+        status: 'error',
+        result: null,
+        error: 'late terminal failure',
+        providerFailureClass: 'transport',
+      })}\n${OUTPUT_END_MARKER}\n`,
+    );
+
+    fakeProc.emit('close', 1);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'error',
+      error: expect.stringContaining('late terminal failure'),
+      providerFailureClass: 'transport',
+    });
+  });
+
   it('codex API-key mode injects OpenAI proxy env vars when a key exists', async () => {
     process.env.AGENT_ENGINE = 'codex';
     mockEnv.OPENAI_API_KEY = 'sk-openai-real-key';

@@ -233,18 +233,35 @@ function buildVolumeMounts(
 }
 
 function parseContainerOutput(stdout: string): ContainerOutput | null {
-  const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-  const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+  const parsedOutputs: ContainerOutput[] = [];
+  let searchStart = 0;
 
-  let jsonLine: string;
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    jsonLine = stdout
+  while (true) {
+    const startIdx = stdout.indexOf(OUTPUT_START_MARKER, searchStart);
+    if (startIdx === -1) break;
+
+    const endIdx = stdout.indexOf(OUTPUT_END_MARKER, startIdx);
+    if (endIdx === -1) break;
+
+    const jsonLine = stdout
       .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
       .trim();
-  } else {
-    const lines = stdout.trim().split('\n');
-    jsonLine = lines[lines.length - 1];
+
+    try {
+      parsedOutputs.push(JSON.parse(jsonLine) as ContainerOutput);
+    } catch {
+      // Ignore malformed payloads and continue scanning for later markers.
+    }
+
+    searchStart = endIdx + OUTPUT_END_MARKER.length;
   }
+
+  if (parsedOutputs.length > 0) {
+    return parsedOutputs[parsedOutputs.length - 1];
+  }
+
+  const lines = stdout.trim().split('\n');
+  const jsonLine = lines[lines.length - 1];
 
   try {
     return JSON.parse(jsonLine) as ContainerOutput;
