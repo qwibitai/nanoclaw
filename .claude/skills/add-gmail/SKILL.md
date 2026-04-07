@@ -72,7 +72,7 @@ When you receive an email notification (messages starting with `[Email from ...`
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/channels/gmail.test.ts
+pnpm exec vitest run src/channels/gmail.test.ts
 ```
 
 All tests must pass (including the new Gmail tests) and build must be clean before proceeding.
@@ -136,10 +136,10 @@ Tell the user:
 Run the authorization:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp auth
 ```
 
-If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
+If that fails (some versions don't have an auth subcommand), try `timeout 60 pnpm dlx @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
 
 ### Build and restart
 
@@ -192,7 +192,7 @@ tail -f logs/nanoclaw.log
 Test directly:
 
 ```bash
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp
 ```
 
 ### OAuth token expired
@@ -201,7 +201,7 @@ Re-authorize:
 
 ```bash
 rm ~/.gmail-mcp/credentials.json
-npx -y @gongrzhe/server-gmail-autoauth-mcp
+pnpm dlx @gongrzhe/server-gmail-autoauth-mcp
 ```
 
 ### Container can't access Gmail

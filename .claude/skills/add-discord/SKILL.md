@@ -60,7 +60,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/channels/discord.test.ts
+pnpm exec vitest run src/channels/discord.test.ts
 ```
 
 All tests must pass (including the new Discord tests) and build must be clean before proceeding.
@@ -130,18 +130,18 @@ Wait for the user to provide the channel ID (format: `dc:1234567890123456`).
 
 ### Register the channel
 
-The channel ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
+The channel ID, name, and folder name are needed. Use `pnpm exec tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main channel (responds to all messages):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_main" --trigger "@${ASSISTANT_NAME}" --channel discord --no-trigger-required --is-main
+pnpm exec tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_main" --trigger "@${ASSISTANT_NAME}" --channel discord --no-trigger-required --is-main
 ```
 
 For additional channels (trigger-only):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel discord
+pnpm exec tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel discord
 ```
 
 ## Phase 5: Verify

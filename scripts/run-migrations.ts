@@ -22,7 +22,7 @@ function resolveTsx(): string {
   try {
     return execSync('which tsx', { encoding: 'utf-8' }).trim();
   } catch {
-    return 'npx'; // last resort
+    return 'pnpm exec'; // last resort
   }
 }
 
@@ -80,7 +80,7 @@ for (const version of migrationVersions) {
   }
 
   try {
-    const tsxArgs = tsxBin.endsWith('npx')
+    const tsxArgs = tsxBin.endsWith('exec')
       ? ['tsx', migrationIndex, projectRoot]
       : [migrationIndex, projectRoot];
     execFileSync(tsxBin, tsxArgs, {

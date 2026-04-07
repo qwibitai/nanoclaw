@@ -54,7 +54,7 @@ This adds:
 ### Run database migration
 
 ```bash
-npx tsx scripts/migrate-reactions.ts
+pnpm exec tsx scripts/migrate-reactions.ts
 ```
 
 ### Validate code changes

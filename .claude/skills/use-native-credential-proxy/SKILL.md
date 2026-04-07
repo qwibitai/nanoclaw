@@ -79,7 +79,7 @@ with:
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/credential-proxy.test.ts src/container-runner.test.ts
+pnpm exec vitest run src/credential-proxy.test.ts src/container-runner.test.ts
 ```
 
 All tests must pass and build must be clean before proceeding.

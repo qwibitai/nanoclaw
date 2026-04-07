@@ -50,7 +50,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 
 ```bash
 pnpm run build
-npx vitest run src/channels/whatsapp.test.ts
+pnpm exec vitest run src/channels/whatsapp.test.ts
 ```
 
 ### Rebuild container

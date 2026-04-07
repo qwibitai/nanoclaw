@@ -1,7 +1,7 @@
 /**
  * Discover an existing OpenClaw installation and emit a structured summary.
  *
- * Usage: npx tsx .claude/skills/migrate-from-openclaw/scripts/discover-openclaw.ts [--state-dir <path>]
+ * Usage: pnpm exec tsx .claude/skills/migrate-from-openclaw/scripts/discover-openclaw.ts [--state-dir <path>]
  *
  * Checks (in order): --state-dir arg, $OPENCLAW_STATE_DIR, ~/.openclaw, ~/.clawdbot
  * Parses openclaw.json (JSON5-tolerant), scans workspace for identity/memory files,

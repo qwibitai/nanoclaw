@@ -60,7 +60,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/channels/telegram.test.ts
+pnpm exec vitest run src/channels/telegram.test.ts
 ```
 
 All tests must pass (including the new Telegram tests) and build must be clean before proceeding.
@@ -133,18 +133,18 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-The chat ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
+The chat ID, name, and folder name are needed. Use `pnpm exec tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main chat (responds to all messages):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
+pnpm exec tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_main" --trigger "@${ASSISTANT_NAME}" --channel telegram --no-trigger-required --is-main
 ```
 
 For additional chats (trigger-only):
 
 ```bash
-npx tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
+pnpm exec tsx setup/index.ts --step register -- --jid "tg:<chat-id>" --name "<chat-name>" --folder "telegram_<group-name>" --trigger "@${ASSISTANT_NAME}" --channel telegram
 ```
 
 ## Phase 5: Verify

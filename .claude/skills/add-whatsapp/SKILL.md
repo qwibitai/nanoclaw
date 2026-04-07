@@ -86,7 +86,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/channels/whatsapp.test.ts
+pnpm exec vitest run src/channels/whatsapp.test.ts
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -104,7 +104,7 @@ rm -rf store/auth/
 For QR code in browser (recommended):
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 (Bash timeout: 150000ms)
@@ -120,7 +120,7 @@ Tell the user:
 For QR code in terminal:
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
 ```
 
 Tell the user to run `pnpm run auth` in another terminal, then:
@@ -135,7 +135,7 @@ Tell the user to have WhatsApp open on **Settings > Linked Devices > Link a Devi
 Run the auth process in the background and poll `store/pairing-code.txt` for the code:
 
 ```bash
-rm -f store/pairing-code.txt && npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
+rm -f store/pairing-code.txt && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
 ```
 
 Then immediately poll for the code (do NOT wait for the background command to finish):
@@ -221,8 +221,8 @@ node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','
 **Group (solo, existing):** Run group sync and list available groups:
 
 ```bash
-npx tsx setup/index.ts --step groups
-npx tsx setup/index.ts --step groups --list
+pnpm exec tsx setup/index.ts --step groups
+pnpm exec tsx setup/index.ts --step groups --list
 ```
 
 The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (names only, not JIDs).
@@ -230,7 +230,7 @@ The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (n
 ### Register the chat
 
 ```bash
-npx tsx setup/index.ts --step register \
+pnpm exec tsx setup/index.ts --step register \
   --jid "<jid>" \
   --name "<chat-name>" \
   --trigger "@<trigger>" \
@@ -244,7 +244,7 @@ npx tsx setup/index.ts --step register \
 For additional groups (trigger-required):
 
 ```bash
-npx tsx setup/index.ts --step register \
+pnpm exec tsx setup/index.ts --step register \
   --jid "<group-jid>" \
   --name "<group-name>" \
   --trigger "@<trigger>" \
@@ -296,7 +296,7 @@ tail -f logs/nanoclaw.log
 QR codes expire after ~60 seconds. Re-run the auth command:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
+rm -rf store/auth/ && pnpm exec tsx src/whatsapp-auth.ts
 ```
 
 ### Pairing code not working
@@ -304,7 +304,7 @@ rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
 Codes expire in ~60 seconds. To retry:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
+rm -rf store/auth/ && pnpm exec tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
 ```
 
 Enter the code **immediately** when it appears. Also ensure:
@@ -315,7 +315,7 @@ Enter the code **immediately** when it appears. Also ensure:
 If pairing code keeps failing, switch to QR-browser auth instead:
 
 ```bash
-rm -rf store/auth/ && npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+rm -rf store/auth/ && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 ### "conflict" disconnection
@@ -340,7 +340,7 @@ Check:
 Run group metadata sync:
 
 ```bash
-npx tsx setup/index.ts --step groups
+pnpm exec tsx setup/index.ts --step groups
 ```
 
 This fetches all group names from WhatsApp. Runs automatically every 24 hours.

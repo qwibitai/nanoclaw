@@ -76,7 +76,7 @@ This merge adds:
 ```bash
 pnpm install
 pnpm run build
-npx vitest run src/formatting.test.ts
+pnpm exec vitest run src/formatting.test.ts
 ```
 
 All 73 tests should pass and the build should be clean before continuing.
