@@ -77,3 +77,10 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## AgentHub
+- Central hub: `~/AgentHub/`
+- Skills: `.agents/skills/` (symlinked to AgentHub shared skills)
+- MCP: 12 servers synced across all agents
+- Agents: 14 shared agents available
+- Hooks: Safety, notification, and logging hooks
