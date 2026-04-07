@@ -188,7 +188,9 @@ export class MatrixChannel implements Channel {
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    await this.client.sendTyping(toRoomId(jid), isTyping, 5_000).catch(() => {});
+    await this.client
+      .sendTyping(toRoomId(jid), isTyping, 5_000)
+      .catch(() => {});
   }
 
   async syncGroups(_force: boolean): Promise<void> {

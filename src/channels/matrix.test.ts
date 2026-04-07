@@ -32,7 +32,10 @@ vi.mock('matrix-js-sdk', () => ({
   createClient: vi.fn(() => _mockClient),
   MemoryStore: vi.fn(),
   ClientEvent: { Sync: 'sync' },
-  RoomEvent: { Timeline: 'Room.timeline', MyMembership: 'RoomMember.membership' },
+  RoomEvent: {
+    Timeline: 'Room.timeline',
+    MyMembership: 'RoomMember.membership',
+  },
   SyncState: { Prepared: 'PREPARED' },
   MsgType: { Text: 'm.text', Notice: 'm.notice' },
   EventType: { RoomMessage: 'm.room.message' },
@@ -68,7 +71,11 @@ describe('toJid / toRoomId', () => {
 // ─── Factory: returns null without credentials ────────────────────────────────
 
 describe('registerChannel factory', () => {
-  const VARS = ['MATRIX_HOMESERVER', 'MATRIX_ACCESS_TOKEN', 'MATRIX_USER_ID'] as const;
+  const VARS = [
+    'MATRIX_HOMESERVER',
+    'MATRIX_ACCESS_TOKEN',
+    'MATRIX_USER_ID',
+  ] as const;
   let saved: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -125,7 +132,9 @@ describe('MatrixChannel', () => {
 
   it('starts the client on connect', async () => {
     await channel.connect();
-    expect(mockClient.startClient).toHaveBeenCalledWith({ initialSyncLimit: 10 });
+    expect(mockClient.startClient).toHaveBeenCalledWith({
+      initialSyncLimit: 10,
+    });
   });
 
   it('reports disconnected before connect()', () => {
@@ -170,12 +179,20 @@ describe('MatrixChannel', () => {
 
   it('setTyping delegates to client sendTyping', async () => {
     await channel.setTyping('matrix:!room:example.com', true);
-    expect(mockClient.sendTyping).toHaveBeenCalledWith('!room:example.com', true, 5_000);
+    expect(mockClient.sendTyping).toHaveBeenCalledWith(
+      '!room:example.com',
+      true,
+      5_000,
+    );
   });
 
   it('syncGroups calls onChatMetadata for each room', async () => {
     const fakeRooms = [
-      { roomId: '!a:example.com', name: 'Alpha', getJoinedMemberCount: () => 5 },
+      {
+        roomId: '!a:example.com',
+        name: 'Alpha',
+        getJoinedMemberCount: () => 5,
+      },
       { roomId: '!b:example.com', name: 'Beta', getJoinedMemberCount: () => 2 },
     ];
     mockClient.getRooms.mockReturnValue(fakeRooms);
