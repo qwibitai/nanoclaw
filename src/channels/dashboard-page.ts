@@ -15,12 +15,17 @@ import {
   getDevTasksViewHTML,
   getDevTasksViewJS,
 } from './dashboard-devtasks-view.js';
+import {
+  getReportsViewHTML,
+  getReportsViewJS,
+} from './dashboard-reports-view.js';
 
 const NAV_ITEMS = [
   { id: 'vault', label: 'Vault', icon: 'vault' },
   { id: 'meals', label: 'Meal Plan', icon: 'meals' },
   { id: 'tasks', label: 'Tasks', icon: 'tasks' },
   { id: 'devtasks', label: 'Dev Tasks', icon: 'devtasks' },
+  { id: 'reports', label: 'Reports', icon: 'reports' },
 ] as const;
 
 const ICONS: Record<string, string> = {
@@ -32,6 +37,8 @@ const ICONS: Record<string, string> = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   devtasks:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  reports:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="13" y2="15"/></svg>',
 };
 
 function esc(s: string): string {
@@ -88,6 +95,9 @@ function renderPage(): string {
     <section id="view-devtasks" class="view">
       ${getDevTasksViewHTML()}
     </section>
+    <section id="view-reports" class="view">
+      ${getReportsViewHTML()}
+    </section>
   </main>
 </div>
 
@@ -99,11 +109,18 @@ function renderPage(): string {
 
 <script>
 // --- Hash Router ---
-const VIEWS = ['vault', 'meals', 'tasks', 'devtasks'];
+//
+// Contract: navigate() READS the hash and updates the DOM. It does NOT
+// write to location.hash. Writes happen at the click site (nav buttons)
+// or inside individual views (deep-link detail URLs like #reports/abc-123).
+// The router derives the active view by splitting on '/' and matching the
+// prefix — so #reports/abc-123 resolves to the 'reports' view while the
+// suffix is preserved for the view's own hashchange listener to parse.
+const VIEWS = ['vault', 'meals', 'tasks', 'devtasks', 'reports'];
 
-function navigate(viewId) {
+function navigate(rawHash) {
+  var viewId = (rawHash || '').split('/')[0];
   if (!VIEWS.includes(viewId)) viewId = 'vault';
-  location.hash = viewId;
 
   // Update views
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -119,16 +136,17 @@ function navigate(viewId) {
   window.dispatchEvent(new CustomEvent('viewchange', { detail: { view: viewId } }));
 }
 
-// Nav click handlers
+// Nav click handlers: writes happen here so the router stays read-only.
 document.querySelectorAll('.nav-item, .tab-item').forEach(btn => {
-  btn.addEventListener('click', () => navigate(btn.dataset.view));
+  btn.addEventListener('click', () => {
+    location.hash = btn.dataset.view;
+  });
 });
 
 // Handle initial hash or default
-const initialHash = location.hash.slice(1);
-navigate(initialHash || 'vault');
+navigate(location.hash.slice(1) || 'vault');
 
-// Handle hash changes (back/forward)
+// Handle hash changes (back/forward, click handlers, and in-view deep links)
 window.addEventListener('hashchange', () => {
   navigate(location.hash.slice(1));
 });
@@ -180,6 +198,10 @@ ${getTasksViewJS()}
 
 <script>
 ${getDevTasksViewJS()}
+</script>
+
+<script>
+${getReportsViewJS()}
 </script>
 
 </body>
