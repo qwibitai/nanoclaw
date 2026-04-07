@@ -53,7 +53,10 @@ function loadExternalMcpServers(): Record<string, McpServerConfig> | undefined {
           .replace(/localhost/g, 'host.docker.internal')
           .replace(/127\.0\.0\.1/g, 'host.docker.internal');
       }
-      logger.info({ name, type: config.type || 'stdio' }, 'Loaded external MCP server');
+      logger.info(
+        { name, type: config.type || 'stdio' },
+        'Loaded external MCP server',
+      );
     }
 
     return servers;

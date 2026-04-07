@@ -446,7 +446,9 @@ async function runQuery(
   }
 
   // Build MCP servers config: built-in nanoclaw + any external servers
-  const mcpServers: Record<string, McpServerConfig> = {
+  // External configs arrive as plain JSON from stdin — cast to satisfy SDK's
+  // discriminated union (McpStdioServerConfig | McpSSEServerConfig | McpHttpServerConfig).
+  const mcpServers = {
     nanoclaw: {
       command: 'node',
       args: [mcpServerPath],
@@ -456,7 +458,7 @@ async function runQuery(
         NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
       },
     },
-    ...containerInput.externalMcpServers,
+    ...(containerInput.externalMcpServers as Record<string, any>),
   };
 
   // Build allowed tools: base set + wildcards for each external MCP server
