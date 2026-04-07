@@ -128,7 +128,9 @@ export class AgentImpl
     }
     const config = this._buildDriverConfig();
     const driver = await factory(config);
-    const channel: Channel = { name: key, ...driver };
+    // Assign `name` directly — object spread would drop prototype methods on class instances
+    const channel = driver as Channel;
+    (channel as { name: string }).name = key;
     this._channels.set(key, channel);
     await channel.connect();
     logger.info({ channel: key, agent: this.name }, 'Channel connected');
