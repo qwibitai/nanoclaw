@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     jq \
+    gnupg \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
@@ -62,25 +63,20 @@ RUN apt-get update && apt-get install -y unzip \
     && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Install agent-browser, claude-code, gws (Google Workspace CLI), and Codex CLI
-# globally. gws replaces the old Gmail, Calendar, and Workspace MCP servers
+# Install agent-browser, claude-code, gws (Google Workspace CLI), Mermaid CLI, and
+# Codex CLI globally. gws replaces the old Gmail, Calendar, and Workspace MCP servers
 # — the agent uses gws via Bash + container skills (gws-gmail-*, gws-calendar-*, gws-drive, etc.).
+# Mermaid CLI uses system Chromium (PUPPETEER_SKIP_DOWNLOAD avoids 300MB download).
 # Codex CLI is invoked by /team-qa Validator E (cross-model adversarial review) and is
 # authenticated via the host's ~/.codex mount (read-write, subscription OAuth).
 # Pinned versions — build.sh checks for updates automatically.
-RUN npm install -g \
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm install -g \
     agent-browser@0.22.1 \
     @anthropic-ai/claude-code \
     @googleworkspace/cli@0.22.3 \
+    @mermaid-js/mermaid-cli \
     @openai/codex@0.118.0 \
-    gitnexus
-
-# Mermaid renders go through the same chromium --headless path as HTML — no mmdc.
-# Fetch the UMD bundle once at build time so the renderer can inline it offline.
-ARG MERMAID_VERSION=11.4.1
-RUN mkdir -p /app \
-    && curl -fsSL "https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js" \
-       -o /app/mermaid.min.js
+    gitnexus@1.5.3
 
 # Install PostgreSQL client, Redis CLI, and Google Cloud CLI
 RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
@@ -123,6 +119,9 @@ RUN HOME=/home/node curl -fsSL https://ai.snowflake.com/static/cc-scripts/instal
        | HOME=/home/node DOCKER_ENV=1 bash \
     && chown -R node:node /home/node/.local
 ENV PATH="/home/node/.local/bin:${PATH}"
+
+# Puppeteer config for Mermaid CLI (use system Chromium, no sandbox for non-root)
+COPY puppeteer-config.json /app/puppeteer-config.json
 
 # Create app directory
 WORKDIR /app
