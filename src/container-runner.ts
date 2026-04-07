@@ -338,11 +338,10 @@ export async function runContainerAgent(
     extraEnv['OUTLOOK_ACCESS_TOKEN'] = outlookToken;
   }
 
-  // Inject Composio API key so the Composio MCP server loads inside the container
-  const { COMPOSIO_API_KEY } = readEnvFile(['COMPOSIO_API_KEY']);
-  if (COMPOSIO_API_KEY) {
-    extraEnv['COMPOSIO_API_KEY'] = COMPOSIO_API_KEY;
-  }
+  // Inject Composio credentials so the Composio MCP server loads inside the container
+  const { COMPOSIO_API_KEY, COMPOSIO_CUSTOMER_ID } = readEnvFile(['COMPOSIO_API_KEY', 'COMPOSIO_CUSTOMER_ID']);
+  if (COMPOSIO_API_KEY) extraEnv['COMPOSIO_API_KEY'] = COMPOSIO_API_KEY;
+  if (COMPOSIO_CUSTOMER_ID) extraEnv['COMPOSIO_CUSTOMER_ID'] = COMPOSIO_CUSTOMER_ID;
 
   const containerArgs = buildContainerArgs(mounts, containerName, extraEnv);
 

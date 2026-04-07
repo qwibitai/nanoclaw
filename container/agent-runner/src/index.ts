@@ -429,13 +429,10 @@ async function runQuery(
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
-        ...(process.env.COMPOSIO_API_KEY ? {
+        ...(process.env.COMPOSIO_API_KEY && process.env.COMPOSIO_CUSTOMER_ID ? {
           composio: {
             type: 'http' as const,
-            url: 'https://connect.composio.dev/mcp',
-            headers: {
-              'x-consumer-api-key': process.env.COMPOSIO_API_KEY,
-            },
+            url: `https://mcp.composio.dev/partner/composio/claude/mcp?api_key=${process.env.COMPOSIO_API_KEY}&customerId=${process.env.COMPOSIO_CUSTOMER_ID}&include_composio_helper_actions=true`,
           },
         } : {}),
       },

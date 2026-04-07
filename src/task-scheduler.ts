@@ -20,6 +20,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import { makeReminderCall } from './voice-call.js';
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -187,6 +188,7 @@ async function runTask(
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          void makeReminderCall(streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
