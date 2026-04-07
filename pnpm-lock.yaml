@@ -12,8 +12,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0
       better-sqlite3:
-        specifier: 11.10.0
-        version: 11.10.0
+        specifier: 12.8.0
+        version: 12.8.0
       cron-parser:
         specifier: 5.5.0
         version: 5.5.0
@@ -53,7 +53,7 @@ importers:
         version: 8.58.0(eslint@9.39.4)(typescript@5.9.3)
       vitest:
         specifier: ^4.0.18
-        version: 4.1.1(@types/node@22.19.15)(vite@8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))
+        version: 4.1.1(@types/node@22.19.15)(vite@8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))
 
 packages:
 
@@ -279,8 +279,11 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@napi-rs/wasm-runtime@1.1.1':
-    resolution: {integrity: sha512-p64ah1M1ld8xjWv3qbvFwHiFVWrq1yFvV4f7w+mzaqiR4IlSgkqhcRdHwsGgomwzBH51sRY4NEowLxnaBjcW/A==}
+  '@napi-rs/wasm-runtime@1.1.2':
+    resolution: {integrity: sha512-sNXv5oLJ7ob93xkZ1XnxisYhGYXfaG9f65/ZgYuAu3qt7b3NadcOEhLvx28hv31PgX8SZJRYrAIPQilQmFpLVw==}
+    peerDependencies:
+      '@emnapi/core': ^1.7.1
+      '@emnapi/runtime': ^1.7.1
 
   '@onecli-sh/sdk@0.2.0':
     resolution: {integrity: sha512-u7PqWROEvTV9f0ADVkjigTrd2AZn3klbPrv7GGpeRHIJpjAxJUdlWqxr5kiGt6qTDKL8t3nq76xr4X2pxTiyBg==}
@@ -533,8 +536,9 @@ packages:
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
-  better-sqlite3@11.10.0:
-    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
+  better-sqlite3@12.8.0:
+    resolution: {integrity: sha512-RxD2Vd96sQDjQr20kdP+F+dK/1OUNiVOl200vKBZY8u0vTwysfolF6Hq+3ZK2+h8My9YvZhHsF+RSGZW2VYrPQ==}
+    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -1398,7 +1402,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@napi-rs/wasm-runtime@1.1.1':
+  '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
     dependencies:
       '@emnapi/core': 1.9.1
       '@emnapi/runtime': 1.9.1
@@ -1445,9 +1449,12 @@ snapshots:
   '@rolldown/binding-openharmony-arm64@1.0.0-rc.11':
     optional: true
 
-  '@rolldown/binding-wasm32-wasi@1.0.0-rc.11':
+  '@rolldown/binding-wasm32-wasi@1.0.0-rc.11(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.1.1
+      '@napi-rs/wasm-runtime': 1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
     optional: true
 
   '@rolldown/binding-win32-arm64-msvc@1.0.0-rc.11':
@@ -1584,13 +1591,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.1(vite@8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))':
+  '@vitest/mocker@4.1.1(vite@8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))':
     dependencies:
       '@vitest/spy': 4.1.1
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)
+      vite: 8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)
 
   '@vitest/pretty-format@4.1.1':
     dependencies:
@@ -1643,7 +1650,7 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  better-sqlite3@11.10.0:
+  better-sqlite3@12.8.0:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3
@@ -2102,7 +2109,7 @@ snapshots:
 
   resolve-pkg-maps@1.0.0: {}
 
-  rolldown@1.0.0-rc.11:
+  rolldown@1.0.0-rc.11(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1):
     dependencies:
       '@oxc-project/types': 0.122.0
       '@rolldown/pluginutils': 1.0.0-rc.11
@@ -2119,9 +2126,12 @@ snapshots:
       '@rolldown/binding-linux-x64-gnu': 1.0.0-rc.11
       '@rolldown/binding-linux-x64-musl': 1.0.0-rc.11
       '@rolldown/binding-openharmony-arm64': 1.0.0-rc.11
-      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.11
+      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.11(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
       '@rolldown/binding-win32-arm64-msvc': 1.0.0-rc.11
       '@rolldown/binding-win32-x64-msvc': 1.0.0-rc.11
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
 
   safe-buffer@5.2.1: {}
 
@@ -2230,12 +2240,12 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  vite@8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3):
+  vite@8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
       postcss: 8.5.8
-      rolldown: 1.0.0-rc.11
+      rolldown: 1.0.0-rc.11(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
       tinyglobby: 0.2.15
     optionalDependencies:
       '@types/node': 22.19.15
@@ -2243,11 +2253,14 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.21.0
       yaml: 2.8.3
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
 
-  vitest@4.1.1(@types/node@22.19.15)(vite@8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)):
+  vitest@4.1.1(@types/node@22.19.15)(vite@8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)):
     dependencies:
       '@vitest/expect': 4.1.1
-      '@vitest/mocker': 4.1.1(vite@8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))
+      '@vitest/mocker': 4.1.1(vite@8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3))
       '@vitest/pretty-format': 4.1.1
       '@vitest/runner': 4.1.1
       '@vitest/snapshot': 4.1.1
@@ -2264,7 +2277,7 @@ snapshots:
       tinyexec: 1.0.4
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 8.0.2(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)
+      vite: 8.0.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.3)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.19.15
