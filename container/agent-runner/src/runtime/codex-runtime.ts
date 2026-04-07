@@ -20,8 +20,8 @@ import {
 // Container-internal paths (same as Claude runtime)
 const CONTAINER_GROUP_PATH = '/workspace/group';
 const CONTAINER_IPC_PATH = '/workspace/ipc';
-// Mounted from host's ~/.codex so the SDK can find session credentials
-const CONTAINER_CODEX_HOME = '/home/node/.codex';
+// Mounted from host's ~/.codex at the same absolute path the config expects.
+const CONTAINER_CODEX_HOME = '/home/sheep/.codex';
 const CONTAINER_EXTRA_BASE = '/workspace/extra';
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {

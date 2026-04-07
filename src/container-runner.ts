@@ -213,6 +213,11 @@ function buildVolumeMounts(
     if (fs.existsSync(hostCodexHome)) {
       mounts.push({
         hostPath: hostCodexHome,
+        containerPath: '/home/sheep/.codex',
+        readonly: false,
+      });
+      mounts.push({
+        hostPath: hostCodexHome,
         containerPath: '/home/node/.codex',
         readonly: false,
       });
