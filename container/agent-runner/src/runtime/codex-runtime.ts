@@ -20,8 +20,6 @@ import {
 // Container-internal paths (same as Claude runtime)
 const CONTAINER_GROUP_PATH = '/workspace/group';
 const CONTAINER_IPC_PATH = '/workspace/ipc';
-// Mounted from host's ~/.codex at the same absolute path the config expects.
-const CONTAINER_CODEX_HOME = '/home/sheep/.codex';
 const CONTAINER_EXTRA_BASE = '/workspace/extra';
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
@@ -111,6 +109,14 @@ function getCodexOptions(input: RunQueryInput): CodexOptions {
   };
 }
 
+function resolveCodexHome(sdkEnv: Record<string, string | undefined>): string {
+  return (
+    sdkEnv.NANOCLAW_CODEX_HOME ||
+    process.env.NANOCLAW_CODEX_HOME ||
+    path.join(process.env.HOME || '/home/node', '.codex')
+  );
+}
+
 function eventSummary(event: ThreadEvent): string | null {
   if (event.type === 'item.completed') {
     if (event.item.type === 'command_execution') {
@@ -172,8 +178,8 @@ export class CodexRuntime implements AgentRuntime {
       this.hooks.onLog(`Codex runtime ignores resumeAt cursor for now: ${resumeAt}`);
     }
 
-    // Point SDK to the mounted host credentials directory
-    process.env.CODEX_HOME = CONTAINER_CODEX_HOME;
+    const codexHome = resolveCodexHome(input.sdkEnv);
+    process.env.CODEX_HOME = codexHome;
 
     // Codex requires a git repo in the working directory.
     // Initialize one if not present — this is a one-time setup per group.
@@ -189,7 +195,7 @@ export class CodexRuntime implements AgentRuntime {
     if (input.sdkEnv.OPENAI_API_KEY) {
       this.hooks.onLog('Codex runtime auth mode: OPENAI_API_KEY');
     } else {
-      this.hooks.onLog(`Codex runtime auth mode: CODEX_HOME (${CONTAINER_CODEX_HOME})`);
+      this.hooks.onLog(`Codex runtime auth mode: CODEX_HOME (${codexHome})`);
     }
 
     const codex = new Codex(getCodexOptions(input));

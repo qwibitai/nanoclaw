@@ -63,6 +63,7 @@ export const OPENAI_PROXY_PORT = parseInt(
   process.env.OPENAI_PROXY_PORT || '19002',
   10,
 );
+export const CODEX_HOME = path.join(HOME_DIR, '.codex');
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,

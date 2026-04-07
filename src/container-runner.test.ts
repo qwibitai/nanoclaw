@@ -5,6 +5,7 @@ import { PassThrough } from 'stream';
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const mockHome = '/Users/alice';
 
 // Mock config
 vi.mock('./config.js', () => ({
@@ -12,12 +13,21 @@ vi.mock('./config.js', () => ({
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   CREDENTIAL_PROXY_PORT: 3001,
+  CODEX_HOME: `${mockHome}/.codex`,
   OPENAI_PROXY_PORT: 3002,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
 }));
+
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return {
+    ...actual,
+    homedir: vi.fn(() => mockHome),
+  };
+});
 
 const mockEnv: Record<string, string> = {};
 vi.mock('./env.js', () => ({
@@ -253,6 +263,37 @@ describe('container-runner timeout behavior', () => {
     expect(containerArgs).not.toContain(
       'OPENAI_BASE_URL=http://host.docker.internal:3002',
     );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('codex session auth mounts CODEX_HOME at a portable path', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).toContain(`NANOCLAW_CODEX_HOME=${mockHome}/.codex`);
+    expect(containerArgs).toContain(`${mockHome}/.codex:${mockHome}/.codex`);
 
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);

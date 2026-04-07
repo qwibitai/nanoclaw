@@ -4,7 +4,6 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
@@ -12,6 +11,7 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
+  CODEX_HOME,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -209,16 +209,11 @@ function buildVolumeMounts(
   // Codex engine: mount host's ~/.codex so the SDK can find session credentials.
   // The SDK reads auth.json and may write refreshed tokens back.
   if (engine === 'codex') {
-    const hostCodexHome = path.join(os.homedir(), '.codex');
+    const hostCodexHome = CODEX_HOME;
     if (fs.existsSync(hostCodexHome)) {
       mounts.push({
         hostPath: hostCodexHome,
-        containerPath: '/home/sheep/.codex',
-        readonly: false,
-      });
-      mounts.push({
-        hostPath: hostCodexHome,
-        containerPath: '/home/node/.codex',
+        containerPath: hostCodexHome,
         readonly: false,
       });
     }
@@ -274,6 +269,7 @@ function buildContainerArgs(
 
   if (engine === 'codex') {
     const codexSecrets = readEnvFile(['OPENAI_API_KEY']);
+    args.push('-e', `NANOCLAW_CODEX_HOME=${CODEX_HOME}`);
 
     // Only enable the OpenAI proxy path when an API key is actually configured.
     // If no key is present, the container must use the mounted ~/.codex session
