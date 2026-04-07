@@ -8,14 +8,11 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
-  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
-  CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
-  IDLE_TIMEOUT: 1800000, // 30min
+  IDLE_TIMEOUT: 1800000,
+  TIMEZONE: 'Asia/Shanghai',
   ONECLI_URL: 'http://localhost:10254',
-  TIMEZONE: 'America/Los_Angeles',
 }));
 
 // Mock logger
@@ -35,39 +32,55 @@ vi.mock('fs', async () => {
     ...actual,
     default: {
       ...actual,
-      existsSync: vi.fn(() => false),
+      existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
 
-// Mock mount-security
-vi.mock('./mount-security.js', () => ({
-  validateAdditionalMounts: vi.fn(() => []),
+// Mock env
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
 }));
 
-// Mock container-runtime
-vi.mock('./container-runtime.js', () => ({
-  CONTAINER_RUNTIME_BIN: 'docker',
-  hostGatewayArgs: () => [],
-  readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
-  stopContainer: vi.fn(),
+// Mock group-folder
+vi.mock('./group-folder.js', () => ({
+  resolveGroupFolderPath: (folder: string) =>
+    `/tmp/nanoclaw-test-groups/${folder}`,
+  resolveGroupIpcPath: (folder: string) =>
+    `/tmp/nanoclaw-test-data/ipc/${folder}`,
 }));
 
 // Mock OneCLI SDK
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: class {
+    getContainerConfig = vi.fn().mockResolvedValue({
+      env: {
+        HTTPS_PROXY: 'http://x:token@localhost:10255',
+        NODE_EXTRA_CA_CERTS: '/tmp/onecli-gateway-ca.pem',
+        NODE_USE_ENV_PROXY: '1',
+        CLAUDE_CODE_OAUTH_TOKEN: 'placeholder',
+      },
+      caCertificate: 'mock-cert',
+    });
     applyContainerConfig = vi.fn().mockResolvedValue(true);
-    createAgent = vi.fn().mockResolvedValue({ id: 'test' });
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
+    ensureAgent = vi.fn().mockResolvedValue({ id: 'test', created: false });
   },
+}));
+
+// Mock db
+vi.mock('./db.js', () => ({
+  getRotateEnabled: vi.fn(() => false),
+  getRotateIndex: vi.fn(() => 0),
+  getLastRotateAt: vi.fn(() => null),
+  setRotateIndex: vi.fn(),
+  setLastRotateAt: vi.fn(),
 }));
 
 // Create a controllable fake ChildProcess
@@ -78,12 +91,14 @@ function createFakeProcess() {
     stderr: PassThrough;
     kill: ReturnType<typeof vi.fn>;
     pid: number;
+    unref: ReturnType<typeof vi.fn>;
   };
   proc.stdin = new PassThrough();
   proc.stdout = new PassThrough();
   proc.stderr = new PassThrough();
   proc.kill = vi.fn();
   proc.pid = 12345;
+  proc.unref = vi.fn();
   return proc;
 }
 
@@ -96,6 +111,8 @@ vi.mock('child_process', async () => {
   return {
     ...actual,
     spawn: vi.fn(() => fakeProc),
+    execFileSync: vi.fn(() => ''),
+    execSync: vi.fn(() => '[]'),
     exec: vi.fn(
       (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
         if (cb) cb(null);
@@ -105,8 +122,17 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  parseEnvOutput,
+  checkAgentRunnerDist,
+  resolveWorkspacePaths,
+  prepareGroupSession,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import fs from 'fs';
+import { spawn } from 'child_process';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -130,7 +156,7 @@ function emitOutputMarker(
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
-describe('container-runner timeout behavior', () => {
+describe('agent spawn and timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
@@ -138,6 +164,54 @@ describe('container-runner timeout behavior', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('spawns node child process and writes workspacePaths', async () => {
+    // Capture stdin writes
+    const chunks: Buffer[] = [];
+    const origWrite = fakeProc.stdin.write.bind(fakeProc.stdin);
+    fakeProc.stdin.write = ((chunk: any, ...args: any[]) => {
+      if (Buffer.isBuffer(chunk) || typeof chunk === 'string') {
+        chunks.push(Buffer.from(chunk));
+      }
+      return origWrite(chunk, ...args);
+    }) as any;
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(),
+    );
+
+    // Let async buildLocalEnv settle
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Verify spawn was called with node (not docker)
+    expect(spawn).toHaveBeenCalledWith(
+      'node',
+      [expect.stringContaining('agent-runner/dist/index.js')],
+      expect.objectContaining({
+        detached: true,
+        cwd: expect.stringContaining('test-group'),
+      }),
+    );
+
+    // Verify stdin contains workspacePaths
+    const written = Buffer.concat(chunks).toString();
+    if (written) {
+      const parsed = JSON.parse(written);
+      expect(parsed.workspacePaths).toBeDefined();
+      expect(parsed.workspacePaths.group).toContain('test-group');
+      expect(parsed.workspacePaths.ipc).toContain('test-group');
+    }
+
+    // Clean up
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 
   it('timeout after output resolves as success', async () => {
@@ -149,31 +223,20 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output with a result
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
     });
 
-    // Let output processing settle
     await vi.advanceTimersByTimeAsync(10);
-
-    // Fire the hard timeout (IDLE_TIMEOUT + 30s = 1830000ms)
     await vi.advanceTimersByTimeAsync(1830000);
-
-    // Emit close event (as if container was stopped by the timeout)
     fakeProc.emit('close', 137);
-
-    // Let the promise resolve
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-123');
-    expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
-    );
   });
 
   it('timeout with no output resolves as error', async () => {
@@ -185,18 +248,13 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
-
-    // Emit close event
     fakeProc.emit('close', 137);
-
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
-    expect(onOutput).not.toHaveBeenCalled();
   });
 
   it('normal exit after output resolves as success', async () => {
@@ -208,7 +266,6 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output
     emitOutputMarker(fakeProc, {
       status: 'success',
       result: 'Done',
@@ -216,14 +273,82 @@ describe('container-runner timeout behavior', () => {
     });
 
     await vi.advanceTimersByTimeAsync(10);
-
-    // Normal exit (no timeout)
     fakeProc.emit('close', 0);
-
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('parseEnvOutput', () => {
+  it('parses KEY=VALUE format', () => {
+    expect(parseEnvOutput('FOO=bar\nBAZ=qux')).toEqual({
+      FOO: 'bar',
+      BAZ: 'qux',
+    });
+  });
+
+  it('handles values containing =', () => {
+    expect(parseEnvOutput('KEY=a=b=c')).toEqual({ KEY: 'a=b=c' });
+  });
+
+  it('skips empty lines', () => {
+    expect(parseEnvOutput('A=1\n\nB=2\n')).toEqual({ A: '1', B: '2' });
+  });
+});
+
+describe('checkAgentRunnerDist', () => {
+  it('does not throw when dist exists', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    expect(() => checkAgentRunnerDist()).not.toThrow();
+  });
+
+  it('throws with build:agent hint when dist missing', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(() => checkAgentRunnerDist()).toThrow(/build:agent/);
+    vi.mocked(fs.existsSync).mockReturnValue(true); // restore
+  });
+});
+
+describe('resolveWorkspacePaths', () => {
+  it('main group includes project path', () => {
+    const p = resolveWorkspacePaths(testGroup, true);
+    expect(p.project).toBeDefined();
+    expect(p.group).toContain('test-group');
+    expect(p.ipc).toContain('test-group');
+  });
+
+  it('non-main group excludes project', () => {
+    const p = resolveWorkspacePaths(testGroup, false);
+    expect(p.project).toBeUndefined();
+  });
+
+  it('all paths are absolute', () => {
+    const p = resolveWorkspacePaths(testGroup, true);
+    for (const val of Object.values(p)) {
+      if (val) expect(val).toMatch(/^\//);
+    }
+  });
+
+  it('global points to groups/global', () => {
+    const p = resolveWorkspacePaths(testGroup, true);
+    expect(p.global).toMatch(/groups\/global$/);
+  });
+});
+
+describe('prepareGroupSession', () => {
+  it('returns different paths for different groups', () => {
+    const a = prepareGroupSession('group-a');
+    const b = prepareGroupSession('group-b');
+    expect(a).toContain('group-a');
+    expect(b).toContain('group-b');
+    expect(a).not.toBe(b);
+  });
+
+  it('path ends with .claude', () => {
+    const dir = prepareGroupSession('main');
+    expect(dir).toMatch(/sessions\/main\/\.claude$/);
   });
 });

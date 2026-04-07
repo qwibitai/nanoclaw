@@ -1,8 +1,14 @@
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
+import {
+  getMemoryQueue,
+  injectMemory,
+  isMemoryEnabled,
+} from './memory/index.js';
 import {
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
@@ -21,18 +27,17 @@ import {
 } from './channels/registry.js';
 import {
   ContainerOutput,
+  detectRateLimit,
+  rotateAccount,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
-import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getChatName,
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
@@ -43,11 +48,13 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  getRotateEnabled,
+  setRotateEnabled,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -114,6 +121,97 @@ function loadState(): void {
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
+}
+
+/**
+ * 自动注册未注册的群聊。从 chat metadata 中取名称，生成合法的 folder name，
+ * 以 requiresTrigger: true 注册，这样必须 @触发 才会响应。
+ * 返回是否成功注册。
+ */
+function autoRegisterGroup(chatJid: string): boolean {
+  if (registeredGroups[chatJid]) return false;
+
+  const chatName = getChatName(chatJid);
+  if (!chatName) {
+    logger.debug({ chatJid }, '自动注册跳过：找不到群名');
+    return false;
+  }
+
+  // 从群名生成 folder name：去除非法字符，截断到 64 字符
+  let folder = chatName
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 64);
+
+  // 确保 folder 以字母或数字开头
+  if (!folder || !/^[A-Za-z0-9]/.test(folder)) {
+    folder = `grp_${folder || chatJid.replace(/[^A-Za-z0-9]/g, '').slice(0, 50)}`;
+  }
+
+  if (!isValidGroupFolder(folder)) {
+    logger.warn({ chatJid, folder }, '自动注册失败：生成的 folder name 不合法');
+    return false;
+  }
+
+  // 检查 folder 是否已被其他群占用
+  const folderInUse = Object.values(registeredGroups).some(
+    (g) => g.folder === folder,
+  );
+  if (folderInUse) {
+    // 追加 JID hash 后缀避免冲突
+    const suffix = chatJid.replace(/[^A-Za-z0-9]/g, '').slice(-6);
+    folder = `${folder.slice(0, 57)}_${suffix}`;
+    if (!isValidGroupFolder(folder)) {
+      logger.warn({ chatJid, folder }, '自动注册失败：去重后 folder 不合法');
+      return false;
+    }
+  }
+
+  const group: RegisteredGroup = {
+    name: chatName,
+    folder,
+    trigger: DEFAULT_TRIGGER,
+    added_at: new Date().toISOString(),
+    requiresTrigger: true,
+  };
+
+  registerGroup(chatJid, group);
+  logger.info({ chatJid, name: chatName, folder }, '群聊已自动注册');
+  return true;
+}
+
+/**
+ * 处理 /trigger 和 /notrigger 指令，切换群的 requiresTrigger 状态。
+ * 返回要发送给用户的确认消息，如果不适用则返回 null。
+ */
+function handleTriggerToggle(
+  chatJid: string,
+  command: '/trigger' | '/notrigger',
+): string | null {
+  const group = registeredGroups[chatJid];
+  if (!group) return null;
+  if (group.isMain) return null; // main group 不需要 trigger
+
+  const wantTrigger = command === '/trigger';
+  if (group.requiresTrigger === wantTrigger) {
+    return wantTrigger
+      ? `已经是 @触发 模式，发消息需要 ${group.trigger || DEFAULT_TRIGGER} 开头`
+      : '已经是免@模式，所有消息都会被处理';
+  }
+
+  group.requiresTrigger = wantTrigger;
+  registeredGroups[chatJid] = group;
+  setRegisteredGroup(chatJid, group);
+
+  logger.info(
+    { chatJid, name: group.name, requiresTrigger: wantTrigger },
+    'Trigger mode toggled',
+  );
+
+  return wantTrigger
+    ? `已切换到 @触发 模式，发消息需要 ${group.trigger || DEFAULT_TRIGGER} 开头`
+    : '已切换到免@模式，所有消息都会被处理';
 }
 
 /**
@@ -283,37 +381,86 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  // R8.1: 收集 Agent 回复文本（用于记忆更新）
+  const agentReplies: string[] = [];
+
+  // 取最后一条用户消息用于记忆召回
+  const lastUserMsg = [...missedMessages]
+    .reverse()
+    .find((m) => !m.is_bot_message && !m.is_from_me);
+  const latestUserMessage = lastUserMsg?.content;
+  const memorySenderId = lastUserMsg?.sender || '';
+
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
+      // 进度消息 — 转发给 channel 显示进度卡片
+      if (result.status === 'progress' && result.result) {
+        const payload = result.detail
+          ? JSON.stringify({ title: result.result, detail: result.detail })
+          : result.result;
+        await channel.sendMessage(chatJid, payload);
+        return;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      // 传递 usage 数据到飞书 channel（在发送文本回复之前）
+      if (result.usage && 'setUsage' in channel) {
+        (
+          channel as {
+            setUsage: (jid: string, usage: typeof result.usage) => void;
+          }
+        ).setUsage(chatJid, result.usage);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.setTyping?.(chatJid, false);
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+          agentReplies.push(text);
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
+      }
+
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
+
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    latestUserMessage,
+    memorySenderId,
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  // 轮换通知
+  if (output.rotatedTo) {
+    channel
+      .sendMessage(chatJid, `🔄 账号已自动切换到 ${output.rotatedTo}`)
+      .catch(() => {});
+  }
+  if (output.allExhausted) {
+    channel
+      .sendMessage(chatJid, '⚠️ 所有账号配额已耗尽，请等待恢复或添加新账号')
+      .catch(() => {});
+  }
+
+  if (output.status === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -333,7 +480,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // R8.1: 对话完成后，收集 Agent 回复 + 用户消息一起入队记忆更新
+  if (isMemoryEnabled()) {
+    const memoryMessages = [
+      ...missedMessages.map((m) => ({
+        content: m.content,
+        sender_name: m.sender_name,
+        is_bot_message: m.is_bot_message,
+        is_from_me: m.is_from_me,
+      })),
+      ...agentReplies.map((text) => ({
+        content: text,
+        is_bot_message: true,
+      })),
+    ];
+    getMemoryQueue().add(
+      group.folder,
+      memoryMessages,
+      sessions[group.folder],
+      memorySenderId,
+    );
+  }
+
   return true;
+}
+
+interface RunAgentResult {
+  status: 'success' | 'error';
+  rotatedTo?: string; // 轮换到的新 secret 名称（用于通知用户）
+  allExhausted?: boolean; // 所有账号配额耗尽
 }
 
 async function runAgent(
@@ -341,9 +516,27 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+  latestUserMessage?: string,
+  memorySenderId?: string,
+  isRetry?: boolean,
+): Promise<RunAgentResult> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
+
+  // R8.2: 启动容器前注入记忆
+  if (isMemoryEnabled()) {
+    try {
+      const groupDir = resolveGroupFolderPath(group.folder);
+      await injectMemory(
+        group.folder,
+        groupDir,
+        latestUserMessage,
+        memorySenderId,
+      );
+    } catch (err) {
+      logger.warn({ err, group: group.name }, '记忆注入失败，继续启动容器');
+    }
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -424,17 +617,51 @@ async function runAgent(
         deleteSession(group.folder);
       }
 
+      // 429 检测 + 自动轮换
+      if (!isRetry && output.error && detectRateLimit(output.error)) {
+        const agentId = group.folder.toLowerCase().replace(/_/g, '-');
+        const rotateResult = rotateAccount(agentId);
+
+        if (rotateResult && !rotateResult.success) {
+          // 所有账号耗尽
+          logger.warn({ group: group.name }, '所有账号配额已耗尽');
+          return { status: 'error', allExhausted: true };
+        }
+
+        if (rotateResult && rotateResult.success) {
+          // 清除 session，用新 token 重试
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+          logger.info(
+            { group: group.name, newSecret: rotateResult.newSecretName },
+            '429 检测到，已轮换账号，重试中',
+          );
+          return runAgent(
+            group,
+            prompt,
+            chatJid,
+            onOutput,
+            latestUserMessage,
+            memorySenderId,
+            true,
+          ).then((retryResult) => ({
+            ...retryResult,
+            rotatedTo: rotateResult.newSecretName,
+          }));
+        }
+      }
+
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return 'error';
+      return { status: 'error' };
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return { status: 'error' };
   }
 }
 
@@ -444,6 +671,27 @@ async function startMessageLoop(): Promise<void> {
     return;
   }
   messageLoopRunning = true;
+
+  // 启动飞书 OAuth 回调 server（用户点击授权卡片后的回调）
+  try {
+    const { startOAuthCallbackServer } =
+      await import('./channels/feishu-oauth.js');
+    startOAuthCallbackServer(async ({ openId, chatJid }) => {
+      logger.info({ openId, chatJid }, '飞书 OAuth 授权成功回调');
+      const channel = findChannel(channels, chatJid);
+      if (channel) {
+        await channel.sendMessage(
+          chatJid,
+          '✅ 飞书文档授权成功！后续文档操作将使用你的权限。',
+        );
+        logger.info({ chatJid }, '飞书授权成功通知已发送');
+      } else {
+        logger.warn({ chatJid }, '飞书授权成功但找不到对应 channel');
+      }
+    });
+  } catch (err) {
+    logger.warn({ err }, '飞书 OAuth server 启动失败');
+  }
 
   logger.info(`NanoClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 
@@ -563,13 +811,7 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
-}
-
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -582,9 +824,18 @@ async function main(): Promise<void> {
 
   restoreRemoteControl();
 
+  // Initialize memory system (if enabled)
+  if (isMemoryEnabled()) {
+    getMemoryQueue();
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    // R8.4: flush pending memory updates before shutdown
+    if (isMemoryEnabled()) {
+      await getMemoryQueue().flush();
+    }
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -637,13 +888,297 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
+      // 剥离 trigger 前缀（如 "@Andy "）以匹配 slash 命令
+      const rawContent = msg.content.trim();
+      let trimmed = rawContent;
+      const group = registeredGroups[chatJid];
+      if (group) {
+        const triggerPattern = getTriggerPattern(group.trigger);
+        trimmed = trimmed.replace(triggerPattern, '').trim();
+      }
+
       // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
+      }
+
+      // /help 指令 — 列出所有可用命令
+      if (trimmed === '/help') {
+        const ch = findChannel(channels, chatJid);
+        const help = [
+          '可用命令：',
+          '',
+          '/help — 显示此帮助',
+          '/clear — 清除当前 session，开始新对话（记忆保留）',
+          '/account — 列出所有 Anthropic 账号及当前绑定',
+          '/account <name> — 切换到指定账号',
+          '/account auto on|off — 开关自动轮换（429 时自动切换）',
+          '/trigger — 开启 @触发模式（群聊需 @机器人才响应）',
+          '/notrigger — 关闭 @触发模式（群聊中所有消息都响应）',
+          '/remote-control — 启动 Claude Code 远程控制会话',
+          '/remote-control-end — 结束远程控制会话',
+          '/llmlog on|off|status — 开关 LLM 完整请求日志（会话级，重启后重置）',
+        ].join('\n');
+        ch?.sendMessage(chatJid, help).catch((err) =>
+          logger.error({ err }, '/help reply failed'),
+        );
+        return;
+      }
+
+      // /clear 指令 — 清除 session，开始新对话（对齐 Claude Code /clear）
+      if (trimmed === '/clear') {
+        const group = registeredGroups[chatJid];
+        if (group) {
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+          // /clear 时同步重置 llmlog 开关
+          try { fs.unlinkSync(path.join(GROUPS_DIR, group.folder, '.llmlog_enabled')); } catch { /* ignore */ }
+          logger.info({ group: group.folder }, '/clear: session 已清除');
+          const ch = findChannel(channels, chatJid);
+          ch?.sendMessage(
+            chatJid,
+            '对话已清除，下次消息将开始新 session。记忆保留。',
+          ).catch((err) =>
+            logger.error({ err }, 'Failed to send /clear reply'),
+          );
+        }
+        return;
+      }
+
+      // /account 指令 — 切换 Anthropic 账号
+      if (trimmed === '/account' || trimmed.startsWith('/account ')) {
+        const arg = trimmed.slice('/account'.length).trim();
+        const ch = findChannel(channels, chatJid);
+        logger.info(
+          { chatJid, arg, hasCh: !!ch, trimmed },
+          '/account 命令匹配',
+        );
+        try {
+          if (arg === 'auto on') {
+            setRotateEnabled(true);
+            ch?.sendMessage(chatJid, '🔄 自动轮换已开启').catch(() => {});
+            logger.info('/account auto on');
+          } else if (arg === 'auto off') {
+            setRotateEnabled(false);
+            ch?.sendMessage(chatJid, '🔄 自动轮换已关闭').catch(() => {});
+            logger.info('/account auto off');
+          } else if (!arg) {
+            // 列出所有 secrets
+
+            const secrets = JSON.parse(
+              execSync('onecli secrets list', {
+                encoding: 'utf-8',
+                timeout: 5000,
+              }),
+            ) as Array<{ id: string; name: string; type: string }>;
+            const agents = JSON.parse(
+              execSync('onecli agents list', {
+                encoding: 'utf-8',
+                timeout: 5000,
+              }),
+            ) as Array<{
+              id: string;
+              name: string;
+              identifier: string;
+              secretMode: string;
+            }>;
+
+            // 找当前群对应的 agent
+            const group = registeredGroups[chatJid];
+            const agentId =
+              group?.folder.toLowerCase().replace(/_/g, '-') || '';
+            const currentAgent =
+              agents.find((a) => a.identifier === agentId) ||
+              agents.find((a) => 'isDefault' in a && a.isDefault);
+
+            // 获取当前 agent 绑定的 secrets
+            let assignedSecretIds: string[] = [];
+            if (currentAgent) {
+              try {
+                const agentSecrets = JSON.parse(
+                  execSync(`onecli agents secrets --id ${currentAgent.id}`, {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                  }),
+                ) as Array<string | { id: string }>;
+                assignedSecretIds = agentSecrets.map((s) =>
+                  typeof s === 'string' ? s : s.id,
+                );
+              } catch {
+                /* no secrets assigned */
+              }
+            }
+
+            const autoStatus = getRotateEnabled() ? '开启' : '关闭';
+            const lines = secrets.map((s) => {
+              const active = assignedSecretIds.includes(s.id) ? ' ← 当前' : '';
+              return `• ${s.name} (${s.type})${active}`;
+            });
+            const reply =
+              lines.length > 0
+                ? `可用账号：\n${lines.join('\n')}\n\n自动轮换: ${autoStatus}\n\n切换：/account <name>\n开关：/account auto on|off`
+                : '没有配置任何账号。用 onecli secrets create 添加。';
+            logger.info(
+              { chatJid, replyLen: reply.length },
+              '/account 准备发送回复',
+            );
+            ch?.sendMessage(chatJid, reply)
+              .then(() => logger.info('/account 回复已发送'))
+              .catch((err) => logger.error({ err }, '/account reply failed'));
+          } else {
+            // 切换到指定账号
+
+            const secrets = JSON.parse(
+              execSync('onecli secrets list', {
+                encoding: 'utf-8',
+                timeout: 5000,
+              }),
+            ) as Array<{ id: string; name: string }>;
+            const target = secrets.find(
+              (s) =>
+                s.name === arg ||
+                s.id === arg ||
+                s.name.toLowerCase().includes(arg.toLowerCase()),
+            );
+            if (!target) {
+              ch?.sendMessage(
+                chatJid,
+                `❌ 找不到账号 "${arg}"。用 /account 查看可用账号。`,
+              ).catch(() => {});
+            } else {
+              const group = registeredGroups[chatJid];
+              const agentId =
+                group?.folder.toLowerCase().replace(/_/g, '-') || '';
+              const agents = JSON.parse(
+                execSync('onecli agents list', {
+                  encoding: 'utf-8',
+                  timeout: 5000,
+                }),
+              ) as Array<{
+                id: string;
+                identifier: string;
+                isDefault?: boolean;
+              }>;
+              const agent =
+                agents.find((a) => a.identifier === agentId) ||
+                agents.find((a) => 'isDefault' in a && a.isDefault);
+              if (agent) {
+                execSync(
+                  `onecli agents set-secrets --id ${agent.id} --secret-ids ${target.id}`,
+                  { encoding: 'utf-8', timeout: 5000 },
+                );
+                // 也清掉 session，让新容器用新 key
+                if (group) {
+                  delete sessions[group.folder];
+                  deleteSession(group.folder);
+                }
+                ch?.sendMessage(
+                  chatJid,
+                  `✅ 已切换到 ${target.name}。下次对话生效。`,
+                ).catch(() => {});
+                logger.info(
+                  { agent: agent.id, secret: target.name },
+                  '/account: 账号已切换',
+                );
+              } else {
+                ch?.sendMessage(chatJid, '❌ 找不到对应的 agent。').catch(
+                  () => {},
+                );
+              }
+            }
+          }
+        } catch (err) {
+          logger.error({ err }, '/account 执行失败');
+          ch?.sendMessage(
+            chatJid,
+            `❌ 账号操作失败: ${(err as Error).message}`,
+          ).catch(() => {});
+        }
+        return;
+      }
+
+      // /trigger 和 /notrigger 指令 — 拦截并切换模式
+      if (trimmed === '/trigger' || trimmed === '/notrigger') {
+        const reply = handleTriggerToggle(
+          chatJid,
+          trimmed as '/trigger' | '/notrigger',
+        );
+        if (reply) {
+          const ch = findChannel(channels, chatJid);
+          ch?.sendMessage(chatJid, reply).catch((err) =>
+            logger.error(
+              { err, chatJid },
+              'Failed to send trigger toggle reply',
+            ),
+          );
+        }
+        return; // 不存储指令消息
+      }
+
+      // /llmlog 指令 — 开关 LLM 请求日志（编排层直接处理，不进 LLM）
+      if (
+        trimmed === '/llmlog' ||
+        trimmed === '/llmlog on' ||
+        trimmed === '/llmlog off' ||
+        trimmed === '/llmlog status'
+      ) {
+        const ch = findChannel(channels, chatJid);
+        const grp = registeredGroups[chatJid];
+        if (grp) {
+          const flagFile = path.join(GROUPS_DIR, grp.folder, '.llmlog_enabled');
+          const logDir = path.join(GROUPS_DIR, grp.folder, 'llmlogs');
+          let reply: string;
+          if (trimmed === '/llmlog on') {
+            fs.mkdirSync(path.dirname(flagFile), { recursive: true });
+            fs.writeFileSync(flagFile, '');
+            reply = `[llmlog] 已开启，API 请求将保存到 groups/${grp.folder}/llmlogs/`;
+          } else if (trimmed === '/llmlog off') {
+            try { fs.unlinkSync(flagFile); } catch { /* ignore */ }
+            reply = '[llmlog] 已关闭';
+          } else {
+            // status
+            const isOn = fs.existsSync(flagFile);
+            let count = 0;
+            try { count = fs.readdirSync(logDir).length; } catch { /* ignore */ }
+            reply = `[llmlog] 当前${isOn ? '开启' : '关闭'}，已保存 ${count} 条日志`;
+          }
+          ch?.sendMessage(chatJid, reply).catch((err) =>
+            logger.error({ err }, '/llmlog reply failed'),
+          );
+        }
+        return;
+      }
+
+      // 未知 / 命令 — 拦截并返回错误提示，不进 LLM
+      if (trimmed.startsWith('/') && !trimmed.startsWith('/ ')) {
+        const ch = findChannel(channels, chatJid);
+        const unknownCmd = trimmed.split(/\s/)[0];
+        const help = [
+          `❓ 未知命令 "${unknownCmd}"，可用命令：`,
+          '',
+          '/help — 显示此帮助',
+          '/clear — 清除当前 session，开始新对话（记忆保留）',
+          '/account — 列出所有 Anthropic 账号及当前绑定',
+          '/account <name> — 切换到指定账号',
+          '/account auto on|off — 开关自动轮换（429 时自动切换）',
+          '/trigger — 开启 @触发模式',
+          '/notrigger — 关闭 @触发模式',
+          '/llmlog on|off|status — 开关 LLM 完整请求日志',
+          '/remote-control — 启动 Claude Code 远程控制会话',
+          '/remote-control-end — 结束远程控制会话',
+        ].join('\n');
+        ch?.sendMessage(chatJid, help).catch((err) =>
+          logger.error({ err }, 'unknown command reply failed'),
+        );
+        return;
+      }
+
+      // 自动注册未注册的群聊
+      if (!registeredGroups[chatJid]) {
+        autoRegisterGroup(chatJid);
       }
 
       // Sender allowlist drop mode: discard messages from denied senders before storing
@@ -744,6 +1279,20 @@ async function main(): Promise<void> {
       }));
       for (const group of Object.values(registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+      }
+    },
+    onFeishuAuthRequest: async (chatJid, groupFolder) => {
+      const feishuMod = await import('./channels/feishu.js');
+      const feishuChannel = channels.find((c) => c.name === 'feishu') as
+        | InstanceType<typeof feishuMod.FeishuChannel>
+        | undefined;
+      if (!feishuChannel?.sendAuthCard) return;
+      const { buildAuthUrl } = await import('./channels/feishu-oauth.js');
+      const state = `${chatJid}|${groupFolder}`;
+      const authUrl = buildAuthUrl(state);
+      if (authUrl) {
+        await feishuChannel.sendAuthCard(chatJid, authUrl);
+        logger.info({ chatJid }, '飞书授权卡片已发送');
       }
     },
   });

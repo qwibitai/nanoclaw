@@ -23,6 +23,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onFeishuAuthRequest?: (chatJid: string, groupFolder: string) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -74,6 +75,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              if (data.type === 'message' && data.chatJid && data.text) {
+                // 飞书授权请求 — text 中包含 feishu_auth_request JSON
+                let isAuthRequest = false;
+                try {
+                  const parsed =
+                    typeof data.text === 'string'
+                      ? JSON.parse(data.text)
+                      : null;
+                  if (parsed?.type === 'feishu_auth_request')
+                    isAuthRequest = true;
+                } catch {
+                  /* 不是 JSON，正常消息 */
+                }
+                if (isAuthRequest || data.type === 'feishu_auth_request') {
+                  if (deps.onFeishuAuthRequest) {
+                    await deps.onFeishuAuthRequest(data.chatJid, sourceGroup);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'Feishu auth request processed',
+                    );
+                  }
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
+              }
+
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];

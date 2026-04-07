@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running as local Node.js child processes. Each group has isolated `.claude/` config, IPC directory and filesystem.
 
 ## Key Files
 
@@ -15,7 +15,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/container-runner.ts` | Spawns agent as Node.js child process |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
@@ -23,7 +23,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
-API keys, secret keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway — which handles secret injection into containers at request time, so no keys or tokens are ever passed to containers directly. Run `onecli --help`.
+API keys and credentials are injected via OneCLI CLI mode (`onecli agents get-env`) or read from `.env`. Agent child processes receive only explicitly filtered environment variables via `buildLocalEnv()`. Run `onecli --help`.
 
 ## Skills
 
@@ -32,7 +32,7 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 - **Feature skills** — merge a `skill/*` branch to add capabilities (e.g. `/add-telegram`, `/add-slack`)
 - **Utility skills** — ship code files alongside SKILL.md (e.g. `/claw`)
 - **Operational skills** — instruction-only workflows, always on `main` (e.g. `/setup`, `/debug`)
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`)
+- **Container skills** — synced to per-group `.claude/skills/` at agent startup (`container/skills/`)
 
 | Skill | When to Use |
 |-------|-------------|
@@ -54,9 +54,13 @@ Run commands directly—don't tell the user to run them.
 
 ```bash
 npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+npm run build        # Compile TypeScript (host)
+npm run build:agent  # Compile agent-runner TypeScript
 ```
+
+**Security note:** Agent runs as a local child process without OS-level sandboxing. It can read/write host files (including `.env` and project source). Security relies on Claude SDK tool allowlists. Docker-based isolation is preserved in git tag `docker-runtime-v1`.
+
+**Limitations:** Per-group agent-runner source customization is not supported — all groups share the same compiled `container/agent-runner/dist/`.
 
 Service management:
 ```bash
@@ -75,6 +79,6 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
-## Container Build Cache
+## Docker Rollback
 
-The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+The Docker-based container runtime has been replaced with local Node.js child processes. The complete Docker codebase is preserved in git tag `docker-runtime-v1` for rollback if needed: `git checkout docker-runtime-v1`.

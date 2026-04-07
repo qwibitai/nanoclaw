@@ -82,6 +82,21 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS account_rotate_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_tokens (
+      user_id TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, chat_jid)
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -241,6 +256,16 @@ export interface ChatInfo {
   last_message_time: string;
   channel: string;
   is_group: number;
+}
+
+/**
+ * Get a chat's display name by JID. Returns undefined if not found.
+ */
+export function getChatName(chatJid: string): string | undefined {
+  const row = db
+    .prepare('SELECT name FROM chats WHERE jid = ?')
+    .get(chatJid) as { name: string } | undefined;
+  return row?.name ?? undefined;
 }
 
 /**
@@ -687,6 +712,108 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Account rotate config accessors ---
+
+export function getRotateEnabled(): boolean {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('enabled') as { value: string } | undefined;
+  return row?.value === 'true';
+}
+
+export function setRotateEnabled(enabled: boolean): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('enabled', String(enabled));
+}
+
+export function getRotateIndex(): number {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('current_index') as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : 0;
+}
+
+export function setRotateIndex(index: number): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('current_index', String(index));
+}
+
+export function getLastRotateAt(): number | null {
+  const row = db
+    .prepare('SELECT value FROM account_rotate_config WHERE key = ?')
+    .get('last_rotate_at') as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : null;
+}
+
+export function setLastRotateAt(ts: number): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_rotate_config (key, value) VALUES (?, ?)',
+  ).run('last_rotate_at', String(ts));
+}
+
+// --- Last sender lookup ---
+
+export function getLastSenderForChat(chatJid: string): string | null {
+  const row = db
+    .prepare(
+      'SELECT sender FROM messages WHERE chat_jid = ? AND is_bot_message = 0 AND sender != ? ORDER BY timestamp DESC LIMIT 1',
+    )
+    .get(chatJid, '') as { sender: string } | undefined;
+  return row?.sender ?? null;
+}
+
+// --- Feishu tokens ---
+
+export interface FeishuTokenRecord {
+  access_token: string;
+  refresh_token: string;
+  expires_at: string;
+}
+
+export function getFeishuToken(
+  userId: string,
+  chatJid: string,
+): FeishuTokenRecord | null {
+  const row = db
+    .prepare(
+      'SELECT access_token, refresh_token, expires_at FROM feishu_tokens WHERE user_id = ? AND chat_jid = ?',
+    )
+    .get(userId, chatJid) as FeishuTokenRecord | undefined;
+  return row ?? null;
+}
+
+export function getFeishuTokenByUserId(
+  userId: string,
+): (FeishuTokenRecord & { chat_jid: string }) | null {
+  const row = db
+    .prepare(
+      'SELECT access_token, refresh_token, expires_at, chat_jid FROM feishu_tokens WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
+    )
+    .get(userId) as (FeishuTokenRecord & { chat_jid: string }) | undefined;
+  return row ?? null;
+}
+
+export function setFeishuToken(
+  userId: string,
+  chatJid: string,
+  accessToken: string,
+  refreshToken: string,
+  expiresAt: string,
+): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO feishu_tokens (user_id, chat_jid, access_token, refresh_token, expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    userId,
+    chatJid,
+    accessToken,
+    refreshToken,
+    expiresAt,
+    new Date().toISOString(),
+  );
 }
 
 // --- JSON migration ---
