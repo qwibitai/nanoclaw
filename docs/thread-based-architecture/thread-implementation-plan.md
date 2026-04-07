@@ -142,8 +142,13 @@
 `index.ts` のメッセージ処理は次の 2 層で動く。
 
 ```
-onMessage callback (channel → index.ts)
-  └── storeMessage(msg)   ← 登録済みかどうかに関わらず DB に保存
+discord.ts (チャンネルアダプター)
+  └── 未登録チャンネル/スレッド → ドロップ（例外: 親に thread_defaults がある thread は通す）
+        └── onMessage callback (channel → index.ts)
+              ├── 未登録 + parent_jid あり + 親に thread_defaults あり
+              │     → autoRegisterThread() → 登録完了後に storeMessage
+              ├── 未登録 + parent_jid なし／親に thread_defaults なし → return（ドロップ）
+              └── 登録済み → sender-allowlist チェック → storeMessage
 
 startMessageLoop (POLL_INTERVAL ごと)
   └── getNewMessages(registered jids only)
@@ -152,37 +157,35 @@ startMessageLoop (POLL_INTERVAL ごと)
                     └── processGroupMessages → runAgent
 ```
 
-重要な点として、`onMessage` は `registeredGroups[chatJid]` を参照していない。
-メッセージは thread であっても DB に保存される。スキップされるのは `startMessageLoop` 側。
+重要な点として、メッセージは次の 2 段階でフィルタリングされる。
+
+1. **`discord.ts` 側（チャンネルアダプター）**: 未登録チャンネル/スレッドのメッセージはここでドロップされる。ただし、スレッドの親チャンネルが `thread_defaults` を持つ場合は例外として `onMessage` まで通す。
+2. **`onMessage` コールバック（`index.ts`）**: `registeredGroups[chatJid]` を参照する。未登録かつ `msg.parent_jid` がある場合は `autoRegisterThread` を呼んで子 group を登録し、処理を継続する。親に `thread_defaults` がなければ `return` で早期終了する。`storeMessage` は最終的にすべてのチェックを通過したメッセージにのみ呼ばれる。
 
 ### thread 自動登録の差し込み点
 
-`startMessageLoop` 内の以下の箇所が自然な差し込み点になる。
+実際の実装では `onMessage` コールバック内が差し込み点になっている。
 
 ```ts
-// 現状
-const group = registeredGroups[chatJid];
-if (!group) continue;
-
-// 拡張後
-const group = registeredGroups[chatJid];
-if (!group) {
-  // thread 自動登録を試みる
-  const registered = await tryAutoRegisterThread(chatJid, msg);
-  if (!registered) continue;
-  // 登録完了 → 次のポーリングサイクルで処理（同サイクルでは処理しない）
-  continue;
+// src/index.ts — onMessage コールバック内
+if (!registeredGroups[chatJid] && msg.parent_jid) {
+  const parent = registeredGroups[msg.parent_jid];
+  if (parent?.thread_defaults) {
+    autoRegisterThread(chatJid, msg, parent);
+    // 登録したので以降の storeMessage / allowlist 処理を通常通り実行する
+  } else {
+    return; // parent が thread_defaults を持たない → ドロップ
+  }
 }
 ```
 
-自動登録後は **同サイクルで処理しない**。`registeredGroups` への反映と `lastAgentTimestamp` の初期化が揃ってから、次のポーリングで通常フローに乗せるのが安全。
+メッセージは自動登録完了後もそのまま `storeMessage` まで流れる。`startMessageLoop` 側では次のポーリングサイクルで通常フローに乗る。
 
-`tryAutoRegisterThread` の内部ロジック:
+`autoRegisterThread` の内部ロジック:
 
-1. `chatJid` から親チャンネルの JID を導出する（Discord の場合 `dc:{parentChannelId}`）
-2. `registeredGroups` から親 group を探す
-3. 親に `thread_defaults` がなければ `return false`
-4. `thread_defaults` の内容で子 group を組み立てて `registerGroup(chatJid, childGroup)` を呼ぶ
+1. `msg.parent_jid` から親 group を `registeredGroups` で直接引く
+2. 親に `thread_defaults` がなければ早期 `return`（呼び出し元でガード済み）
+3. `thread_defaults` の内容（`type ?? 'thread'`、`requiresTrigger` など）で子 group を組み立てて `setRegisteredGroup()` で DB に保存し `registeredGroups[chatJid]` に反映する
 
 ### トリガー判定
 
