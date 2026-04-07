@@ -18,18 +18,26 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+import {
+  persistCryptoStore,
+  restoreCryptoStore,
+} from './matrix-idb-persist.js';
 
 /** Persistent data directory — survives container restarts */
 const MATRIX_DATA_DIR = '/app/data';
+const MATRIX_CRYPTO_STORE_PATH = path.join(
+  MATRIX_DATA_DIR,
+  'matrix-crypto-store',
+);
 const MATRIX_DEVICE_ID_PATH = path.join(MATRIX_DATA_DIR, 'matrix-device-id');
 
 /**
  * Crypto store prefix for IndexedDB databases created by the Rust SDK.
  * The WASM crypto module stores Olm account keys, Megolm sessions, and device
- * lists in IndexedDB (provided by fake-indexeddb in Node.js). These databases
- * live in-process memory — on restart, the SDK re-negotiates Megolm sessions
- * using the same device ID (persisted to disk), so Synapse recognises the
- * device and shares room keys automatically.
+ * lists in IndexedDB (provided by fake-indexeddb in Node.js). A persistence
+ * layer (matrix-idb-persist) serialises the in-memory IndexedDB state to a
+ * SQLite file at MATRIX_CRYPTO_STORE_PATH so Olm keys and Megolm sessions
+ * survive process restarts.
  */
 const MATRIX_CRYPTO_DB_PREFIX = 'matrix-crypto-nanoclaw';
 
@@ -69,6 +77,7 @@ export class MatrixChannel implements Channel {
   private accessToken: string;
   private botUserId: string;
   private syncReady = false;
+  private cryptoPersistTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     homeserverUrl: string,
@@ -83,16 +92,18 @@ export class MatrixChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    // Ensure the persistent data directory exists and is writable.
-    // Device ID must survive restarts for E2EE key continuity.
-    fs.mkdirSync(MATRIX_DATA_DIR, { recursive: true });
-    try {
-      fs.accessSync(MATRIX_DATA_DIR, fs.constants.W_OK);
-    } catch {
-      throw new Error(
-        `Matrix data directory ${MATRIX_DATA_DIR} is not writable — ` +
-          'E2EE keys will be lost on restart. Fix permissions or volume mount.',
-      );
+    // Ensure the persistent data directories exist and are writable.
+    // Device ID and crypto store must survive restarts for E2EE key continuity.
+    for (const dir of [MATRIX_DATA_DIR, MATRIX_CRYPTO_STORE_PATH]) {
+      fs.mkdirSync(dir, { recursive: true });
+      try {
+        fs.accessSync(dir, fs.constants.W_OK);
+      } catch {
+        throw new Error(
+          `Matrix directory ${dir} is not writable — ` +
+            'E2EE keys will be lost on restart. Fix permissions or volume mount.',
+        );
+      }
     }
 
     // Reuse a previously persisted device ID so the crypto identity survives
@@ -137,12 +148,34 @@ export class MatrixChannel implements Channel {
 
     // Initialise Rust crypto for E2EE support.
     // The WASM module stores keys in IndexedDB (polyfilled by fake-indexeddb).
-    // Using a named prefix creates persistent databases within the process.
-    // On restart, the same device ID lets Synapse re-share room keys.
+    // Before crypto init, restore any previously persisted IndexedDB state from
+    // the SQLite file on disk so the same Olm account and Megolm sessions are
+    // available without re-registering keys with Synapse.
     if (deviceId) {
+      const restored = await restoreCryptoStore(MATRIX_CRYPTO_STORE_PATH);
+      if (restored) {
+        logger.info('Matrix crypto store restored from disk');
+      }
+
       await this.client.initRustCrypto({
         cryptoDatabasePrefix: MATRIX_CRYPTO_DB_PREFIX,
       });
+
+      // Persist the freshly-initialised (or restored) crypto store to disk
+      // so it survives process restarts.
+      await persistCryptoStore(MATRIX_CRYPTO_STORE_PATH);
+
+      // Periodically flush crypto state to disk (every 5 minutes).
+      // New Megolm sessions established during runtime are captured here.
+      this.cryptoPersistTimer = setInterval(
+        () => {
+          persistCryptoStore(MATRIX_CRYPTO_STORE_PATH).catch((err) => {
+            logger.warn({ err }, 'Failed to persist Matrix crypto store');
+          });
+        },
+        5 * 60 * 1000,
+      );
+
       logger.info(
         { cryptoDbPrefix: MATRIX_CRYPTO_DB_PREFIX, deviceId },
         'Matrix E2EE crypto initialised',
@@ -430,7 +463,15 @@ export class MatrixChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    if (this.cryptoPersistTimer) {
+      clearInterval(this.cryptoPersistTimer);
+      this.cryptoPersistTimer = null;
+    }
     if (this.client) {
+      // Flush crypto state to disk before stopping
+      await persistCryptoStore(MATRIX_CRYPTO_STORE_PATH).catch((err) => {
+        logger.warn({ err }, 'Failed to persist Matrix crypto store on shutdown');
+      });
       this.client.stopClient();
       this.client = null;
       this.syncReady = false;
