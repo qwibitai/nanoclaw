@@ -52,6 +52,15 @@ interface ContainerOutput {
   error?: string;
   errorType?: 'prompt_too_long' | 'general';
   idle?: boolean;
+  /**
+   * Models that produced output during the turn this result represents.
+   * Computed from the SDK's cumulative `modelUsage` field by diffing against
+   * the previously observed totals — only models whose outputTokens grew
+   * since the last result are included. The host uses this to verify that
+   * a `-m`/`-m1` model switch actually took effect before sending the
+   * "✅ Switched to ..." confirmation message to the user.
+   */
+  modelsUsedThisTurn?: string[];
 }
 
 interface SessionEntry {
@@ -521,6 +530,11 @@ function drainIpcInput(): IpcMessage[] {
           log(`Model switched via IPC: ${data.model}${data.oneshot ? ' (one-shot)' : ''}`);
         } else if (data.type === 'effort_switch' && data.effort) {
           sdkEnvRef['CLAUDE_CODE_USE_EFFORT'] = data.effort;
+          if (activeQuery) {
+            activeQuery.applyFlagSettings({ effortLevel: data.effort }).catch(err =>
+              log(`applyFlagSettings(effort=${data.effort}) failed: ${err instanceof Error ? err.message : String(err)}`),
+            );
+          }
           log(`Effort switched via IPC: ${data.effort}`);
         }
         try { fs.unlinkSync(filePath); } catch { /* ignore delete failures */ }
@@ -940,6 +954,13 @@ async function runQuery(
   let lastAssistantText = ''; // accumulate text from assistant content blocks
   let messageCount = 0;
   let resultCount = 0;
+  // Per-runQuery cumulative outputTokens snapshot, used to detect which
+  // model(s) actually produced output in the latest result (we diff against
+  // the prior snapshot since `modelUsage` is cumulative across the turns of
+  // a single Query). Local to runQuery so each new query starts from a
+  // clean slate — the SDK may or may not reset modelUsage between Query
+  // objects, and a stale snapshot would mask growth (curr<prev → no flag).
+  const cumulativeOutputTokensByModel = new Map<string, number>();
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -1120,12 +1141,29 @@ async function runQuery(
           log(`Result extra keys: ${usageKeys.join(', ')} = ${JSON.stringify(Object.fromEntries(usageKeys.map(k => [k, msgAny[k]])))}`);
         }
       }
+      // Diff modelUsage against the prior cumulative snapshot to figure out
+      // which model(s) actually produced output in this turn. The host uses
+      // this to verify that an `-m`/`-m1` switch took effect before
+      // confirming to the user.
+      let modelsUsedThisTurn: string[] | undefined;
+      if (msgAny.modelUsage && typeof msgAny.modelUsage === 'object') {
+        const usage = msgAny.modelUsage as Record<string, { outputTokens?: number }>;
+        const grew: string[] = [];
+        for (const [modelId, m] of Object.entries(usage)) {
+          const curr = typeof m?.outputTokens === 'number' ? m.outputTokens : 0;
+          const prev = cumulativeOutputTokensByModel.get(modelId) || 0;
+          if (curr > prev) grew.push(modelId);
+          cumulativeOutputTokensByModel.set(modelId, curr);
+        }
+        if (grew.length > 0) modelsUsedThisTurn = grew;
+      }
       // Claude Code SDK may return result: null when text was only sent via
       // streaming events. Fall back to the last assistant text block content.
       writeOutput({
         status: 'success',
         result: textResult || lastAssistantText || null,
-        newSessionId
+        newSessionId,
+        modelsUsedThisTurn
       });
       lastAssistantText = '';
       hasPipedSinceLastOutput = false;
