@@ -201,6 +201,23 @@ export function handleDashboardPage(
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache',
+      // Defense-in-depth against a hypothetical sanitizer bypass in the
+      // report renderer. The dashboard uses inline <script> blocks for its
+      // views (vault, meals, tasks, devtasks, reports), so 'unsafe-inline'
+      // is required for now. The report body never contains <script> (both
+      // marked's HTML passthrough is off and sanitize-html strips it), so
+      // the practical attack surface is narrow — but CSP still rules out
+      // external script loads beyond d3 and object/base-uri tricks.
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://d3js.org",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+      ].join('; '),
     });
     res.end(html);
     return true;

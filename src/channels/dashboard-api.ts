@@ -11,10 +11,14 @@ import { readVaultGraph } from './vault-reader.js';
 import { listTasks as listDevTasks } from '../dev-tasks.js';
 import { getAllTasks as getAllScheduledTasks } from '../db.js';
 import { parsePlan, parseIngredients } from './meal-plan-page.js';
+import { onDevTasksChanged, onScheduledTasksChanged } from './ios-data-api.js';
 import {
-  onDevTasksChanged,
-  onScheduledTasksChanged,
-} from './ios-data-api.js';
+  getReport,
+  isValidReportId,
+  listReports,
+  setReportsChangeCallback,
+} from '../reports.js';
+import { renderReportMarkdown } from './dashboard-report-render.js';
 
 const PICKLE_GROUP = 'telegram_pickle';
 const PLAN_FILE = path.join(GROUPS_DIR, PICKLE_GROUP, 'current-plan.md');
@@ -40,9 +44,10 @@ function startDashboardWatchers(): void {
   if (watchersStarted) return;
   watchersStarted = true;
 
-  // Subscribe to shared broadcast callbacks (dev tasks, scheduled tasks)
+  // Subscribe to shared broadcast callbacks (dev tasks, scheduled tasks, reports)
   onDevTasksChanged(() => sendSSEEvent('devtasks_updated'));
   onScheduledTasksChanged(() => sendSSEEvent('tasks_updated'));
+  setReportsChangeCallback(() => sendSSEEvent('reports_updated'));
 
   // Meal plan file watchers (separate from meal-plan-page.ts's own watchers)
   let mealDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +70,8 @@ function startDashboardWatchers(): void {
   }
 
   // Vault directory watcher
-  const vaultPath = process.env.VAULT_PATH || '/Users/fambot/sigma-data/family-vault';
+  const vaultPath =
+    process.env.VAULT_PATH || '/Users/fambot/sigma-data/family-vault';
   let vaultDebounce: ReturnType<typeof setTimeout> | null = null;
   try {
     fs.watch(vaultPath, { recursive: true }, () => {
@@ -157,6 +163,53 @@ export function handleDashboardApi(
       jsonResponse(
         res,
         { error: 'Failed to read scheduled tasks: ' + err.message },
+        500,
+      );
+    }
+    return true;
+  }
+
+  // Reports list
+  if (url === '/dashboard/api/reports') {
+    try {
+      const reports = listReports();
+      jsonResponse(res, { reports });
+    } catch (err: any) {
+      jsonResponse(
+        res,
+        { error: 'Failed to read reports: ' + err.message },
+        500,
+      );
+    }
+    return true;
+  }
+
+  // Single report
+  if (url.startsWith('/dashboard/api/reports/')) {
+    const id = url.slice('/dashboard/api/reports/'.length);
+    if (!isValidReportId(id)) {
+      jsonResponse(res, { error: 'Invalid report id' }, 400);
+      return true;
+    }
+    try {
+      const report = getReport(id);
+      if (!report) {
+        jsonResponse(res, { error: 'Report not found' }, 404);
+        return true;
+      }
+      const body_html = renderReportMarkdown(report.body_markdown);
+      jsonResponse(res, {
+        id: report.id,
+        title: report.title,
+        summary: report.summary,
+        created_at: report.created_at,
+        created_by: report.created_by,
+        body_html,
+      });
+    } catch (err: any) {
+      jsonResponse(
+        res,
+        { error: 'Failed to read report: ' + err.message },
         500,
       );
     }
