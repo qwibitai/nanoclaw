@@ -12,6 +12,7 @@ const testInstance = new AgentImpl(agentConfig, runtimeConfig);
 beforeEach(() => {
   _initTestDatabase();
   testInstance._setRegisteredGroups({});
+  (testInstance as unknown as { _started: boolean })._started = true;
 });
 
 // --- JID ownership patterns ---
@@ -172,5 +173,114 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = testInstance.getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+});
+
+// --- getRegisteredGroups ---
+
+describe('getRegisteredGroups', () => {
+  it('returns an empty array when no groups are registered', () => {
+    expect(testInstance.getRegisteredGroups()).toEqual([]);
+  });
+
+  it('returns registered groups with jid and optional fields preserved', () => {
+    testInstance._setRegisteredGroups({
+      'main@g.us': {
+        name: 'Main',
+        folder: 'main',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        requiresTrigger: false,
+        isMain: true,
+        containerConfig: {
+          timeout: 1234,
+          additionalMounts: [
+            {
+              hostPath: '/tmp/data',
+              containerPath: '/workspace/data',
+              readonly: false,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(testInstance.getRegisteredGroups()).toEqual([
+      {
+        jid: 'main@g.us',
+        name: 'Main',
+        folder: 'main',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        requiresTrigger: false,
+        isMain: true,
+        containerConfig: {
+          timeout: 1234,
+          additionalMounts: [
+            {
+              hostPath: '/tmp/data',
+              containerPath: '/workspace/data',
+              readonly: false,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('returns defensive snapshots instead of live mutable references', () => {
+    testInstance._setRegisteredGroups({
+      'group@g.us': {
+        name: 'Original',
+        folder: 'group',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        containerConfig: {
+          additionalMounts: [
+            {
+              hostPath: '/tmp/source',
+              containerPath: '/workspace/source',
+              readonly: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const snapshot = testInstance.getRegisteredGroups();
+    snapshot[0].name = 'Mutated';
+    snapshot[0].containerConfig!.additionalMounts![0].hostPath = '/tmp/mutated';
+
+    expect(testInstance.getRegisteredGroups()).toEqual([
+      {
+        jid: 'group@g.us',
+        name: 'Original',
+        folder: 'group',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+        containerConfig: {
+          additionalMounts: [
+            {
+              hostPath: '/tmp/source',
+              containerPath: '/workspace/source',
+              readonly: true,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+});
+
+describe('group getters require start()', () => {
+  it('throws before start', () => {
+    const unstarted = new AgentImpl(agentConfig, runtimeConfig);
+
+    expect(() => unstarted.getRegisteredGroups()).toThrow(
+      'Call start() before getRegisteredGroups()',
+    );
+    expect(() => unstarted.getAvailableGroups()).toThrow(
+      'Call start() before getAvailableGroups()',
+    );
   });
 });

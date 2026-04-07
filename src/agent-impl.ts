@@ -18,11 +18,20 @@ import type { AgentConfig } from './agent-config.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { AgentOptions } from './api/options.js';
 import type {
+  AvailableGroup,
+  RegisterGroupOptions,
+  RegisteredGroup as PublicRegisteredGroup,
+} from './api/group.js';
+import type {
   ChannelDriver,
   ChannelDriverFactory,
   ChannelDriverConfig,
 } from './api/channel-driver.js';
-import type { Channel, NewMessage, RegisteredGroup } from './types.js';
+import type {
+  Channel,
+  NewMessage,
+  RegisteredGroup as InternalRegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 import {
@@ -64,12 +73,33 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import type { AvailableGroup } from './container-runner.js';
 
 import type { Agent } from './api/agent.js';
-import type { RegisterGroupOptions } from './api/group.js';
 
 export { type Agent };
+
+function cloneRegisteredGroup(
+  jid: string,
+  group: InternalRegisteredGroup,
+): PublicRegisteredGroup {
+  return {
+    jid,
+    name: group.name,
+    folder: group.folder,
+    trigger: group.trigger,
+    added_at: group.added_at,
+    containerConfig: group.containerConfig
+      ? {
+          ...group.containerConfig,
+          additionalMounts: group.containerConfig.additionalMounts?.map(
+            (mount) => ({ ...mount }),
+          ),
+        }
+      : undefined,
+    requiresTrigger: group.requiresTrigger,
+    isMain: group.isMain,
+  };
+}
 
 // ─── Implementation (used by sdk.ts, not by consumers) ─────────────
 
@@ -83,7 +113,7 @@ export class AgentImpl
   // --- Per-agent state ---
   private lastTimestamp = '';
   private sessions: Record<string, string> = {};
-  private _registeredGroups: Record<string, RegisteredGroup> = {};
+  private _registeredGroups: Record<string, InternalRegisteredGroup> = {};
   private lastAgentTimestamp: Record<string, string> = {};
   private _channels = new Map<string, Channel>();
   private queue!: GroupQueue;
@@ -149,6 +179,17 @@ export class AgentImpl
     }
     this._channels.delete(key);
     this.emit('channel.disconnected', { key });
+  }
+
+  /** Get a snapshot of all registered groups. Only after start(). */
+  getRegisteredGroups(): PublicRegisteredGroup[] {
+    if (!this._started) {
+      throw new Error('Call start() before getRegisteredGroups()');
+    }
+
+    return Object.entries(this._registeredGroups).map(([jid, group]) =>
+      cloneRegisteredGroup(jid, group),
+    );
   }
 
   /**
@@ -313,7 +354,7 @@ export class AgentImpl
       return;
     }
 
-    const group: RegisteredGroup = {
+    const group: InternalRegisteredGroup = {
       name: options.name,
       folder: options.folder,
       trigger: options.trigger,
@@ -352,7 +393,10 @@ export class AgentImpl
     return this._onecli;
   }
 
-  private ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
+  private ensureOneCLIAgent(
+    jid: string,
+    group: InternalRegisteredGroup,
+  ): void {
     if (group.isMain) return;
     const identifier = group.folder.toLowerCase().replace(/_/g, '-');
     this.getOneCLI().then((onecli) => {
@@ -582,7 +626,7 @@ export class AgentImpl
   }
 
   private async runAgent(
-    group: RegisteredGroup,
+    group: InternalRegisteredGroup,
     prompt: string,
     chatJid: string,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -778,6 +822,10 @@ export class AgentImpl
   }
 
   getAvailableGroups(): AvailableGroup[] {
+    if (!this._started) {
+      throw new Error('Call start() before getAvailableGroups()');
+    }
+
     const chats = getAllChats();
     const registeredJids = new Set(Object.keys(this._registeredGroups));
     return chats
@@ -791,7 +839,7 @@ export class AgentImpl
   }
 
   /** @internal — test helper for setting registered groups directly. */
-  _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+  _setRegisteredGroups(groups: Record<string, InternalRegisteredGroup>): void {
     this._registeredGroups = groups;
   }
 
