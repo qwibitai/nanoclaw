@@ -39,7 +39,8 @@ function parseIpcThreadDefaultType(
 
 /**
  * thread_defaults を IPC 入力から検証して返す。
- * type が不正または特権値の場合は null を返す。
+ * - 省略（null/undefined）の場合は null を返す（正常）
+ * - オブジェクトでない、または type が不正・特権値の場合は false を返す（リクエストを破棄）
  */
 function validateThreadDefaults(
   raw: unknown,
