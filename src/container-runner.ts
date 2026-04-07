@@ -2224,21 +2224,25 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
-  }
 
-  // Mount host ~/.codex read-write so the Codex CLI inside the container can use
-  // the subscription OAuth session. Used by /team-qa Validator E (cross-model
-  // adversarial review) via the /codex:adversarial-review plugin command.
-  // Read-write because Codex refreshes its OAuth token in auth.json during use;
-  // refreshed tokens persist back to the host for the next container run.
-  // Single-user assumption: all containers share the same Codex session.
-  const hostCodexDir = path.join(homeDir, '.codex');
-  if (fs.existsSync(hostCodexDir)) {
-    mounts.push({
-      hostPath: hostCodexDir,
-      containerPath: '/home/node/.codex',
-      readonly: false,
-    });
+    // Mount host ~/.codex when the codex plugin is mounted, so the Codex CLI
+    // can use the host's subscription OAuth session. Read-write so token
+    // refreshes in auth.json persist back to the host.
+    const codexPluginAllowed =
+      !allowedPlugins || allowedPlugins.includes('codex');
+    if (
+      codexPluginAllowed &&
+      fs.existsSync(path.join(PLUGINS_DIR, 'codex'))
+    ) {
+      const hostCodexDir = path.join(homeDir, '.codex');
+      if (fs.existsSync(hostCodexDir)) {
+        mounts.push({
+          hostPath: hostCodexDir,
+          containerPath: '/home/node/.codex',
+          readonly: false,
+        });
+      }
+    }
   }
 
   mounts.push({
