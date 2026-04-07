@@ -1,0 +1,178 @@
+name: Notify NanoClaw PR Reviews
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
+    env:
+      NANOCLAW_GROUP_FOLDER: pr-reviews
+      NANOCLAW_SSH_PORT: ${{ secrets.NANOCLAW_SSH_PORT }}
+      NANOCLAW_REMOTE_SCRIPT: ${{ secrets.NANOCLAW_REMOTE_SCRIPT }}
+    steps:
+      - uses: actions/github-script@v7
+        id: build-payloads
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GROUP_FOLDER: ${{ env.NANOCLAW_GROUP_FOLDER }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const payloads = [];
+
+            function isBotLogin(login) {
+              return typeof login === 'string' && /\[bot\]$/.test(login);
+            }
+
+            async function wait(ms) {
+              await new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            async function getMergeability(prNumber) {
+              for (let i = 0; i < 3; i++) {
+                const pr = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: prNumber,
+                });
+                if (pr.data.mergeable !== null) {
+                  return {
+                    pr: pr.data,
+                    mergeability: pr.data.mergeable ? 'mergeable' : 'conflicting',
+                  };
+                }
+                await wait(2000);
+              }
+
+              const pr = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+              return { pr: pr.data, mergeability: 'unknown' };
+            }
+
+            async function getFailedChecks(headSha) {
+              const checks = await github.rest.checks.listForRef({
+                owner,
+                repo,
+                ref: headSha,
+                per_page: 100,
+              });
+
+              return checks.data.check_runs
+                .filter((check) => {
+                  if (check.status !== 'completed') return false;
+                  return check.conclusion === 'failure' || check.conclusion === 'timed_out' || check.conclusion === 'cancelled';
+                })
+                .map((check) => check.name);
+            }
+
+            async function addNotifyPayload(prNumber, workflowRunId) {
+              const { pr, mergeability } = await getMergeability(prNumber);
+              if (pr.draft) return;
+              if (isBotLogin(pr.user?.login)) return;
+
+              const failedChecks = await getFailedChecks(pr.head.sha);
+              const ciStatus =
+                failedChecks.length > 0
+                  ? 'failure'
+                  : context.eventName === 'workflow_run' && context.payload.workflow_run?.conclusion
+                    ? String(context.payload.workflow_run.conclusion)
+                    : 'success';
+
+              payloads.push({
+                type: 'github_pr_event',
+                action: 'notify',
+                groupFolder: process.env.GROUP_FOLDER,
+                repoFullName: `${owner}/${repo}`,
+                prNumber: pr.number,
+                headSha: pr.head.sha,
+                workflowRunId: workflowRunId || null,
+                prTitle: pr.title,
+                branch: pr.head.ref,
+                author: pr.user?.login || 'unknown',
+                ciStatus,
+                mergeability,
+                failedChecks,
+              });
+            }
+
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              payloads.push({
+                type: 'github_pr_event',
+                action: 'closed',
+                groupFolder: process.env.GROUP_FOLDER,
+                repoFullName: `${owner}/${repo}`,
+                prNumber: pr.number,
+                merged: !!pr.merged,
+              });
+            } else if (context.eventName === 'workflow_run') {
+              const run = context.payload.workflow_run;
+              let prs = run.pull_requests || [];
+              if (prs.length === 0 && run.head_sha) {
+                const associated = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner,
+                  repo,
+                  commit_sha: run.head_sha,
+                });
+                prs = associated.data.map((pr) => ({ number: pr.number }));
+              }
+
+              for (const pr of prs) {
+                await addNotifyPayload(pr.number, run.id);
+              }
+            } else {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+              for (const pr of prs) {
+                await addNotifyPayload(pr.number, null);
+              }
+            }
+
+            const outPath = path.join(process.env.RUNNER_TEMP, 'nanoclaw-pr-payloads.json');
+            fs.writeFileSync(outPath, JSON.stringify(payloads, null, 2));
+            core.setOutput('path', outPath);
+            core.setOutput('count', String(payloads.length));
+
+      - name: Send payloads to NanoClaw
+        if: steps.build-payloads.outputs.count != '0'
+        env:
+          NANOCLAW_SSH_HOST: ${{ secrets.NANOCLAW_SSH_HOST }}
+          NANOCLAW_SSH_USER: ${{ secrets.NANOCLAW_SSH_USER }}
+        run: |
+          set -euo pipefail
+          payload_file="${{ steps.build-payloads.outputs.path }}"
+          port="${NANOCLAW_SSH_PORT:-22}"
+          remote_script="${NANOCLAW_REMOTE_SCRIPT:-~/nanoclaw/scripts/nanoclaw-notify-pr.sh}"
+
+          jq -c '.[]' "${payload_file}" | while IFS= read -r payload; do
+            printf '%s\n' "${payload}" | ssh \
+              -p "${port}" \
+              -o StrictHostKeyChecking=accept-new \
+              "${NANOCLAW_SSH_USER}@${NANOCLAW_SSH_HOST}" \
+              "${remote_script}"
+          done

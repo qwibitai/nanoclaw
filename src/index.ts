@@ -27,6 +27,7 @@ import {
   getAllChats,
   getAllGroupsForJid,
   getAllRegisteredGroups,
+  getPendingArchivePrThreads,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
@@ -39,10 +40,12 @@ import {
   initDatabase,
   markWorkItemDelivered,
   markWorkItemFailed,
+  deleteRegisteredGroup,
   setRegisteredGroup,
   setRouterState,
   storeChatMetadata,
   storeMessage,
+  updatePrThreadStatus,
 } from './db.js';
 import {
   buildRestartAnnouncement,
@@ -693,6 +696,15 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    unregisterGroup: (jid, agentType) => {
+      const group = registeredGroups[jid];
+      if (group) {
+        sessionService.clearLiveSession(group.folder, agentType);
+      }
+      deleteRegisteredGroup(jid, agentType);
+      delete registeredGroups[jid];
+      queue.removeGroup(jid);
+    },
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
@@ -703,6 +715,38 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    createThread: async (parentJid, name) => {
+      const channel = findChannel(channels, parentJid);
+      if (!channel?.createThread) {
+        throw new Error('No createThread support for this channel');
+      }
+      return channel.createThread(parentJid, name);
+    },
+    archiveThread: async (threadJid) => {
+      for (const channel of channels) {
+        if (threadJid.startsWith('dc:') && channel.archiveThread) {
+          await channel.archiveThread(threadJid);
+          return;
+        }
+      }
+      throw new Error('No archiveThread support for this channel');
+    },
+    enqueueSyntheticMessage: (chatJid, _groupFolder, text) => {
+      const timestamp = new Date().toISOString();
+      const msg: NewMessage = {
+        id: `pr-synthetic-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        chat_jid: chatJid,
+        sender: 'github',
+        sender_name: 'GitHub',
+        content: text,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+      };
+      storeMessage(msg);
+      storeChatMetadata(chatJid, timestamp, 'PR Thread', 'discord', true);
+      queue.enqueueMessageCheck(chatJid);
+    },
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({
@@ -721,6 +765,34 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+
+  for (const thread of getPendingArchivePrThreads()) {
+    for (const channel of channels) {
+      if (!thread.thread_jid.startsWith('dc:') || !channel.archiveThread) {
+        continue;
+      }
+      channel.archiveThread(thread.thread_jid).then(
+        () => {
+          updatePrThreadStatus(
+            thread.repo_full_name,
+            thread.pr_number,
+            'archived',
+            new Date().toISOString(),
+          );
+          logger.info(
+            { threadJid: thread.thread_jid },
+            'Retried pending PR thread archive successfully',
+          );
+        },
+        (err) =>
+          logger.warn(
+            { threadJid: thread.thread_jid, err },
+            'Failed to retry pending PR thread archive',
+          ),
+      );
+      break;
+    }
+  }
 
   // Announce restart to any groups that were interrupted at last shutdown
   const restartCtx = consumeRestartContext();

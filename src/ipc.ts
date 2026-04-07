@@ -1,13 +1,22 @@
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getPrThread,
+  getTaskById,
+  updatePrThreadStatus,
+  updateTask,
+  upsertPrThread,
+} from './db.js';
 import { isError, isSyntaxError } from './error-utils.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -15,6 +24,7 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  unregisterGroup?: (jid: string, agentType: string) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -24,6 +34,132 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  createThread?: (parentJid: string, name: string) => Promise<string>;
+  archiveThread?: (threadJid: string) => Promise<void>;
+  enqueueSyntheticMessage?: (
+    chatJid: string,
+    groupFolder: string,
+    text: string,
+  ) => void;
+}
+
+function computePrFingerprint(task: {
+  ciStatus?: string;
+  mergeability?: string;
+  failedChecks?: string[];
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        ciStatus: task.ciStatus || null,
+        mergeability: task.mergeability || null,
+        failedChecks: [...(task.failedChecks || [])].sort(),
+      }),
+    )
+    .digest('hex');
+}
+
+function buildPrStatusMessage(task: {
+  repoFullName?: string;
+  prNumber?: number;
+  prTitle?: string;
+  branch?: string;
+  author?: string;
+  headSha?: string;
+  ciStatus?: string;
+  mergeability?: string;
+  failedChecks?: string[];
+}): string {
+  const lines = [
+    `PR #${task.prNumber}${task.prTitle ? `: ${task.prTitle}` : ''}`,
+    task.repoFullName ? `Repo: ${task.repoFullName}` : null,
+    task.branch ? `Branch: ${task.branch}` : null,
+    task.author ? `Author: ${task.author}` : null,
+    task.headSha ? `Head SHA: ${task.headSha}` : null,
+    `CI: ${task.ciStatus || 'unknown'}`,
+    `Mergeability: ${task.mergeability || 'unknown'}`,
+  ];
+
+  if (task.failedChecks && task.failedChecks.length > 0) {
+    lines.push(`Failed checks: ${task.failedChecks.join(', ')}`);
+  }
+
+  return lines.filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function buildPrAgentPrompt(task: {
+  repoFullName: string;
+  prNumber: number;
+  prTitle?: string;
+  branch?: string;
+  author?: string;
+  ciStatus?: string;
+  mergeability?: string;
+  failedChecks?: string[];
+}): string {
+  return [
+    'PR review thread initialized.',
+    `PR #${task.prNumber}${task.prTitle ? `: ${task.prTitle}` : ''}`,
+    `Repository: ${task.repoFullName}`,
+    task.branch ? `Branch: ${task.branch}` : null,
+    task.author ? `Author: ${task.author}` : null,
+    `CI status: ${task.ciStatus || 'unknown'}`,
+    `Mergeability: ${task.mergeability || 'unknown'}`,
+    task.failedChecks && task.failedChecks.length > 0
+      ? `Failed checks: ${task.failedChecks.join(', ')}`
+      : null,
+    'Wait for user instructions. Use the GitHub plugin for merge, comment, request changes, or close actions.',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function writePrAgentFile(
+  groupFolder: string,
+  task: {
+    repoFullName: string;
+    prNumber: number;
+    prTitle?: string;
+    branch?: string;
+    author?: string;
+  },
+): void {
+  const groupDir = resolveGroupFolderPath(groupFolder);
+  fs.mkdirSync(groupDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(groupDir, 'agent.md'),
+    `# PR Review Agent
+
+이 세션은 GitHub PR 관리를 위한 전용 에이전트입니다.
+
+## PR 정보
+- PR #${task.prNumber}: ${task.prTitle || ''}
+- 저장소: ${task.repoFullName}
+- 브랜치: ${task.branch || 'unknown'}
+- 작성자: ${task.author || 'unknown'}
+
+## 사용 가능한 명령
+사용자의 자연어 명령을 GitHub plugin으로 실행합니다:
+- "머지해줘" -> PR merge
+- "댓글 달아줘 [내용]" -> PR comment
+- "수정 요청해줘 [이유]" -> request changes review
+- "닫아줘" -> PR close
+- "상태 확인해줘" -> CI/merge 상태 재조회
+
+## 규칙
+- 명령 전에는 PR 상태 요약만 간단히 답하고 대기
+- GitHub plugin을 사용해서 실제 액션 수행
+- 에러 발생 시 명확하게 알림
+`,
+  );
+}
+
+function buildPrGroupFolder(repoFullName: string, prNumber: number): string {
+  const repoSlug = repoFullName.replace(/[^A-Za-z0-9_-]+/g, '-');
+  const folder = `pr-${repoSlug}-${prNumber}`.replace(/-+/g, '-');
+  if (folder.length <= 64 && isValidGroupFolder(folder)) return folder;
+  const hash = createHash('sha1').update(`${repoFullName}#${prNumber}`).digest('hex').slice(0, 12);
+  return `pr-${hash}-${prNumber}`;
 }
 
 let ipcWatcherRunning = false;
@@ -163,6 +299,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 export async function processTaskIpc(
   data: {
     type: string;
+    action?: string;
     taskId?: string;
     prompt?: string;
     schedule_type?: string;
@@ -172,6 +309,17 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    repoFullName?: string;
+    prNumber?: number;
+    headSha?: string;
+    workflowRunId?: number;
+    prTitle?: string;
+    branch?: string;
+    author?: string;
+    ciStatus?: string;
+    mergeability?: string;
+    failedChecks?: string[];
+    merged?: boolean;
     // For register_group
     jid?: string;
     name?: string;
@@ -464,6 +612,161 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'github_pr_event': {
+      if (!data.groupFolder || !data.repoFullName || !data.prNumber) {
+        logger.warn({ data }, 'Invalid github_pr_event request');
+        break;
+      }
+      if (!isMain && data.groupFolder !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, groupFolder: data.groupFolder },
+          'Unauthorized github_pr_event attempt blocked',
+        );
+        break;
+      }
+
+      if (data.action === 'notify') {
+        const parentGroup = Object.entries(registeredGroups).find(
+          ([, group]) =>
+            group.folder === data.groupFolder && group.agentType === 'codex',
+        );
+        if (!parentGroup) {
+          logger.warn(
+            { groupFolder: data.groupFolder },
+            'No registered PR review parent group found',
+          );
+          break;
+        }
+        if (!deps.createThread) {
+          logger.warn('No createThread support configured for github_pr_event');
+          break;
+        }
+
+        const fingerprint = computePrFingerprint(data);
+        const existing = getPrThread(data.repoFullName, data.prNumber);
+        if (existing?.last_fingerprint === fingerprint) {
+          logger.info(
+            { repo: data.repoFullName, prNumber: data.prNumber },
+            'Skipping duplicate PR notification',
+          );
+          break;
+        }
+
+        const parentJid = parentGroup[0];
+        const threadJid =
+          existing?.thread_jid ??
+          (await deps.createThread(
+            parentJid,
+            `PR #${data.prNumber}${data.prTitle ? ` ${data.prTitle}` : ''}`,
+          ));
+        const prGroupFolder = existing?.group_folder
+          ? existing.group_folder
+          : buildPrGroupFolder(data.repoFullName, data.prNumber);
+        const statusMessage = buildPrStatusMessage(data);
+
+        if (!existing) {
+          deps.registerGroup(threadJid, {
+            name: `PR #${data.prNumber}`,
+            folder: prGroupFolder,
+            trigger: parentGroup[1].trigger,
+            added_at: new Date().toISOString(),
+            agentType: 'codex',
+            requiresTrigger: false,
+            isMain: false,
+            containerConfig: parentGroup[1].containerConfig,
+          });
+          writePrAgentFile(prGroupFolder, {
+            repoFullName: data.repoFullName,
+            prNumber: data.prNumber,
+            prTitle: data.prTitle,
+            branch: data.branch,
+            author: data.author,
+          });
+        }
+
+        upsertPrThread(
+          data.repoFullName,
+          data.prNumber,
+          threadJid,
+          prGroupFolder,
+          parentJid,
+          data.headSha,
+          data.workflowRunId,
+          fingerprint,
+        );
+        await deps.sendMessage(threadJid, statusMessage);
+
+        if (!existing && deps.enqueueSyntheticMessage) {
+          deps.enqueueSyntheticMessage(
+            threadJid,
+            prGroupFolder,
+            buildPrAgentPrompt({
+              repoFullName: data.repoFullName,
+              prNumber: data.prNumber,
+              prTitle: data.prTitle,
+              branch: data.branch,
+              author: data.author,
+              ciStatus: data.ciStatus,
+              mergeability: data.mergeability,
+              failedChecks: data.failedChecks,
+            }),
+          );
+        }
+        break;
+      }
+
+      if (data.action === 'closed') {
+        const existing = getPrThread(data.repoFullName, data.prNumber);
+        if (!existing) {
+          logger.warn(
+            { repo: data.repoFullName, prNumber: data.prNumber },
+            'PR thread not found for close event',
+          );
+          break;
+        }
+
+        await deps.sendMessage(
+          existing.thread_jid,
+          `PR #${data.prNumber} ${data.merged ? 'merged' : 'closed'}. Archiving thread.`,
+        );
+        deps.unregisterGroup?.(existing.thread_jid, 'codex');
+
+        const closedAt = new Date().toISOString();
+        if (!deps.archiveThread) {
+          updatePrThreadStatus(
+            data.repoFullName,
+            data.prNumber,
+            'archive_pending',
+            closedAt,
+          );
+          break;
+        }
+
+        try {
+          await deps.archiveThread(existing.thread_jid);
+          updatePrThreadStatus(
+            data.repoFullName,
+            data.prNumber,
+            'archived',
+            closedAt,
+          );
+        } catch (err) {
+          if (!isError(err)) throw err;
+          logger.warn(
+            { repo: data.repoFullName, prNumber: data.prNumber, err },
+            'Failed to archive PR thread, will retry later',
+          );
+          updatePrThreadStatus(
+            data.repoFullName,
+            data.prNumber,
+            'archive_pending',
+            closedAt,
+          );
+        }
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

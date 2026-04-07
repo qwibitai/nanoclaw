@@ -7,6 +7,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   NewMessage,
+  PrThreadRecord,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -105,6 +106,20 @@ function createSchema(database: Database.Database): void {
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS pr_threads (
+      repo_full_name TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      thread_jid TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      parent_jid TEXT NOT NULL,
+      head_sha TEXT,
+      workflow_run_id INTEGER,
+      last_fingerprint TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      closed_at TEXT,
+      PRIMARY KEY (repo_full_name, pr_number)
     );
   `);
 
@@ -870,6 +885,152 @@ export function deleteRegisteredGroup(jid: string, agentType: string): void {
   db.prepare(
     'DELETE FROM registered_groups WHERE jid = ? AND agent_type = ?',
   ).run(jid, agentType);
+}
+
+// --- PR thread accessors ---
+
+export function getPrThread(
+  repoFullName: string,
+  prNumber: number,
+): PrThreadRecord | undefined {
+  return db
+    .prepare(
+      `
+      SELECT
+        repo_full_name,
+        pr_number,
+        thread_jid,
+        group_folder,
+        parent_jid,
+        head_sha,
+        workflow_run_id,
+        last_fingerprint,
+        status,
+        created_at,
+        closed_at
+      FROM pr_threads
+      WHERE repo_full_name = ? AND pr_number = ?
+    `,
+    )
+    .get(repoFullName, prNumber) as PrThreadRecord | undefined;
+}
+
+export function upsertPrThread(
+  repoFullName: string,
+  prNumber: number,
+  threadJid: string,
+  groupFolder: string,
+  parentJid: string,
+  headSha?: string,
+  workflowRunId?: number,
+  lastFingerprint?: string,
+  status: PrThreadRecord['status'] = 'active',
+): void {
+  db.prepare(
+    `
+    INSERT INTO pr_threads (
+      repo_full_name,
+      pr_number,
+      thread_jid,
+      group_folder,
+      parent_jid,
+      head_sha,
+      workflow_run_id,
+      last_fingerprint,
+      status,
+      created_at,
+      closed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    ON CONFLICT(repo_full_name, pr_number) DO UPDATE SET
+      thread_jid = excluded.thread_jid,
+      group_folder = excluded.group_folder,
+      parent_jid = excluded.parent_jid,
+      head_sha = excluded.head_sha,
+      workflow_run_id = excluded.workflow_run_id,
+      last_fingerprint = excluded.last_fingerprint,
+      status = excluded.status
+  `,
+  ).run(
+    repoFullName,
+    prNumber,
+    threadJid,
+    groupFolder,
+    parentJid,
+    headSha ?? null,
+    workflowRunId ?? null,
+    lastFingerprint ?? null,
+    status,
+    new Date().toISOString(),
+  );
+}
+
+export function deletePrThread(repoFullName: string, prNumber: number): void {
+  db.prepare(
+    'DELETE FROM pr_threads WHERE repo_full_name = ? AND pr_number = ?',
+  ).run(repoFullName, prNumber);
+}
+
+export function getAllPrThreads(): PrThreadRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        repo_full_name,
+        pr_number,
+        thread_jid,
+        group_folder,
+        parent_jid,
+        head_sha,
+        workflow_run_id,
+        last_fingerprint,
+        status,
+        created_at,
+        closed_at
+      FROM pr_threads
+      ORDER BY created_at DESC
+    `,
+    )
+    .all() as PrThreadRecord[];
+}
+
+export function getPendingArchivePrThreads(): PrThreadRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        repo_full_name,
+        pr_number,
+        thread_jid,
+        group_folder,
+        parent_jid,
+        head_sha,
+        workflow_run_id,
+        last_fingerprint,
+        status,
+        created_at,
+        closed_at
+      FROM pr_threads
+      WHERE status = 'archive_pending'
+      ORDER BY created_at DESC
+    `,
+    )
+    .all() as PrThreadRecord[];
+}
+
+export function updatePrThreadStatus(
+  repoFullName: string,
+  prNumber: number,
+  status: PrThreadRecord['status'],
+  closedAt?: string | null,
+): void {
+  db.prepare(
+    `
+    UPDATE pr_threads
+    SET status = ?, closed_at = ?
+    WHERE repo_full_name = ? AND pr_number = ?
+  `,
+  ).run(status, closedAt ?? null, repoFullName, prNumber);
 }
 
 /**

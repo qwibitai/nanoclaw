@@ -141,15 +141,18 @@ export class DiscordChannel implements Channel {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
 
-      // Thread support: if message is in a thread, resolve to parent channel
-      // so it matches the registered group, but track the thread for replies
+      // Registered PR review threads keep their own JID.
+      // Unregistered threads flatten to the parent channel for legacy behavior.
       let channelId = message.channelId;
       if (message.channel.isThread()) {
         const thread = message.channel as ThreadChannel;
-        const parentId = thread.parentId;
-        if (parentId) {
-          this.activeThreads.set(parentId, channelId);
-          channelId = parentId;
+        const threadJid = `dc:${thread.id}`;
+        const threadGroup = this.getRegisteredGroupForChannel(threadJid);
+        if (threadGroup && this.matchesScope(threadGroup)) {
+          channelId = thread.id;
+        } else if (thread.parentId) {
+          this.activeThreads.set(thread.parentId, channelId);
+          channelId = thread.parentId;
         }
       }
 
@@ -173,8 +176,9 @@ export class DiscordChannel implements Channel {
       // Determine chat name
       let chatName: string;
       if (message.guild) {
-        const textChannel = message.channel as TextChannel;
-        chatName = `${message.guild.name} #${textChannel.name}`;
+        const name =
+          'name' in message.channel ? message.channel.name : message.channelId;
+        chatName = `${message.guild.name} #${name}`;
       } else {
         chatName = senderName;
       }
@@ -393,9 +397,11 @@ export class DiscordChannel implements Channel {
 
     try {
       const channelId = jid.replace(/^dc:/, '');
-
-      // Thread support: if a thread is active for this channel, reply there
-      const threadId = this.activeThreads.get(channelId);
+      const directGroup = this.getRegisteredGroupForChannel(jid);
+      const threadId =
+        directGroup && this.matchesScope(directGroup)
+          ? channelId
+          : this.activeThreads.get(channelId);
       const targetId = threadId ?? channelId;
       const channel = await this.client.channels.fetch(targetId);
 
@@ -435,7 +441,11 @@ export class DiscordChannel implements Channel {
 
     try {
       const channelId = jid.replace(/^dc:/, '');
-      const threadId = this.activeThreads.get(channelId);
+      const directGroup = this.getRegisteredGroupForChannel(jid);
+      const threadId =
+        directGroup && this.matchesScope(directGroup)
+          ? channelId
+          : this.activeThreads.get(channelId);
       const channel = await this.client.channels.fetch(threadId ?? channelId);
 
       if (!channel || !('send' in channel)) return;
@@ -489,7 +499,12 @@ export class DiscordChannel implements Channel {
     if (!this.client || !isTyping) return;
     try {
       const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
+      const directGroup = this.getRegisteredGroupForChannel(jid);
+      const targetId =
+        directGroup && this.matchesScope(directGroup)
+          ? channelId
+          : this.activeThreads.get(channelId) || channelId;
+      const channel = await this.client.channels.fetch(targetId);
       if (channel && 'sendTyping' in channel) {
         await (channel as TextChannel).sendTyping();
       }
@@ -497,6 +512,33 @@ export class DiscordChannel implements Channel {
       if (!isError(err)) throw err;
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
     }
+  }
+
+  async createThread(parentJid: string, threadName: string): Promise<string> {
+    if (!this.client) throw new Error('Discord client not initialized');
+
+    const parentId = parentJid.replace(/^dc:/, '');
+    const channel = await this.client.channels.fetch(parentId);
+    if (!channel || !('threads' in channel)) {
+      throw new Error('Discord channel does not support threads');
+    }
+
+    const thread = await (channel as TextChannel).threads.create({
+      name: threadName.slice(0, 100),
+      reason: 'GitHub PR review thread',
+    });
+    return `dc:${thread.id}`;
+  }
+
+  async archiveThread(threadJid: string): Promise<void> {
+    if (!this.client) throw new Error('Discord client not initialized');
+
+    const threadId = threadJid.replace(/^dc:/, '');
+    const channel = await this.client.channels.fetch(threadId);
+    if (!channel || !channel.isThread()) {
+      throw new Error('Discord thread not found');
+    }
+    await (channel as ThreadChannel).setArchived(true);
   }
 }
 

@@ -4,15 +4,21 @@ import {
   _initTestDatabase,
   createTask,
   deleteTask,
+  deletePrThread,
   getAllChats,
   getAllRegisteredGroups,
+  getAllPrThreads,
   getMessagesSince,
   getNewMessages,
+  getPendingArchivePrThreads,
+  getPrThread,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
+  updatePrThreadStatus,
   updateTask,
+  upsertPrThread,
 } from './db.js';
 
 beforeEach(() => {
@@ -137,6 +143,90 @@ describe('storeMessage', () => {
     );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
+  });
+});
+
+describe('pr_threads', () => {
+  it('upsertPrThread creates a new row and getPrThread retrieves it', () => {
+    upsertPrThread(
+      'enu3379/nanoclaw',
+      5,
+      'dc:thread123',
+      'pr-enu3379-nanoclaw-5',
+      'dc:parent456',
+      'sha1',
+      100,
+    );
+
+    const row = getPrThread('enu3379/nanoclaw', 5);
+    expect(row).toBeDefined();
+    expect(row!.thread_jid).toBe('dc:thread123');
+    expect(row!.group_folder).toBe('pr-enu3379-nanoclaw-5');
+    expect(row!.parent_jid).toBe('dc:parent456');
+    expect(row!.head_sha).toBe('sha1');
+    expect(row!.workflow_run_id).toBe(100);
+    expect(row!.status).toBe('active');
+  });
+
+  it('upsertPrThread updates existing row (same repo+pr)', () => {
+    upsertPrThread(
+      'enu3379/nanoclaw',
+      5,
+      'dc:thread123',
+      'pr-enu3379-nanoclaw-5',
+      'dc:parent456',
+      'sha1',
+    );
+    upsertPrThread(
+      'enu3379/nanoclaw',
+      5,
+      'dc:thread123',
+      'pr-enu3379-nanoclaw-5',
+      'dc:parent456',
+      'sha2',
+    );
+
+    const row = getPrThread('enu3379/nanoclaw', 5);
+    expect(row!.head_sha).toBe('sha2');
+  });
+
+  it('upsertPrThread updates last_fingerprint', () => {
+    upsertPrThread(
+      'enu3379/nanoclaw',
+      5,
+      'dc:t1',
+      'pr-x-5',
+      'dc:p1',
+      'sha1',
+      undefined,
+      'fp1',
+    );
+
+    const row = getPrThread('enu3379/nanoclaw', 5);
+    expect(row!.last_fingerprint).toBe('fp1');
+  });
+
+  it('getAllPrThreads returns all rows', () => {
+    upsertPrThread('enu3379/nanoclaw', 1, 'dc:t1', 'pr-x-1', 'dc:p1');
+    upsertPrThread('enu3379/nanoclaw', 2, 'dc:t2', 'pr-x-2', 'dc:p1');
+
+    const all = getAllPrThreads();
+    expect(all.length).toBe(2);
+  });
+
+  it('getPendingArchivePrThreads returns only archive_pending rows', () => {
+    upsertPrThread('enu3379/nanoclaw', 1, 'dc:t1', 'pr-x-1', 'dc:p1');
+    updatePrThreadStatus('enu3379/nanoclaw', 1, 'archive_pending');
+
+    const pending = getPendingArchivePrThreads();
+    expect(pending.length).toBe(1);
+    expect(pending[0].pr_number).toBe(1);
+  });
+
+  it('deletePrThread removes the row', () => {
+    upsertPrThread('enu3379/nanoclaw', 5, 'dc:t1', 'pr-x-5', 'dc:p1');
+    deletePrThread('enu3379/nanoclaw', 5);
+    expect(getPrThread('enu3379/nanoclaw', 5)).toBeUndefined();
   });
 });
 

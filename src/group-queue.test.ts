@@ -481,4 +481,44 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  it('removes inactive group state from queue', async () => {
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('dc:test-group');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.getStatus().some((s) => s.groupJid === 'dc:test-group')).toBe(
+      true,
+    );
+
+    queue.removeGroup('dc:test-group');
+
+    expect(queue.getStatus().some((s) => s.groupJid === 'dc:test-group')).toBe(
+      false,
+    );
+  });
+
+  it('does not remove group state if group is active', async () => {
+    let resolveTask: () => void;
+    const taskFn = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveTask = resolve;
+        }),
+    );
+
+    queue.enqueueTask('dc:active-group', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.removeGroup('dc:active-group');
+
+    expect(queue.getStatus().some((s) => s.groupJid === 'dc:active-group')).toBe(
+      true,
+    );
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });

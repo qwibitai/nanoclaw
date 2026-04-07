@@ -77,6 +77,20 @@ export interface ScheduledTask {
   created_at: string;
 }
 
+export interface PrThreadRecord {
+  repo_full_name: string;
+  pr_number: number;
+  thread_jid: string;
+  group_folder: string;
+  parent_jid: string;
+  head_sha: string | null;
+  workflow_run_id: number | null;
+  last_fingerprint: string | null;
+  status: 'active' | 'archived' | 'archive_pending';
+  created_at: string;
+  closed_at: string | null;
+}
+
 export interface TaskRunLog {
   task_id: string;
   run_at: string;
@@ -101,6 +115,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  createThread?(parentJid: string, threadName: string): Promise<string>;
+  archiveThread?(threadJid: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

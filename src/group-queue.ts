@@ -93,6 +93,30 @@ export class GroupQueue {
     });
   }
 
+  getStatus(): Array<{
+    groupJid: string;
+    active: boolean;
+    pendingMessages: boolean;
+    pendingTasks: number;
+  }> {
+    return Array.from(this.groups.entries()).map(([groupJid, state]) => ({
+      groupJid,
+      active: state.active,
+      pendingMessages: state.pendingMessages,
+      pendingTasks: state.pendingTasks.length,
+    }));
+  }
+
+  removeGroup(groupJid: string): void {
+    const state = this.groups.get(groupJid);
+    if (!state) return;
+    if (state.active) return;
+    if (state.pendingMessages) return;
+    if (state.pendingTasks.length > 0) return;
+    this.groups.delete(groupJid);
+    this.waitingGroups = this.waitingGroups.filter((jid) => jid !== groupJid);
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
