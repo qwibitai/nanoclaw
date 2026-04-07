@@ -79,7 +79,8 @@ Chat is great for conversation and short answers. It is terrible for long resear
 **When you use `create_report`:**
 1. Write the whole thing as GitHub-flavored Markdown in `body_markdown`. Use headings, lists, tables, code blocks, blockquotes, links.
 2. Give it a short descriptive `title` and a one-line `summary` that says *what you actually found* (not "here is a comparison" — say which option wins, or what surprised you).
-3. **Reply in chat with ONE line** summarizing what you found, followed by the URL the tool returns. Do NOT paste the body of the report into chat — that defeats the whole point.
+3. **Reply in chat with ONE line** summarizing what you found, followed by a tappable link to the report. **Use Telegram's markdown link format — this is the one place the "no `[links](url)`" rule is overridden.** The tool's response will contain the exact URL. Shape: `<one-line finding> [Read the full report](<url>)`. A bare URL at the dashboard hostname will render as unclickable plain text because Telegram's auto-detector doesn't recognize its TLD — always use the `[text](url)` form.
+4. Do NOT paste the body of the report into chat — that defeats the whole point.
 
 **Do NOT use `create_report` when:**
 - The user asks a short factual question ("what time is it in Tokyo?") — just answer inline.

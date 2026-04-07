@@ -75,6 +75,13 @@ function shortid(): string {
   return Math.random().toString(36).slice(2, 8).padEnd(6, '0');
 }
 
+// Tailscale MagicDNS hostname for the NanoClaw dashboard. Has a .ts.net TLD
+// so Telegram's URL auto-detector recognizes it (bare "fambots-mac-mini"
+// doesn't), and resolves from anywhere on the Tailnet (the bare LAN hostname
+// only resolves inside the house). Matches the base URL Pickle uses for the
+// meal plan page (see groups/telegram_pickle/CLAUDE.md).
+const DASHBOARD_BASE_URL = 'http://fambots-mac-mini.tail41dff2.ts.net:3100';
+
 server.tool(
   'send_message',
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
@@ -623,12 +630,19 @@ BAD: pasting the report body into chat after writing it.`,
 
     writeIpcFile(TASKS_DIR, data);
 
-    const url = `/dashboard#reports/${id}`;
+    const url = `${DASHBOARD_BASE_URL}/dashboard#reports/${id}`;
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Report created: ${url}\n\nReply to the user with a one-line summary and this URL. Do NOT paste the report body into chat.`,
+          text:
+            `Report created at ${url}\n\n` +
+            `Reply to the user using Telegram's tappable link format. Exactly this shape:\n\n` +
+            `<one-line summary of what you found — say the actual finding, not "here is a comparison"> [Read the full report](${url})\n\n` +
+            `IMPORTANT:\n` +
+            `• Use the [text](url) markdown link format, NOT a bare URL. Bare URLs at this hostname don't auto-link in Telegram because the TLD isn't on Telegram's built-in list, so they render as unclickable plain text.\n` +
+            `• Do NOT paste the body of the report into chat. The whole point of writing a report is keeping chat clean.\n` +
+            `• Keep the summary to ONE line. It should say what you actually found (e.g. "ABC wins on price, XYZ on coverage"), not restate the question.`,
         },
       ],
     };
