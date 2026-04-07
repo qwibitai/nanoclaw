@@ -92,7 +92,8 @@
   - 分離は JID と session で行う
 
 命名:
-- 子 group の `name` は Discord 上の表示名を使う
+- 子 group の `name` は `msg.sender_name` から導出した値を使う
+  - 例: `Thread (from Alice)`
 - `added_at` は自動登録時刻
 
 完了条件:
