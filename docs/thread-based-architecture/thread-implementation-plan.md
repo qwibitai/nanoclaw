@@ -22,7 +22,7 @@
 - 親 group と別の `chat_jid` を持つ
 - 親 group と別の Claude session を持つ
 - 親 group の `thread_defaults` があるときだけ、自動登録される
-- `type: 'thread'` として DB に保存される
+- DB に保存される `type` は `thread_defaults.type` を優先し、未指定時は `thread` になる
 - 権限レベルは `chat` と同じ非特権側で開始する
 - 将来の thread 用共有設定を継承できる構造を持つ
 
