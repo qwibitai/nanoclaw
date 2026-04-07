@@ -10,11 +10,15 @@ Scan the family vault for structural integrity issues, auto-fix the safe ones, a
 
 This is the **structural-integrity counterpart** to `date-reminders`, which scans for upcoming dates. This skill never reads the `dates` field — that's date-reminders' job. This skill cares about whether nodes are well-formed and connected.
 
-## When to send a message
+## How to send the report — READ THIS CAREFULLY
 
-**Always emit a final text result** — never finish silently. Even on a fully healthy vault, send the brief healthy-week message. Even on error, send a message that starts with `vault-maintenance error:`. The scheduler only forwards a message to chat when the agent emits a `result`, so silence here means Boris sees nothing and can't tell whether the job ran.
+**Emit the full report as your final text response.** That is the ONLY way to deliver the message. The nanoclaw scheduler automatically forwards your final text response to the chat — you don't need to do anything else.
 
-**This contradicts the `date-reminders` precedent** which says "If no upcoming dates are found, output nothing." Don't pattern-match the wrong rule — vault-maintenance always speaks.
+**Do NOT call `send_message`, `mcp__nanoclaw__send_message`, or any other messaging tool** inside this skill. Doing so will cause **duplicate messages** — one from your explicit tool call, and one from the scheduler auto-forwarding your final text. The report is the last thing you say, full stop.
+
+**Always emit a final text response** — never finish silently. On a fully healthy vault, emit the brief healthy-week message. On error, emit a message that starts with `vault-maintenance error:`. Silence means Boris sees nothing and can't tell whether the job ran.
+
+**This contradicts the `date-reminders` precedent** which says "If no upcoming dates are found, output nothing." Don't pattern-match the wrong rule — vault-maintenance always speaks, and it speaks via its final response, never via an explicit send tool.
 
 ## Steps
 
@@ -112,13 +116,15 @@ This makes failures observable through the same chat path as success. Don't swal
 
 ## Compose the report
 
-The report goes to the **Pip Admin** chat (the JID of the chat the scheduled task targets). Use Telegram formatting (not markdown):
+The report goes to the **Pip Admin** chat via the scheduler's auto-forward of your final text response — **not** via any explicit send tool (see "How to send the report" above). Use Telegram formatting (not markdown):
 
 - `*bold*` with single asterisks for the header and section names
-- Bullet points with the bullet character
+- Bullet points with the bullet character (`- `)
 - Backticks for file paths and field names
 
 **Always include the total file count scanned**, in both the healthy and the unhealthy paths. Silent under-scans (where the glob returned fewer files than expected but more than 5) are easier to spot when the count is visible every week.
+
+**The report IS your final response.** Do not prefix it with narration like "Here is the report:" or suffix it with summaries like "Report sent." The report itself, alone, is what you emit as your last message.
 
 ### Healthy-week message
 
@@ -158,6 +164,7 @@ Skip any section whose count is zero. Order: auto-fixed → broken → stale →
 ## Rules (recap)
 
 - Always emit a final text result. Never finish silently.
+- **Never call `send_message` or any messaging tool.** The report IS your final response. The scheduler forwards it automatically. Explicit send calls cause duplicate messages.
 - Auto-fix orphans only. Never auto-fix broken links, stale ephemerals, or missing frontmatter.
 - Single batched `_log.md` write at the end. Never per-fix.
 - Idempotency check before every MOC append. Skip duplicates.
