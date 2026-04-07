@@ -12,6 +12,8 @@ import fs from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
 
+import type { TypedEmitter } from './typed-emitter.js';
+import type { AgentEvents } from './api/events.js';
 import type { AgentConfig } from './agent-config.js';
 import type { RuntimeConfig } from './runtime-config.js';
 import type { AgentOptions } from './api/options.js';
@@ -70,7 +72,10 @@ export { type Agent };
 
 // ─── Implementation (used by sdk.ts, not by consumers) ─────────────
 
-export class AgentImpl extends EventEmitter implements Agent {
+export class AgentImpl
+  extends (EventEmitter as { new (): TypedEmitter<AgentEvents> })
+  implements Agent
+{
   readonly config: AgentConfig;
   readonly runtimeConfig: RuntimeConfig;
 
@@ -253,6 +258,12 @@ export class AgentImpl extends EventEmitter implements Agent {
           }
         }
         storeMessage(msg);
+        this.emit('message.in', {
+          jid: chatJid,
+          sender: msg.sender,
+          text: msg.content,
+          timestamp: msg.timestamp,
+        });
       },
       onChatMetadata: (
         chatJid: string,
@@ -260,7 +271,16 @@ export class AgentImpl extends EventEmitter implements Agent {
         name?: string,
         channel?: string,
         isGroup?: boolean,
-      ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+      ) => {
+        storeChatMetadata(chatJid, timestamp, name, channel, isGroup);
+        this.emit('chat.metadata', {
+          jid: chatJid,
+          timestamp,
+          name,
+          channel,
+          isGroup,
+        });
+      },
       registeredGroups: () => this._registeredGroups,
     };
   }
