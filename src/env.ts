@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+
+import { isErrnoException } from './error-utils.js';
 import { logger } from './logger.js';
 
 /**
@@ -14,6 +16,7 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   try {
     content = fs.readFileSync(envFile, 'utf-8');
   } catch (err) {
+    if (!isErrnoException(err, 'ENOENT')) throw err;
     logger.debug({ err }, '.env file not found, using defaults');
     return {};
   }

@@ -209,7 +209,7 @@ def run_container(runtime: str, image: str, payload: dict,
                 try:
                     proc.terminate()
                     try:
-                        proc.wait(timeout=5)
+                        proc.wait(timeout=1)
                     except subprocess.TimeoutExpired:
                         dbg("graceful stop timed out, force killing container")
                         proc.kill()
@@ -230,8 +230,8 @@ def run_container(runtime: str, image: str, payload: dict,
             proc.kill()
             sys.exit(f"error: container timed out after {timeout}s (no output sentinel received)")
 
-    t_err.join(timeout=5)
-    t_out.join(timeout=5)
+    t_err.join(timeout=1)
+    t_out.join(timeout=1)
     proc.wait()
     dbg(f"container done (rc={proc.returncode}), {len(stdout_lines)} stdout lines")
     stdout = "\n".join(stdout_lines)

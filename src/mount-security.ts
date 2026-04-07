@@ -11,6 +11,7 @@ import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
+import { isError, isErrnoException } from './error-utils.js';
 import { MOUNT_ALLOWLIST_PATH } from './config.js';
 import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
 
@@ -106,6 +107,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
 
     return cachedAllowlist;
   } catch (err) {
+    if (!isError(err)) throw err;
     allowlistLoadError = err instanceof Error ? err.message : String(err);
     logger.error(
       {
@@ -139,7 +141,8 @@ function expandPath(p: string): string {
 function getRealPath(p: string): string | null {
   try {
     return fs.realpathSync(p);
-  } catch {
+  } catch (err) {
+    if (!isErrnoException(err, 'ENOENT')) throw err;
     return null;
   }
 }

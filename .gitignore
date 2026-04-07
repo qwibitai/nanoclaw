@@ -21,6 +21,14 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+.env.*
+!.env.example
+.mcp.local.json
+.claude/settings.local.json
+.claude/.credentials.json
+.claude/credentials.json
+.claude.json
+messages.db
 
 # Temp files
 .tmp-*

@@ -38,6 +38,27 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+## Attachments
+
+When a user sends a file, it's saved to `/workspace/group/attachments/` and referenced in the message:
+
+- `[Image: /workspace/group/attachments/photo.jpg]` — read directly (multimodal)
+- `[PDF: /workspace/group/attachments/doc.pdf]` — convert with:
+  ```bash
+  python3 -c "
+  import opendataloader_pdf, os
+  out='/workspace/group/attachments/pdf_out'
+  os.makedirs(out, exist_ok=True)
+  opendataloader_pdf.convert(input_path=['{PDF_PATH}'], output_dir=out, format='markdown', quiet=True)
+  for f in os.listdir(out):
+      if f.endswith('.md'):
+          print(open(os.path.join(out,f)).read()); break
+  "
+  ```
+  Replace `{PDF_PATH}` with the actual path.
+- `[File: /workspace/group/attachments/file.txt]` — read with `cat` or Read tool
+- Inline file content (small text files) — content is already in the message
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
@@ -73,4 +94,7 @@ No `##` headings. No `[links](url)`. No `**double stars**`.
 
 ### Discord channels (folder starts with `discord_`)
 
-Standard Markdown works: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
+- No markdown headings (`#`, `##`) in chat replies — use **bold** for emphasis instead
+- `**bold**`, `*italic*`, ` ```code``` `
+- Prefer plain URLs over `[link text](url)` syntax
+- Keep replies concise and conversational

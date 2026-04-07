@@ -6,6 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { isError, isSyntaxError } from './error-utils.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -46,6 +47,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         return stat.isDirectory() && f !== 'errors';
       });
     } catch (err) {
+      if (!isError(err)) throw err;
       logger.error({ err }, 'Error reading IPC base directory');
       setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
       return;
@@ -95,6 +97,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
               fs.unlinkSync(filePath);
             } catch (err) {
+              if (!isError(err) && !isSyntaxError(err)) throw err;
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC message',
@@ -109,6 +112,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
+        if (!isError(err)) throw err;
         logger.error(
           { err, sourceGroup },
           'Error reading IPC messages directory',
@@ -129,6 +133,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
             } catch (err) {
+              if (!isError(err) && !isSyntaxError(err)) throw err;
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC task',
@@ -143,6 +148,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
+        if (!isError(err)) throw err;
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
     }
@@ -220,7 +226,8 @@ export async function processTaskIpc(
               tz: TIMEZONE,
             });
             nextRun = interval.next().toISOString();
-          } catch {
+          } catch (err) {
+            if (!isError(err)) throw err;
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid cron expression',

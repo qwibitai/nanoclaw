@@ -1,3 +1,5 @@
+import { isError } from './error-utils.js';
+
 /**
  * Check whether a timezone string is a valid IANA identifier
  * that Intl.DateTimeFormat can use.
@@ -6,7 +8,8 @@ export function isValidTimezone(tz: string): boolean {
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
     return true;
-  } catch {
+  } catch (err) {
+    if (!isError(err) || err.name !== 'RangeError') throw err;
     return false;
   }
 }

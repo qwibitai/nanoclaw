@@ -70,8 +70,32 @@ function createSchema(database: Database.Database): void {
       value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
+      group_folder TEXT NOT NULL,
+      agent_type TEXT NOT NULL DEFAULT 'claude-code',
+      session_id TEXT NOT NULL,
+      PRIMARY KEY (group_folder, agent_type)
+    );
+    CREATE TABLE IF NOT EXISTS named_sessions (
+      group_folder TEXT NOT NULL,
+      agent_type TEXT NOT NULL,
+      session_label TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (group_folder, agent_type, session_label)
+    );
+    CREATE TABLE IF NOT EXISTS work_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      agent_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'produced',
+      result_payload TEXT NOT NULL,
+      delivery_attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      delivered_at TEXT,
+      CHECK (status IN ('produced', 'delivery_retry', 'delivered'))
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
@@ -124,6 +148,81 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Add paused_until column for /pause command support
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Migrate registered_groups to composite PK (jid, agent_type) — EJClaw-style paired room support
+  {
+    const rgCols = database
+      .prepare('PRAGMA table_info(registered_groups)')
+      .all() as Array<{ name: string }>;
+    if (!rgCols.some((col) => col.name === 'agent_type')) {
+      database.exec(`
+        CREATE TABLE registered_groups_v2 (
+          jid TEXT NOT NULL,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1,
+          is_main INTEGER DEFAULT 0,
+          paused_until TEXT,
+          agent_type TEXT NOT NULL DEFAULT 'claude-code',
+          PRIMARY KEY (jid, agent_type),
+          UNIQUE (folder, agent_type)
+        );
+        INSERT INTO registered_groups_v2 (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, paused_until, agent_type)
+        SELECT
+          jid, name, folder, trigger_pattern, added_at, container_config,
+          COALESCE(requires_trigger, 1),
+          COALESCE(is_main, 0),
+          paused_until,
+          CASE
+            WHEN json_extract(container_config, '$.agentCli') = 'gemini'  THEN 'gemini'
+            WHEN json_extract(container_config, '$.agentCli') = 'copilot' THEN 'copilot'
+            WHEN json_extract(container_config, '$.agentCli') = 'codex'   THEN 'codex'
+            ELSE 'claude-code'
+          END
+        FROM registered_groups;
+        DROP TABLE registered_groups;
+        ALTER TABLE registered_groups_v2 RENAME TO registered_groups;
+      `);
+    }
+  }
+
+  // Backfill paused_until again after the registered_groups table rewrite above.
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN paused_until TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Migrate sessions to composite PK (group_folder, agent_type)
+  {
+    const sessionCols = database
+      .prepare('PRAGMA table_info(sessions)')
+      .all() as Array<{ name: string }>;
+    if (!sessionCols.some((col) => col.name === 'agent_type')) {
+      database.exec(`
+        ALTER TABLE sessions RENAME TO sessions_old;
+        CREATE TABLE sessions (
+          group_folder TEXT NOT NULL,
+          agent_type TEXT NOT NULL DEFAULT 'claude-code',
+          session_id TEXT NOT NULL,
+          PRIMARY KEY (group_folder, agent_type)
+        );
+        INSERT INTO sessions (group_folder, agent_type, session_id)
+          SELECT group_folder, 'claude-code', session_id FROM sessions_old;
+        DROP TABLE sessions_old;
+      `);
+    }
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -375,6 +474,33 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function getRecentMessages(
+  chatJid: string,
+  limit: number = 12,
+): Array<
+  Pick<
+    NewMessage,
+    'id' | 'chat_jid' | 'sender' | 'sender_name' | 'content' | 'timestamp'
+  > & { is_bot_message?: boolean }
+> {
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_bot_message
+      FROM messages
+      WHERE chat_jid = ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+  return db.prepare(sql).all(chatJid, limit) as Array<
+    Pick<
+      NewMessage,
+      'id' | 'chat_jid' | 'sender' | 'sender_name' | 'content' | 'timestamp'
+    > & { is_bot_message?: boolean }
+  >;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
@@ -535,23 +661,132 @@ export function setRouterState(key: string, value: string): void {
 
 // --- Session accessors ---
 
+/** Get session ID for any agent type. */
+export function getAgentSession(
+  groupFolder: string,
+  agentType: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?',
+    )
+    .get(groupFolder, agentType) as { session_id: string } | undefined;
+  return row?.session_id;
+}
+
+/** Store session ID for any agent type. */
+export function setAgentSession(
+  groupFolder: string,
+  agentType: string,
+  sessionId: string,
+): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO sessions (group_folder, agent_type, session_id) VALUES (?, ?, ?)',
+  ).run(groupFolder, agentType, sessionId);
+}
+
+export function deleteAgentSession(
+  groupFolder: string,
+  agentType: string,
+): void {
+  db.prepare(
+    'DELETE FROM sessions WHERE group_folder = ? AND agent_type = ?',
+  ).run(groupFolder, agentType);
+}
+
+export interface NamedSession {
+  session_label: string;
+  session_id: string;
+  updated_at: string;
+}
+
+export function getNamedAgentSession(
+  groupFolder: string,
+  agentType: string,
+  sessionLabel: string,
+): NamedSession | undefined {
+  return db
+    .prepare(
+      `SELECT session_label, session_id, updated_at
+       FROM named_sessions
+       WHERE group_folder = ? AND agent_type = ? AND session_label = ?`,
+    )
+    .get(groupFolder, agentType, sessionLabel) as NamedSession | undefined;
+}
+
+export function getNamedAgentSessions(
+  groupFolder: string,
+  agentType: string,
+): NamedSession[] {
+  return db
+    .prepare(
+      `SELECT session_label, session_id, updated_at
+       FROM named_sessions
+       WHERE group_folder = ? AND agent_type = ?
+       ORDER BY updated_at DESC, session_label ASC`,
+    )
+    .all(groupFolder, agentType) as NamedSession[];
+}
+
+export function setNamedAgentSession(
+  groupFolder: string,
+  agentType: string,
+  sessionLabel: string,
+  sessionId: string,
+): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO named_sessions
+     (group_folder, agent_type, session_label, session_id, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    groupFolder,
+    agentType,
+    sessionLabel,
+    sessionId,
+    new Date().toISOString(),
+  );
+}
+
+function activeSessionLabelKey(groupFolder: string, agentType: string): string {
+  return `active_session_label:${groupFolder}:${agentType}`;
+}
+
+export function getActiveAgentSessionLabel(
+  groupFolder: string,
+  agentType: string,
+): string | undefined {
+  return getRouterState(activeSessionLabelKey(groupFolder, agentType));
+}
+
+export function setActiveAgentSessionLabel(
+  groupFolder: string,
+  agentType: string,
+  sessionLabel: string,
+): void {
+  setRouterState(activeSessionLabelKey(groupFolder, agentType), sessionLabel);
+}
+
 export function getSession(groupFolder: string): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND agent_type = ?',
+    )
+    .get(groupFolder, 'claude-code') as { session_id: string } | undefined;
   return row?.session_id;
 }
 
 export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_folder, agent_type, session_id) VALUES (?, ?, ?)',
+  ).run(groupFolder, 'claude-code', sessionId);
 }
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+    .prepare(
+      'SELECT group_folder, session_id FROM sessions WHERE agent_type = ?',
+    )
+    .all('claude-code') as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
     result[row.group_folder] = row.session_id;
@@ -561,33 +796,21 @@ export function getAllSessions(): Record<string, string> {
 
 // --- Registered group accessors ---
 
-export function getRegisteredGroup(
-  jid: string,
-): (RegisteredGroup & { jid: string }) | undefined {
-  const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-        is_main: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
-  if (!isValidGroupFolder(row.folder)) {
-    logger.warn(
-      { jid: row.jid, folder: row.folder },
-      'Skipping registered group with invalid folder',
-    );
-    return undefined;
-  }
+type RawGroupRow = {
+  jid: string;
+  name: string;
+  folder: string;
+  trigger_pattern: string;
+  added_at: string;
+  container_config: string | null;
+  requires_trigger: number | null;
+  is_main: number | null;
+  agent_type: string | null;
+  paused_until: string | null;
+};
+
+function rowToGroup(row: RawGroupRow): RegisteredGroup {
   return {
-    jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
@@ -598,16 +821,37 @@ export function getRegisteredGroup(
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    agentType: row.agent_type ?? 'claude-code',
+    pausedUntil: row.paused_until ?? undefined,
   };
+}
+
+export function getRegisteredGroup(
+  jid: string,
+  agentType = 'claude-code',
+): (RegisteredGroup & { jid: string }) | undefined {
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE jid = ? AND agent_type = ?')
+    .get(jid, agentType) as RawGroupRow | undefined;
+  if (!row) return undefined;
+  if (!isValidGroupFolder(row.folder)) {
+    logger.warn(
+      { jid, folder: row.folder },
+      'Skipping registered group with invalid folder',
+    );
+    return undefined;
+  }
+  return { jid: row.jid, ...rowToGroup(row) };
 }
 
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
+  const agentType = group.agentType ?? 'claude-code';
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, agent_type, paused_until)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -617,20 +861,34 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
+    agentType,
+    group.pausedUntil ?? null,
   );
 }
 
-export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    is_main: number | null;
-  }>;
+export function deleteRegisteredGroup(jid: string, agentType: string): void {
+  db.prepare(
+    'DELETE FROM registered_groups WHERE jid = ? AND agent_type = ?',
+  ).run(jid, agentType);
+}
+
+/**
+ * Load all registered groups, optionally filtered by agent_type.
+ * For paired rooms the same JID can appear multiple times (once per agent_type).
+ * Returns Record<jid, RegisteredGroup> using the FIRST matching row per JID
+ * when no filter is supplied (backwards-compat), or exactly the filtered set.
+ */
+export function getAllRegisteredGroups(
+  agentTypeFilter?: string,
+): Record<string, RegisteredGroup> {
+  const rows = (
+    agentTypeFilter
+      ? db
+          .prepare('SELECT * FROM registered_groups WHERE agent_type = ?')
+          .all(agentTypeFilter)
+      : db.prepare('SELECT * FROM registered_groups').all()
+  ) as RawGroupRow[];
+
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
     if (!isValidGroupFolder(row.folder)) {
@@ -640,20 +898,122 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger:
-        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      isMain: row.is_main === 1 ? true : undefined,
-    };
+    // When no filter: first row wins per JID (prefer claude-code, then others)
+    if (!agentTypeFilter && result[row.jid]) continue;
+    result[row.jid] = rowToGroup(row);
   }
   return result;
+}
+
+/**
+ * Returns true if the JID has more than one agent_type registered (paired room).
+ */
+export function isPairedRoomJid(jid: string): boolean {
+  return getRegisteredAgentTypesForJid(jid).length > 1;
+}
+
+/**
+ * Returns all agent_types registered for a JID.
+ * More than one entry means this is a paired room.
+ */
+export function getRegisteredAgentTypesForJid(jid: string): string[] {
+  const rows = db
+    .prepare('SELECT agent_type FROM registered_groups WHERE jid = ?')
+    .all(jid) as Array<{ agent_type: string }>;
+  return rows.map((r) => r.agent_type);
+}
+
+/**
+ * Returns ALL group registrations for a JID (one per agent_type).
+ */
+export function getAllGroupsForJid(jid: string): RegisteredGroup[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM registered_groups WHERE jid = ? ORDER BY agent_type',
+    )
+    .all(jid) as RawGroupRow[];
+  return rows.filter((r) => isValidGroupFolder(r.folder)).map(rowToGroup);
+}
+
+// --- Pause accessors ---
+
+/** Set or clear the pause timestamp for a specific agent in a channel. */
+export function setGroupPause(
+  jid: string,
+  agentType: string,
+  pausedUntil: string | null,
+): void {
+  db.prepare(
+    'UPDATE registered_groups SET paused_until = ? WHERE jid = ? AND agent_type = ?',
+  ).run(pausedUntil, jid, agentType);
+}
+
+/** Returns true if the agent is currently paused (pausedUntil is in the future). */
+export function isGroupPaused(jid: string, agentType: string): boolean {
+  const row = db
+    .prepare(
+      'SELECT paused_until FROM registered_groups WHERE jid = ? AND agent_type = ?',
+    )
+    .get(jid, agentType) as { paused_until: string | null } | undefined;
+  if (!row?.paused_until) return false;
+  return new Date() < new Date(row.paused_until);
+}
+
+// --- Work item accessors ---
+
+export interface WorkItem {
+  id: number;
+  group_folder: string;
+  chat_jid: string;
+  agent_type: string;
+  status: 'produced' | 'delivery_retry' | 'delivered';
+  result_payload: string;
+  delivery_attempts: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  delivered_at: string | null;
+}
+
+export function createWorkItem(
+  item: Pick<
+    WorkItem,
+    'group_folder' | 'chat_jid' | 'agent_type' | 'result_payload'
+  >,
+): number {
+  const result = db
+    .prepare(
+      `INSERT INTO work_items (group_folder, chat_jid, agent_type, result_payload) VALUES (?, ?, ?, ?)`,
+    )
+    .run(
+      item.group_folder,
+      item.chat_jid,
+      item.agent_type,
+      item.result_payload,
+    );
+  return result.lastInsertRowid as number;
+}
+
+export function markWorkItemDelivered(id: number): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE work_items SET status = 'delivered', delivered_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(now, now, id);
+}
+
+export function markWorkItemFailed(id: number, error: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE work_items SET status = 'delivery_retry', delivery_attempts = delivery_attempts + 1, last_error = ?, updated_at = ? WHERE id = ?`,
+  ).run(error, now, id);
+}
+
+export function getUndeliveredWorkItems(): WorkItem[] {
+  return db
+    .prepare(
+      `SELECT * FROM work_items WHERE status IN ('produced', 'delivery_retry') ORDER BY created_at`,
+    )
+    .all() as WorkItem[];
 }
 
 // --- JSON migration ---

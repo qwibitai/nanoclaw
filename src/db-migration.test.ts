@@ -64,4 +64,62 @@ describe('database migrations', () => {
       process.chdir(repoRoot);
     }
   });
+
+  it('maps legacy codex host-runner groups to agent_type=codex', async () => {
+    const repoRoot = process.cwd();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-db-test-'));
+
+    try {
+      process.chdir(tempDir);
+      fs.mkdirSync(path.join(tempDir, 'store'), { recursive: true });
+
+      const dbPath = path.join(tempDir, 'store', 'messages.db');
+      const legacyDb = new Database(dbPath);
+      legacyDb.exec(`
+        CREATE TABLE registered_groups (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL UNIQUE,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1,
+          is_main INTEGER DEFAULT 0
+        );
+      `);
+      legacyDb
+        .prepare(
+          `INSERT INTO registered_groups
+            (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'dc:codex-room',
+          'Codex Room',
+          'codex_room',
+          '^@codex\\b',
+          '2024-01-01T00:00:00.000Z',
+          JSON.stringify({ agentCli: 'codex' }),
+          1,
+          0,
+        );
+      legacyDb.close();
+
+      vi.resetModules();
+      const { initDatabase, getAllRegisteredGroups, _closeDatabase } =
+        await import('./db.js');
+
+      initDatabase();
+
+      const groups = getAllRegisteredGroups('codex');
+      expect(groups['dc:codex-room']).toMatchObject({
+        folder: 'codex_room',
+        agentType: 'codex',
+      });
+
+      _closeDatabase();
+    } finally {
+      process.chdir(repoRoot);
+    }
+  });
 });

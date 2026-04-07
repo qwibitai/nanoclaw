@@ -6,6 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:agent-runner": "npm --prefix container/agent-runner run build",
+    "build:runners": "npm run build:agent-runner",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
@@ -17,6 +19,9 @@
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "check:secrets": "bash scripts/check-staged-secrets.sh",
+    "check:staged-lint": "bash scripts/lint-staged.sh",
+    "check:pre-push": "npm run typecheck && npm test",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -24,6 +29,7 @@
     "@onecli-sh/sdk": "^0.2.0",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
+    "discord.js": "^14.25.1",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",

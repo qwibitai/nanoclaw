@@ -30,6 +30,12 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  agentCli?: 'claude' | 'gemini' | 'copilot' | 'codex' | 'multi';
+  model?: string; // Per-group model override for host agents
+  reasoningEffort?: string; // Per-group reasoning/effort override when supported
+  thinking?: boolean; // Claude thinking toggle
+  thinkingBudget?: number; // Claude thinking budget override
+  providerPreset?: 'anthropic' | 'ollama'; // Host-side Claude provider preset
 }
 
 export interface RegisteredGroup {
@@ -40,6 +46,8 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  agentType?: string; // 'claude-code' | 'gemini' | 'copilot' | 'codex' — which service handles this group
+  pausedUntil?: string; // ISO timestamp — agent won't respond until this time
 }
 
 export interface NewMessage {
@@ -87,6 +95,8 @@ export interface Channel {
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
+  // Optional: returns true if this channel handles the given agent type ('claude-code' | 'gemini' | 'copilot' | 'codex')
+  handlesAgentType?(agentType: string): boolean;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.

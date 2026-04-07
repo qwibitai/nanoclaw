@@ -77,6 +77,9 @@ Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 This is the **main channel**, which has elevated privileges.
 
+See also:
+- `ADMIN.md` in this folder for NanoClaw service operations, logs, DB checks, recovery steps, and runtime troubleshooting.
+
 ## Container Mounts
 
 Main has read-only access to the project and read-write access to its group folder:

@@ -1,1 +1,2 @@
-npm run format:fix
+npm run check:secrets
+npm run check:staged-lint

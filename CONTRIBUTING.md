@@ -13,6 +13,33 @@
 
 3. **One thing per PR.** Each PR should do one thing — one bug fix, one skill, one simplification. Don't mix unrelated changes in a single PR.
 
+## Git Workflow
+
+- 기능 작업은 `main`에서 바로 하지 말고 `feat/<summary>` 브랜치에서 진행한다.
+- 버그는 `fix/<summary>`, 문서는 `docs/<summary>`, 잡일은 `chore/<summary>`를 쓸 수 있다.
+- 기본 작업 방식은 브랜치마다 `git worktree`를 따로 두는 것이다. 같은 워크트리에서 여러 브랜치를 오가며 작업하지 않는다.
+- 적당한 작업 단위가 끝나면 바로 커밋하고, 한 PR에는 한 주제만 담는다.
+- 로컬 비밀값과 개인 설정은 커밋하지 않는다. 실제 값은 `.env` 같은 로컬 파일에 두고, 공유 예시는 `.env.example`에 둔다.
+
+예시:
+
+```bash
+git switch -c feat/admin-model-switching
+git worktree add ../nanoclaw-admin-model-switching feat/admin-model-switching
+cd ../nanoclaw-admin-model-switching
+git add <files>
+git commit -m "feat: add admin model switching"
+```
+
+## Hooks
+
+Husky hook이 기본 점검을 자동 수행한다.
+
+- `pre-commit`: staged secret/file 검사 + staged 파일 lint
+- `pre-push`: `npm run typecheck` + `npm test`
+
+실패하면 먼저 수정하고 다시 커밋/푸시한다.
+
 ## Source Code Changes
 
 **Accepted:** Bug fixes, security fixes, simplifications, reducing code.

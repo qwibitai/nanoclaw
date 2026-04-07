@@ -3,12 +3,9 @@ import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { ContainerOutput, writeTasksSnapshot } from './container-runner.js';
 import {
-  ContainerOutput,
-  runContainerAgent,
-  writeTasksSnapshot,
-} from './container-runner.js';
-import {
+  getAgentSession,
   getAllTasks,
   getDueTasks,
   getTaskById,
@@ -17,8 +14,14 @@ import {
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
+import { isError } from './error-utils.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import {
+  getAgentType,
+  requiresContainerRuntime,
+  resolveAgentRuntime,
+} from './runtimes/index.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -84,6 +87,7 @@ async function runTask(
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
   } catch (err) {
+    if (!isError(err)) throw err;
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
     updateTask(task.id, { status: 'paused' });
@@ -129,31 +133,33 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      script: t.script,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
+  const runtime = resolveAgentRuntime(group);
+  if (requiresContainerRuntime(group)) {
+    const tasks = getAllTasks();
+    writeTasksSnapshot(
+      task.group_folder,
+      isMain,
+      tasks.map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        prompt: t.prompt,
+        script: t.script,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      })),
+    );
+  }
 
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
   const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+    task.context_mode === 'group'
+      ? getAgentSession(task.group_folder, getAgentType(group))
+      : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -162,6 +168,7 @@ async function runTask(
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleClose = () => {
+    if (runtime.kind !== 'container') return;
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
@@ -170,36 +177,33 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const output = await runtime.run({
       group,
-      {
-        prompt: task.prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-        script: task.script || undefined,
-      },
-      (proc, containerName) =>
+      prompt: task.prompt,
+      sessionId,
+      groupFolder: task.group_folder,
+      chatJid: task.chat_jid,
+      isMain,
+      isScheduledTask: true,
+      assistantName: ASSISTANT_NAME,
+      script: task.script || undefined,
+      onProcess: (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
+      onOutput: async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
-          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
+          scheduleClose();
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
         }
       },
-    );
+    });
 
     if (closeTimer) clearTimeout(closeTimer);
 
@@ -215,6 +219,7 @@ async function runTask(
       'Task completed',
     );
   } catch (err) {
+    if (!isError(err)) throw err;
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
@@ -269,6 +274,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         );
       }
     } catch (err) {
+      if (!isError(err)) throw err;
       logger.error({ err }, 'Error in scheduler loop');
     }
 

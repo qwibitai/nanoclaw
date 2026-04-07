@@ -1,0 +1,11 @@
+{
+  "name": "nanoclaw-codex-runner",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Host-side Codex app-server runner for NanoClaw",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc",
+    "start": "node dist/index.js"
+  }
+}

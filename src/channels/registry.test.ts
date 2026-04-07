@@ -39,4 +39,16 @@ describe('channel registry', () => {
     registerChannel('overwrite-test', factory2);
     expect(getChannelFactory('overwrite-test')).toBe(factory2);
   });
+
+  it('registers the codex Discord channel factory', async () => {
+    await import('./discord.js');
+    expect(getChannelFactory('discord-codex')).toBeTypeOf('function');
+    expect(getRegisteredChannelNames()).toContain('discord-codex');
+  });
+
+  it('registers the admin Discord channel factory', async () => {
+    await import('./discord.js');
+    expect(getChannelFactory('discord-admin')).toBeTypeOf('function');
+    expect(getRegisteredChannelNames()).toContain('discord-admin');
+  });
 });

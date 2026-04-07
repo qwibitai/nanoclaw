@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { isErrnoException } from './error-utils.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -16,6 +17,7 @@ const BASE_RETRY_MS = 5000;
 
 interface GroupState {
   active: boolean;
+  activeStartedAt: number | null;
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
@@ -40,6 +42,7 @@ export class GroupQueue {
     if (!state) {
       state = {
         active: false,
+        activeStartedAt: null,
         idleWaiting: false,
         isTaskContainer: false,
         runningTaskId: null,
@@ -57,6 +60,37 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  isGroupBusy(groupJid: string): boolean {
+    return this.groups.get(groupJid)?.active ?? false;
+  }
+
+  getStatuses(groupJids: string[]): Array<{
+    jid: string;
+    status: 'processing' | 'waiting' | 'inactive';
+    elapsedMs: number | null;
+    pendingMessages: boolean;
+    pendingTasks: number;
+  }> {
+    return groupJids.map((jid) => {
+      const state = this.getGroup(jid);
+      const status = state.active
+        ? 'processing'
+        : state.pendingMessages || state.pendingTasks.length > 0
+          ? 'waiting'
+          : 'inactive';
+      return {
+        jid,
+        status,
+        elapsedMs:
+          state.active && state.activeStartedAt
+            ? Date.now() - state.activeStartedAt
+            : null,
+        pendingMessages: state.pendingMessages,
+        pendingTasks: state.pendingTasks.length,
+      };
+    });
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -172,7 +206,8 @@ export class GroupQueue {
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
       fs.renameSync(tempPath, filepath);
       return true;
-    } catch {
+    } catch (err) {
+      if (!isErrnoException(err)) throw err;
       return false;
     }
   }
@@ -188,8 +223,35 @@ export class GroupQueue {
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
-    } catch {
-      // ignore
+    } catch (err) {
+      if (!isErrnoException(err)) throw err;
+    }
+  }
+
+  killGroupProcess(groupJid: string, reason: string): boolean {
+    const state = this.getGroup(groupJid);
+    const proc = state.process;
+    if (!state.active || !proc || proc.killed) return false;
+
+    logger.warn({ groupJid, reason }, 'Killing active group process');
+    try {
+      proc.kill('SIGTERM');
+      setTimeout(() => {
+        if (!proc.killed) {
+          try {
+            proc.kill('SIGKILL');
+          } catch (err) {
+            if (!isErrnoException(err, 'ESRCH')) throw err;
+          }
+        }
+      }, 5000);
+      return true;
+    } catch (err) {
+      logger.warn(
+        { groupJid, reason, err },
+        'Failed to kill active group process',
+      );
+      return false;
     }
   }
 
@@ -199,6 +261,7 @@ export class GroupQueue {
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.activeStartedAt = Date.now();
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
@@ -223,6 +286,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
+      state.activeStartedAt = null;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -234,6 +298,7 @@ export class GroupQueue {
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.activeStartedAt = Date.now();
     state.idleWaiting = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
@@ -250,6 +315,7 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+      state.activeStartedAt = null;
       state.isTaskContainer = false;
       state.runningTaskId = null;
       state.process = null;
