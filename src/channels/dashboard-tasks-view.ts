@@ -1,17 +1,120 @@
 /**
- * Scheduled tasks view — read-only list with status badges and human-readable schedules.
+ * Scheduled tasks view — read-only list grouped by status, with
+ * click-to-expand last_result snippets. Migrated to the shared
+ * dashboard vocabulary in devtask #60 (Unit 6).
+ *
+ * Tasks rows are <div>s, not <button>s — there is no selection
+ * concept in Tasks. The chevron is the only button in the row,
+ * with aria-expanded / aria-controls on the .list-row__expanded
+ * pre. Chevron click is stopPropagation'd so it never bubbles to
+ * the row. Tasks with no last_result hide the chevron entirely.
+ *
+ * Expanded state is an in-memory Set<taskId> at module scope so
+ * SSE re-fetches don't collapse rows the user just expanded.
+ * State does NOT survive page reload (intentional — ephemeral).
+ *
+ * last_result is rendered via textContent on a <pre>, never
+ * innerHTML — last_result is raw stdout from agent jobs and may
+ * contain arbitrary HTML.
  */
 
 export function getTasksViewHTML(): string {
   return `
-<h2 style="font-size:22px;font-weight:700;letter-spacing:-0.3px;margin-bottom:var(--spacing-lg);">Scheduled Tasks</h2>
-<div id="tasks-list"></div>
+<div class="view-shell">
+  <header class="page-header">
+    <div class="page-header__title-block">
+      <h1 class="page-header__title">Scheduled Tasks</h1>
+      <div class="page-header__meta" id="tasks-meta"></div>
+    </div>
+  </header>
+  <div class="view-body tasks-shell">
+    <div class="tasks-card" id="tasks-list"></div>
+  </div>
+</div>
+
+<style>
+.tasks-shell { padding-bottom: var(--spacing-xl); }
+.tasks-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.tasks-card .list-row:last-child { border-bottom: none; }
+
+.tasks-row {
+  cursor: default;
+}
+.tasks-row__inner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  width: 100%;
+}
+.tasks-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tasks-row.is-active    { border-left-color: var(--green); border-left-width: 4px; }
+.tasks-row.is-paused    { border-left-color: var(--orange); border-left-width: 4px; }
+.tasks-row.is-completed { border-left-color: var(--text-tertiary); opacity: 0.65; }
+
+.tasks-chevron {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s, color 0.15s;
+}
+.tasks-chevron:hover { background: var(--surface-hover); color: var(--text); }
+.tasks-chevron:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tasks-chevron[aria-expanded="true"] { transform: rotate(90deg); color: var(--text); }
+
+.tasks-result {
+  margin: var(--spacing-sm) 0 0 0;
+  padding: var(--spacing-md);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  .tasks-card { border-radius: var(--radius-md); }
+  .tasks-row__inner { gap: var(--spacing-sm); }
+  .tasks-chevron { width: 36px; height: 36px; }
+}
+</style>
 `;
 }
 
 export function getTasksViewJS(): string {
   return `
 (function() {
+  // Expanded-row state survives SSE re-fetches because the IIFE
+  // persists across renders. Lost on page reload (intentional).
+  var expanded = new Set();
+
   function esc(s) {
     var d = document.createElement('div');
     d.textContent = s || '';
@@ -83,41 +186,116 @@ export function getTasksViewJS(): string {
 
   function promptSummary(prompt) {
     var line = (prompt || '').split('\\n')[0];
-    return line.length > 80 ? line.slice(0, 77) + '...' : line;
+    return line.length > 120 ? line.slice(0, 117) + '...' : line;
   }
 
-  var statusOrder = { active: 0, paused: 1, completed: 2 };
+  var statusOrder = ['active', 'paused', 'completed'];
+  var statusLabels = { active: 'Active', paused: 'Paused', completed: 'Completed' };
+
+  function updateMeta(tasks) {
+    var meta = document.getElementById('tasks-meta');
+    if (!meta) return;
+    var active = tasks.filter(function(t) { return t.status === 'active'; }).length;
+    meta.textContent = active + ' active · ' + tasks.length + ' total';
+  }
+
+  function rowHTML(t) {
+    var hasResult = !!(t.last_result && t.last_result.trim());
+    var isExpanded = expanded.has(t.id);
+    var expandedAttr = isExpanded ? 'true' : 'false';
+    var expandedId = 'task-exp-' + esc(String(t.id));
+
+    var metaParts = [];
+    if (t.next_run) metaParts.push('<span>Next ' + esc(relativeTime(t.next_run)) + '</span>');
+    if (t.last_run) metaParts.push('<span>Last ' + esc(relativeTime(t.last_run)) + '</span>');
+    if (t.group_folder) metaParts.push('<span>' + esc(t.group_folder) + '</span>');
+    var metaHTML = metaParts.length
+      ? '<div class="list-row__meta">' + metaParts.join('') + '</div>'
+      : '';
+
+    var chevronHTML = hasResult
+      ? '<button type="button" class="tasks-chevron" aria-expanded="' + expandedAttr +
+        '" aria-controls="' + expandedId + '" aria-label="Show last result" data-task-id="' + esc(String(t.id)) + '">›</button>'
+      : '';
+
+    // last_result is intentionally NOT inserted via innerHTML — it's
+    // raw stdout. Render path inserts via textContent after attaching.
+    var hiddenAttr = isExpanded ? '' : ' hidden';
+    var expandedHTML = hasResult
+      ? '<pre class="tasks-result" id="' + expandedId + '" data-task-id="' + esc(String(t.id)) + '"' + hiddenAttr + '></pre>'
+      : '';
+
+    return '<div class="list-row tasks-row is-' + esc(t.status) + (isExpanded ? ' is-expanded' : '') + '">' +
+        '<div class="tasks-row__inner">' +
+          '<div class="tasks-row__main">' +
+            '<div class="list-row__title">' + esc(promptSummary(t.prompt)) + '</div>' +
+            '<div class="list-row__summary">' + esc(scheduleDesc(t)) + '</div>' +
+            metaHTML +
+          '</div>' +
+          chevronHTML +
+        '</div>' +
+        expandedHTML +
+      '</div>';
+  }
 
   function renderTasks(data) {
     var el = document.getElementById('tasks-list');
-    var tasks = (data.tasks || []).sort(function(a, b) {
-      return (statusOrder[a.status] || 9) - (statusOrder[b.status] || 9);
-    });
+    var tasks = (data.tasks || []).slice();
+    updateMeta(tasks);
 
     if (tasks.length === 0) {
       el.innerHTML = '<div class="empty-state"><h3>All clear</h3><p>Pip and Pickle have nothing scheduled right now.</p></div>';
       return;
     }
 
-    var html = tasks.map(function(t) {
-      var dimmed = t.status === 'completed' ? 'opacity:0.6;' : '';
-      return '<div class="card" style="display:flex;flex-direction:column;gap:8px;' + dimmed + '">' +
-        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-          '<span class="badge badge-' + esc(t.status) + '">' + esc(t.status) + '</span>' +
-          '<span style="font-size:12px;color:var(--text-tertiary);">' + esc(t.schedule_type === 'cron' ? 'Recurring' : t.schedule_type === 'interval' ? 'Repeating' : 'One-time') + '</span>' +
-          '<span style="font-size:12px;color:var(--text-tertiary);margin-left:auto;">' + esc(t.group_folder) + '</span>' +
-        '</div>' +
-        '<div style="font-size:15px;font-weight:600;">' + esc(promptSummary(t.prompt)) + '</div>' +
-        '<div style="font-size:13px;color:var(--text-secondary);">' + esc(scheduleDesc(t)) + '</div>' +
-        '<div style="display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);">' +
-          (t.next_run ? '<span>Next: ' + esc(relativeTime(t.next_run)) + '</span>' : '') +
-          (t.last_run ? '<span>Last: ' + esc(relativeTime(t.last_run)) + '</span>' : '') +
-        '</div>' +
-        (t.last_result ? '<div style="font-size:12px;color:var(--text-tertiary);background:var(--surface-hover);padding:6px 10px;border-radius:var(--radius-sm);margin-top:4px;white-space:pre-wrap;max-height:60px;overflow:hidden;">' + esc(t.last_result.slice(0, 200)) + '</div>' : '') +
-      '</div>';
-    }).join('');
+    // Group by status
+    var groups = { active: [], paused: [], completed: [] };
+    tasks.forEach(function(t) {
+      var s = (groups[t.status] ? t.status : 'active');
+      groups[s].push(t);
+    });
+
+    var html = '';
+    statusOrder.forEach(function(status) {
+      var items = groups[status];
+      if (!items || items.length === 0) return;
+      html += '<div class="list-section list-section--' + esc(status) + '">' + esc(statusLabels[status]) +
+        '<span class="list-section__count">' + items.length + '</span></div>';
+      items.forEach(function(t) { html += rowHTML(t); });
+    });
 
     el.innerHTML = html;
+
+    // Inject last_result via textContent (NOT innerHTML).
+    var byId = {};
+    tasks.forEach(function(t) { byId[t.id] = t; });
+    el.querySelectorAll('.tasks-result').forEach(function(pre) {
+      var t = byId[pre.dataset.taskId] || byId[+pre.dataset.taskId];
+      if (t && t.last_result) pre.textContent = t.last_result;
+    });
+
+    // Chevron click handlers (event delegation could work too, this
+    // keeps the surface area small).
+    el.querySelectorAll('.tasks-chevron').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var id = btn.dataset.taskId;
+        var key = isNaN(+id) ? id : +id;
+        var pre = document.getElementById('task-exp-' + id);
+        var row = btn.closest('.tasks-row');
+        if (expanded.has(key)) {
+          expanded.delete(key);
+          btn.setAttribute('aria-expanded', 'false');
+          if (pre) pre.setAttribute('hidden', 'hidden');
+          if (row) row.classList.remove('is-expanded');
+        } else {
+          expanded.add(key);
+          btn.setAttribute('aria-expanded', 'true');
+          if (pre) pre.removeAttribute('hidden');
+          if (row) row.classList.add('is-expanded');
+        }
+      });
+    });
   }
 
   function loadTasks() {

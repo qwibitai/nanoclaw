@@ -1,64 +1,193 @@
 /**
  * Vault view — D3.js force-directed knowledge graph.
- * Ported from vault-explorer/server.js, restyled for dashboard design tokens.
+ * Migrated to the shared dashboard vocabulary in devtask #60: chrome
+ * (title, search, legend, zoom controls) lives in a real .page-header
+ * instead of floating absolute over the canvas. The graph itself,
+ * the slide-in detail panel, and the D3 simulation are unchanged
+ * except for:
+ *   - formatContent() now esc()s d.content before its regex transforms
+ *     (closes a pre-existing XSS sink — see devtask #60 plan Unit 4).
+ *   - initGraph() defers the dimension read with requestAnimationFrame
+ *     and a one-frame zero-width retry guard so the page-header has
+ *     time to take its space before forceCenter computes.
  */
 
 export function getVaultViewHTML(): string {
   return `
-<div id="vault-container" style="position:relative;width:100%;height:100%;overflow:hidden;">
-  <div id="vault-header" style="position:absolute;top:16px;left:20px;z-index:5;pointer-events:none;">
-    <h2 style="font-size:20px;font-weight:700;letter-spacing:-0.3px;">Family Vault</h2>
-    <p style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Knowledge graph</p>
-  </div>
-  <div id="vault-search" style="position:absolute;top:16px;right:20px;z-index:5;">
-    <input type="text" id="vault-search-input" placeholder="Search nodes\u2026"
-      style="width:180px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:width 0.2s;"
-      autocomplete="off" spellcheck="false">
-  </div>
-  <svg id="vault-svg" style="width:100%;height:100%;display:block;"></svg>
-  <div id="vault-detail" style="position:absolute;top:0;right:-400px;width:400px;height:100%;background:var(--surface);border-left:1px solid var(--border);padding:24px 20px;overflow-y:auto;transition:right 0.3s cubic-bezier(0.4,0,0.2,1);z-index:10;">
-    <button id="vault-detail-close" style="position:absolute;top:12px;right:12px;width:28px;height:28px;border:none;background:var(--surface-hover);border-radius:var(--radius-sm);color:var(--text-secondary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&times;</button>
-    <div id="vault-detail-content"></div>
-  </div>
-  <div id="vault-legend" style="position:absolute;bottom:16px;left:20px;display:flex;gap:12px;z-index:5;flex-wrap:wrap;"></div>
-  <div id="vault-controls" style="position:absolute;bottom:16px;right:20px;display:flex;gap:6px;z-index:5;">
-    <button class="vault-ctrl" onclick="window._vaultZoomIn()" title="Zoom in">+</button>
-    <button class="vault-ctrl" onclick="window._vaultZoomOut()" title="Zoom out">&minus;</button>
-    <button class="vault-ctrl" onclick="window._vaultReset()" title="Reset">&#x2302;</button>
+<div class="view-shell">
+  <header class="page-header">
+    <div class="page-header__title-block">
+      <div class="page-header__eyebrow">Knowledge Graph</div>
+      <h1 class="page-header__title">Family Vault</h1>
+      <div class="page-header__meta" id="vault-meta"></div>
+    </div>
+    <div class="page-header__tools">
+      <input type="search" id="vault-search-input" class="input" placeholder="Search nodes…" autocomplete="off" spellcheck="false" />
+      <div id="vault-legend" class="vault-legend"></div>
+      <div class="vault-ctrls">
+        <button class="vault-ctrl" type="button" onclick="window._vaultZoomIn()" title="Zoom in">+</button>
+        <button class="vault-ctrl" type="button" onclick="window._vaultZoomOut()" title="Zoom out">&minus;</button>
+        <button class="vault-ctrl" type="button" onclick="window._vaultReset()" title="Reset">&#x2302;</button>
+      </div>
+    </div>
+  </header>
+  <div class="vault-canvas" id="vault-container">
+    <svg id="vault-svg"></svg>
+    <aside class="vault-detail-panel" id="vault-detail">
+      <button id="vault-detail-close" class="vault-detail-close" type="button" aria-label="Close">&times;</button>
+      <div id="vault-detail-content"></div>
+    </aside>
   </div>
 </div>
 
 <style>
-#vault-search-input:focus { border-color:var(--accent); width:240px; }
-#vault-search-input::placeholder { color:var(--text-tertiary); }
+.vault-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.vault-canvas svg { width: 100%; height: 100%; display: block; }
+
+.vault-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+.vault-legend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.2s, background 0.15s;
+}
+.vault-legend-pill:hover { background: var(--surface-hover); }
+.vault-legend-pill[aria-pressed="false"] { opacity: 0.4; }
+.vault-legend-pill__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.vault-ctrls { display: flex; gap: 4px; }
 .vault-ctrl {
-  width:34px;height:34px;border:1px solid var(--border);background:var(--surface);
-  border-radius:var(--radius-sm);color:var(--text-secondary);font-size:16px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;transition:background 0.15s;
+  width: 32px; height: 32px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
 }
-.vault-ctrl:hover { background:var(--surface-hover);color:var(--text); }
+.vault-ctrl:hover { background: var(--surface-hover); color: var(--text); }
+.vault-ctrl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.vault-detail-panel {
+  position: absolute;
+  top: 0;
+  right: -400px;
+  width: 400px;
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 24px 20px;
+  overflow-y: auto;
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 10;
+}
+.vault-detail-panel.is-open { right: 0; }
+.vault-detail-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px; height: 28px;
+  border: none;
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 #vault-detail .domain-badge {
-  display:inline-block;padding:3px 10px;border-radius:6px;
-  font-size:11px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:12px;
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
 }
-#vault-detail h3 { font-size:20px;font-weight:700;margin-bottom:6px;letter-spacing:-0.3px; }
-#vault-detail .desc { font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5; }
-#vault-detail .meta { display:flex;gap:12px;margin-bottom:16px;font-size:12px;color:var(--text-tertiary); }
+#vault-detail h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+  color: var(--text);
+}
+#vault-detail .desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+#vault-detail .meta {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
 #vault-detail .section-label {
-  font-size:11px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;
-  color:var(--text-tertiary);margin:16px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 16px 0 8px;
 }
-#vault-detail .content-text { font-size:13.5px;line-height:1.7;color:var(--text-secondary); }
-#vault-detail .content-text h3 { font-size:14px;font-weight:600;color:var(--text);margin:12px 0 4px; }
-#vault-detail .content-text ul { padding-left:16px; }
-#vault-detail .content-text li { margin-bottom:4px; }
-#vault-detail .content-text strong { color:var(--text); }
-.connected-nodes { display:flex;flex-wrap:wrap;gap:6px; }
+#vault-detail .content-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+#vault-detail .content-text h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 12px 0 4px; }
+#vault-detail .content-text ul { padding-left: 16px; }
+#vault-detail .content-text li { margin-bottom: 4px; }
+#vault-detail .content-text strong { color: var(--text); }
+.connected-nodes { display: flex; flex-wrap: wrap; gap: 6px; }
 .connected-node {
-  padding:4px 10px;border-radius:6px;font-size:12px;
-  background:var(--surface-hover);border:1px solid var(--border);cursor:pointer;transition:background 0.15s;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
 }
-.connected-node:hover { background:var(--accent-light); }
+.connected-node:hover { background: var(--accent-light); }
 </style>
 `;
 }
@@ -87,11 +216,16 @@ export function getVaultViewJS(): string {
 
   function esc(s) {
     const d = document.createElement('div');
-    d.textContent = s;
+    d.textContent = s == null ? '' : String(s);
     return d.innerHTML;
   }
 
   function formatContent(text) {
+    // Escape first so the regex transforms operate on safe text. The
+    // markdown delimiters (*, #, -, \\n) are not HTML-special and pass
+    // through esc() unchanged, so the substitutions still match.
+    // Captured \$1 groups now contain pre-escaped text.
+    text = esc(text);
     return text
       .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
       .replace(/\\*(.+?)\\*/g, '<em>$1</em>')
@@ -139,29 +273,19 @@ export function getVaultViewJS(): string {
         if (n) openPanel(n);
       });
     });
-    panel.style.right = '0';
+    panel.classList.add('is-open');
   }
 
   function closePanel() {
-    document.getElementById('vault-detail').style.right = '-400px';
+    document.getElementById('vault-detail').classList.remove('is-open');
   }
 
   document.getElementById('vault-detail-close').addEventListener('click', closePanel);
 
-  function initGraph(data) {
-    vaultNodes = data.nodes;
-    edges = data.edges;
-
-    vaultNodes.forEach(function(n) { getColor(n.domain); });
-    Object.keys(domainColors).forEach(function(d) { activeDomains.add(d); });
-
-    const container = document.getElementById('vault-container');
+  function buildSimulation(width, height) {
     const svgEl = document.getElementById('vault-svg');
     svg = d3.select(svgEl);
     svg.selectAll('*').remove();
-
-    const width = container.clientWidth;
-    const height = container.clientHeight;
 
     gContainer = svg.append('g');
     zoom = d3.zoom().scaleExtent([0.3, 4]).on('zoom', function(e) { gContainer.attr('transform', e.transform); });
@@ -247,29 +371,64 @@ export function getVaultViewJS(): string {
           .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
       node.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
     });
+  }
 
-    // Legend
+  function buildLegend() {
     var legendEl = document.getElementById('vault-legend');
     legendEl.innerHTML = '';
     Object.entries(domainColors).forEach(function(entry) {
       var domain = entry[0], colors = entry[1];
-      var item = document.createElement('div');
-      item.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none;';
-      item.innerHTML = '<div style="width:10px;height:10px;border-radius:50%;background:' + colors.raw + '"></div>' + domain;
-      item.addEventListener('click', function() {
-        if (activeDomains.has(domain)) { activeDomains.delete(domain); item.style.opacity = '0.3'; }
-        else { activeDomains.add(domain); item.style.opacity = '1'; }
-        node.transition().duration(300).style('opacity', function(d) { return activeDomains.has(d.domain) ? 1 : 0.08; });
+      var pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'vault-legend-pill';
+      pill.setAttribute('aria-pressed', 'true');
+      pill.innerHTML = '<span class="vault-legend-pill__dot" style="background:' + colors.raw + '"></span>' + esc(domain);
+      pill.addEventListener('click', function() {
+        var on = activeDomains.has(domain);
+        if (on) { activeDomains.delete(domain); pill.setAttribute('aria-pressed', 'false'); }
+        else { activeDomains.add(domain); pill.setAttribute('aria-pressed', 'true'); }
+        if (node) node.transition().duration(300).style('opacity', function(d) { return activeDomains.has(d.domain) ? 1 : 0.08; });
       });
-      legendEl.appendChild(item);
+      legendEl.appendChild(pill);
     });
+  }
 
-    initialized = true;
+  function updateMeta() {
+    var meta = document.getElementById('vault-meta');
+    if (meta) meta.textContent = vaultNodes.length + ' nodes · ' + edges.length + ' connections';
+  }
+
+  function initGraph(data) {
+    vaultNodes = data.nodes;
+    edges = data.edges;
+
+    vaultNodes.forEach(function(n) { getColor(n.domain); });
+    Object.keys(domainColors).forEach(function(d) { activeDomains.add(d); });
+
+    updateMeta();
+    buildLegend();
+
+    // Defer the dimension read until after layout. The viewchange event
+    // fires before the new flex layout has computed, so reading
+    // container.clientWidth synchronously can return 0 — which would bake
+    // a forceCenter at (0, 0) silently. rAF + one-frame zero-width retry.
+    var container = document.getElementById('vault-container');
+    function tryInit() {
+      var width = container.clientWidth;
+      var height = container.clientHeight;
+      if (width === 0 || height === 0) {
+        requestAnimationFrame(tryInit);
+        return;
+      }
+      buildSimulation(width, height);
+      initialized = true;
+    }
+    requestAnimationFrame(tryInit);
   }
 
   // Search
   document.getElementById('vault-search-input').addEventListener('input', function() {
-    if (!initialized) return;
+    if (!initialized || !node) return;
     var q = this.value.toLowerCase().trim();
     if (!q) { node.transition().duration(200).style('opacity', 1); return; }
     node.transition().duration(200).style('opacity', function(d) {
@@ -278,9 +437,9 @@ export function getVaultViewJS(): string {
   });
 
   // Zoom controls
-  window._vaultZoomIn = function() { svg.transition().duration(300).call(zoom.scaleBy, 1.4); };
-  window._vaultZoomOut = function() { svg.transition().duration(300).call(zoom.scaleBy, 0.7); };
-  window._vaultReset = function() { svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity); };
+  window._vaultZoomIn = function() { if (svg && zoom) svg.transition().duration(300).call(zoom.scaleBy, 1.4); };
+  window._vaultZoomOut = function() { if (svg && zoom) svg.transition().duration(300).call(zoom.scaleBy, 0.7); };
+  window._vaultReset = function() { if (svg && zoom) svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity); };
 
   // Keyboard shortcuts
   document.addEventListener('keydown', function(e) {
@@ -295,8 +454,8 @@ export function getVaultViewJS(): string {
         if (data.nodes && data.nodes.length > 0) {
           initGraph(data);
         } else {
-          document.getElementById('view-vault').innerHTML =
-            '<div class="empty-state"><h3>Vault</h3><p>No vault files found.</p></div>';
+          var canvas = document.querySelector('#view-vault .vault-canvas');
+          if (canvas) canvas.innerHTML = '<div class="empty-state"><h3>Vault</h3><p>No vault files found.</p></div>';
         }
       })
       .catch(function(err) {
