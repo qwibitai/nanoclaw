@@ -32,7 +32,13 @@ export type {
   MessageInEvent,
   MessageOutEvent,
   ChatMetadataEvent,
+  GroupRegisteredEvent,
 } from './events.js';
+export type {
+  RegisterGroupOptions,
+  ContainerConfig,
+  AdditionalMount,
+} from './group.js';
 
 import type { Agent } from './agent.js';
 import type { AgentLiteOptions, AgentOptions } from './options.js';

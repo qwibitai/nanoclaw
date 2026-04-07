@@ -11,8 +11,16 @@ export interface AgentEvents extends Record<string, any[]> {
   'chat.metadata': [payload: ChatMetadataEvent];
   'channel.connected': [payload: { key: string }];
   'channel.disconnected': [payload: { key: string }];
+  'group.registered': [payload: GroupRegisteredEvent];
   started: [];
   stopped: [];
+}
+
+/** A group was registered with the agent. */
+export interface GroupRegisteredEvent {
+  jid: string;
+  name: string;
+  folder: string;
 }
 
 /** Inbound message received from a user. */

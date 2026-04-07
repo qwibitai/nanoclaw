@@ -4,6 +4,7 @@
 
 import type { ChannelDriverFactory } from './channel-driver.js';
 import type { AgentEvents } from './events.js';
+import type { RegisterGroupOptions } from './group.js';
 
 /** Per-project agent runtime. Manages channels and per-chat VMs. */
 export interface Agent {
@@ -14,6 +15,8 @@ export interface Agent {
   addChannel(key: string, factory: ChannelDriverFactory): Promise<void>;
   /** Remove and disconnect a channel. */
   removeChannel(key: string): Promise<void>;
+  /** Register a group for message processing. Only after start(). */
+  registerGroup(jid: string, options: RegisterGroupOptions): Promise<void>;
   /** Start the agent — connects channels, begins processing messages. */
   start(): Promise<void>;
   /** Stop the agent — disconnects channels, stops processing. */
