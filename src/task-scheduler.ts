@@ -110,13 +110,11 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+  const group = groups[task.chat_jid];
 
   if (!group) {
     logger.error(
-      { taskId: task.id, groupFolder: task.group_folder },
+      { taskId: task.id, chatJid: task.chat_jid },
       'Group not found for task',
     );
     logTaskRun({
@@ -125,7 +123,7 @@ async function runTask(
       duration_ms: Date.now() - startTime,
       status: 'error',
       result: null,
-      error: `Group not found: ${task.group_folder}`,
+      error: `Group not found: ${task.chat_jid}`,
     });
     return;
   }
