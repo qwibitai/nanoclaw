@@ -147,9 +147,10 @@ The credential system depends on the container runtime chosen in step 3.
 Install OneCLI and its CLI tool:
 
 ```bash
-# Pinned to onecli/onecli v1.14.1 and onecli/onecli-cli v1.2.1
-curl -fsSL https://raw.githubusercontent.com/onecli/onecli/v1.14.1/scripts/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/onecli/onecli-cli/v1.2.1/scripts/install.sh | sh
+# onecli/onecli v1.14.1 (pinned to commit hash)
+curl -fsSL https://raw.githubusercontent.com/onecli/onecli/e22d0aafa978d54daeca55dfa45f5b65c8d9b052/scripts/install.sh | sh
+# onecli/onecli-cli v1.2.1 (pinned to commit hash)
+curl -fsSL https://raw.githubusercontent.com/onecli/onecli-cli/a455389407273dc305d669014e8e2b4f8e93e2e5/scripts/install.sh | sh
 ```
 
 Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
