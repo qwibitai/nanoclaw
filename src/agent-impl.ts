@@ -393,10 +393,7 @@ export class AgentImpl
     return this._onecli;
   }
 
-  private ensureOneCLIAgent(
-    jid: string,
-    group: InternalRegisteredGroup,
-  ): void {
+  private ensureOneCLIAgent(jid: string, group: InternalRegisteredGroup): void {
     if (group.isMain) return;
     const identifier = group.folder.toLowerCase().replace(/_/g, '-');
     this.getOneCLI().then((onecli) => {

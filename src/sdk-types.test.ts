@@ -1,10 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type {
-  Agent,
-  AvailableGroup,
-  RegisteredGroup,
-} from './api/sdk.js';
+import type { Agent, AvailableGroup, RegisteredGroup } from './api/sdk.js';
 
 describe('public SDK type exports', () => {
   it('exposes group getters with public group types', () => {
