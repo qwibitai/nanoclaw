@@ -9,6 +9,7 @@ store/
 data/
 logs/
 instances/
+agents/
 
 # BoxLite runtime state
 .boxlite/

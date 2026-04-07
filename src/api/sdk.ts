@@ -27,6 +27,12 @@ export type {
   ChannelDriverConfig,
 } from './channel-driver.js';
 export type { MountAllowlist, AllowedRoot } from './mount.js';
+export type {
+  AgentEvents,
+  MessageInEvent,
+  MessageOutEvent,
+  ChatMetadataEvent,
+} from './events.js';
 
 import type { Agent } from './agent.js';
 import type { AgentLiteOptions, AgentOptions } from './options.js';

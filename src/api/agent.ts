@@ -3,6 +3,7 @@
  */
 
 import type { ChannelDriverFactory } from './channel-driver.js';
+import type { AgentEvents } from './events.js';
 
 /** Per-project agent runtime. Manages channels and per-chat VMs. */
 export interface Agent {
@@ -18,8 +19,20 @@ export interface Agent {
   /** Stop the agent — disconnects channels, stops processing. */
   stop(): Promise<void>;
 
-  /** Subscribe to agent events. */
-  on(event: string, listener: (...args: unknown[]) => void): this;
-  off(event: string, listener: (...args: unknown[]) => void): this;
-  once(event: string, listener: (...args: unknown[]) => void): this;
+  /** Subscribe to typed agent events. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on<K extends keyof AgentEvents & string>(
+    event: K,
+    listener: (...args: AgentEvents[K]) => void,
+  ): any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  off<K extends keyof AgentEvents & string>(
+    event: K,
+    listener: (...args: AgentEvents[K]) => void,
+  ): any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  once<K extends keyof AgentEvents & string>(
+    event: K,
+    listener: (...args: AgentEvents[K]) => void,
+  ): any;
 }
