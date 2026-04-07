@@ -232,6 +232,29 @@ function buildVolumeMounts(
   return mounts;
 }
 
+function parseContainerOutput(
+  stdout: string,
+): ContainerOutput | null {
+  const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
+  const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+
+  let jsonLine: string;
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    jsonLine = stdout
+      .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+      .trim();
+  } else {
+    const lines = stdout.trim().split('\n');
+    jsonLine = lines[lines.length - 1];
+  }
+
+  try {
+    return JSON.parse(jsonLine) as ContainerOutput;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Decide whether Codex should use the API-key proxy path or the mounted
  * session-auth path.
@@ -589,6 +612,8 @@ export async function runContainerAgent(
       fs.writeFileSync(logFile, logLines.join('\n'));
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
+      const parsedOutput = parseContainerOutput(stdout);
+
       if (code !== 0) {
         logger.error(
           {
@@ -601,6 +626,21 @@ export async function runContainerAgent(
           },
           'Container exited with error',
         );
+
+        if (parsedOutput) {
+          logger.info(
+            {
+              group: group.name,
+              duration,
+              status: parsedOutput.status,
+              hasResult: !!parsedOutput.result,
+              providerFailureClass: parsedOutput.providerFailureClass,
+            },
+            'Container returned structured output despite nonzero exit',
+          );
+          resolve(parsedOutput);
+          return;
+        }
 
         resolve({
           status: 'error',
@@ -626,53 +666,35 @@ export async function runContainerAgent(
         return;
       }
 
-      // Legacy mode: parse the last output marker pair from accumulated stdout
-      try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
-        }
-
-        const output: ContainerOutput = JSON.parse(jsonLine);
-
+      if (parsedOutput) {
         logger.info(
           {
             group: group.name,
             duration,
-            status: output.status,
-            hasResult: !!output.result,
+            status: parsedOutput.status,
+            hasResult: !!parsedOutput.result,
           },
           'Container completed',
         );
 
-        resolve(output);
-      } catch (err) {
-        logger.error(
-          {
-            group: group.name,
-            stdout,
-            stderr,
-            error: err,
-          },
-          'Failed to parse container output',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        resolve(parsedOutput);
+        return;
       }
+
+      logger.error(
+        {
+          group: group.name,
+          stdout,
+          stderr,
+        },
+        'Failed to parse container output',
+      );
+
+      resolve({
+        status: 'error',
+        result: null,
+        error: 'Failed to parse container output: missing or invalid sentinel JSON',
+      });
     });
 
     container.on('error', (err) => {

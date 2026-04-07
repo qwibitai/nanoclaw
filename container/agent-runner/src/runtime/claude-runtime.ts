@@ -67,6 +67,8 @@ const AUTH_PATTERNS = [
   'oauth',
 ];
 
+const API_RETRY_LIMIT = 3;
+
 function matchesAny(text: string, patterns: string[]): boolean {
   const normalized = text.toLowerCase();
   return patterns.some((pattern) => normalized.includes(pattern));
@@ -297,6 +299,7 @@ export class ClaudeRuntime implements AgentRuntime {
     let lastAssistantUuid: string | undefined;
     let messageCount = 0;
     let resultCount = 0;
+    let apiRetryCount = 0;
 
     // Load global CLAUDE.md as additional system context
     const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -380,6 +383,23 @@ export class ClaudeRuntime implements AgentRuntime {
       if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
         const tn = message as { task_id: string; status: string; summary: string };
         this.hooks.onLog(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      }
+
+      if (
+        message.type === 'system' &&
+        (message as { subtype?: string }).subtype === 'api_retry'
+      ) {
+        apiRetryCount++;
+        this.hooks.onLog(
+          `Claude runtime emitted api_retry (${apiRetryCount}/${API_RETRY_LIMIT})`,
+        );
+        if (apiRetryCount >= API_RETRY_LIMIT) {
+          throw new ProviderFailureError(
+            'Claude runtime exceeded retry budget',
+            'transport',
+          );
+        }
+        continue;
       }
 
       if (
