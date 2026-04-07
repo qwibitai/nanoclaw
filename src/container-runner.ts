@@ -2209,7 +2209,7 @@ function buildVolumeMounts(
   }
 
   // Mount external plugin repos from ~/plugins/ read-only.
-  // Each subdirectory is a separate plugin repo (e.g. bootstrap, impeccable, omni-claude-skills).
+  // Each subdirectory is a separate plugin repo (e.g. bootstrap, impeccable, omni-claude-skills, codex).
   // The SDK loads skills, agents, and hooks via the `plugins` option in agent-runner.
   // Per-group scoping: if containerConfig.plugins is set, only those repos are mounted.
   if (fs.existsSync(PLUGINS_DIR)) {
@@ -2225,6 +2225,22 @@ function buildVolumeMounts(
       });
     }
   }
+
+  // Mount host ~/.codex read-write so the Codex CLI inside the container can use
+  // the subscription OAuth session. Used by /team-qa Validator E (cross-model
+  // adversarial review) via the /codex:adversarial-review plugin command.
+  // Read-write because Codex refreshes its OAuth token in auth.json during use;
+  // refreshed tokens persist back to the host for the next container run.
+  // Single-user assumption: all containers share the same Codex session.
+  const hostCodexDir = path.join(homeDir, '.codex');
+  if (fs.existsSync(hostCodexDir)) {
+    mounts.push({
+      hostPath: hostCodexDir,
+      containerPath: '/home/node/.codex',
+      readonly: false,
+    });
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
