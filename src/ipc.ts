@@ -14,7 +14,46 @@ import {
 } from './dev-tasks.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { createReport, isValidReportId } from './reports.js';
 import { RegisteredGroup } from './types.js';
+
+// --- create_report rate limiter ---
+//
+// In-memory per-group token bucket. Anti-runaway, not anti-abuse: caps a
+// stuck or prompt-injected agent at 20 reports/group/hour. Resets on host
+// restart, no persistence needed.
+const REPORT_RATE_LIMIT = 20;
+const REPORT_RATE_WINDOW_MS = 60 * 60 * 1000;
+const reportCallTimestamps = new Map<string, number[]>();
+
+function checkReportRateLimit(group: string): boolean {
+  const now = Date.now();
+  const cutoff = now - REPORT_RATE_WINDOW_MS;
+  const stamps = (reportCallTimestamps.get(group) || []).filter(
+    (t) => t >= cutoff,
+  );
+  if (stamps.length >= REPORT_RATE_LIMIT) {
+    reportCallTimestamps.set(group, stamps);
+    return false;
+  }
+  stamps.push(now);
+  reportCallTimestamps.set(group, stamps);
+  return true;
+}
+
+// Strip C0 control characters (0x00–0x1F) except common whitespace (\t \n \r).
+// Pip-authored content has no legitimate use for the rest, and they're an
+// easy injection vector for the YAML parser when titles round-trip through
+// frontmatter on read.
+function stripControlChars(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+// Length caps mirror the MCP tool schema (defense in depth — host validates
+// independently in case a future tool change skips zod).
+const REPORT_TITLE_MAX = 200;
+const REPORT_BODY_MAX = 256 * 1024;
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -199,6 +238,10 @@ export async function processTaskIpc(
     description?: string;
     dispatch?: boolean;
     devTaskId?: number;
+    // For create_report
+    id?: string;
+    summary?: string;
+    body_markdown?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -574,6 +617,96 @@ export async function processTaskIpc(
         }
       } else {
         logger.warn({ data }, 'update_dev_task missing devTaskId');
+      }
+      break;
+
+    case 'create_report':
+      // Open to all groups (key decision in plan): reports are a usability
+      // convenience for collaborative chats, not a trust surface. The host
+      // displays `created_by` in the dashboard so Boris can see which
+      // conversation produced any given report.
+      if (
+        !data.id ||
+        !data.title ||
+        !data.body_markdown ||
+        typeof data.id !== 'string' ||
+        typeof data.title !== 'string' ||
+        typeof data.body_markdown !== 'string'
+      ) {
+        logger.warn(
+          { data, sourceGroup },
+          'create_report missing required fields',
+        );
+        break;
+      }
+
+      if (!isValidReportId(data.id)) {
+        logger.warn(
+          { reportId: data.id, sourceGroup },
+          'create_report invalid id',
+        );
+        break;
+      }
+
+      {
+        const titleClean = stripControlChars(data.title);
+        const summaryClean = stripControlChars(data.summary || '');
+        const bodyClean = stripControlChars(data.body_markdown);
+
+        if (titleClean.length === 0) {
+          logger.warn(
+            { sourceGroup },
+            'create_report empty title after stripping',
+          );
+          break;
+        }
+        if (titleClean.length > REPORT_TITLE_MAX) {
+          logger.warn(
+            { titleLength: titleClean.length, sourceGroup },
+            `create_report title exceeds ${REPORT_TITLE_MAX} chars`,
+          );
+          break;
+        }
+        if (bodyClean.length > REPORT_BODY_MAX) {
+          logger.warn(
+            { bodySize: bodyClean.length, sourceGroup },
+            `create_report body exceeds ${REPORT_BODY_MAX} bytes`,
+          );
+          break;
+        }
+
+        if (!checkReportRateLimit(sourceGroup)) {
+          logger.warn(
+            { sourceGroup, reportId: data.id },
+            `create_report rate limit hit (${REPORT_RATE_LIMIT}/hr)`,
+          );
+          break;
+        }
+
+        try {
+          const report = createReport({
+            id: data.id,
+            title: titleClean,
+            summary: summaryClean,
+            body_markdown: bodyClean,
+            created_by: sourceGroup,
+          });
+          logger.info(
+            {
+              reportId: report.id,
+              sourceGroup,
+              titleLength: titleClean.length,
+              summaryLength: summaryClean.length,
+              bodySize: bodyClean.length,
+            },
+            'create_report invoked',
+          );
+        } catch (err) {
+          logger.error(
+            { err, reportId: data.id, sourceGroup },
+            'Failed to create report',
+          );
+        }
       }
       break;
 
