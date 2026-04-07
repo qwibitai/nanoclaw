@@ -32,6 +32,9 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      reply_to_id TEXT,
+      reply_to_sender_name TEXT,
+      reply_to_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -111,6 +114,21 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add reply_to_* columns if they don't exist (migration for existing DBs).
+  // Channels with native reply support (Telegram) populate these so the
+  // prompt envelope can show what each message is replying to.
+  for (const col of [
+    'reply_to_id',
+    'reply_to_sender_name',
+    'reply_to_content',
+  ]) {
+    try {
+      database.exec(`ALTER TABLE messages ADD COLUMN ${col} TEXT`);
+    } catch {
+      /* column already exists */
+    }
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -276,7 +294,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_id, reply_to_sender_name, reply_to_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -286,6 +304,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.reply_to?.id ?? null,
+    msg.reply_to?.sender_name ?? null,
+    msg.reply_to?.content ?? null,
   );
 }
 
@@ -316,6 +337,45 @@ export function storeMessageDirect(msg: {
   );
 }
 
+/** Columns selected from `messages` for hydration into NewMessage. */
+const MESSAGE_COLS =
+  'id, chat_jid, sender, sender_name, content, timestamp, is_from_me, reply_to_id, reply_to_sender_name, reply_to_content';
+
+interface MessageRow {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number | boolean | null;
+  reply_to_id: string | null;
+  reply_to_sender_name: string | null;
+  reply_to_content: string | null;
+}
+
+/** Lift reply_to_* columns into a `reply_to` sub-object on NewMessage. */
+function hydrateMessage(row: MessageRow): NewMessage {
+  const {
+    reply_to_id,
+    reply_to_sender_name,
+    reply_to_content,
+    ...rest
+  } = row;
+  const msg: NewMessage = {
+    ...rest,
+    is_from_me: !!row.is_from_me,
+  };
+  if (reply_to_id || reply_to_content) {
+    msg.reply_to = {
+      id: reply_to_id ?? '',
+      sender_name: reply_to_sender_name ?? 'Unknown',
+      content: reply_to_content ?? '',
+    };
+  }
+  return msg;
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
@@ -330,7 +390,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT ${MESSAGE_COLS}
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -342,14 +402,15 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as MessageRow[];
 
+  const messages = rows.map(hydrateMessage);
   let newTimestamp = lastTimestamp;
-  for (const row of rows) {
+  for (const row of messages) {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
   }
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
 export function getMessagesSince(
@@ -363,7 +424,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT ${MESSAGE_COLS}
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -372,9 +433,10 @@ export function getMessagesSince(
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as MessageRow[];
+  return rows.map(hydrateMessage);
 }
 
 /**
@@ -387,7 +449,7 @@ export function getMessageHistory(
 ): NewMessage[] {
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT ${MESSAGE_COLS}
       FROM messages
       WHERE chat_jid = ?
         AND content != '' AND content IS NOT NULL
@@ -395,7 +457,8 @@ export function getMessageHistory(
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db.prepare(sql).all(chatJid, limit) as NewMessage[];
+  const rows = db.prepare(sql).all(chatJid, limit) as MessageRow[];
+  return rows.map(hydrateMessage);
 }
 
 /**
@@ -406,7 +469,7 @@ export function getMessageHistory(
 export function getMessageHistoryAllIos(limit: number = 200): NewMessage[] {
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT ${MESSAGE_COLS}
       FROM messages
       WHERE chat_jid LIKE 'ios:%'
         AND content != '' AND content IS NOT NULL
@@ -414,7 +477,8 @@ export function getMessageHistoryAllIos(limit: number = 200): NewMessage[] {
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db.prepare(sql).all(limit) as NewMessage[];
+  const rows = db.prepare(sql).all(limit) as MessageRow[];
+  return rows.map(hydrateMessage);
 }
 
 export function createTask(

@@ -105,6 +105,48 @@ describe('formatMessages', () => {
     );
   });
 
+  it('renders reply_to inside the message envelope when present', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          content: 'sounds good',
+          reply_to: {
+            id: '42',
+            sender_name: 'Rachel',
+            content: 'pizza tonight?',
+          },
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain(
+      '<reply_to sender="Rachel">pizza tonight?</reply_to>sounds good</message>',
+    );
+  });
+
+  it('escapes special characters inside reply_to', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          content: 'ok',
+          reply_to: {
+            id: '1',
+            sender_name: 'A & B',
+            content: '<b>bold</b> & "quoted"',
+          },
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('<reply_to sender="A &amp; B">');
+    expect(result).toContain('&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;');
+  });
+
+  it('omits reply_to tag when message has no reply context', () => {
+    const result = formatMessages([makeMsg({ content: 'plain' })], TZ);
+    expect(result).not.toContain('<reply_to');
+  });
+
   it('handles empty array', () => {
     const result = formatMessages([], TZ);
     expect(result).toContain('<context timezone="UTC" />');
