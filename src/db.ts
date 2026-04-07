@@ -384,6 +384,36 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function getTopicMessages(
+  chatJid: string,
+  threadId: string | undefined,
+  botPrefix: string,
+  limit: number = 200,
+): NewMessage[] {
+  const threadFilter =
+    threadId != null ? 'AND thread_id = ?' : 'AND thread_id IS NULL';
+
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_id
+      FROM messages
+      WHERE chat_jid = ?
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+        ${threadFilter}
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+
+  const params =
+    threadId != null
+      ? [chatJid, `${botPrefix}:%`, threadId, limit]
+      : [chatJid, `${botPrefix}:%`, limit];
+
+  return db.prepare(sql).all(...params) as NewMessage[];
+}
+
 export function getLastBotMessageTimestamp(
   chatJid: string,
   botPrefix: string,

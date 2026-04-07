@@ -36,7 +36,6 @@ export function getContainerHostGateway(): string {
   return _cachedHostGateway;
 }
 
-
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
   // On Linux, host.docker.internal isn't built-in — add it explicitly
