@@ -25,7 +25,6 @@ export type {
   ChannelDriver,
   ChannelDriverFactory,
   ChannelDriverConfig,
-  ChannelIdentity,
 } from './channel-driver.js';
 export type { MountAllowlist, AllowedRoot } from './mount.js';
 

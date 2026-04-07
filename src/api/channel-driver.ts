@@ -1,30 +1,18 @@
 /**
- * ChannelDriver + ChannelDriverFactory — user-facing channel interfaces.
- *
- * Users provide a ChannelDriverFactory. The SDK calls it with config
- * (callbacks) at agent.start() or agent.addChannel() time. The factory
- * returns a ChannelDriver. The SDK wraps it into the internal Channel.
+ * ChannelDriver — user-facing interface for messaging platform adapters.
+ * Method names align with the internal Channel interface.
+ * ChannelDriver + { name } = Channel.
  */
 
 /** What a channel implementor provides. */
 export interface ChannelDriver {
-  /** Send a message to a chat. Called by the agent VM when it responds. */
-  send(chatId: string, text: string): Promise<void>;
-
-  /** Start receiving messages. Called once by the SDK. */
-  start(): Promise<void>;
-
-  /** Stop receiving messages and clean up resources. */
-  stop(): Promise<void>;
-
-  /** Return true if this driver handles the given JID. */
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  sendMessage(jid: string, text: string): Promise<void>;
+  isConnected(): boolean;
   ownsJid(jid: string): boolean;
-
-  /** Optional: get the channel's identity (bot name, username). */
-  identity?(): Promise<ChannelIdentity>;
-
-  /** Optional: typing indicator. */
-  setTyping?(chatId: string, on: boolean): Promise<void>;
+  setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  syncGroups?(force: boolean): Promise<void>;
 }
 
 /** Config the SDK provides to the factory at channel creation time. */
@@ -42,7 +30,7 @@ export interface ChannelDriverConfig {
 
 /**
  * Factory function that creates a ChannelDriver.
- * Called by the SDK with config — returns a driver instance.
+ * Called by the SDK with config at agent.start() time.
  */
 export type ChannelDriverFactory = (
   config: ChannelDriverConfig,
@@ -58,9 +46,4 @@ export interface InboundMessage {
   is_bot_message?: boolean;
   sender_name?: string;
   attachments?: string[];
-}
-
-export interface ChannelIdentity {
-  name: string;
-  username?: string;
 }

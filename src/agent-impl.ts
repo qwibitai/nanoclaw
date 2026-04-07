@@ -123,7 +123,7 @@ export class AgentImpl extends EventEmitter implements Agent {
     }
     const config = this._buildDriverConfig();
     const driver = await factory(config);
-    const channel = driver as unknown as Channel;
+    const channel: Channel = { name: key, ...driver };
     this._channels.set(key, channel);
     await channel.connect();
     logger.info({ channel: key, agent: this.name }, 'Channel connected');
