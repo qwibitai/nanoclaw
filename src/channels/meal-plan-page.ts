@@ -75,12 +75,9 @@ export function handleMealPlanPage(
 
   if (url !== '/pickle/meal-plan') return false;
 
-  const plan = readFileSafe(PLAN_FILE);
-  const ingredients = readFileSafe(INGREDIENTS_FILE);
-  const html = renderPage(plan, ingredients);
-
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(html);
+  // Redirect to dashboard meals view
+  res.writeHead(302, { Location: '/dashboard#meals' });
+  res.end();
   return true;
 }
 
@@ -99,7 +96,7 @@ interface RecipeLink {
   url: string;
 }
 
-function parsePlan(md: string): {
+export function parsePlan(md: string): {
   title: string;
   subtitle: string | null;
   days: {
@@ -192,7 +189,7 @@ function parsePlan(md: string): {
   return { title, subtitle, days };
 }
 
-function parseIngredients(md: string): {
+export function parseIngredients(md: string): {
   title: string;
   sections: { name: string; items: string[] }[];
 } {

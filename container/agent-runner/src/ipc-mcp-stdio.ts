@@ -40,6 +40,48 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+// --- Helpers for create_report ---
+
+// Strip C0 control chars (except \t \n \r) from agent-supplied text. Same
+// rule the host applies; doing it here too keeps the slug pipeline and the
+// generated ID stable.
+function stripControlChars(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+function slugifyTitle(title: string): string {
+  const cleaned = stripControlChars(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, ''); // trim again after slice in case the cap landed inside a run
+  return cleaned || 'report';
+}
+
+function todayISODate(): string {
+  // Local-date YYYY-MM-DD prefix. Container's TZ env mirrors the host.
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function shortid(): string {
+  // 6 chars of base36 — collision space ~2 billion, more than enough for
+  // "two reports on the same topic on the same day".
+  return Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+}
+
+// Tailscale MagicDNS hostname for the NanoClaw dashboard. Has a .ts.net TLD
+// so Telegram's URL auto-detector recognizes it (bare "fambots-mac-mini"
+// doesn't), and resolves from anywhere on the Tailnet (the bare LAN hostname
+// only resolves inside the house). Matches the base URL Pickle uses for the
+// meal plan page (see groups/telegram_pickle/CLAUDE.md).
+const DASHBOARD_BASE_URL = 'http://fambots-mac-mini.tail41dff2.ts.net:3100';
+
 server.tool(
   'send_message',
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
@@ -530,6 +572,79 @@ server.tool(
 
     return {
       content: [{ type: 'text' as const, text: `Dev task #${args.task_id} update requested.` }],
+    };
+  },
+);
+
+server.tool(
+  'create_report',
+  `Write a Markdown report to the user's dashboard instead of dumping a long answer in chat. Use this when the answer would be:
+  • Research, comparisons, or option analyses
+  • Anything table-shaped (multiple options × multiple criteria)
+  • Anything that would otherwise be longer than ~3 paragraphs of prose
+  • A summary of multiple sources, sub-investigations, or sub-agent results
+
+After calling this tool, your reply in chat should be ONE LINE summarizing what you found, followed by the URL the tool returned. DO NOT paste the body of the report into chat — that defeats the entire purpose. Trust that the user will open the URL.
+
+Reports are transactional: they're produced once for a single conversation and read at the user's leisure. They're not knowledge-base entries, they're not maintained, and they're not actionable on their own.
+
+If the user explicitly asks for a short inline answer ("just give me a one-liner"), give them one — don't write a report when they wanted a sentence.
+
+GOOD title example: "Health insurance options: ABC vs XYZ vs DEF"
+GOOD summary example: "ABC wins on price, XYZ on coverage breadth; DEF only worth it if you travel a lot."
+BAD summary: "Here is a comparison of health insurance options." (says nothing)
+BAD: pasting the report body into chat after writing it.`,
+  {
+    title: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe('Short, descriptive title for the report (≤ 200 chars).'),
+    summary: z
+      .string()
+      .max(200)
+      .describe(
+        'One-line summary that gives the user enough context to decide whether to open the report now (≤ 200 chars). Should NOT just restate the title — say what you found.',
+      ),
+    body_markdown: z
+      .string()
+      .min(1)
+      .max(256 * 1024)
+      .describe(
+        'The full report body in GitHub-flavored Markdown. Use headings, lists, tables, code blocks, blockquotes, links. Do not include the title as an H1 — the dashboard renders it separately. Max 256 KB.',
+      ),
+  },
+  async (args) => {
+    const date = todayISODate();
+    const slug = slugifyTitle(args.title);
+    const id = `${date}-${slug}-${shortid()}`;
+
+    const data = {
+      type: 'create_report',
+      id,
+      title: stripControlChars(args.title),
+      summary: stripControlChars(args.summary || ''),
+      body_markdown: args.body_markdown,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const url = `${DASHBOARD_BASE_URL}/dashboard#reports/${id}`;
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text:
+            `Report created at ${url}\n\n` +
+            `Reply to the user using Telegram's tappable link format. Exactly this shape:\n\n` +
+            `<one-line summary of what you found — say the actual finding, not "here is a comparison"> [Read the full report](${url})\n\n` +
+            `IMPORTANT:\n` +
+            `• Use the [text](url) markdown link format, NOT a bare URL. Bare URLs at this hostname don't auto-link in Telegram because the TLD isn't on Telegram's built-in list, so they render as unclickable plain text.\n` +
+            `• Do NOT paste the body of the report into chat. The whole point of writing a report is keeping chat clean.\n` +
+            `• Keep the summary to ONE line. It should say what you actually found (e.g. "ABC wins on price, XYZ on coverage"), not restate the question.`,
+        },
+      ],
     };
   },
 );

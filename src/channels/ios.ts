@@ -17,12 +17,50 @@ import {
   watchScheduledTasks,
   watchWorkFiles,
 } from './ios-data-api.js';
+import { handleDashboardApi } from './dashboard-api.js';
+import { handleDashboardPage } from './dashboard-page.js';
 import { handleMealPlanPage } from './meal-plan-page.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
 let WebSocketServer: any;
 
 const DEFAULT_PORT = 3100;
+
+/**
+ * Whether a request's remote address is on Tailscale or loopback.
+ *
+ * The dashboard has no application-layer auth — its threat model is
+ * "Tailscale is the access boundary". This function enforces that boundary
+ * in code so the assumption holds even if the host's network topology
+ * changes (LAN exposure, IPv6 from ISP, port forwarding, guest devices).
+ *
+ * Allowed sources:
+ *   - Loopback: 127.0.0.0/8, ::1, ::ffff:127.0.0.1
+ *   - Tailscale IPv4 CGNAT: 100.64.0.0/10  (100.64.x.x – 100.127.x.x)
+ *   - Tailscale IPv6 ULA:   fd7a:115c:a1e0::/48
+ */
+function isAllowedSource(remoteAddress: string | undefined): boolean {
+  if (!remoteAddress) return false;
+
+  // Strip IPv4-mapped IPv6 prefix (e.g. "::ffff:100.66.147.90")
+  const addr = remoteAddress.replace(/^::ffff:/, '');
+
+  // Loopback
+  if (addr === '::1' || addr.startsWith('127.')) return true;
+
+  // Tailscale IPv4 CGNAT: 100.64.0.0/10
+  const ipv4Match = addr.match(/^(\d+)\.(\d+)\./);
+  if (ipv4Match) {
+    const a = parseInt(ipv4Match[1], 10);
+    const b = parseInt(ipv4Match[2], 10);
+    if (a === 100 && b >= 64 && b <= 127) return true;
+  }
+
+  // Tailscale IPv6 ULA: fd7a:115c:a1e0::/48
+  if (addr.toLowerCase().startsWith('fd7a:115c:a1e0:')) return true;
+
+  return false;
+}
 
 export interface IosChannelOpts {
   onMessage: OnInboundMessage;
@@ -86,11 +124,17 @@ export class IosChannel implements Channel {
     });
 
     return new Promise<void>((resolve) => {
-      // Bind to 0.0.0.0 so the app can reach us over Tailscale / LAN
+      // Bind to 0.0.0.0 so Tailscale clients can reach us. The actual
+      // access boundary is enforced per-request in handleHttp() via
+      // isAllowedSource() — only loopback and Tailscale addresses pass.
       this.server!.listen(this.port, '0.0.0.0', () => {
-        logger.info({ port: this.port }, 'iOS channel listening on 0.0.0.0');
+        logger.info(
+          { port: this.port },
+          'iOS channel listening on 0.0.0.0 (HTTP locked to Tailscale + loopback)',
+        );
         console.log(`\n  iOS channel: http://0.0.0.0:${this.port}`);
-        console.log(`  WebSocket:   ws://0.0.0.0:${this.port}/ws\n`);
+        console.log(`  WebSocket:   ws://0.0.0.0:${this.port}/ws`);
+        console.log(`  HTTP locked to Tailscale (100.64.0.0/10) + loopback\n`);
         resolve();
       });
     });
@@ -100,11 +144,33 @@ export class IosChannel implements Channel {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): void {
+    // Source check: enforce the "Tailscale is the access layer" assumption
+    // in code, not just at the network level. Anything outside Tailscale +
+    // loopback is rejected before any handler runs. Defense in depth — even
+    // if the host's network changes (LAN exposure, IPv6 from ISP, port
+    // forwarding), the dashboard stays inaccessible to non-Tailscale clients.
+    const remote = req.socket.remoteAddress;
+    if (!isAllowedSource(remote)) {
+      logger.warn(
+        { remote, url: req.url, method: req.method },
+        'Rejected non-Tailscale request',
+      );
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
     // No CORS headers — FamBot is a native app making direct HTTP requests,
     // not a browser. Removing wildcard CORS prevents cross-origin exfiltration
     // from malicious websites on the home network.
 
-    // Public pages (no auth — Tailscale is the access layer)
+    // Public pages (no auth — Tailscale boundary enforced above)
+    if (handleDashboardPage(req, res)) {
+      return;
+    }
+    if (handleDashboardApi(req, res)) {
+      return;
+    }
     if (handleMealPlanPage(req, res)) {
       return;
     }
