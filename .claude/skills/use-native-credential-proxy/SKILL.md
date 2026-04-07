@@ -78,7 +78,7 @@ with:
 
 ```bash
 pnpm install
-ppnpm run build
+pnpm run build
 npx vitest run src/credential-proxy.test.ts src/container-runner.test.ts
 ```
 

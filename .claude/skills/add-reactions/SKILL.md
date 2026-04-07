@@ -61,7 +61,7 @@ npx tsx scripts/migrate-reactions.ts
 
 ```bash
 pnpm test
-ppnpm run build
+pnpm run build
 ```
 
 All tests must pass and build must be clean before proceeding.

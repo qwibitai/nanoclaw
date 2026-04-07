@@ -55,7 +55,7 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 
 ```bash
 pnpm install
-ppnpm run build
+pnpm run build
 npx vitest run src/channels/slack.test.ts
 ```
 

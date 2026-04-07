@@ -71,7 +71,7 @@ When you receive an email notification (messages starting with `[Email from ...`
 
 ```bash
 pnpm install
-ppnpm run build
+pnpm run build
 npx vitest run src/channels/gmail.test.ts
 ```
 
@@ -158,7 +158,7 @@ cd container && ./build.sh
 Then compile and restart:
 
 ```bash
-ppnpm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
