@@ -470,7 +470,10 @@ export class MatrixChannel implements Channel {
     if (this.client) {
       // Flush crypto state to disk before stopping
       await persistCryptoStore(MATRIX_CRYPTO_STORE_PATH).catch((err) => {
-        logger.warn({ err }, 'Failed to persist Matrix crypto store on shutdown');
+        logger.warn(
+          { err },
+          'Failed to persist Matrix crypto store on shutdown',
+        );
       });
       this.client.stopClient();
       this.client = null;
