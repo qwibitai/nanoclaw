@@ -107,6 +107,7 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import fs from 'fs';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -225,5 +226,100 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('settings.json ANTHROPIC_API_KEY injection', () => {
+  const originalEnv = process.env.ANTHROPIC_API_KEY;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.writeFileSync).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalEnv !== undefined) {
+      process.env.ANTHROPIC_API_KEY = originalEnv;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  function getSettingsJson(): Record<string, unknown> | undefined {
+    const calls = vi.mocked(fs.writeFileSync).mock.calls;
+    const settingsCall = calls.find(
+      (c) => typeof c[0] === 'string' && c[0].endsWith('settings.json'),
+    );
+    if (!settingsCall) return undefined;
+    return JSON.parse(settingsCall[1] as string);
+  }
+
+  it('injects ANTHROPIC_API_KEY when env var is set', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key-123';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const settings = getSettingsJson();
+    expect(settings).toBeDefined();
+    const env = (settings as any).env;
+    expect(env.ANTHROPIC_API_KEY).toBe('sk-ant-test-key-123');
+  });
+
+  it('omits ANTHROPIC_API_KEY when env var is not set', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const settings = getSettingsJson();
+    expect(settings).toBeDefined();
+    const env = (settings as any).env;
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+  });
+
+  it('omits ANTHROPIC_API_KEY when env var is empty/whitespace', async () => {
+    process.env.ANTHROPIC_API_KEY = '   ';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const settings = getSettingsJson();
+    expect(settings).toBeDefined();
+    const env = (settings as any).env;
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
   });
 });
