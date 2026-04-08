@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
+    "prebuild": "bash scripts/write-version.sh",
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
