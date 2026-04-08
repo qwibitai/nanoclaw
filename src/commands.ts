@@ -34,11 +34,7 @@ const MISSION_TEMPLATES_PATH = path.join(
   'swarm',
   'mission-templates.json',
 );
-const HOST_TASKS_PENDING = path.join(
-  ATLAS_STATE_DIR,
-  'host-tasks',
-  'pending',
-);
+const HOST_TASKS_PENDING = path.join(ATLAS_STATE_DIR, 'host-tasks', 'pending');
 const CODEX_TOGGLE_PATH = path.join(
   ATLAS_STATE_DIR,
   'state',
@@ -373,7 +369,6 @@ function handleResetMode(): string {
   }
 }
 
-
 function handleMission(args: string[]): string {
   if (args.length === 0) {
     return `Usage:
@@ -408,14 +403,22 @@ function handleMission(args: string[]): string {
 
 function missionTypes(): string {
   try {
-    if (!fs.existsSync(MISSION_TEMPLATES_PATH)) return 'No mission templates found.';
+    if (!fs.existsSync(MISSION_TEMPLATES_PATH))
+      return 'No mission templates found.';
     const data = JSON.parse(fs.readFileSync(MISSION_TEMPLATES_PATH, 'utf-8'));
     const templates = data.templates || {};
     const lines = ['Available mission types:'];
     for (const [key, tmpl] of Object.entries(templates)) {
-      const t = tmpl as { name: string; estimated_cost: number; estimated_minutes: number; roles: Record<string, unknown> };
+      const t = tmpl as {
+        name: string;
+        estimated_cost: number;
+        estimated_minutes: number;
+        roles: Record<string, unknown>;
+      };
       const roleCount = Object.keys(t.roles || {}).length;
-      lines.push(`  ${key} — ${t.name} (${roleCount} roles, ~$${t.estimated_cost}, ~${t.estimated_minutes}min)`);
+      lines.push(
+        `  ${key} — ${t.name} (${roleCount} roles, ~$${t.estimated_cost}, ~${t.estimated_minutes}min)`,
+      );
     }
     return lines.join('\n');
   } catch (err) {
@@ -426,9 +429,12 @@ function missionTypes(): string {
 function missionList(): string {
   try {
     if (!fs.existsSync(MISSIONS_DIR)) return 'No missions yet.';
-    const dirs = fs.readdirSync(MISSIONS_DIR).filter(d =>
-      fs.statSync(path.join(MISSIONS_DIR, d)).isDirectory()
-    ).sort().reverse().slice(0, 10);
+    const dirs = fs
+      .readdirSync(MISSIONS_DIR)
+      .filter((d) => fs.statSync(path.join(MISSIONS_DIR, d)).isDirectory())
+      .sort()
+      .reverse()
+      .slice(0, 10);
 
     if (dirs.length === 0) return 'No missions yet.';
 
@@ -438,7 +444,9 @@ function missionList(): string {
       try {
         const status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
         const roleCount = Object.keys(status.roles || {}).length;
-        lines.push(`  ${dir} | ${status.status} | ${roleCount} roles | ${status.started_at || 'pending'}`);
+        lines.push(
+          `  ${dir} | ${status.status} | ${roleCount} roles | ${status.started_at || 'pending'}`,
+        );
       } catch {
         lines.push(`  ${dir} | (no status file)`);
       }
@@ -455,7 +463,7 @@ function missionStatus(id?: string): string {
     // Find mission by partial match
     if (!fs.existsSync(MISSIONS_DIR)) return 'No missions directory.';
     const dirs = fs.readdirSync(MISSIONS_DIR);
-    const match = dirs.find(d => d.includes(id));
+    const match = dirs.find((d) => d.includes(id));
     if (!match) return `Mission not found: ${id}`;
 
     const statusPath = path.join(MISSIONS_DIR, match, 'status.json');
@@ -466,7 +474,7 @@ function missionStatus(id?: string): string {
       `Started: ${status.started_at || 'n/a'}`,
       `Completed: ${status.completed_at || 'running'}`,
       '',
-      'Roles:'
+      'Roles:',
     ];
     for (const [role, roleStatus] of Object.entries(status.roles || {})) {
       lines.push(`  ${role}: ${roleStatus}`);
@@ -475,7 +483,9 @@ function missionStatus(id?: string): string {
     // Check for outputs
     const workspace = path.join(MISSIONS_DIR, match, 'workspace');
     if (fs.existsSync(workspace)) {
-      const outputs = fs.readdirSync(workspace).filter(f => f.endsWith('-output.md'));
+      const outputs = fs
+        .readdirSync(workspace)
+        .filter((f) => f.endsWith('-output.md'));
       if (outputs.length > 0) {
         lines.push('');
         lines.push('Outputs:');
@@ -493,12 +503,15 @@ function missionStatus(id?: string): string {
 }
 
 function missionCreate(missionType?: string, entity?: string): string {
-  if (!missionType) return 'Usage: /mission create <type> [entity]\nRun /mission types for available types.';
+  if (!missionType)
+    return 'Usage: /mission create <type> [entity]\nRun /mission types for available types.';
   try {
-    if (!fs.existsSync(MISSION_TEMPLATES_PATH)) return 'No mission templates found.';
+    if (!fs.existsSync(MISSION_TEMPLATES_PATH))
+      return 'No mission templates found.';
     const data = JSON.parse(fs.readFileSync(MISSION_TEMPLATES_PATH, 'utf-8'));
     const template = data.templates?.[missionType];
-    if (!template) return `Unknown mission type: ${missionType}\nRun /mission types for available types.`;
+    if (!template)
+      return `Unknown mission type: ${missionType}\nRun /mission types for available types.`;
 
     const missionId = `mission-${Date.now()}`;
     const missionEntity = entity || 'atlas_main';
@@ -522,7 +535,7 @@ function missionCreate(missionType?: string, entity?: string): string {
     fs.mkdirSync(approvalDir, { recursive: true });
     fs.writeFileSync(
       path.join(approvalDir, `${missionId}.json`),
-      JSON.stringify(task, null, 2)
+      JSON.stringify(task, null, 2),
     );
 
     const roleNames = Object.keys(template.roles).join(', ');
@@ -538,7 +551,9 @@ function missionApprove(id?: string): string {
     const approvalDir = path.join(ATLAS_STATE_DIR, 'approval-queue', 'pending');
     if (!fs.existsSync(approvalDir)) return 'No pending approvals.';
 
-    const files = fs.readdirSync(approvalDir).filter(f => f === `${id}.json` || f.startsWith(`${id}-`));
+    const files = fs
+      .readdirSync(approvalDir)
+      .filter((f) => f === `${id}.json` || f.startsWith(`${id}-`));
     if (files.length === 0) return `No pending mission found: ${id}`;
 
     const filePath = path.join(approvalDir, files[0]);
@@ -551,14 +566,17 @@ function missionApprove(id?: string): string {
     fs.mkdirSync(HOST_TASKS_PENDING, { recursive: true });
     fs.writeFileSync(
       path.join(HOST_TASKS_PENDING, files[0]),
-      JSON.stringify(task, null, 2)
+      JSON.stringify(task, null, 2),
     );
 
     // Remove from approval queue
     try {
       fs.unlinkSync(filePath);
     } catch (unlinkErr) {
-      logger.error({ missionId: id, error: unlinkErr }, 'Failed to remove from approval queue after writing to pending — task may execute twice');
+      logger.error(
+        { missionId: id, error: unlinkErr },
+        'Failed to remove from approval queue after writing to pending — task may execute twice',
+      );
       throw unlinkErr;
     }
 
@@ -574,7 +592,7 @@ function missionStop(id?: string): string {
   try {
     if (!fs.existsSync(MISSIONS_DIR)) return 'No missions directory.';
     const dirs = fs.readdirSync(MISSIONS_DIR);
-    const match = dirs.find(d => d.includes(id));
+    const match = dirs.find((d) => d.includes(id));
     if (!match) return `Mission not found: ${id}`;
 
     const statusPath = path.join(MISSIONS_DIR, match, 'status.json');
