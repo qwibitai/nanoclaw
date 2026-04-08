@@ -36,11 +36,13 @@ export interface Agent {
     event: K,
     listener: (...args: AgentEvents[K]) => void,
   ): any;
+  /** Unsubscribe from a typed agent event. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   off<K extends keyof AgentEvents & string>(
     event: K,
     listener: (...args: AgentEvents[K]) => void,
   ): any;
+  /** Subscribe to a typed agent event, firing the listener at most once. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   once<K extends keyof AgentEvents & string>(
     event: K,

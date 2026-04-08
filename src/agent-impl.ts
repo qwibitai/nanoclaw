@@ -361,6 +361,7 @@ export class AgentImpl
       added_at: new Date().toISOString(),
       containerConfig: options.containerConfig,
       requiresTrigger: options.requiresTrigger,
+      isMain: options.isMain,
     };
 
     this._registeredGroups[jid] = group;
