@@ -1,214 +1,120 @@
 /**
- * NanoClaw Web Dashboard — unified SPA for vault, meals, tasks, dev tasks.
- * No auth — Tailscale is the access layer.
+ * NanoClaw Web Dashboard — shell loader for the dashboard-web SPA.
  *
- * Client-side rendered SPA: server delivers HTML shell with inline JS,
- * views fetch data from /dashboard/api/* endpoints and render client-side.
+ * No auth — Tailscale is the access layer (enforced upstream in ios.ts
+ * by the isAllowedSource source check; see handleHttp).
+ *
+ * The old hand-rolled HTML/CSS/JS that used to live here has been
+ * replaced by a React + Vite + shadcn/ui SPA built out of
+ * nanoclaw/dashboard-web/. This file just serves the built index.html
+ * shell for /dashboard and /dashboard/. Static assets emitted by Vite
+ * (hashed JS/CSS under dist/assets/) are served by the sibling
+ * handleDashboardAssets in ./dashboard-assets.ts.
+ *
+ * Report content is still sanitized server-side in
+ * ./dashboard-report-render.ts and reaches the client as opaque
+ * body_html — the React app renders it via dangerouslySetInnerHTML
+ * against a branded SanitizedHtml type so the security boundary
+ * stays in exactly one place.
  */
 
 import http from 'http';
-import { getDashboardCSS } from './dashboard-css.js';
-import { getVaultViewHTML, getVaultViewJS } from './dashboard-vault-view.js';
-import { getMealsViewHTML, getMealsViewJS } from './dashboard-meals-view.js';
-import { getTasksViewHTML, getTasksViewJS } from './dashboard-tasks-view.js';
-import {
-  getDevTasksViewHTML,
-  getDevTasksViewJS,
-} from './dashboard-devtasks-view.js';
-import {
-  getReportsViewHTML,
-  getReportsViewJS,
-} from './dashboard-reports-view.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { logger } from '../logger.js';
 
-const NAV_ITEMS = [
-  { id: 'vault', label: 'Vault', icon: 'vault' },
-  { id: 'meals', label: 'Meal Plan', icon: 'meals' },
-  { id: 'tasks', label: 'Tasks', icon: 'tasks' },
-  { id: 'devtasks', label: 'Dev Tasks', icon: 'devtasks' },
-  { id: 'reports', label: 'Reports', icon: 'reports' },
-] as const;
+/**
+ * Resolve nanoclaw/dashboard-web/dist/index.html relative to this file's
+ * compiled location. At runtime, `import.meta.url` points into
+ * nanoclaw/dist/channels/dashboard-page.js (nanoclaw ships `"type":
+ * "module"` and `tsc` emits the source tree preserved under dist/). Two
+ * `..` levels walk back to nanoclaw/, then into dashboard-web/dist.
+ *
+ * Computed once at module load, not per request.
+ */
+const DIST_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../dashboard-web/dist',
+);
+const INDEX_HTML_PATH = path.join(DIST_DIR, 'index.html');
 
-const ICONS: Record<string, string> = {
-  vault:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
-  meals:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>',
-  tasks:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-  devtasks:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
-  reports:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="13" y2="15"/></svg>',
-};
+/**
+ * Content Security Policy for the dashboard shell.
+ *
+ * Tightened from the previous hand-rolled dashboard:
+ *   - `'unsafe-inline'` DROPPED from script-src. Vite bundles everything
+ *     into hashed script files under /dashboard/assets/; there are no
+ *     inline <script> blocks in the served HTML.
+ *   - `https://d3js.org` DROPPED. D3 (force, selection, zoom, drag
+ *     submodules only) is bundled into the Vite output.
+ *   - `'unsafe-inline'` retained in style-src: Tailwind emits a single
+ *     stylesheet but Radix primitives (via shadcn) use inline style
+ *     attributes for animations and theme variables. Dropping this
+ *     requires nonces, which is a separate tightening pass.
+ *
+ * Report HTML is sanitized in dashboard-report-render.ts (marked +
+ * sanitize-html with a narrow allowlist) and never contains <script>;
+ * the sanitizer stays the security boundary of record.
+ */
+const CSP_HEADER = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
 
-function esc(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+// --- index.html mtime cache ---
+
+let cachedHtml: string | null = null;
+let cachedMtimeMs = 0;
+
+/**
+ * Read dist/index.html with an mtime-based cache so a fresh `vite build`
+ * is picked up without restarting nanoclaw. The file is small (<1kb) and
+ * stat is cheap; one stat per dashboard load is negligible.
+ *
+ * Returns null if the build output is missing — the caller responds 500
+ * with a clear error so first-deploy build misses are loud.
+ */
+function readIndexHtml(): string | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(INDEX_HTML_PATH);
+  } catch {
+    return null;
+  }
+
+  if (cachedHtml !== null && stat.mtimeMs === cachedMtimeMs) {
+    return cachedHtml;
+  }
+
+  try {
+    cachedHtml = fs.readFileSync(INDEX_HTML_PATH, 'utf-8');
+    cachedMtimeMs = stat.mtimeMs;
+    return cachedHtml;
+  } catch {
+    return null;
+  }
 }
 
-function renderNavItems(type: 'sidebar' | 'tabbar'): string {
-  const cls = type === 'sidebar' ? 'nav-item' : 'tab-item';
-  return NAV_ITEMS.map(
-    (item) =>
-      `<button class="${cls}" data-view="${item.id}">${ICONS[item.icon]}<span>${esc(item.label)}</span></button>`,
-  ).join('\n');
-}
-
-function renderPage(): string {
-  const css = getDashboardCSS();
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>NanoClaw Dashboard</title>
-<script src="https://d3js.org/d3.v7.min.js"><\/script>
-<style>${css}</style>
-</head>
-<body>
-
-<div class="app">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h1>NanoClaw</h1>
-      <div class="subtitle"><span class="connection-dot"></span>Live</div>
-    </div>
-    <nav>
-      ${renderNavItems('sidebar')}
-    </nav>
-  </aside>
-
-  <main class="main">
-    <section id="view-vault" class="view">
-      ${getVaultViewHTML()}
-    </section>
-    <section id="view-meals" class="view">
-      ${getMealsViewHTML()}
-    </section>
-    <section id="view-tasks" class="view">
-      ${getTasksViewHTML()}
-    </section>
-    <section id="view-devtasks" class="view">
-      ${getDevTasksViewHTML()}
-    </section>
-    <section id="view-reports" class="view">
-      ${getReportsViewHTML()}
-    </section>
-  </main>
-</div>
-
-<div class="tab-bar">
-  <nav>
-    ${renderNavItems('tabbar')}
-  </nav>
-</div>
-
-<script>
-// --- Hash Router ---
+// --- Startup existence check ---
 //
-// Contract: navigate() READS the hash and updates the DOM. It does NOT
-// write to location.hash. Writes happen at the click site (nav buttons)
-// or inside individual views (deep-link detail URLs like #reports/abc-123).
-// The router derives the active view by splitting on '/' and matching the
-// prefix — so #reports/abc-123 resolves to the 'reports' view while the
-// suffix is preserved for the view's own hashchange listener to parse.
-const VIEWS = ['vault', 'meals', 'tasks', 'devtasks', 'reports'];
-
-function navigate(rawHash) {
-  var viewId = (rawHash || '').split('/')[0];
-  if (!VIEWS.includes(viewId)) viewId = 'vault';
-
-  // Update views
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  const target = document.getElementById('view-' + viewId);
-  if (target) target.classList.add('active');
-
-  // Update nav
-  document.querySelectorAll('.nav-item, .tab-item').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.view === viewId);
-  });
-
-  // Dispatch event for views that need to know when they become active
-  window.dispatchEvent(new CustomEvent('viewchange', { detail: { view: viewId } }));
+// Logged loudly once at module load if the build output is missing. This
+// catches the first-deploy-without-build case immediately instead of at
+// the first HTTP request, where it would surface as an opaque 500.
+if (!fs.existsSync(INDEX_HTML_PATH)) {
+  logger.error(
+    { path: INDEX_HTML_PATH },
+    'dashboard-web build output not found — run `npm run build` from the nanoclaw root',
+  );
 }
 
-// Nav click handlers: writes happen here so the router stays read-only.
-document.querySelectorAll('.nav-item, .tab-item').forEach(btn => {
-  btn.addEventListener('click', () => {
-    location.hash = btn.dataset.view;
-  });
-});
-
-// Handle initial hash or default
-navigate(location.hash.slice(1) || 'vault');
-
-// Handle hash changes (back/forward, click handlers, and in-view deep links)
-window.addEventListener('hashchange', () => {
-  navigate(location.hash.slice(1));
-});
-
-// --- SSE Connection ---
-let sseConnected = false;
-
-function connectSSE() {
-  const es = new EventSource('/dashboard/events');
-
-  es.onopen = function() {
-    sseConnected = true;
-    document.querySelectorAll('.connection-dot').forEach(d => d.classList.remove('disconnected'));
-  };
-
-  es.onmessage = function(e) {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type) {
-        window.dispatchEvent(new CustomEvent('dashboard-' + data.type));
-      }
-    } catch {
-      // Simple string messages like 'connected'
-    }
-  };
-
-  es.onerror = function() {
-    sseConnected = false;
-    document.querySelectorAll('.connection-dot').forEach(d => d.classList.add('disconnected'));
-    es.close();
-    setTimeout(connectSSE, 5000);
-  };
-}
-
-connectSSE();
-</script>
-
-<script>
-${getVaultViewJS()}
-</script>
-
-<script>
-${getMealsViewJS()}
-</script>
-
-<script>
-${getTasksViewJS()}
-</script>
-
-<script>
-${getDevTasksViewJS()}
-</script>
-
-<script>
-${getReportsViewJS()}
-</script>
-
-</body>
-</html>`;
-}
-
-/** Handle GET /dashboard and /dashboard/* routes. Returns true if matched. */
+/** Handle GET /dashboard and /dashboard/. Returns true if matched. */
 export function handleDashboardPage(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -217,33 +123,22 @@ export function handleDashboardPage(
 
   const url = req.url?.split('?')[0] || '';
 
-  // Match /dashboard exactly, or /dashboard/ with trailing slash
-  if (url === '/dashboard' || url === '/dashboard/') {
-    const html = renderPage();
-    res.writeHead(200, {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      // Defense-in-depth against a hypothetical sanitizer bypass in the
-      // report renderer. The dashboard uses inline <script> blocks for its
-      // views (vault, meals, tasks, devtasks, reports), so 'unsafe-inline'
-      // is required for now. The report body never contains <script> (both
-      // marked's HTML passthrough is off and sanitize-html strips it), so
-      // the practical attack surface is narrow — but CSP still rules out
-      // external script loads beyond d3 and object/base-uri tricks.
-      'Content-Security-Policy': [
-        "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://d3js.org",
-        "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data:",
-        "connect-src 'self'",
-        "object-src 'none'",
-        "base-uri 'none'",
-        "frame-ancestors 'none'",
-      ].join('; '),
-    });
-    res.end(html);
+  if (url !== '/dashboard' && url !== '/dashboard/') return false;
+
+  const html = readIndexHtml();
+  if (html === null) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(
+      'Dashboard build not found. Run `npm run build` in nanoclaw/ to build dashboard-web.',
+    );
     return true;
   }
 
-  return false;
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Content-Security-Policy': CSP_HEADER,
+  });
+  res.end(html);
+  return true;
 }

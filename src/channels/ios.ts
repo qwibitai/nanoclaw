@@ -19,6 +19,7 @@ import {
 } from './ios-data-api.js';
 import { handleDashboardApi } from './dashboard-api.js';
 import { handleDashboardPage } from './dashboard-page.js';
+import { handleDashboardAssets } from './dashboard-assets.js';
 import { handleMealPlanPage } from './meal-plan-page.js';
 
 // Use dynamic import for ws since it's an ESM/CJS package
@@ -166,6 +167,9 @@ export class IosChannel implements Channel {
 
     // Public pages (no auth — Tailscale boundary enforced above)
     if (handleDashboardPage(req, res)) {
+      return;
+    }
+    if (handleDashboardAssets(req, res)) {
       return;
     }
     if (handleDashboardApi(req, res)) {

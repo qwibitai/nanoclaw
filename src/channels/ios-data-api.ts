@@ -69,19 +69,31 @@ export function onScheduledTasksChanged(cb: () => void): void {
 
 function notifyBroadcastChange(fileType: string): void {
   for (const cb of broadcastChangeCallbacks) {
-    try { cb(fileType); } catch { /* ignore */ }
+    try {
+      cb(fileType);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 function notifyDevTasksChange(): void {
   for (const cb of broadcastDevTasksChangeCallbacks) {
-    try { cb(); } catch { /* ignore */ }
+    try {
+      cb();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 function notifyScheduledTasksChange(): void {
   for (const cb of broadcastScheduledTasksChangeCallbacks) {
-    try { cb(); } catch { /* ignore */ }
+    try {
+      cb();
+    } catch {
+      /* ignore */
+    }
   }
 }
 

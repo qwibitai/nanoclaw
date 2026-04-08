@@ -1,0 +1,39 @@
+{
+  "reports": [
+    {
+      "id": "rpt_2026-04-08-school-pickup-rotation",
+      "title": "School pickup rotation — proposed schedule for the rest of April",
+      "summary": "Three-week rotation starting Monday, balancing Boris and Rachel's calendars against Pip's after-school clubs and Pickle's nap window.",
+      "created_at": "2026-04-08T07:42:00.000Z",
+      "created_by": "Pip"
+    },
+    {
+      "id": "rpt_2026-04-07-vault-cleanup-pass",
+      "title": "Family vault cleanup — orphan nodes and stale links",
+      "summary": "Quarterly review of the family vault: 12 orphan nodes, 6 broken wikilinks, and 3 MOCs that drifted from their domain.",
+      "created_at": "2026-04-07T22:18:00.000Z",
+      "created_by": "Pip"
+    },
+    {
+      "id": "rpt_2026-04-06-pediatrician-followup",
+      "title": "Pickle's pediatrician follow-up — what to ask about the rash",
+      "summary": "Notes from yesterday's call. Three questions to ask at Tuesday's appointment, and a list of foods to track this week.",
+      "created_at": "2026-04-06T14:05:00.000Z",
+      "created_by": "Pip"
+    },
+    {
+      "id": "rpt_2026-04-05-budget-q2-forecast",
+      "title": "Q2 household budget forecast",
+      "summary": "Looking at the next three months: groceries trending 8% over, daycare jumps in May, and the car insurance renewal hits June.",
+      "created_at": "2026-04-05T09:30:00.000Z",
+      "created_by": "Pip"
+    },
+    {
+      "id": "rpt_2026-04-03-cabinet-meeting",
+      "title": "Family cabinet meeting — last Sunday",
+      "summary": "Decisions made and follow-ups assigned during the weekly family alignment meeting.",
+      "created_at": "2026-04-03T19:50:00.000Z",
+      "created_by": "Pip"
+    }
+  ]
+}

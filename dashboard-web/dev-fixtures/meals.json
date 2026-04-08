@@ -1,0 +1,178 @@
+{
+  "plan": {
+    "title": "Week of April 7",
+    "subtitle": "Lighter dinners, asparagus is back",
+    "days": [
+      {
+        "name": "Monday",
+        "meals": [
+          {
+            "label": "Breakfast",
+            "desc": "Oatmeal with strawberries and almonds",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Lunch",
+            "desc": "Leftover chicken salad on sourdough",
+            "details": ["Use the rest of Sunday's roast", "Pickle gets the soft inside"],
+            "recipes": []
+          },
+          {
+            "label": "Dinner",
+            "desc": "Sheet-pan salmon with asparagus and lemon",
+            "details": ["~30 min including prep", "Pickle: skip the lemon"],
+            "recipes": [
+              { "title": "NYT Cooking — sheet pan salmon", "url": "https://cooking.nytimes.com/recipes/example1" }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Tuesday",
+        "meals": [
+          {
+            "label": "Breakfast",
+            "desc": "Yogurt parfait + granola",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Lunch",
+            "desc": "Pip: school lunch · Boris/Rachel: leftover salmon over arugula",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Dinner",
+            "desc": "Spring pea risotto",
+            "details": ["Use the frozen peas in the freezer drawer", "Stir in lemon zest at the end"],
+            "recipes": [
+              { "title": "Smitten Kitchen — spring pea risotto", "url": "https://smittenkitchen.com/recipes/example2" }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Wednesday",
+        "meals": [
+          {
+            "label": "Breakfast",
+            "desc": "Eggs scrambled with chives",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Lunch",
+            "desc": "Hummus + pita + cucumber sticks",
+            "details": ["Pack two pitas for Pip's school lunch"],
+            "recipes": []
+          },
+          {
+            "label": "Dinner",
+            "desc": "Slow-cooker carnitas tacos",
+            "details": ["Start the pork at 8am", "Pickle: chopped fine, no spice"],
+            "recipes": [
+              { "title": "America's Test Kitchen — slow cooker carnitas", "url": "https://www.americastestkitchen.com/recipes/example3" }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Thursday",
+        "meals": [
+          {
+            "label": "Breakfast",
+            "desc": "Banana pancakes",
+            "details": ["Pip's request from Sunday"],
+            "recipes": []
+          },
+          {
+            "label": "Lunch",
+            "desc": "Carnitas leftovers in quesadillas",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Dinner",
+            "desc": "Quick pasta puttanesca",
+            "details": ["Pantry meal — capers, olives, anchovies, tomatoes"],
+            "recipes": []
+          }
+        ]
+      },
+      {
+        "name": "Friday",
+        "meals": [
+          {
+            "label": "Breakfast",
+            "desc": "Toast with peanut butter and banana",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Lunch",
+            "desc": "Bento boxes — turkey roll-ups, cheese cubes, grapes",
+            "details": [],
+            "recipes": []
+          },
+          {
+            "label": "Dinner",
+            "desc": "Pizza night — order in or homemade",
+            "details": ["Friday tradition; cabin trip starts after"],
+            "recipes": []
+          }
+        ]
+      }
+    ]
+  },
+  "ingredients": {
+    "title": "Shopping list",
+    "sections": [
+      {
+        "name": "Produce",
+        "items": [
+          "Asparagus, 2 bunches",
+          "Strawberries, 1 quart",
+          "Lemons, 4",
+          "Bananas, bunch of 6",
+          "Arugula, 1 bag",
+          "Cucumbers, 2",
+          "Avocados, 3 (for the carnitas night)",
+          "Cilantro, 1 bunch",
+          "Lime, 2",
+          "Chives, 1 small bunch"
+        ]
+      },
+      {
+        "name": "Protein",
+        "items": [
+          "Salmon fillets, 1.5 lb",
+          "Pork shoulder, 3 lb (for carnitas)",
+          "Eggs, 1 dozen",
+          "Sliced turkey, ½ lb (Pip lunches)"
+        ]
+      },
+      {
+        "name": "Pantry",
+        "items": [
+          "Arborio rice (check first — there's a half bag in the back)",
+          "Capers, small jar",
+          "Anchovies, tin",
+          "Castelvetrano olives, jar",
+          "Crushed tomatoes, 1 can",
+          "Tortillas, 1 pack of 12 (corn for adults, flour for Pip)"
+        ]
+      },
+      {
+        "name": "Dairy & cold",
+        "items": [
+          "Greek yogurt, 32 oz",
+          "Granola (Boris's favorite — hippie blend)",
+          "Cheddar block, ½ lb (quesadillas)",
+          "Hummus, 1 tub"
+        ]
+      }
+    ]
+  }
+}

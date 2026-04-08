@@ -1,0 +1,108 @@
+{
+  "tasks": [
+    {
+      "id": 63,
+      "title": "FamBot dashboard: rebuild web UI from scratch on a component-library foundation",
+      "description": "Replace the hand-rolled HTML/CSS/JS dashboard at /dashboard with a React + Vite + Tailwind v4 + shadcn SPA. Full feature parity across all 5 views, follow-system dark mode, bottom-tab nav on mobile.",
+      "status": "working",
+      "created_at": "2026-04-07T12:58:51.214Z",
+      "updated_at": "2026-04-08T09:40:00.000Z",
+      "source": "claude",
+      "branch": "pip/task-63-fambot-dashboard-rebuild",
+      "pr_url": "https://github.com/BorisBozic/Sigma/pull/41"
+    },
+    {
+      "id": 62,
+      "title": "Tighten dashboard polish — Linear-meets-Things across 5 views",
+      "description": "Visual design pass on the existing dashboard before the rebuild. Bring typography, spacing rhythm, hierarchy, motion up to a Linear-density / Things-calm bar in both light and dark mode.",
+      "status": "pr_ready",
+      "created_at": "2026-04-07T06:29:24.212Z",
+      "updated_at": "2026-04-08T05:12:00.000Z",
+      "source": "claude",
+      "branch": "pip/task-62-dashboard-polish",
+      "pr_url": "https://github.com/BorisBozic/nanoclaw/pull/13"
+    },
+    {
+      "id": 61,
+      "title": "Wire reports into the iOS share sheet",
+      "description": "When Pip creates a report, also generate a shareable iOS-friendly preview so it shows up cleanly when you share the link.",
+      "status": "pr_ready",
+      "created_at": "2026-04-06T17:22:00.000Z",
+      "updated_at": "2026-04-07T20:14:00.000Z",
+      "source": "fambot",
+      "branch": "pip/task-61-ios-share",
+      "pr_url": "https://github.com/BorisBozic/Sigma/pull/40"
+    },
+    {
+      "id": 60,
+      "title": "Audit and tighten the agent-runner sandbox filesystem rules",
+      "description": "Walk every container mount and confirm the agent-runner can't read or write outside the per-group data directory. Pip flagged a path resolution edge case last week.",
+      "status": "open",
+      "created_at": "2026-04-04T08:05:00.000Z",
+      "updated_at": "2026-04-04T08:05:00.000Z",
+      "source": "claude"
+    },
+    {
+      "id": 59,
+      "title": "Migrate vault search from substring to fuzzy match",
+      "description": "Substring search misses obvious typos and accent variants. Pull in a tiny fuzzy library or roll one inline.",
+      "status": "open",
+      "created_at": "2026-04-02T11:30:00.000Z",
+      "updated_at": "2026-04-02T11:30:00.000Z",
+      "source": "chat"
+    },
+    {
+      "id": 58,
+      "title": "Quarterly meal plan template refresh",
+      "description": "Pull the new seasonal recipe set from the family vault and refresh the meal plan template. Spring veg, lighter dinners.",
+      "status": "needs_session",
+      "created_at": "2026-04-01T10:00:00.000Z",
+      "updated_at": "2026-04-05T14:22:00.000Z",
+      "source": "chat",
+      "session_notes": "Started but blocked on the new vault folder structure. Resume after task 63 ships."
+    },
+    {
+      "id": 57,
+      "title": "Pickle's daycare transition checklist",
+      "description": "End-to-end checklist for moving Pickle from the toddler room to the preschool room on May 1. Forms, supplies, teacher introduction.",
+      "status": "has_followups",
+      "created_at": "2026-03-28T09:15:00.000Z",
+      "updated_at": "2026-04-06T18:40:00.000Z",
+      "source": "chat",
+      "session_notes": "Initial draft delivered. Rachel has notes on the supplies list and wants a separate teacher-introduction draft."
+    },
+    {
+      "id": 56,
+      "title": "Wire dev task counts into the morning brief",
+      "description": "The 7am family brief should include a one-line summary of what's in flight on the dashboard.",
+      "status": "done",
+      "created_at": "2026-03-25T16:48:00.000Z",
+      "updated_at": "2026-03-27T09:02:00.000Z",
+      "source": "claude",
+      "branch": "pip/task-56-brief-dev-counts",
+      "pr_url": "https://github.com/BorisBozic/nanoclaw/pull/11"
+    },
+    {
+      "id": 55,
+      "title": "Telegram message queue persistence across restarts",
+      "description": "Drop Telegram messages were arriving out of order after a nanoclaw restart because the in-memory queue was lost.",
+      "status": "done",
+      "created_at": "2026-03-22T14:30:00.000Z",
+      "updated_at": "2026-03-25T11:18:00.000Z",
+      "source": "claude-code",
+      "branch": "pip/task-55-telegram-queue",
+      "pr_url": "https://github.com/BorisBozic/nanoclaw/pull/9"
+    },
+    {
+      "id": 54,
+      "title": "Vault graph: render MOC nodes with a dashed outer ring",
+      "description": "Visual differentiation for Maps of Content vs regular nodes in the family vault force-directed graph.",
+      "status": "done",
+      "created_at": "2026-03-19T19:05:00.000Z",
+      "updated_at": "2026-03-21T08:44:00.000Z",
+      "source": "claude",
+      "branch": "pip/task-54-moc-rings",
+      "pr_url": "https://github.com/BorisBozic/nanoclaw/pull/8"
+    }
+  ]
+}
