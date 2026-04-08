@@ -98,6 +98,15 @@ export function getServiceManager(): ServiceManager {
   return 'none';
 }
 
+/** Detect Nix-managed systems (NixOS, nix-darwin) by checking for the system profile. */
+export function isNixManaged(): boolean {
+  try {
+    return fs.existsSync('/run/current-system/sw/bin');
+  } catch {
+    return false;
+  }
+}
+
 export function getNodePath(): string {
   try {
     return execSync('command -v node', { encoding: 'utf-8' }).trim();

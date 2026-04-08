@@ -6,6 +6,7 @@ import {
   isRoot,
   isHeadless,
   hasSystemd,
+  isNixManaged,
   getServiceManager,
   commandExists,
   getNodeVersion,
@@ -64,6 +65,19 @@ describe('hasSystemd', () => {
     // On systemd systems, should return true
     // Just verify it doesn't throw
     const result = hasSystemd();
+    expect(typeof result).toBe('boolean');
+  });
+});
+
+// --- isNixManaged ---
+
+describe('isNixManaged', () => {
+  it('returns a boolean', () => {
+    expect(typeof isNixManaged()).toBe('boolean');
+  });
+
+  it('checks for /run/current-system/sw/bin', () => {
+    const result = isNixManaged();
     expect(typeof result).toBe('boolean');
   });
 });
