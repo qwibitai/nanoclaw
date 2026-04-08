@@ -36,14 +36,61 @@ export interface ContainerInput {
   script?: string;
 }
 
+export type QwenErrorType =
+  | 'stale-session'
+  | 'context-exhausted'
+  | 'non-retryable'
+  | 'retryable';
+
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  errorType?: QwenErrorType;
 }
 
 const QWEN_BIN = process.env.QWEN_BIN || 'qwen';
+
+/**
+ * Classify a Qwen error from stdout/stderr text and exit code.
+ * Used to decide retry strategy in the caller.
+ */
+export function classifyQwenError(
+  text: string,
+  _exitCode: number | null,
+): QwenErrorType {
+  const lower = text.toLowerCase();
+
+  if (text.includes('No saved session found with ID')) return 'stale-session';
+
+  // Context window exhaustion — clear session and let GroupQueue retry fresh
+  if (
+    (lower.includes('context') &&
+      (lower.includes('length') ||
+        lower.includes('window') ||
+        lower.includes('maximum') ||
+        lower.includes('exceed'))) ||
+    (lower.includes('token') &&
+      (lower.includes('limit') ||
+        lower.includes('too many') ||
+        lower.includes('maximum') ||
+        lower.includes('exceed')))
+  ) {
+    return 'context-exhausted';
+  }
+
+  // Non-retryable 4xx (except 429 rate-limit and 408 timeout)
+  const match = text.match(/\b(4\d\d)\b/);
+  if (match) {
+    const code = parseInt(match[1], 10);
+    if (code >= 400 && code < 500 && code !== 429 && code !== 408) {
+      return 'non-retryable';
+    }
+  }
+
+  return 'retryable';
+}
 
 function readGlobalClaudeMd(projectRoot: string): string | null {
   const p = path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
@@ -199,6 +246,7 @@ export async function runContainerAgent(
                 status: 'error',
                 result: null,
                 error: `Qwen agent timed out after ${Math.round(duration / 1000)}s`,
+                errorType: 'retryable',
               });
             }
             return;
@@ -212,16 +260,23 @@ export async function runContainerAgent(
           ) {
             // Stale session ID from previous backend (Claude Code → Qwen migration).
             // Signal the caller to retry without --resume.
-            resolve({ status: 'error', result: null, error: 'stale-session' });
+            resolve({
+              status: 'error',
+              result: null,
+              error: 'stale-session',
+              errorType: 'stale-session',
+            });
           } else if (code !== 0) {
+            const errText = stdout.slice(-2000);
             logger.error(
-              { group: group.name, code, tail: stdout.slice(-1000) },
+              { group: group.name, code, tail: errText.slice(-1000) },
               'Qwen exited with error, no output received',
             );
             resolve({
               status: 'error',
               result: null,
               error: `Qwen exited with code ${code}`,
+              errorType: classifyQwenError(errText, code),
             });
           } else {
             // Clean exit with no result event — treat as silent success
