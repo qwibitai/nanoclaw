@@ -132,6 +132,25 @@ describe('renderReportMarkdown (sanitizer)', () => {
 
   // --- Allowed content round-trips ---
 
+  it('wraps every <table> in a .report-table-wrap container for horizontal scrolling', () => {
+    // Reports with wide comparison tables would otherwise push the
+    // whole page past viewport width on mobile. The renderer wraps
+    // tables so the dashboard can give each table its own scroller.
+    const md = [
+      '| a | b | c |',
+      '|---|---|---|',
+      '| 1 | 2 | 3 |',
+      '',
+      '| x | y |',
+      '|---|---|',
+      '| 9 | 8 |',
+    ].join('\n');
+    const out = rendered(md);
+    // Both tables wrapped.
+    expect(out.match(/<div class="report-table-wrap"><table/g)?.length).toBe(2);
+    expect(out.match(/<\/table><\/div>/g)?.length).toBe(2);
+  });
+
   it('preserves headings, lists, code, tables, blockquotes, strong, em', () => {
     const md = [
       '# H1',

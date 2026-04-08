@@ -136,7 +136,7 @@ function TaskCard({ task }: { task: ScheduledTask }) {
                   "text-[0.6875rem]",
                   task.last_result === "success"
                     ? "text-muted-foreground"
-                    : "text-accent",
+                    : "text-destructive",
                 )}
               >
                 last: {task.last_result}

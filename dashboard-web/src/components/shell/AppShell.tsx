@@ -15,20 +15,26 @@ import { Sidebar, TabBar } from "./Nav";
 
 export function AppShell() {
   return (
-    <div className="min-h-dvh bg-background text-foreground antialiased">
-      <div className="flex">
-        <Sidebar />
-        <main
-          className={
-            // Padding-bottom on mobile so scrollable content doesn't
-            // disappear under the fixed tab bar. Desktop has no tab
-            // bar so no extra padding.
-            "flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
-          }
-        >
-          <Outlet />
-        </main>
-      </div>
+    // Outer flex row is `min-h-dvh` so the sidebar (a flex child with
+    // default align-stretch) naturally fills the full viewport height.
+    // Previously min-h-dvh sat on a plain block wrapper, which left
+    // the sidebar at content-height — visually it stopped short of
+    // the bottom on long pages where content grew past the nav.
+    <div className="flex min-h-dvh bg-background text-foreground antialiased">
+      <Sidebar />
+      <main
+        className={
+          // min-w-0 is load-bearing. Without it, any wide child
+          // (e.g. a report table, a long unbroken monospace string)
+          // pushes the flex-1 column past viewport width, which on
+          // mobile Safari reads as "page is wider than the screen"
+          // and the browser zooms out to fit. min-w-0 lets the
+          // column shrink so overflow stays local to the child.
+          "min-w-0 flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+        }
+      >
+        <Outlet />
+      </main>
       <TabBar />
     </div>
   );

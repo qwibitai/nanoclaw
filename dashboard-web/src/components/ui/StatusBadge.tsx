@@ -13,8 +13,8 @@ interface StatusBadgeProps {
 
 const VARIANT_CLASSES: Record<NonNullable<StatusBadgeProps["variant"]>, string> = {
   neutral: "bg-muted text-foreground",
-  active: "bg-accent/15 text-accent",
-  attention: "bg-accent text-accent-foreground",
+  active: "bg-primary/15 text-primary",
+  attention: "bg-primary text-primary-foreground",
   muted: "bg-muted/60 text-muted-foreground",
 };
 

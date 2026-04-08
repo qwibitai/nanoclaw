@@ -8,6 +8,13 @@
       "created_by": "Pip"
     },
     {
+      "id": "rpt_2026-04-07-ev-suv-comparison",
+      "title": "Pure Electric 6-7 Seat SUVs in AU — Comparison",
+      "summary": "6 vehicles qualify. IONIQ 9 and EV9 lead on value, Model X is dead in AU, Model Y is smaller.",
+      "created_at": "2026-04-07T05:52:00.000Z",
+      "created_by": "telegram_pip_family"
+    },
+    {
       "id": "rpt_2026-04-07-vault-cleanup-pass",
       "title": "Family vault cleanup — orphan nodes and stale links",
       "summary": "Quarterly review of the family vault: 12 orphan nodes, 6 broken wikilinks, and 3 MOCs that drifted from their domain.",

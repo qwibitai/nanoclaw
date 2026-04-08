@@ -68,7 +68,29 @@ const REPORT_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   disallowedTagsMode: 'discard',
 };
 
+/**
+ * Wrap every top-level `<table>…</table>` block in a
+ * `<div class="report-table-wrap">` so the dashboard can give
+ * tables their own horizontal scroller. Report authors (Pip) love
+ * wide matrix comparisons that blow past 68ch — without the wrapper
+ * the whole page slides sideways on mobile and the browser zooms
+ * out to fit.
+ *
+ * Applied AFTER sanitization so the sanitizer's strict tag allowlist
+ * (which doesn't include `<div>`) stays untouched. Safe because the
+ * tag names `<table>` / `</table>` can't appear inside text at this
+ * point — they'd have been escaped by the markdown parser or
+ * stripped by the sanitizer.
+ */
+function wrapTables(html: string): string {
+  return html.replace(
+    /<table[\s\S]*?<\/table>/g,
+    (match) => `<div class="report-table-wrap">${match}</div>`,
+  );
+}
+
 export function renderReportMarkdown(md: string): string {
   const rawHtml = marked.parse(md, { async: false }) as string;
-  return sanitizeHtml(rawHtml, REPORT_SANITIZE_OPTIONS);
+  const sanitized = sanitizeHtml(rawHtml, REPORT_SANITIZE_OPTIONS);
+  return wrapTables(sanitized);
 }

@@ -143,7 +143,7 @@ function NavItem({ id, label, path, active, mode }: NavItemProps) {
        *  bar reflow on Mobile Safari. */}
       {active && (
         <span
-          className="absolute left-0 right-0 top-0 h-[2px] bg-accent"
+          className="absolute left-0 right-0 top-0 h-[2px] bg-primary"
           aria-hidden="true"
         />
       )}

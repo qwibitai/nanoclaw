@@ -111,7 +111,7 @@ function DetailError({ error }: { error: unknown }) {
         <div className="text-sm font-medium">Report not found.</div>
         <Link
           to="/reports"
-          className="mt-2 inline-block text-xs text-accent underline underline-offset-2"
+          className="mt-2 inline-block text-xs text-primary underline underline-offset-2"
         >
           Back to reports
         </Link>

@@ -147,14 +147,20 @@ function TaskCard({ task }: { task: DevTask }) {
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {task.branch && (
-              <span className="font-mono text-[0.6875rem]">{task.branch}</span>
+              // break-all so long branch names like
+              // `pip/task-58-investigate-dropped-messages` wrap
+              // inside the card on narrow screens instead of
+              // pushing the layout wider than the viewport.
+              <span className="font-mono text-[0.6875rem] break-all">
+                {task.branch}
+              </span>
             )}
             {task.pr_url && (
               <a
                 href={task.pr_url}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="text-accent underline underline-offset-2"
+                className="text-primary underline underline-offset-2"
                 onClick={(e) => e.stopPropagation()}
               >
                 PR
