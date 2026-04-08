@@ -57,6 +57,19 @@ Text inside `<internal>` tags is logged but **never sent** to the chat. Use this
 - You already sent the key information via `send_message` and want to avoid duplication
 - Tool output or intermediate results shouldn't reach the user
 
+#### Sending images
+
+Use `<image>` tags in your text output to send photos or images to the chat:
+
+```
+<image path="/path/to/photo.png" caption="Optional caption" />
+```
+
+- `path` — local file path or URL
+- `caption` — optional description shown with the image
+
+Multiple images can be included in a single response. The tags are stripped from the text before delivery — only the images and remaining text are sent.
+
 #### Immediate messaging
 
 `mcp__nanoclaw__send_message` sends a message to the chat **immediately**, while you're still working. Use it for:
