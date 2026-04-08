@@ -2,9 +2,9 @@
  * Signal channel for NanoClaw via signal-cli JSON-RPC daemon.
  *
  * Requires:
- *   - signal-cli running in daemon mode: signal-cli -a <account> daemon --http localhost:8080
+ *   - signal-cli running in daemon mode: signal-cli -a <account> daemon --http 0.0.0.0:8581
  *   - Environment: SIGNAL_ACCOUNT (phone number, e.g. +17733409232)
- *   - Optional:    SIGNAL_CLI_URL  (default: http://127.0.0.1:8080)
+ *   - Optional:    SIGNAL_CLI_URL  (default: http://127.0.0.1:8581)
  */
 
 import { readEnvFile } from '../env.js';
@@ -532,7 +532,7 @@ registerChannel('signal', (opts: ChannelOpts) => {
   const baseUrl =
     process.env.SIGNAL_CLI_URL ||
     envVars.SIGNAL_CLI_URL ||
-    'http://127.0.0.1:8080';
+    'http://127.0.0.1:8581';
 
   if (!account) {
     logger.warn('Signal: SIGNAL_ACCOUNT not set — channel disabled');
