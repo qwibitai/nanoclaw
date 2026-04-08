@@ -3,7 +3,11 @@
  * Only imported by cli.ts. SDK consumers never touch this file.
  */
 
+import os from 'os';
+import path from 'path';
+
 import { readEnvFile } from './env.js';
+import { resolveMountAllowlist } from './mount-security.js';
 import { isValidTimezone } from './timezone.js';
 import type { AgentLiteOptions, AgentOptions } from './api/options.js';
 
@@ -39,7 +43,14 @@ export function buildOptionsFromEnv(): AgentLiteOptions {
 
 /** Build AgentOptions (per-agent) from env. */
 export function buildAgentOptionsFromEnv(): AgentOptions {
+  const allowlistPath = path.join(
+    os.homedir(),
+    '.config',
+    'agentlite',
+    'mount-allowlist.json',
+  );
   return {
     name: process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || undefined,
+    mountAllowlist: resolveMountAllowlist(null, allowlistPath) ?? undefined,
   };
 }

@@ -29,20 +29,11 @@ async function getOneCLI(onecliUrl: string): Promise<any> {
   return _onecli;
 }
 
-// Model credential resolver — set via SDK, bypasses OneCLI when provided
-type CredentialResolver = () => Promise<Record<string, string>>;
-let _credentialResolver: CredentialResolver | null = null;
-
-/** Configure model options. Called by orchestrator during start(). */
-export function setModelOptions(opts: {
-  credentials?: CredentialResolver;
-}): void {
-  _credentialResolver = opts.credentials ?? null;
-}
-
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---AGENTLITE_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---AGENTLITE_OUTPUT_END---';
+
+export type CredentialResolver = () => Promise<Record<string, string>>;
 
 export interface ContainerInput {
   prompt: string;
@@ -54,10 +45,15 @@ export interface ContainerInput {
   assistantName?: string;
   /** Instance name for multi-instance support. Scopes container names. */
   instanceName?: string;
+  workDir?: string;
   /** Override config.GROUPS_DIR for per-instance group paths. */
   groupsDir?: string;
   /** Override config.DATA_DIR for per-instance data paths. */
   dataDir?: string;
+  /** Per-agent credential resolver. Bypasses OneCLI when provided. */
+  credentialResolver?: CredentialResolver;
+  /** Per-agent mount allowlist (resolved). */
+  mountAllowlist?: import('./types.js').MountAllowlist | null;
 }
 
 export interface ContainerOutput {
@@ -76,9 +72,11 @@ export interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  workDir: string,
   groupsDir: string,
   dataDir: string,
   packageRoot: string,
+  mountAllowlist?: import('./types.js').MountAllowlist | null,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const groupDir = resolveGroupFolderPath(group.folder, groupsDir);
@@ -94,6 +92,11 @@ function buildVolumeMounts(
     //   containerPath: '/workspace/project',
     //   readonly: true,
     // });
+    mounts.push({
+      hostPath: workDir,
+      containerPath: '/workspace/project',
+      readonly: true,
+    });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
     // Credentials are injected by the OneCLI gateway, never exposed to containers.
@@ -224,6 +227,7 @@ function buildVolumeMounts(
       group.containerConfig.additionalMounts,
       group.name,
       isMain,
+      mountAllowlist ?? null,
     );
     mounts.push(...validatedMounts);
   }
@@ -288,11 +292,12 @@ async function buildBoxConfig(
   containerName: string,
   rc: RuntimeConfig,
   agentIdentifier?: string,
+  credentialResolver?: CredentialResolver,
 ): Promise<BoxConfig> {
   // Use SDK-provided credential resolver if set, else OneCLI gateway
   let credentialEnv: Record<string, string>;
-  if (_credentialResolver) {
-    credentialEnv = await _credentialResolver();
+  if (credentialResolver) {
+    credentialEnv = await credentialResolver();
   } else {
     credentialEnv = await extractOnecliEnv(
       containerName,
@@ -334,6 +339,7 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
+  const workDir = input.workDir ?? rc.workdir;
   const groupsDir = input.groupsDir ?? path.join(rc.workdir, 'groups');
   const dataDir = input.dataDir ?? path.join(rc.workdir, 'data');
 
@@ -343,9 +349,11 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(
     group,
     input.isMain,
+    workDir,
     groupsDir,
     dataDir,
     rc.packageRoot,
+    input.mountAllowlist,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const instancePrefix = input.instanceName ? `${input.instanceName}-` : '';
@@ -359,6 +367,7 @@ export async function runContainerAgent(
     containerName,
     rc,
     agentIdentifier,
+    input.credentialResolver,
   );
 
   const boxOptions = {

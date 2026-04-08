@@ -19,8 +19,8 @@ export interface AgentConfig {
   readonly assistantName: string;
   readonly triggerPattern: RegExp;
 
-  // Paths (derived from workdir)
-  readonly workdir: string;
+  // Paths (derived from workDir)
+  readonly workDir: string;
   readonly storeDir: string;
   readonly groupsDir: string;
   readonly dataDir: string;
@@ -47,7 +47,7 @@ export function buildAgentConfig(
     agentName,
     assistantName,
     triggerPattern: new RegExp(`^@${escapeRegex(assistantName)}\\b`, 'i'),
-    workdir,
+    workDir: workdir,
     storeDir: path.join(workdir, 'store'),
     groupsDir: path.join(workdir, 'groups'),
     dataDir: path.join(workdir, 'data'),

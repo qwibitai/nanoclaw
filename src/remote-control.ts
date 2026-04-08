@@ -12,7 +12,7 @@ interface RemoteControlSession {
   startedAt: string;
 }
 
-let activeSession: RemoteControlSession | null = null;
+const sessions = new Map<string, RemoteControlSession>();
 
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
@@ -61,7 +61,7 @@ export function restoreRemoteControl(dataDir: string): void {
   try {
     const session: RemoteControlSession = JSON.parse(data);
     if (session.pid && isProcessAlive(session.pid)) {
-      activeSession = session;
+      sessions.set(dataDir, session);
       logger.info(
         { pid: session.pid, url: session.url },
         'Restored Remote Control session from previous run',
@@ -74,13 +74,13 @@ export function restoreRemoteControl(dataDir: string): void {
   }
 }
 
-export function getActiveSession(): RemoteControlSession | null {
-  return activeSession;
+export function getActiveSession(dataDir: string): RemoteControlSession | null {
+  return sessions.get(dataDir) ?? null;
 }
 
 /** @internal — exported for testing only */
 export function _resetForTesting(): void {
-  activeSession = null;
+  sessions.clear();
 }
 
 /** @internal — exported for testing only */
@@ -94,13 +94,14 @@ export async function startRemoteControl(
   cwd: string,
   dataDir: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
-  if (activeSession) {
+  const existing = sessions.get(dataDir);
+  if (existing) {
     // Verify the process is still alive
-    if (isProcessAlive(activeSession.pid)) {
-      return { ok: true, url: activeSession.url };
+    if (isProcessAlive(existing.pid)) {
+      return { ok: true, url: existing.url };
     }
     // Process died — clean up and start a new one
-    activeSession = null;
+    sessions.delete(dataDir);
     clearState(dataDir);
   }
 
@@ -169,7 +170,7 @@ export async function startRemoteControl(
           startedInChat: chatJid,
           startedAt: new Date().toISOString(),
         };
-        activeSession = session;
+        sessions.set(dataDir, session);
         saveState(dataDir, session);
 
         logger.info(
@@ -210,17 +211,18 @@ export function stopRemoteControl(dataDir: string):
       ok: true;
     }
   | { ok: false; error: string } {
-  if (!activeSession) {
+  const session = sessions.get(dataDir);
+  if (!session) {
     return { ok: false, error: 'No active Remote Control session' };
   }
 
-  const { pid } = activeSession;
+  const { pid } = session;
   try {
     process.kill(pid, 'SIGTERM');
   } catch {
     // already dead
   }
-  activeSession = null;
+  sessions.delete(dataDir);
   clearState(dataDir);
   logger.info({ pid }, 'Remote Control session stopped');
   return { ok: true };

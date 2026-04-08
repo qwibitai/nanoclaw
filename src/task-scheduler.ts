@@ -8,14 +8,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import type { RuntimeConfig } from './runtime-config.js';
-import {
-  getAllTasks,
-  getDueTasks,
-  getTaskById,
-  logTaskRun,
-  updateTask,
-  updateTaskAfterRun,
-} from './db.js';
+import type { AgentDb } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -70,6 +63,13 @@ export interface SchedulerDependencies {
   schedulerPollInterval: number;
   timezone: string;
   runtimeConfig: RuntimeConfig;
+  db: AgentDb;
+  /** Per-agent paths and security context */
+  workDir: string;
+  groupsDir: string;
+  dataDir: string;
+  credentialResolver?: import('./container-runner.js').CredentialResolver;
+  mountAllowlist?: import('./types.js').MountAllowlist | null;
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
@@ -89,19 +89,16 @@ async function runTask(
   const startTime = Date.now();
   let groupDir: string;
   try {
-    groupDir = resolveGroupFolderPath(
-      task.group_folder,
-      path.join(deps.runtimeConfig.workdir, 'groups'),
-    );
+    groupDir = resolveGroupFolderPath(task.group_folder, deps.groupsDir);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
-    updateTask(task.id, { status: 'paused' });
+    deps.db.updateTask(task.id, { status: 'paused' });
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder, error },
       'Task has invalid group folder',
     );
-    logTaskRun({
+    deps.db.logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
@@ -128,7 +125,7 @@ async function runTask(
       { taskId: task.id, groupFolder: task.group_folder },
       'Group not found for task',
     );
-    logTaskRun({
+    deps.db.logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
@@ -141,7 +138,7 @@ async function runTask(
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
-  const tasks = getAllTasks();
+  const tasks = deps.db.getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
     isMain,
@@ -154,7 +151,7 @@ async function runTask(
       status: t.status,
       next_run: t.next_run,
     })),
-    path.join(deps.runtimeConfig.workdir, 'data'),
+    deps.dataDir,
   );
 
   let result: string | null = null;
@@ -190,6 +187,11 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: deps.assistantName,
+        workDir: deps.workDir,
+        groupsDir: deps.groupsDir,
+        dataDir: deps.dataDir,
+        credentialResolver: deps.credentialResolver,
+        mountAllowlist: deps.mountAllowlist,
       },
       deps.runtimeConfig,
       (boxName, containerName) =>
@@ -237,7 +239,7 @@ async function runTask(
 
   const durationMs = Date.now() - startTime;
 
-  logTaskRun({
+  deps.db.logTaskRun({
     task_id: task.id,
     run_at: new Date().toISOString(),
     duration_ms: durationMs,
@@ -252,29 +254,26 @@ async function runTask(
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+  deps.db.updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
-let schedulerRunning = false;
-
-export function startSchedulerLoop(deps: SchedulerDependencies): void {
-  if (schedulerRunning) {
-    logger.debug('Scheduler loop already running, skipping duplicate start');
-    return;
-  }
-  schedulerRunning = true;
+export function startSchedulerLoop(deps: SchedulerDependencies): {
+  stop(): void;
+} {
+  let stopped = false;
   logger.info('Scheduler loop started');
 
   const loop = async () => {
+    if (stopped) return;
     try {
-      const dueTasks = getDueTasks();
+      const dueTasks = deps.db.getDueTasks();
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
 
       for (const task of dueTasks) {
         // Re-check task status in case it was paused/cancelled
-        const currentTask = getTaskById(task.id);
+        const currentTask = deps.db.getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
@@ -287,13 +286,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       logger.error({ err }, 'Error in scheduler loop');
     }
 
-    setTimeout(loop, deps.schedulerPollInterval);
+    if (!stopped) setTimeout(loop, deps.schedulerPollInterval);
   };
 
   loop();
-}
-
-/** @internal - for tests only. */
-export function _resetSchedulerLoopForTests(): void {
-  schedulerRunning = false;
+  return {
+    stop() {
+      stopped = true;
+    },
+  };
 }

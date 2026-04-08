@@ -37,26 +37,12 @@ import { logger } from './logger.js';
 import {
   ContainerOutput,
   runContainerAgent,
-  setModelOptions,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import { cleanupOrphans } from './box-runtime.js';
-import {
-  getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
-  getAllTasks,
-  getMessagesSince,
-  getNewMessages,
-  getRouterState,
-  initDatabase,
-  setRegisteredGroup,
-  setRouterState,
-  setSession,
-  storeMessage,
-  storeChatMetadata,
-} from './db.js';
+import { AgentDb, initDatabase } from './db.js';
+import { resolveMountAllowlist } from './mount-security.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -118,9 +104,19 @@ export class AgentImpl
   private _channels = new Map<string, Channel>();
   private queue!: GroupQueue;
   private messageLoopRunning = false;
+  private _stopping = false;
+  private _messageLoopPromise: Promise<void> | null = null;
+  private _wakeLoop: (() => void) | null = null;
   private _started = false;
   private _onecli: any = null;
   private _options: AgentOptions | undefined;
+
+  // --- Per-agent subsystem handles ---
+  private db!: AgentDb;
+  private ipcHandle: { stop(): void } | null = null;
+  private schedulerHandle: { stop(): void } | null = null;
+  private resolvedMountAllowlist: import('./types.js').MountAllowlist | null =
+    null;
 
   constructor(
     agentConfig: AgentConfig,
@@ -198,6 +194,9 @@ export class AgentImpl
   async start(): Promise<void> {
     if (this._started) throw new Error(`Agent "${this.name}" already running`);
     this._started = true;
+    this._stopping = false;
+    this._messageLoopPromise = null;
+    this._wakeLoop = null;
 
     // Ensure directories exist
     fs.mkdirSync(this.config.storeDir, { recursive: true });
@@ -207,13 +206,12 @@ export class AgentImpl
     this.copyGroupTemplates();
     await cleanupOrphans(this.name);
 
-    // Configure model credentials
-    if (this.config.credentials) {
-      setModelOptions({ credentials: this.config.credentials });
-    }
+    this.resolvedMountAllowlist = resolveMountAllowlist(
+      this.config.mountAllowlist,
+    );
 
     // Initialize database for this agent
-    initDatabase({
+    this.db = initDatabase({
       storeDir: this.config.storeDir,
       dataDir: this.config.dataDir,
       assistantName: this.config.assistantName,
@@ -250,11 +248,19 @@ export class AgentImpl
    * Stop the agent — disconnect channels, stop message loop.
    */
   async stop(): Promise<void> {
+    this._stopping = true;
+    this._wakeLoop?.();
+    this.ipcHandle?.stop();
+    this.schedulerHandle?.stop();
+    await this._messageLoopPromise;
     await this.queue.shutdown(10000);
     for (const [, channel] of this._channels) {
       await channel.disconnect();
     }
+    // DB intentionally not closed — detached boxes may still write
+    // session/task state after shutdown. Handle is GC'd with the agent.
     this._started = false;
+    this.messageLoopRunning = false;
     this.emit('stopped');
   }
 
@@ -301,7 +307,7 @@ export class AgentImpl
             return;
           }
         }
-        storeMessage(msg);
+        this.db.storeMessage(msg);
         this.emit('message.in', {
           jid: chatJid,
           sender: msg.sender,
@@ -316,7 +322,7 @@ export class AgentImpl
         channel?: string,
         isGroup?: boolean,
       ) => {
-        storeChatMetadata(chatJid, timestamp, name, channel, isGroup);
+        this.db.storeChatMetadata(chatJid, timestamp, name, channel, isGroup);
         this.emit('chat.metadata', {
           jid: chatJid,
           timestamp,
@@ -365,7 +371,7 @@ export class AgentImpl
     };
 
     this._registeredGroups[jid] = group;
-    setRegisteredGroup(jid, group);
+    this.db.setRegisteredGroup(jid, group);
     fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
     this.ensureOneCLIAgent(jid, group);
     logger.info(
@@ -419,16 +425,16 @@ export class AgentImpl
   // ─── State ───────────────────────────────────────────────────────
 
   private loadState(): void {
-    this.lastTimestamp = getRouterState('last_timestamp') || '';
-    const agentTs = getRouterState('last_agent_timestamp');
+    this.lastTimestamp = this.db.getRouterState('last_timestamp') || '';
+    const agentTs = this.db.getRouterState('last_agent_timestamp');
     try {
       this.lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
     } catch {
       logger.warn('Corrupted last_agent_timestamp in DB, resetting');
       this.lastAgentTimestamp = {};
     }
-    this.sessions = getAllSessions();
-    this._registeredGroups = getAllRegisteredGroups();
+    this.sessions = this.db.getAllSessions();
+    this._registeredGroups = this.db.getAllRegisteredGroups();
     logger.info(
       {
         groupCount: Object.keys(this._registeredGroups).length,
@@ -439,8 +445,8 @@ export class AgentImpl
   }
 
   private saveState(): void {
-    setRouterState('last_timestamp', this.lastTimestamp);
-    setRouterState(
+    this.db.setRouterState('last_timestamp', this.lastTimestamp);
+    this.db.setRouterState(
       'last_agent_timestamp',
       JSON.stringify(this.lastAgentTimestamp),
     );
@@ -487,7 +493,7 @@ export class AgentImpl
       const result = await startRemoteControl(
         msg.sender,
         chatJid,
-        this.config.workdir,
+        this.config.workDir,
         this.config.dataDir,
       );
       if (result.ok) {
@@ -522,7 +528,7 @@ export class AgentImpl
 
     const isMainGroup = group.isMain === true;
     const sinceTimestamp = this.lastAgentTimestamp[chatJid] || '';
-    const missedMessages = getMessagesSince(
+    const missedMessages = this.db.getMessagesSince(
       chatJid,
       sinceTimestamp,
       this.config.assistantName,
@@ -632,7 +638,7 @@ export class AgentImpl
     const isMain = group.isMain === true;
     const sessionId = this.sessions[group.folder];
 
-    const tasks = getAllTasks();
+    const tasks = this.db.getAllTasks();
     writeTasksSnapshot(
       group.folder,
       isMain,
@@ -661,7 +667,7 @@ export class AgentImpl
       ? async (output: ContainerOutput) => {
           if (output.newSessionId) {
             this.sessions[group.folder] = output.newSessionId;
-            setSession(group.folder, output.newSessionId);
+            this.db.setSession(group.folder, output.newSessionId);
           }
           await onOutput(output);
         }
@@ -674,12 +680,15 @@ export class AgentImpl
           prompt,
           sessionId,
           groupFolder: group.folder,
+          workDir: this.config.workDir,
           chatJid,
           isMain,
           assistantName: this.config.assistantName,
           instanceName: this.name,
           groupsDir: this.config.groupsDir,
           dataDir: this.config.dataDir,
+          credentialResolver: this.config.credentials ?? undefined,
+          mountAllowlist: this.resolvedMountAllowlist,
         },
         this.runtimeConfig,
         (boxName, _containerName) =>
@@ -689,7 +698,7 @@ export class AgentImpl
 
       if (output.newSessionId) {
         this.sessions[group.folder] = output.newSessionId;
-        setSession(group.folder, output.newSessionId);
+        this.db.setSession(group.folder, output.newSessionId);
       }
 
       if (output.status === 'error') {
@@ -717,10 +726,10 @@ export class AgentImpl
       `Agent running (trigger: @${this.config.assistantName})`,
     );
 
-    while (true) {
+    while (!this._stopping) {
       try {
         const jids = Object.keys(this._registeredGroups);
-        const { messages, newTimestamp } = getNewMessages(
+        const { messages, newTimestamp } = this.db.getNewMessages(
           jids,
           this.lastTimestamp,
           this.config.assistantName,
@@ -764,7 +773,7 @@ export class AgentImpl
               if (!hasTrigger) continue;
             }
 
-            const allPending = getMessagesSince(
+            const allPending = this.db.getMessagesSince(
               chatJid,
               this.lastAgentTimestamp[chatJid] || '',
               this.config.assistantName,
@@ -796,15 +805,17 @@ export class AgentImpl
       } catch (err) {
         logger.error({ err, agent: this.name }, 'Error in message loop');
       }
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.runtimeConfig.pollInterval),
-      );
+      await new Promise<void>((resolve) => {
+        this._wakeLoop = resolve;
+        setTimeout(resolve, this.runtimeConfig.pollInterval);
+      });
+      this._wakeLoop = null;
     }
   }
 
   private recoverPendingMessages(): void {
     for (const [chatJid, group] of Object.entries(this._registeredGroups)) {
-      const pending = getMessagesSince(
+      const pending = this.db.getMessagesSince(
         chatJid,
         this.lastAgentTimestamp[chatJid] || '',
         this.config.assistantName,
@@ -824,7 +835,7 @@ export class AgentImpl
       throw new Error('Call start() before getAvailableGroups()');
     }
 
-    const chats = getAllChats();
+    const chats = this.db.getAllChats();
     const registeredJids = new Set(Object.keys(this._registeredGroups));
     return chats
       .filter((c) => c.jid !== '__group_sync__' && c.is_group)
@@ -841,14 +852,25 @@ export class AgentImpl
     this._registeredGroups = groups;
   }
 
+  /** @internal — test helper for injecting a database directly. */
+  _setDbForTests(testDb: AgentDb): void {
+    this.db = testDb;
+  }
+
   // ─── Subsystems ──────────────────────────────────────────────────
 
   private startSubsystems(): void {
-    startSchedulerLoop({
+    this.schedulerHandle = startSchedulerLoop({
       assistantName: this.config.assistantName,
       schedulerPollInterval: this.runtimeConfig.schedulerPollInterval,
       timezone: this.runtimeConfig.timezone,
       runtimeConfig: this.runtimeConfig,
+      db: this.db,
+      workDir: this.config.workDir,
+      groupsDir: this.config.groupsDir,
+      dataDir: this.config.dataDir,
+      credentialResolver: this.config.credentials ?? undefined,
+      mountAllowlist: this.resolvedMountAllowlist,
       registeredGroups: () => this._registeredGroups,
       getSessions: () => this.sessions,
       queue: this.queue,
@@ -865,10 +887,11 @@ export class AgentImpl
       },
     });
 
-    startIpcWatcher({
+    this.ipcHandle = startIpcWatcher({
       dataDir: this.config.dataDir,
       ipcPollInterval: this.runtimeConfig.ipcPollInterval,
       timezone: this.runtimeConfig.timezone,
+      db: this.db,
       sendMessage: (jid, text) => {
         const channel = findChannel(this.channelArray, jid);
         if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -885,7 +908,7 @@ export class AgentImpl
       writeGroupsSnapshot: (gf, im, ag, rj) =>
         writeGroupsSnapshot(gf, im, ag, rj, this.config.dataDir),
       onTasksChanged: () => {
-        const tasks = getAllTasks();
+        const tasks = this.db.getAllTasks();
         const taskRows = tasks.map((t) => ({
           id: t.id,
           groupFolder: t.group_folder,
@@ -910,7 +933,7 @@ export class AgentImpl
       this.processGroupMessages(chatJid),
     );
     this.recoverPendingMessages();
-    this.startMessageLoop().catch((err) => {
+    this._messageLoopPromise = this.startMessageLoop().catch((err) => {
       logger.fatal({ err, agent: this.name }, 'Message loop crashed');
       throw err;
     });

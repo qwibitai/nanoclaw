@@ -48,9 +48,9 @@ describe('Multi-agent isolation', () => {
     const alice = createAgent('alice');
     const bob = createAgent('bob');
 
-    expect(alice.config.workdir).toContain('alice');
-    expect(bob.config.workdir).toContain('bob');
-    expect(alice.config.workdir).not.toBe(bob.config.workdir);
+    expect(alice.config.workDir).toContain('alice');
+    expect(bob.config.workDir).toContain('bob');
+    expect(alice.config.workDir).not.toBe(bob.config.workDir);
     expect(alice.config.storeDir).not.toBe(bob.config.storeDir);
     expect(alice.config.groupsDir).not.toBe(bob.config.groupsDir);
     expect(alice.config.dataDir).not.toBe(bob.config.dataDir);
@@ -95,7 +95,7 @@ describe('Multi-agent isolation', () => {
     expect(bob.config.assistantName).toBe('Andy');
 
     // But paths are different
-    expect(alice.config.workdir).not.toBe(bob.config.workdir);
+    expect(alice.config.workDir).not.toBe(bob.config.workDir);
   });
 
   it('custom assistant names per agent', () => {
