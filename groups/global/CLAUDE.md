@@ -54,3 +54,46 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 - Suggest restructuring with a script that checks the condition first
 - If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
 - Help the user find the minimum viable frequency
+
+---
+
+## Files
+
+Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
+
+## Memory
+
+The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+
+When you learn something important:
+- Create files for structured data (e.g., `customers.md`, `preferences.md`)
+- Split files larger than 500 lines into folders
+- Keep an index in your memory for the files you create
+
+## Message Formatting
+
+Format messages based on the channel you're responding to. Check your group folder name:
+
+### Slack channels (folder starts with `slack_`)
+
+Use Slack mrkdwn syntax. Key rules:
+- `*bold*` (single asterisks)
+- `_italic_` (underscores)
+- `<https://url|link text>` for links (NOT `[text](url)`)
+- `•` bullets (no numbered lists)
+- `:emoji:` shortcodes
+- `>` for block quotes
+- No `##` headings — use `*Bold text*` instead
+
+### WhatsApp/Telegram channels (folder starts with `whatsapp_` or `telegram_`)
+
+- `*bold*` (single asterisks, NEVER **double**)
+- `_italic_` (underscores)
+- `•` bullet points
+- ` ``` ` code blocks
+
+No `##` headings. No `[links](url)`. No `**double stars**`.
+
+### Discord channels (folder starts with `discord_`)
+
+Standard Markdown works: `**bold**`, `*italic*`, `[links](url)`, `# headings`.

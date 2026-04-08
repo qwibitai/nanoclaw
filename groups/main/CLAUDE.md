@@ -43,15 +43,33 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Message Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
-- _Italic_ (underscores)
-- • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+Format messages based on the channel. Check the group folder name prefix:
 
-Keep messages clean and readable for WhatsApp.
+### Slack channels (folder starts with `slack_`)
+
+Use Slack mrkdwn syntax. Run `/slack-formatting` for the full reference. Key rules:
+- `*bold*` (single asterisks)
+- `_italic_` (underscores)
+- `<https://url|link text>` for links (NOT `[text](url)`)
+- `•` bullets (no numbered lists)
+- `:emoji:` shortcodes like `:white_check_mark:`, `:rocket:`
+- `>` for block quotes
+- No `##` headings — use `*Bold text*` instead
+
+### WhatsApp/Telegram (folder starts with `whatsapp_` or `telegram_`)
+
+- `*bold*` (single asterisks, NEVER **double**)
+- `_italic_` (underscores)
+- `•` bullet points
+- ` ``` ` code blocks
+
+No `##` headings. No `[links](url)`. No `**double stars**`.
+
+### Discord (folder starts with `discord_`)
+
+Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 ---
 
@@ -65,15 +83,16 @@ Anthropic credentials must be either an API key from console.anthropic.com (`ANT
 
 ## Container Mounts
 
-Main has read-only access to the project and read-write access to its group folder:
+Main has read-only access to the project, read-write access to the store (SQLite DB), and read-write access to its group folder:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
+| `/workspace/project/store` | `store/` | read-write |
 | `/workspace/group` | `groups/main/` | read-write |
 
 Key paths inside the container:
-- `/workspace/project/store/messages.db` - SQLite database
+- `/workspace/project/store/messages.db` - SQLite database (read-write)
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
 
@@ -154,10 +173,11 @@ Fields:
 ### Adding a Group
 
 1. Query the database to find the group's JID
-2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
-3. Optionally include `containerConfig` for additional mounts
-4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
-5. Optionally create an initial `CLAUDE.md` for the group
+2. Ask the user whether the group should require a trigger word before registering
+3. Use the `register_group` MCP tool with the JID, name, folder, trigger, and the chosen `requiresTrigger` setting
+4. Optionally include `containerConfig` for additional mounts
+5. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
+6. Optionally create an initial `CLAUDE.md` for the group
 
 Folder naming convention — channel prefix with underscore separator:
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
@@ -238,7 +258,7 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ## Global Memory
 
-You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+You can read and write to `/workspace/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
 
 ---
 
