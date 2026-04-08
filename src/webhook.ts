@@ -57,7 +57,8 @@ export function startWebhookServer(
         let parsed: { text?: unknown };
         try {
           parsed = JSON.parse(body) as { text?: unknown };
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err;
           jsonResponse(res, 400, { error: 'Invalid JSON' });
           return;
         }

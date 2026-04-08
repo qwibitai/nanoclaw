@@ -17,8 +17,8 @@ export function syncSkills(srcDir: string, dstDir: string): void {
     const dst = path.join(dstDir, entry);
     try {
       fs.cpSync(src, dst, { recursive: true });
-    } catch (err: any) {
-      if (err?.code !== 'EACCES') throw err;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EACCES') throw err;
       fs.rmSync(dst, { recursive: true, force: true });
       fs.cpSync(src, dst, { recursive: true });
     }

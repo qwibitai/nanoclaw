@@ -283,9 +283,9 @@ describe('stripInternalTags', () => {
   });
 
   it('strips complete pair + trailing unclosed tag', () => {
-    expect(
-      stripInternalTags('<internal>a</internal>hello<internal>b'),
-    ).toBe('hello');
+    expect(stripInternalTags('<internal>a</internal>hello<internal>b')).toBe(
+      'hello',
+    );
   });
 
   it('returns empty string when text is only unclosed internal tag', () => {
