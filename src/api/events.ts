@@ -18,31 +18,46 @@ export interface AgentEvents extends Record<string, any[]> {
 
 /** A group was registered with the agent. */
 export interface GroupRegisteredEvent {
+  /** Stable group/chat identifier from the channel. */
   jid: string;
+  /** Human-readable group name. */
   name: string;
+  /** Folder name for group data. */
   folder: string;
 }
 
 /** Inbound message received from a user. */
 export interface MessageInEvent {
+  /** Group/chat identifier where the message originated. */
   jid: string;
+  /** Display name of the sender. */
   sender: string;
+  /** Message text content. */
   text: string;
+  /** ISO timestamp when the message was received. */
   timestamp: string;
 }
 
 /** Outbound message sent by the agent. */
 export interface MessageOutEvent {
+  /** Group/chat identifier where the message was sent. */
   jid: string;
+  /** Message text content. */
   text: string;
+  /** ISO timestamp when the message was sent. */
   timestamp: string;
 }
 
 /** Chat/group metadata discovered from a channel. */
 export interface ChatMetadataEvent {
+  /** Group/chat identifier. */
   jid: string;
+  /** ISO timestamp of the metadata update. */
   timestamp: string;
+  /** Human-readable chat/group name, if available. */
   name?: string;
+  /** Channel key that discovered this metadata (e.g. 'telegram'). */
   channel?: string;
+  /** Whether this is a group chat (vs. a direct message). */
   isGroup?: boolean;
 }

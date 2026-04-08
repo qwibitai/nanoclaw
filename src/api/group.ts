@@ -64,4 +64,6 @@ export interface RegisterGroupOptions {
   containerConfig?: ContainerConfig;
   /** Whether a trigger is required to activate. Default: true. */
   requiresTrigger?: boolean;
+  /** Mark as the main control group — elevated privileges (no trigger required, can register other groups via IPC). At most one per agent. */
+  isMain?: boolean;
 }
