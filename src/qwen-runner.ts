@@ -72,7 +72,12 @@ export async function runContainerAgent(
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
 
-  const args: string[] = ['--output-format', 'stream-json', '--approval-mode', 'yolo'];
+  const args: string[] = [
+    '--output-format',
+    'stream-json',
+    '--approval-mode',
+    'yolo',
+  ];
 
   if (input.sessionId) {
     args.push('--resume', input.sessionId);
@@ -88,122 +93,157 @@ export async function runContainerAgent(
   const procName = `qwen-${group.folder}`;
 
   logger.info(
-    { group: group.name, procName, sessionId: input.sessionId, isMain: input.isMain },
+    {
+      group: group.name,
+      procName,
+      sessionId: input.sessionId,
+      isMain: input.isMain,
+    },
     'Spawning Qwen agent',
   );
 
-  return new Promise((resolve) => {
-    const proc = spawn(QWEN_BIN, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      cwd: groupDir,
-    });
+  const spawnQwen = (spawnArgs: string[]): Promise<ContainerOutput> =>
+    new Promise((resolve) => {
+      const proc = spawn(QWEN_BIN, spawnArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: groupDir,
+      });
 
-    onProcess(proc, procName);
+      onProcess(proc, procName);
 
-    let stdout = '';
-    let stdoutTruncated = false;
-    let newSessionId: string | undefined;
-    let hadOutput = false;
-    let outputChain = Promise.resolve();
+      let stdout = '';
+      let stdoutTruncated = false;
+      let newSessionId: string | undefined;
+      let hadOutput = false;
+      let outputChain = Promise.resolve();
 
-    proc.stdout.on('data', (data: Buffer) => {
-      const chunk = data.toString();
+      proc.stdout.on('data', (data: Buffer) => {
+        const chunk = data.toString();
 
-      if (!stdoutTruncated) {
-        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
-        if (chunk.length > remaining) {
-          stdout += chunk.slice(0, remaining);
-          stdoutTruncated = true;
-          logger.warn({ group: group.name }, 'Qwen stdout truncated due to size limit');
-        } else {
-          stdout += chunk;
-        }
-      }
-
-      // Parse stream-json lines looking for the result event
-      for (const line of chunk.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const msg = JSON.parse(trimmed);
-          if (msg.type === 'result') {
-            newSessionId = msg.session_id;
-            hadOutput = true;
-            resetTimeout();
-            if (onOutput) {
-              const output: ContainerOutput = {
-                status: msg.is_error ? 'error' : 'success',
-                result: msg.result ?? null,
-                newSessionId: msg.session_id,
-                ...(msg.is_error && { error: msg.result ?? 'Qwen error' }),
-              };
-              outputChain = outputChain.then(() => onOutput(output));
-            }
+        if (!stdoutTruncated) {
+          const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+          if (chunk.length > remaining) {
+            stdout += chunk.slice(0, remaining);
+            stdoutTruncated = true;
+            logger.warn(
+              { group: group.name },
+              'Qwen stdout truncated due to size limit',
+            );
+          } else {
+            stdout += chunk;
           }
-        } catch {
-          // Non-JSON stdout lines are normal (debug output) — ignore
         }
-      }
-    });
 
-    proc.stderr.on('data', (data: Buffer) => {
-      for (const line of data.toString().trim().split('\n')) {
-        if (line) logger.debug({ group: group.folder }, line);
-      }
-    });
+        // Parse stream-json lines looking for the result event
+        for (const line of chunk.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const msg = JSON.parse(trimmed);
+            if (msg.type === 'result') {
+              newSessionId = msg.session_id;
+              hadOutput = true;
+              resetTimeout();
+              if (onOutput) {
+                const output: ContainerOutput = {
+                  status: msg.is_error ? 'error' : 'success',
+                  result: msg.result ?? null,
+                  newSessionId: msg.session_id,
+                  ...(msg.is_error && { error: msg.result ?? 'Qwen error' }),
+                };
+                outputChain = outputChain.then(() => onOutput(output));
+              }
+            }
+          } catch {
+            // Non-JSON stdout lines are normal (debug output) — ignore
+          }
+        }
+      });
 
-    let timedOut = false;
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+      proc.stderr.on('data', (data: Buffer) => {
+        for (const line of data.toString().trim().split('\n')) {
+          if (line) logger.debug({ group: group.folder }, line);
+        }
+      });
 
-    const killOnTimeout = () => {
-      timedOut = true;
-      logger.error({ group: group.name, procName }, 'Qwen agent timed out, killing');
-      proc.kill('SIGKILL');
-    };
+      let timedOut = false;
+      const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+      const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
-    const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
-    };
+      const killOnTimeout = () => {
+        timedOut = true;
+        logger.error(
+          { group: group.name, procName },
+          'Qwen agent timed out, killing',
+        );
+        proc.kill('SIGKILL');
+      };
 
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-      const duration = Date.now() - startTime;
+      let timeout = setTimeout(killOnTimeout, timeoutMs);
+      const resetTimeout = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(killOnTimeout, timeoutMs);
+      };
 
-      outputChain.then(() => {
-        if (timedOut) {
-          // If output was already sent, treat as idle cleanup (not failure)
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        const duration = Date.now() - startTime;
+
+        outputChain.then(() => {
+          if (timedOut) {
+            // If output was already sent, treat as idle cleanup (not failure)
+            if (hadOutput) {
+              resolve({ status: 'success', result: null, newSessionId });
+            } else {
+              resolve({
+                status: 'error',
+                result: null,
+                error: `Qwen agent timed out after ${Math.round(duration / 1000)}s`,
+              });
+            }
+            return;
+          }
+
           if (hadOutput) {
             resolve({ status: 'success', result: null, newSessionId });
-          } else {
+          } else if (
+            code !== 0 &&
+            stdout.includes('No saved session found with ID')
+          ) {
+            // Stale session ID from previous backend (Claude Code → Qwen migration).
+            // Signal the caller to retry without --resume.
+            resolve({ status: 'error', result: null, error: 'stale-session' });
+          } else if (code !== 0) {
+            logger.error(
+              { group: group.name, code, tail: stdout.slice(-1000) },
+              'Qwen exited with error, no output received',
+            );
             resolve({
               status: 'error',
               result: null,
-              error: `Qwen agent timed out after ${Math.round(duration / 1000)}s`,
+              error: `Qwen exited with code ${code}`,
             });
+          } else {
+            // Clean exit with no result event — treat as silent success
+            resolve({ status: 'success', result: null, newSessionId });
           }
-          return;
-        }
-
-        if (hadOutput) {
-          resolve({ status: 'success', result: null, newSessionId });
-        } else if (code !== 0) {
-          logger.error(
-            { group: group.name, code, tail: stdout.slice(-1000) },
-            'Qwen exited with error, no output received',
-          );
-          resolve({
-            status: 'error',
-            result: null,
-            error: `Qwen exited with code ${code}`,
-          });
-        } else {
-          // Clean exit with no result event — treat as silent success
-          resolve({ status: 'success', result: null, newSessionId });
-        }
+        });
       });
     });
-  });
+
+  const result = await spawnQwen(args);
+
+  // If the session ID was stale (e.g. leftover from Claude Code), retry fresh.
+  if (result.error === 'stale-session') {
+    logger.warn(
+      { group: group.name, sessionId: input.sessionId },
+      'Stale session ID detected, retrying without --resume',
+    );
+    const freshArgs = args.filter(
+      (a, i, arr) => a !== '--resume' && arr[i - 1] !== '--resume',
+    );
+    return spawnQwen(freshArgs);
+  }
+
+  return result;
 }
