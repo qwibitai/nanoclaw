@@ -125,7 +125,7 @@ Skills we'd like to see:
 
 - macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
-- [Claude Code](https://claude.ai/download)
+- [Claude Code](https://claude.ai/download) or any LLM with container access
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
 ## Architecture
