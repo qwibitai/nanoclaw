@@ -7,12 +7,7 @@
  *   - Optional:    SIGNAL_CLI_URL  (default: http://127.0.0.1:8080)
  */
 
-import fs from 'fs';
-import path from 'path';
-
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
-import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -27,6 +22,157 @@ const SIGNAL_POLL_INTERVAL = 2000;
 
 /** Signal has no hard limit, but keep chunks reasonable. */
 const SIGNAL_MAX_MESSAGE_LENGTH = 4000;
+
+// ---------- Markdown → Signal native textStyle conversion ----------
+
+/**
+ * Signal text style range: { style, start, length }.
+ * signal-cli JSON-RPC accepts these as the `textStyle` param,
+ * formatted as "start:length:STYLE".
+ */
+interface SignalTextStyle {
+  style: 'BOLD' | 'ITALIC' | 'MONOSPACE' | 'STRIKETHROUGH' | 'SPOILER';
+  start: number;
+  length: number;
+}
+
+/**
+ * Strip markdown markers and produce Signal-native textStyle ranges.
+ *
+ * Handles (in priority order):
+ *   ```code blocks``` → MONOSPACE (fenced, multi-line)
+ *   `inline code`     → MONOSPACE
+ *   **bold**          → BOLD
+ *   *bold*            → BOLD  (single asterisk = bold in Signal convention)
+ *   _italic_          → ITALIC
+ *   ~~strikethrough~~ → STRIKETHROUGH
+ *   ||spoiler||       → SPOILER
+ *
+ * Code blocks are processed first and their interiors are protected from
+ * further marker substitution.
+ */
+function parseSignalStyles(input: string): {
+  text: string;
+  textStyle: SignalTextStyle[];
+} {
+  const styles: SignalTextStyle[] = [];
+
+  // Track protected ranges (code blocks) so we don't double-parse inside them
+  const protectedRanges: Array<{ start: number; end: number }> = [];
+
+  // Phase 1: Strip fenced code blocks  ```...```
+  let text = input.replace(
+    /```(?:\w*\n)?([\s\S]*?)```/g,
+    (_match, code: string, offset: number) => {
+      // We'll fix offsets after all replacements — collect raw for now
+      return `\x00FENCED\x00${code}\x00ENDFENCED\x00`;
+    },
+  );
+
+  // Phase 2: Strip inline code  `...`
+  text = text.replace(/`([^`]+)`/g, (_match, code: string) => {
+    return `\x00INLINE\x00${code}\x00ENDINLINE\x00`;
+  });
+
+  // Phase 3: Process non-code markers in order
+  // Bold: **text** or *text* (Signal uses single * for bold, unlike Markdown)
+  // Italic: _text_
+  // Strikethrough: ~~text~~
+  // Spoiler: ||text||
+  const markerPatterns: Array<{
+    regex: RegExp;
+    style: SignalTextStyle['style'];
+  }> = [
+    { regex: /\*\*(.+?)\*\*/g, style: 'BOLD' },
+    { regex: /\*(.+?)\*/g, style: 'BOLD' },
+    { regex: /_(.+?)_/g, style: 'ITALIC' },
+    { regex: /~~(.+?)~~/g, style: 'STRIKETHROUGH' },
+    { regex: /\|\|(.+?)\|\|/g, style: 'SPOILER' },
+  ];
+
+  for (const { regex, style } of markerPatterns) {
+    // Rebuild text after each marker pass so offsets stay correct
+    let result = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    const localRegex = new RegExp(regex.source, regex.flags);
+
+    while ((match = localRegex.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const inner = match[1];
+      const matchStart = match.index;
+
+      // Skip if inside a protected sentinel range
+      const inProtected = fullMatch.includes('\x00');
+      if (inProtected) continue;
+
+      result += text.slice(lastIndex, matchStart);
+      const styleStart = result.length;
+      result += inner;
+      styles.push({ style, start: styleStart, length: inner.length });
+      lastIndex = matchStart + fullMatch.length;
+    }
+
+    result += text.slice(lastIndex);
+    text = result;
+  }
+
+  // Phase 4: Restore code blocks with MONOSPACE styles
+  // Fenced blocks
+  text = text.replace(
+    /\x00FENCED\x00([\s\S]*?)\x00ENDFENCED\x00/g,
+    (_match, code: string) => {
+      // We need the offset in the current text — use a placeholder approach
+      return `\x00CODEFINAL\x00${code}\x00ENDCODEFINAL\x00`;
+    },
+  );
+
+  // Inline code
+  text = text.replace(
+    /\x00INLINE\x00([\s\S]*?)\x00ENDINLINE\x00/g,
+    (_match, code: string) => {
+      return `\x00CODEFINAL\x00${code}\x00ENDCODEFINAL\x00`;
+    },
+  );
+
+  // Final pass: extract code positions and remove sentinels
+  let finalText = '';
+  let i = 0;
+  const SENTINEL_START = '\x00CODEFINAL\x00';
+  const SENTINEL_END = '\x00ENDCODEFINAL\x00';
+
+  while (i < text.length) {
+    const startIdx = text.indexOf(SENTINEL_START, i);
+    if (startIdx === -1) {
+      finalText += text.slice(i);
+      break;
+    }
+
+    finalText += text.slice(i, startIdx);
+    const contentStart = startIdx + SENTINEL_START.length;
+    const endIdx = text.indexOf(SENTINEL_END, contentStart);
+    if (endIdx === -1) {
+      // Malformed — just dump the rest
+      finalText += text.slice(startIdx);
+      break;
+    }
+
+    const code = text.slice(contentStart, endIdx);
+    const styleStart = finalText.length;
+    finalText += code;
+    styles.push({ style: 'MONOSPACE', start: styleStart, length: code.length });
+    i = endIdx + SENTINEL_END.length;
+  }
+
+  return { text: finalText, textStyle: styles };
+}
+
+/**
+ * Convert SignalTextStyle array to signal-cli's string format: "start:length:STYLE"
+ */
+function formatTextStyles(styles: SignalTextStyle[]): string[] {
+  return styles.map((s) => `${s.start}:${s.length}:${s.style}`);
+}
 
 // ---------- signal-cli envelope types ----------
 
@@ -156,21 +302,25 @@ export class SignalChannel implements Channel {
     try {
       const chunks = this.splitMessage(text);
 
-      if (this.isGroupJid(jid)) {
-        const groupId = jid.replace('signal:group:', '');
-        for (const chunk of chunks) {
-          await this.rpc('sendGroupMessage', {
-            groupId,
-            message: chunk,
-          });
+      for (const chunk of chunks) {
+        const { text: plainText, textStyle } = parseSignalStyles(chunk);
+        const styleStrings = formatTextStyles(textStyle);
+
+        const params: Record<string, unknown> = {
+          message: plainText,
+        };
+
+        // Only include textStyle if there are styles to apply
+        if (styleStrings.length > 0) {
+          params.textStyle = styleStrings;
         }
-      } else {
-        const recipient = jid.replace('signal:', '');
-        for (const chunk of chunks) {
-          await this.rpc('send', {
-            recipient: [recipient],
-            message: chunk,
-          });
+
+        if (this.isGroupJid(jid)) {
+          params.groupId = jid.replace('signal:group:', '');
+          await this.rpc('sendGroupMessage', params);
+        } else {
+          params.recipient = [jid.replace('signal:', '')];
+          await this.rpc('send', params);
         }
       }
 
@@ -378,8 +528,7 @@ export class SignalChannel implements Channel {
 
 registerChannel('signal', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['SIGNAL_ACCOUNT', 'SIGNAL_CLI_URL']);
-  const account =
-    process.env.SIGNAL_ACCOUNT || envVars.SIGNAL_ACCOUNT || '';
+  const account = process.env.SIGNAL_ACCOUNT || envVars.SIGNAL_ACCOUNT || '';
   const baseUrl =
     process.env.SIGNAL_CLI_URL ||
     envVars.SIGNAL_CLI_URL ||
