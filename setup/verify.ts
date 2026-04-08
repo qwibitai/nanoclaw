@@ -106,6 +106,21 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
+  // Check OneCLI gateway health if configured
+  let gatewayHealth = 'not_checked';
+  if (credentials === 'configured') {
+    try {
+      const health = execSync('curl -sf -m 5 http://127.0.0.1:10254/api/health', {
+        encoding: 'utf-8',
+        timeout: 10000,
+      });
+      gatewayHealth = health.includes('"ok"') ? 'healthy' : 'unhealthy';
+    } catch {
+      gatewayHealth = 'unreachable';
+      logger.warn('OneCLI gateway is not reachable at http://127.0.0.1:10254');
+    }
+  }
+
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
     'TELEGRAM_BOT_TOKEN',
@@ -180,6 +195,7 @@ export async function run(_args: string[]): Promise<void> {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
     CREDENTIALS: credentials,
+    GATEWAY_HEALTH: gatewayHealth,
     CONFIGURED_CHANNELS: configuredChannels.join(','),
     CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,

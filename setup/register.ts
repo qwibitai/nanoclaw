@@ -22,6 +22,7 @@ interface RegisterArgs {
   requiresTrigger: boolean;
   isMain: boolean;
   assistantName: string;
+  dedicatedNumber: boolean;
 }
 
 function parseArgs(args: string[]): RegisterArgs {
@@ -34,6 +35,7 @@ function parseArgs(args: string[]): RegisterArgs {
     requiresTrigger: true,
     isMain: false,
     assistantName: 'Andy',
+    dedicatedNumber: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -61,6 +63,9 @@ function parseArgs(args: string[]): RegisterArgs {
         break;
       case '--assistant-name':
         result.assistantName = args[++i] || 'Andy';
+        break;
+      case '--dedicated-number':
+        result.dedicatedNumber = true;
         break;
     }
   }
@@ -174,17 +179,38 @@ export async function run(args: string[]): Promise<void> {
       if (envContent.includes('ASSISTANT_NAME=')) {
         envContent = envContent.replace(
           /^ASSISTANT_NAME=.*$/m,
-          `ASSISTANT_NAME="${parsed.assistantName}"`,
+          `ASSISTANT_NAME=${parsed.assistantName}`,
         );
       } else {
-        envContent += `\nASSISTANT_NAME="${parsed.assistantName}"`;
+        envContent += `\nASSISTANT_NAME=${parsed.assistantName}\n`;
       }
       fs.writeFileSync(envFile, envContent);
     } else {
-      fs.writeFileSync(envFile, `ASSISTANT_NAME="${parsed.assistantName}"\n`);
+      fs.writeFileSync(envFile, `ASSISTANT_NAME=${parsed.assistantName}\n`);
     }
     logger.info('Set ASSISTANT_NAME in .env');
     nameUpdated = true;
+  }
+
+  // Set ASSISTANT_HAS_OWN_NUMBER for dedicated phone numbers
+  if (parsed.dedicatedNumber) {
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      let envContent = fs.readFileSync(envFile, 'utf-8');
+      if (envContent.includes('ASSISTANT_HAS_OWN_NUMBER=')) {
+        envContent = envContent.replace(
+          /^ASSISTANT_HAS_OWN_NUMBER=.*$/m,
+          'ASSISTANT_HAS_OWN_NUMBER=true',
+        );
+      } else {
+        if (!envContent.endsWith('\n')) envContent += '\n';
+        envContent += 'ASSISTANT_HAS_OWN_NUMBER=true\n';
+      }
+      fs.writeFileSync(envFile, envContent);
+    } else {
+      fs.writeFileSync(envFile, 'ASSISTANT_HAS_OWN_NUMBER=true\n');
+    }
+    logger.info('Set ASSISTANT_HAS_OWN_NUMBER=true in .env');
   }
 
   emitStatus('REGISTER_CHANNEL', {
