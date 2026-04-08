@@ -156,6 +156,15 @@ async function readStdin(): Promise<string> {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+/** Strip <internal> tags, including unclosed tags during streaming. */
+function stripInternalTags(text: string): string {
+  return text
+    .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+    .replace(/<internal>[\s\S]*$/g, '')
+    .replace(/<int(?:e(?:r(?:n(?:a(?:l)?)?)?)?)?$/g, '')
+    .trim();
+}
+
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
@@ -650,9 +659,7 @@ async function runQuery(
         const fullText = completedTurnsText
           ? completedTurnsText + '\n\n' + streamingTextBuffer
           : streamingTextBuffer;
-        const visible = fullText
-          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-          .trim();
+        const visible = stripInternalTags(fullText);
         if (visible) {
           writeOutput({ status: 'success', result: visible, partial: true, newSessionId });
         }

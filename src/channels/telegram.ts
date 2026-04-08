@@ -37,7 +37,7 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getStatus: () => StatusInfo;
   sendIpcMessage: (chatJid: string, text: string) => boolean;
-  clearSession: (groupFolder: string) => void;
+  clearSession: (groupFolder: string, chatJid: string) => void;
 }
 
 /**

@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripInternalTags } from './router.js';
+import { createStreamEditLoop } from './stream-edit-loop.js';
 
 /**
  * Tests for duplicate output suppression and streaming logic in the
@@ -27,7 +29,7 @@ describe('host-side output dedup', () => {
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        const text = stripInternalTags(raw);
         if (result.partial) continue; // partials handled in streaming tests
         if (text && text !== lastSentText) {
           sendMessage(text);
@@ -123,7 +125,7 @@ describe('host-side output dedup', () => {
 });
 
 describe('streaming output', () => {
-  const EDIT_THROTTLE_MS = 1500;
+  const EDIT_THROTTLE_MS = 1000;
 
   interface StreamChannel {
     sendStreamMessage: (jid: string, text: string) => number | null;
@@ -154,7 +156,7 @@ describe('streaming output', () => {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const text = stripInternalTags(raw);
       const now = result.time ?? lastEditTime + EDIT_THROTTLE_MS + 1;
 
       if (result.partial) {
@@ -197,7 +199,11 @@ describe('streaming output', () => {
       // Final result
       if (streamMessageId !== null) {
         if (text && text !== lastSentText) {
-          if (!streamingFailed && text.length <= 4096 && !options?.hasPendingMessages) {
+          if (
+            !streamingFailed &&
+            text.length <= 4096 &&
+            !options?.hasPendingMessages
+          ) {
             channel.editMessage('jid', streamMessageId, text);
           } else {
             channel.sendMessage('jid', text);
@@ -271,10 +277,10 @@ describe('streaming output', () => {
     simulateStreamingOutput(
       [
         { result: 'Hello', partial: true, time: 0 },
-        { result: 'Hello w', partial: true, time: 500 }, // throttled
-        { result: 'Hello wor', partial: true, time: 1000 }, // throttled
-        { result: 'Hello world', partial: true, time: 2000 }, // sent
-        { result: 'Hello world!', partial: false, time: 4000 },
+        { result: 'Hello w', partial: true, time: 300 }, // throttled
+        { result: 'Hello wor', partial: true, time: 700 }, // throttled
+        { result: 'Hello world', partial: true, time: 1500 }, // sent
+        { result: 'Hello world!', partial: false, time: 3000 },
       ],
       channel,
     );
@@ -473,7 +479,10 @@ describe('streaming output', () => {
     // Second partial triggers pending check → streamingFailed, no edit
     expect(channel.editMessage).not.toHaveBeenCalled();
     // Final uses sendMessage because streamingFailed
-    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Complete response');
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'jid',
+      'Complete response',
+    );
     expect(outputSentToUser).toBe(true);
   });
 
@@ -514,6 +523,171 @@ describe('streaming output', () => {
     expect(outputSentToUser).toBe(true);
     expect(channel.editMessage).not.toHaveBeenCalled();
     expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('reduced throttle (1000ms) allows edits that 1500ms would have blocked', () => {
+    const channel = makeChannel();
+
+    // At 1200ms gap: would be blocked by old 1500ms throttle, allowed by new 1000ms
+    simulateStreamingOutput(
+      [
+        { result: 'First chunk', partial: true, time: 0 },
+        { result: 'Second chunk', partial: true, time: 1200 },
+        { result: 'Final', partial: false, time: 3000 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2); // partial edit + final edit
+  });
+});
+
+describe('typing keepalive across queries (#26)', () => {
+  interface TypingChannel {
+    sendStreamMessage: (jid: string, text: string) => number | null;
+    editMessage: (jid: string, messageId: number, text: string) => void;
+    sendMessage: (jid: string, text: string) => void;
+    setTyping: (jid: string, typing: boolean) => void;
+  }
+
+  /**
+   * Replicates the typing keepalive logic from processGroupMessages.
+   * Tracks typingActive state across multiple queries.
+   */
+  function simulateMultiQueryWithTyping(
+    results: Array<{ result: string | null; partial?: boolean; time?: number }>,
+    channel: TypingChannel,
+  ): { typingActiveAtEnd: boolean } {
+    const EDIT_THROTTLE_MS = 1000;
+    let lastSentText: string | null = null;
+    let streamMessageId: number | null = null;
+    let lastEditTime = 0;
+    let streamingFailed = false;
+    let typingActive = true;
+
+    channel.setTyping('jid', true); // initial typing
+
+    for (const result of results) {
+      if (!result.result) continue;
+
+      const raw =
+        typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result);
+      const text = stripInternalTags(raw);
+      const now = result.time ?? lastEditTime + EDIT_THROTTLE_MS + 1;
+
+      if (result.partial) {
+        // Re-enable typing if it was paused after a previous query's final result (#26)
+        if (!typingActive) {
+          typingActive = true;
+          channel.setTyping('jid', true);
+        }
+        if (!text || streamingFailed) continue;
+
+        if (streamMessageId === null) {
+          const resolvedId = channel.sendStreamMessage('jid', text);
+          if (resolvedId === null) {
+            streamingFailed = true;
+            continue;
+          }
+          streamMessageId = resolvedId;
+          lastEditTime = now;
+          lastSentText = text;
+        } else {
+          if (now - lastEditTime < EDIT_THROTTLE_MS) continue;
+          if (text === lastSentText) continue;
+          channel.editMessage('jid', streamMessageId, text);
+          lastEditTime = now;
+          lastSentText = text;
+        }
+        continue;
+      }
+
+      // Final result — pause typing
+      typingActive = false;
+
+      if (streamMessageId !== null) {
+        if (text && text !== lastSentText) {
+          channel.editMessage('jid', streamMessageId, text);
+        }
+        lastSentText = text;
+      } else if (text && text !== lastSentText) {
+        channel.sendMessage('jid', text);
+        lastSentText = text;
+      }
+
+      // Reset streaming state for next IPC query
+      streamMessageId = null;
+      lastEditTime = 0;
+      streamingFailed = false;
+      lastSentText = null;
+    }
+
+    return { typingActiveAtEnd: typingActive };
+  }
+
+  function makeTypingChannel(): TypingChannel {
+    return {
+      sendStreamMessage: vi.fn(() => 42),
+      editMessage: vi.fn(),
+      sendMessage: vi.fn(),
+      setTyping: vi.fn(),
+    };
+  }
+
+  it('re-enables typing when second query partial arrives after first query final', () => {
+    const channel = makeTypingChannel();
+
+    simulateMultiQueryWithTyping(
+      [
+        // Query 1
+        { result: 'Q1 partial', partial: true, time: 0 },
+        { result: 'Q1 final', partial: false, time: 2000 },
+        // Query 2
+        { result: 'Q2 partial', partial: true, time: 5000 },
+        { result: 'Q2 final', partial: false, time: 7000 },
+      ],
+      channel,
+    );
+
+    const setTypingCalls = (channel.setTyping as ReturnType<typeof vi.fn>).mock
+      .calls;
+    // Initial typing(true), then typing re-enabled on Q2's first partial
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typingTrueCalls = setTypingCalls.filter((c: any) => c[1] === true);
+    expect(typingTrueCalls.length).toBe(2); // initial + Q2 resume
+  });
+
+  it('typingActive is false between queries (idle)', () => {
+    const channel = makeTypingChannel();
+
+    const { typingActiveAtEnd } = simulateMultiQueryWithTyping(
+      [
+        { result: 'Partial', partial: true, time: 0 },
+        { result: 'Final', partial: false, time: 2000 },
+        // No more queries — simulates idle
+      ],
+      channel,
+    );
+
+    expect(typingActiveAtEnd).toBe(false);
+  });
+
+  it('typingActive stays true during streaming partials', () => {
+    const channel = makeTypingChannel();
+
+    const { typingActiveAtEnd } = simulateMultiQueryWithTyping(
+      [
+        { result: 'Partial 1', partial: true, time: 0 },
+        { result: 'Partial 2', partial: true, time: 2000 },
+        // Still streaming — no final yet
+      ],
+      channel,
+    );
+
+    expect(typingActiveAtEnd).toBe(true);
   });
 });
 
@@ -563,9 +737,7 @@ describe('agent-runner streaming buffer', () => {
           const fullText = completedTurnsText
             ? completedTurnsText + '\n\n' + streamingTextBuffer
             : streamingTextBuffer;
-          const visible = fullText
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
+          const visible = stripInternalTags(fullText);
           if (visible) {
             writeOutput({ result: visible, partial: true });
           }
@@ -770,9 +942,7 @@ describe('agent-runner streaming buffer', () => {
             const fullText = completedTurnsText
               ? completedTurnsText + '\n\n' + streamingTextBuffer
               : streamingTextBuffer;
-            const visible = fullText
-              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-              .trim();
+            const visible = stripInternalTags(fullText);
             if (visible) {
               onOutput({ result: visible, partial: true });
             }
@@ -861,9 +1031,7 @@ describe('agent-runner streaming buffer', () => {
             const fullText = completedTurnsText
               ? completedTurnsText + '\n\n' + streamingTextBuffer
               : streamingTextBuffer;
-            const visible = fullText
-              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-              .trim();
+            const visible = stripInternalTags(fullText);
             if (visible) {
               onOutput({ result: visible, partial: true });
             }
@@ -1054,9 +1222,7 @@ describe('agent-runner streaming buffer', () => {
             const fullText = completedTurnsText
               ? completedTurnsText + '\n\n' + streamingTextBuffer
               : streamingTextBuffer;
-            const visible = fullText
-              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-              .trim();
+            const visible = stripInternalTags(fullText);
             if (visible) {
               onOutput({ result: visible, partial: true });
             }
@@ -1161,9 +1327,7 @@ describe('agent-runner streaming buffer', () => {
             const fullText = completedTurnsText
               ? completedTurnsText + '\n\n' + streamingTextBuffer
               : streamingTextBuffer;
-            const visible = fullText
-              .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-              .trim();
+            const visible = stripInternalTags(fullText);
             if (visible) {
               onOutput({ result: visible, partial: true });
             }
@@ -1220,5 +1384,333 @@ describe('agent-runner streaming buffer', () => {
     );
 
     expect(writeOutputMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Integration tests: StreamEditLoop used in the same pattern as index.ts.
+ * These verify that the new buffered approach preserves the critical
+ * behavioral contracts documented by the tests above.
+ */
+describe('streaming output with StreamEditLoop', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeChannel() {
+    return {
+      sendStreamMessage: vi.fn(
+        async (_jid: string, _text: string) => 42 as number | null,
+      ),
+      editMessage: vi.fn(
+        async (_jid: string, _msgId: number, _text: string) => {},
+      ),
+      sendMessage: vi.fn(async (_jid: string, _text: string) => {}),
+    };
+  }
+
+  type StreamChannel = ReturnType<typeof makeChannel>;
+
+  /**
+   * Simulates the index.ts integration pattern:
+   * - Creates a StreamEditLoop with a sendOrEdit callback that calls
+   *   sendStreamMessage (first) or editMessage (subsequent).
+   * - Processes results: partials call loop.update(), finals call loop.flush().
+   */
+  async function simulateWithLoop(
+    results: Array<{
+      result: string | null;
+      partial?: boolean;
+      delay?: number;
+    }>,
+    channel: StreamChannel,
+    options?: { hasPendingMessages?: boolean },
+  ): Promise<{ outputSentToUser: boolean }> {
+    let streamMessageId: number | null = null;
+    let streamingFailed = false;
+    let lastSentText: string | null = null;
+    let outputSentToUser = false;
+
+    const loop = createStreamEditLoop({
+      throttleMs: 500,
+      async sendOrEdit(text) {
+        if (options?.hasPendingMessages) {
+          streamMessageId = null;
+          streamingFailed = true;
+          throw new Error('pending');
+        }
+        if (streamMessageId === null) {
+          const msgId = await channel.sendStreamMessage('jid', text);
+          if (msgId === null) {
+            streamingFailed = true;
+            throw new Error('send failed');
+          }
+          streamMessageId = msgId;
+          lastSentText = text;
+        } else {
+          if (text.length > 4000) {
+            streamingFailed = true;
+            throw new Error('too long');
+          }
+          try {
+            await channel.editMessage('jid', streamMessageId, text);
+            lastSentText = text;
+          } catch (err) {
+            streamingFailed = true;
+            throw err;
+          }
+        }
+      },
+    });
+
+    for (const result of results) {
+      if (result.delay) {
+        await vi.advanceTimersByTimeAsync(result.delay);
+      }
+
+      if (!result.result) continue;
+
+      const raw =
+        typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result);
+      const text = stripInternalTags(raw);
+
+      if (result.partial) {
+        if (!text || streamingFailed) continue;
+        loop.update(text);
+        continue;
+      }
+
+      // Final result — flush streaming, then deliver
+      await loop.flush();
+      await loop.waitForInFlight();
+
+      if (streamMessageId !== null) {
+        if (text && text !== lastSentText) {
+          if (
+            !streamingFailed &&
+            text.length <= 4096 &&
+            !options?.hasPendingMessages
+          ) {
+            await channel.editMessage('jid', streamMessageId, text);
+          } else {
+            await channel.sendMessage('jid', text);
+          }
+        }
+        outputSentToUser = true;
+        lastSentText = text;
+      } else if (text && text !== lastSentText) {
+        await channel.sendMessage('jid', text);
+        outputSentToUser = true;
+        lastSentText = text;
+      }
+
+      // Reset for next query
+      loop.resetForNextQuery();
+      streamMessageId = null;
+      streamingFailed = false;
+      lastSentText = null;
+    }
+
+    loop.stop();
+    return { outputSentToUser };
+  }
+
+  it('buffers rapid partials instead of dropping them', async () => {
+    const channel = makeChannel();
+
+    await simulateWithLoop(
+      [
+        { result: 'Hello', partial: true },
+        { result: 'Hello w', partial: true },
+        { result: 'Hello wor', partial: true },
+        { result: 'Hello world', partial: true, delay: 600 },
+        { result: 'Hello world!', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    // First chunk triggers sendStreamMessage
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.sendStreamMessage).toHaveBeenCalledWith('jid', 'Hello');
+    // Buffered updates coalesce — 'Hello wor' is the latest before throttle fires
+    // Then 'Hello world' at +600ms, and final edit with 'Hello world!'
+    expect(channel.editMessage).toHaveBeenCalled();
+    // Final text should be delivered
+    const lastEditCall =
+      channel.editMessage.mock.calls[channel.editMessage.mock.calls.length - 1];
+    expect(lastEditCall[2]).toBe('Hello world!');
+  });
+
+  it('falls back to sendMessage when sendStreamMessage returns null', async () => {
+    const channel = makeChannel();
+    channel.sendStreamMessage.mockResolvedValue(null);
+
+    const { outputSentToUser } = await simulateWithLoop(
+      [
+        { result: 'partial', partial: true },
+        { result: 'Final answer', partial: false, delay: 100 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Final answer');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('falls back to sendMessage when editMessage throws', async () => {
+    const channel = makeChannel();
+    channel.editMessage.mockRejectedValueOnce(
+      new Error('Telegram edit failed'),
+    );
+
+    const { outputSentToUser } = await simulateWithLoop(
+      [
+        { result: 'First chunk', partial: true },
+        { result: 'Second chunk', partial: true, delay: 600 },
+        { result: 'Third chunk', partial: true, delay: 600 },
+        { result: 'Complete response', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    // Final uses sendMessage because streamingFailed
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'jid',
+      'Complete response',
+    );
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('switches to sendMessage when pending messages exist', async () => {
+    const channel = makeChannel();
+
+    const { outputSentToUser } = await simulateWithLoop(
+      [
+        { result: 'First chunk', partial: true },
+        { result: 'Second chunk', partial: true, delay: 600 },
+        { result: 'Complete response', partial: false, delay: 600 },
+      ],
+      channel,
+      { hasPendingMessages: true },
+    );
+
+    // sendStreamMessage attempted but sendOrEdit throws → streamingFailed
+    // Final uses sendMessage
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'jid',
+      'Complete response',
+    );
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('stops streaming when text exceeds 4000 chars', async () => {
+    const channel = makeChannel();
+    const longText = 'x'.repeat(4001);
+
+    const { outputSentToUser } = await simulateWithLoop(
+      [
+        { result: 'Short', partial: true },
+        { result: longText, partial: true, delay: 600 },
+        { result: 'Final result', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Final result');
+    expect(outputSentToUser).toBe(true);
+  });
+
+  it('resets state between IPC queries', async () => {
+    const channel = makeChannel();
+
+    await simulateWithLoop(
+      [
+        // First query
+        { result: 'First answer', partial: true },
+        { result: 'First answer', partial: false, delay: 600 },
+        // Second query
+        { result: 'Second answer', partial: true, delay: 100 },
+        { result: 'Second answer', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    // Each query creates its own streaming message
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(2);
+    expect(channel.sendStreamMessage).toHaveBeenNthCalledWith(
+      1,
+      'jid',
+      'First answer',
+    );
+    expect(channel.sendStreamMessage).toHaveBeenNthCalledWith(
+      2,
+      'jid',
+      'Second answer',
+    );
+  });
+
+  it('no-ops when final text matches accumulated', async () => {
+    const channel = makeChannel();
+
+    const { outputSentToUser } = await simulateWithLoop(
+      [
+        { result: 'Complete text', partial: true },
+        { result: 'Complete text', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    expect(outputSentToUser).toBe(true);
+    // Text already sent via sendStreamMessage — no extra edit or send
+    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('skips partial chunks with empty text after internal tag stripping', async () => {
+    const channel = makeChannel();
+
+    await simulateWithLoop(
+      [
+        { result: '<internal>thinking</internal>', partial: true },
+        {
+          result: '<internal>more thinking</internal>Answer',
+          partial: false,
+          delay: 600,
+        },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith('jid', 'Answer');
+  });
+
+  it('edits streaming message with final text when different', async () => {
+    const channel = makeChannel();
+
+    await simulateWithLoop(
+      [
+        { result: 'Partial preview', partial: true },
+        { result: 'Complete final response', partial: false, delay: 600 },
+      ],
+      channel,
+    );
+
+    expect(channel.sendStreamMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'jid',
+      42,
+      'Complete final response',
+    );
   });
 });

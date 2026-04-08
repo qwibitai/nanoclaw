@@ -26,6 +26,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { stripInternalTags } from './router.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 const HEARTBEAT_OK_MARKER = 'HEARTBEAT_OK';
@@ -204,9 +205,7 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           const raw = streamedOutput.result;
-          const text = raw
-            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-            .trim();
+          const text = stripInternalTags(raw);
           const isHeartbeatOk = text === HEARTBEAT_OK_MARKER;
 
           if (task.silent || isHeartbeatOk) {

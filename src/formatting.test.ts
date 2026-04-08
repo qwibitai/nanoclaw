@@ -264,6 +264,43 @@ describe('stripInternalTags', () => {
   it('returns empty string when text is only internal tags', () => {
     expect(stripInternalTags('<internal>only this</internal>')).toBe('');
   });
+
+  // Streaming leak prevention tests (issue #29)
+  it('strips unclosed <internal> tag to end of string', () => {
+    expect(stripInternalTags('hello <internal>thinking...')).toBe('hello');
+  });
+
+  it('strips incomplete opening tag fragment <int', () => {
+    expect(stripInternalTags('hello <int')).toBe('hello');
+  });
+
+  it('strips incomplete opening tag fragment <intern', () => {
+    expect(stripInternalTags('hello <intern')).toBe('hello');
+  });
+
+  it('strips incomplete opening tag fragment <internal', () => {
+    expect(stripInternalTags('hello <internal')).toBe('hello');
+  });
+
+  it('strips complete pair + trailing unclosed tag', () => {
+    expect(
+      stripInternalTags('<internal>a</internal>hello<internal>b'),
+    ).toBe('hello');
+  });
+
+  it('returns empty string when text is only unclosed internal tag', () => {
+    expect(stripInternalTags('<internal>only this')).toBe('');
+  });
+
+  it('does not strip similar tags like <integer>', () => {
+    expect(stripInternalTags('<integer>5</integer>')).toBe(
+      '<integer>5</integer>',
+    );
+  });
+
+  it('leaves normal text unchanged', () => {
+    expect(stripInternalTags('hello world')).toBe('hello world');
+  });
 });
 
 describe('formatOutbound', () => {

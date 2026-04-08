@@ -32,7 +32,11 @@ export function formatMessages(
 }
 
 export function stripInternalTags(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  return text
+    .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+    .replace(/<internal>[\s\S]*$/g, '')
+    .replace(/<int(?:e(?:r(?:n(?:a(?:l)?)?)?)?)?$/g, '')
+    .trim();
 }
 
 export function formatOutbound(rawText: string): string {

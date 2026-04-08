@@ -64,6 +64,7 @@ import {
   formatMessages,
   formatOutbound,
   sendImages,
+  stripInternalTags,
 } from './router.js';
 import {
   restoreRemoteControl,
@@ -369,8 +370,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
-        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        const text = stripInternalTags(raw);
 
         if (result.partial) {
           // --- Streaming partial chunk ---
