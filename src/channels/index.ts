@@ -7,6 +7,9 @@
 
 // slack
 
+// signal
+import './signal.js';
+
 // telegram
 import './telegram.js';
 
