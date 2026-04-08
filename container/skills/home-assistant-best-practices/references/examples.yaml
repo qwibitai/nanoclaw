@@ -1,0 +1,326 @@
+# =============================================================================
+# Home Assistant Best Practices - Compound Examples
+# =============================================================================
+# Each example demonstrates MULTIPLE best practices working together.
+# For individual patterns, see the corresponding reference file.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 1: Motion-Activated Light (restart mode)
+# -----------------------------------------------------------------------------
+# Demonstrates: restart mode, state trigger, native time condition, wait_for_trigger
+# Best practice: Use restart mode so re-triggering resets the timeout
+
+automation:
+  - id: motion_light_hallway
+    alias: "Hallway Motion Light"
+    description: "Turn on hallway light when motion detected, auto-off after 3 minutes"
+    mode: restart  # Re-trigger resets the timer
+
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.hallway_motion
+        to: "on"
+
+    conditions:
+      # Native time condition - no template needed
+      - condition: time
+        after: "06:00:00"
+        before: "23:00:00"
+
+    actions:
+      - action: light.turn_on
+        target:
+          entity_id: light.hallway
+        data:
+          brightness_pct: 80
+          transition: 1
+
+      # wait_for_trigger - event-driven, waits for the change
+      - wait_for_trigger:
+          - trigger: state
+            entity_id: binary_sensor.hallway_motion
+            to: "off"
+            for:
+              minutes: 3
+        timeout:
+          minutes: 10
+        continue_on_timeout: true
+
+      - action: light.turn_off
+        target:
+          entity_id: light.hallway
+        data:
+          transition: 3
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 2: Multi-Button Remote with trigger_id
+# -----------------------------------------------------------------------------
+# Demonstrates: ZHA event trigger, device_ieee (persistent), trigger_id, choose
+# Best practice: Use device_ieee instead of device_id for ZHA
+
+  - id: bedroom_remote_control
+    alias: "Bedroom Remote Control"
+    description: "Handle single, double, and hold presses on ZHA button"
+    mode: single
+
+    triggers:
+      - trigger: event
+        event_type: zha_event
+        event_data:
+          device_ieee: "00:15:8d:00:07:26:f2:8a"  # Replace with your device
+          command: "single"
+        id: single_press
+
+      - trigger: event
+        event_type: zha_event
+        event_data:
+          device_ieee: "00:15:8d:00:07:26:f2:8a"
+          command: "double"
+        id: double_press
+
+      - trigger: event
+        event_type: zha_event
+        event_data:
+          device_ieee: "00:15:8d:00:07:26:f2:8a"
+          command: "hold"
+        id: hold
+
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: single_press
+            sequence:
+              - action: light.toggle
+                target:
+                  entity_id: light.bedroom
+
+          - conditions:
+              - condition: trigger
+                id: double_press
+            sequence:
+              - action: light.turn_on
+                target:
+                  area_id: bedroom
+                data:
+                  brightness_pct: 100
+
+          - conditions:
+              - condition: trigger
+                id: hold
+            sequence:
+              - action: light.turn_off
+                target:
+                  area_id: bedroom
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 3: Door Lock Notification with Queued Mode
+# -----------------------------------------------------------------------------
+# Demonstrates: queued mode, state condition with attribute, not condition, template message
+# Best practice: Use queued mode when order matters
+
+  - id: door_unlock_notification
+    alias: "Door Unlock Notification"
+    description: "Notify when door is unlocked, show who unlocked it"
+    mode: queued  # Process each unlock event in order
+    max: 10
+
+    triggers:
+      - trigger: state
+        entity_id: lock.front_door
+        to: "unlocked"
+
+    conditions:
+      # Native not + state condition with attribute check - no template
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: lock.front_door
+            attribute: changed_by
+            state: "auto_unlock"
+
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          title: "Front Door Unlocked"
+          message: "Unlocked by {{ state_attr('lock.front_door', 'changed_by') }}"
+          data:
+            tag: "door-unlock"
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 4: Parallel Mode for Per-Entity Actions
+# -----------------------------------------------------------------------------
+# Demonstrates: parallel mode, multi-entity trigger, trigger variable in template target
+# Best practice: Use parallel mode when actions are independent per-entity
+
+  - id: window_open_climate_off
+    alias: "Turn Off Climate When Window Opens"
+    description: "Turn off climate in room when window is opened"
+    mode: parallel  # Handle multiple windows independently
+    max: 10
+
+    triggers:
+      - trigger: state
+        entity_id:
+          - binary_sensor.bedroom_window
+          - binary_sensor.living_room_window
+          - binary_sensor.kitchen_window
+        to: "on"
+
+    actions:
+      # Use trigger variable to determine which room
+      - action: climate.turn_off
+        target:
+          entity_id: >
+            {% set room = trigger.entity_id.split('.')[1].replace('_window', '') %}
+            climate.{{ room }}
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 5: Doorbell with if/then and Native Time Condition
+# -----------------------------------------------------------------------------
+# Demonstrates: if/then action, native time condition, quiet hours logic
+# Best practice: Use if/then for simple binary, choose for multiple branches
+
+  - id: doorbell_announcement
+    alias: "Doorbell Announcement"
+    description: "Announce doorbell with different messages based on time"
+    mode: single
+
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+
+    actions:
+      - if:
+          - condition: time
+            after: "22:00:00"
+            before: "08:00:00"
+        then:
+          # Quiet hours - just notification
+          - action: notify.mobile_app_phone
+            data:
+              title: "Doorbell"
+              message: "Someone is at the door"
+        else:
+          # Normal hours - announce and notification
+          - action: tts.speak
+            target:
+              entity_id: tts.google_say
+            data:
+              media_player_entity_id: media_player.living_room_speaker
+              message: "Someone is at the front door"
+          - action: notify.mobile_app_phone
+            data:
+              title: "Doorbell"
+              message: "Someone is at the door"
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 6: Script with fields, sequence, and mode
+# -----------------------------------------------------------------------------
+# Demonstrates: correct script schema (sequence not actions), fields for
+# parameterization, mode selection, area targeting, multiple service calls
+# Best practice: Use the HA config API to create scripts programmatically
+# rather than generating YAML snippets for manual file editing
+
+script:
+  good_night:
+    alias: "Good Night"
+    description: "Turn off lights, lock doors, and set thermostat for sleeping"
+    icon: mdi:weather-night
+    mode: single
+    fields:
+      sleep_temp:
+        name: Sleep Temperature
+        description: "Target temperature for sleeping"
+        selector:
+          number:
+            min: 60
+            max: 75
+            unit_of_measurement: "°F"
+        default: 68
+    sequence:
+      - action: light.turn_off
+        target:
+          area_id:
+            - living_room
+            - kitchen
+            - bedroom
+
+      - action: lock.lock
+        target:
+          entity_id:
+            - lock.front_door
+            - lock.back_door
+
+      - action: climate.set_temperature
+        target:
+          entity_id: climate.main
+        data:
+          temperature: "{{ sleep_temp }}"
+          hvac_mode: heat
+
+      - action: notify.mobile_app_phone
+        data:
+          message: "Good night! Lights off, doors locked, thermostat set to {{ sleep_temp }}°F."
+
+
+# -----------------------------------------------------------------------------
+# EXAMPLE 7: MQTT entity configuration
+# -----------------------------------------------------------------------------
+# Demonstrates: three approaches to creating MQTT entities, in order of
+# preference. The anti-pattern table says "don't tell users to edit
+# configuration.yaml for integrations" — MQTT now supports UI-based setup.
+#
+# APPROACH 1 (RECOMMENDED): MQTT Subentries via UI
+# Settings > Devices & Services > MQTT > Add MQTT device
+# Supports: sensor, switch, light, climate, cover, fan, lock, button,
+# number, select, text, alarm_control_panel, valve, water_heater, and more.
+# No restart required. Fill in state_topic, device_class, etc. in the UI.
+#
+# APPROACH 2 (PREFERRED for devices): MQTT Discovery
+# Compatible devices (ESPHome, Tasmota, Zigbee2MQTT) announce themselves
+# to the broker. HA auto-creates entities with zero manual configuration.
+# The device publishes a JSON config payload to a discovery topic:
+
+# Example discovery payload published by device to:
+# homeassistant/sensor/outdoor_temp/config
+#
+# {
+#   "name": "Outdoor Temperature",
+#   "state_topic": "home/outdoor/temperature",
+#   "unit_of_measurement": "°C",
+#   "device_class": "temperature",
+#   "state_class": "measurement",
+#   "value_template": "{{ value_json.temperature }}",
+#   "unique_id": "outdoor_temp_001",
+#   "device": {
+#     "identifiers": ["outdoor_weather_station"],
+#     "name": "Outdoor Weather Station"
+#   }
+# }
+
+# APPROACH 3 (LEGACY FALLBACK): YAML in configuration.yaml
+# Only use if subentries don't support the entity platform yet, or if the
+# user explicitly requests YAML config.
+mqtt:
+  sensor:
+    - name: "Outdoor Temperature"
+      state_topic: "home/outdoor/temperature"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      value_template: "{{ value_json.temperature }}"
+
+  binary_sensor:
+    - name: "Garage Door"
+      state_topic: "home/garage/door"
+      payload_on: "open"
+      payload_off: "closed"
+      device_class: garage_door
