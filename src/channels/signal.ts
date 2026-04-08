@@ -226,6 +226,30 @@ export class SignalChannel implements Channel {
     this.account = account;
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.opts = opts;
+    this.ensureNoProxy();
+  }
+
+  /**
+   * Ensure signal-cli host is in no_proxy so Node's fetch doesn't route
+   * through any HTTP proxy (e.g. OneCLI gateway) for local daemon calls.
+   * Without this, SSE streaming hangs because the proxy buffers events.
+   */
+  private ensureNoProxy(): void {
+    try {
+      const host = new URL(this.baseUrl).hostname;
+      for (const key of ['no_proxy', 'NO_PROXY']) {
+        const current = process.env[key] || '';
+        const hosts = current
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean);
+        if (!hosts.includes(host)) {
+          process.env[key] = current ? `${current},${host}` : host;
+        }
+      }
+    } catch {
+      // URL parse failure — baseUrl is invalid, connect() will fail later
+    }
   }
 
   // ---- JSON-RPC 2.0 helper ----
@@ -450,6 +474,10 @@ export class SignalChannel implements Channel {
               }
             }
             if (data) {
+              logger.debug(
+                { dataLength: data.length },
+                'Signal SSE: event received',
+              );
               this.handleSSEData(data);
             }
           }
