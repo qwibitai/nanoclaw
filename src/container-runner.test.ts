@@ -107,7 +107,9 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import { spawn } from 'child_process';
 import fs from 'fs';
+import { logger } from './logger.js';
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -321,5 +323,139 @@ describe('settings.json ANTHROPIC_API_KEY injection', () => {
     expect(settings).toBeDefined();
     const env = (settings as any).env;
     expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+  });
+});
+
+describe('NANOCLAW_EXTRA_MOUNTS parsing', () => {
+  const originalExtraMounts = process.env.NANOCLAW_EXTRA_MOUNTS;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalExtraMounts !== undefined) {
+      process.env.NANOCLAW_EXTRA_MOUNTS = originalExtraMounts;
+    } else {
+      delete process.env.NANOCLAW_EXTRA_MOUNTS;
+    }
+  });
+
+  function getSpawnArgs(): string[] {
+    const call = vi.mocked(spawn).mock.calls[0];
+    return call ? (call[1] as string[]) : [];
+  }
+
+  it('parses a single mount correctly', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = '/mnt/cache/logs:/central-logs:ro';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = getSpawnArgs();
+    expect(args).toContain('-v');
+    // readonlyMountArgs mock returns ['-v', 'host:container:ro']
+    expect(args).toContainEqual('/mnt/cache/logs:/central-logs:ro');
+  });
+
+  it('parses multiple mounts correctly', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS =
+      '/mnt/cache/logs:/central-logs:ro,/mnt/data:/data:rw';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = getSpawnArgs();
+    // ro mount goes through readonlyMountArgs mock → 'host:container:ro'
+    expect(args).toContainEqual('/mnt/cache/logs:/central-logs:ro');
+    // rw mount → 'host:container'
+    expect(args).toContainEqual('/mnt/data:/data');
+  });
+
+  it('adds no extra mounts when env var is not set', async () => {
+    delete process.env.NANOCLAW_EXTRA_MOUNTS;
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = getSpawnArgs();
+    expect(args.join(' ')).not.toContain('/central-logs');
+  });
+
+  it('skips malformed entries with a warning', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = 'bad-entry,:/also-bad,:';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: expect.any(String) }),
+      expect.stringContaining('malformed'),
+    );
+  });
+
+  it('defaults to readonly when mode is not specified', async () => {
+    process.env.NANOCLAW_EXTRA_MOUNTS = '/mnt/share:/share';
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = getSpawnArgs();
+    // No mode specified → readonly → goes through readonlyMountArgs mock → ':ro'
+    expect(args).toContainEqual('/mnt/share:/share:ro');
   });
 });
