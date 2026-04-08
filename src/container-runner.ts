@@ -4,6 +4,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -16,6 +17,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -212,13 +214,23 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    // Refresh the per-group copy whenever ANY file under the canonical
+    // agent-runner src is newer than the newest cached file. Previously this
+    // only compared index.ts mtimes, so edits to siblings (e.g.
+    // ipc-mcp-stdio.ts) silently failed to propagate.
+    const newestMtime = (dir: string): number => {
+      let max = 0;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, entry.name);
+        const m = entry.isDirectory() ? newestMtime(p) : fs.statSync(p).mtimeMs;
+        if (m > max) max = m;
+      }
+      return max;
+    };
     const needsCopy =
       !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      fs.readdirSync(groupAgentRunnerDir).length === 0 ||
+      newestMtime(agentRunnerSrc) > newestMtime(groupAgentRunnerDir);
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
@@ -246,11 +258,26 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  groupFolder?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Model selection: per-group `.model` file overrides global ANTHROPIC_MODEL.
+  // Lets us run sonnet globally but pin opus for chat-heavy channels like family-fun.
+  let model =
+    process.env.ANTHROPIC_MODEL ||
+    readEnvFile(['ANTHROPIC_MODEL']).ANTHROPIC_MODEL;
+  if (groupFolder) {
+    const modelFile = path.join(resolveGroupFolderPath(groupFolder), '.model');
+    if (fs.existsSync(modelFile)) {
+      const v = fs.readFileSync(modelFile, 'utf8').trim();
+      if (v) model = v;
+    }
+  }
+  if (model) args.push('-e', `ANTHROPIC_MODEL=${model}`);
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
@@ -265,6 +292,50 @@ async function buildContainerArgs(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
     );
+  }
+
+  // Pass optional MCP server credentials into the container
+  const mcpEnv = readEnvFile(['AIRTABLE_API_KEY']);
+  if (mcpEnv.AIRTABLE_API_KEY) {
+    args.push('-e', `AIRTABLE_API_KEY=${mcpEnv.AIRTABLE_API_KEY}`);
+  }
+
+  // Google Sheets MCP — mount gcloud ADC file (uses Application Default Credentials)
+  const gcloudAdcPath = path.join(
+    process.env.HOME || os.homedir(),
+    '.config',
+    'gcloud',
+    'application_default_credentials.json',
+  );
+  if (fs.existsSync(gcloudAdcPath)) {
+    const containerAdcPath =
+      '/home/node/.config/gcloud/application_default_credentials.json';
+    args.push(...readonlyMountArgs(gcloudAdcPath, containerAdcPath));
+    args.push('-e', `GOOGLE_APPLICATION_CREDENTIALS=${containerAdcPath}`);
+    args.push('-e', 'GOOGLE_SHEETS_MCP_ENABLED=1');
+  }
+
+  // Google Calendar MCP — mount credentials and tokens into container
+  const gcalCredsPath = path.join(
+    DATA_DIR,
+    'google-calendar',
+    'gcp-oauth.keys.json',
+  );
+  const gcalTokenPath = path.join(
+    process.env.HOME || os.homedir(),
+    '.config',
+    'google-calendar-mcp',
+    'tokens.json',
+  );
+  if (fs.existsSync(gcalCredsPath) && fs.existsSync(gcalTokenPath)) {
+    const containerCredsPath =
+      '/home/node/.config/google-calendar-mcp/gcp-oauth.keys.json';
+    const containerTokenPath =
+      '/home/node/.config/google-calendar-mcp/tokens.json';
+    args.push(...readonlyMountArgs(gcalCredsPath, containerCredsPath));
+    args.push(...readonlyMountArgs(gcalTokenPath, containerTokenPath));
+    args.push('-e', `GOOGLE_OAUTH_CREDENTIALS=${containerCredsPath}`);
+    args.push('-e', `GOOGLE_CALENDAR_MCP_TOKEN_PATH=${containerTokenPath}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -315,6 +386,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    group.folder,
   );
 
   logger.debug(
