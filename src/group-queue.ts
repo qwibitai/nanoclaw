@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  closing: boolean; // true once closeStdin has been called; prevents sendMessage from piping to a shutting-down container
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        closing: false,
       };
       this.groups.set(groupJid, state);
     }
@@ -159,7 +161,7 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
+    if (!state.active || !state.groupFolder || state.isTaskContainer || state.closing)
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
@@ -184,6 +186,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
+    state.closing = true;
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
@@ -202,6 +205,7 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
+    state.closing = false;
     this.activeCount++;
 
     logger.debug(

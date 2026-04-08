@@ -433,6 +433,53 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  // --- Race condition: closeStdin then sendMessage (c98a3e3) ---
+
+  it('sendMessage returns false after closeStdin is called (race: idle timeout fires before container exits)', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      // Block until we manually release — simulates container still running
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Container starts (state.active = true)
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Register process with a groupFolder so closeStdin/sendMessage can both act
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'test-group');
+
+    // Idle timer fires — signals container to wind down (state.closing = true)
+    queue.closeStdin('group1@g.us');
+
+    // New message arrives before container actually exits (state.active still true)
+    // Without the fix, sendMessage() would return true and write to the dead container.
+    // With the fix, it must return false.
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    const result = queue.sendMessage('group1@g.us', 'hello after close');
+
+    expect(result).toBe(false);
+
+    // No IPC .json file should have been written
+    const ipcWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('.json'),
+    );
+    expect(ipcWrites).toHaveLength(0);
+
+    // Let container finish
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
