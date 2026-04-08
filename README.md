@@ -9,7 +9,7 @@ cp .env.example .env
 # Set ANTHROPIC_API_KEY in .env
 
 deno task gateway   # Start gateway on port 3001
-deno task worker    # Start worker (separate terminal)
+deno task agent    # Start agent (separate terminal)
 ```
 
 Test: `curl http://localhost:3001/health`
@@ -19,7 +19,7 @@ Chat: `curl -X POST http://localhost:3001/api/chat -H 'Content-Type: application
 ## Architecture
 
 ```
-Console (Deno Fresh)          Gateway (Deno)              Worker (Deno)
+Console (Deno Fresh)          Gateway (Deno)              Agent (Deno)
 localhost:8000                localhost:3001
 
   Browser --> /api/proxy/* --> POST /api/chat
@@ -32,9 +32,9 @@ localhost:8000                localhost:3001
   polls /api/chat/response <---| returns result
 ```
 
-**Gateway**: HTTP server with in-memory work queue, event log, public API, and internal worker API. One instance per Operator.
+**Gateway**: HTTP server with in-memory work queue, event log, public API, and internal agent API. One instance per Operator.
 
-**Worker**: Polls gateway for work, assembles workspace from skills + knowledge + operator context, runs Claude Agent SDK, returns result.
+**Agent**: Polls gateway for work, assembles workspace from skills + knowledge + operator context, runs Claude Agent SDK, returns result.
 
 **Console**: Separate Deno Fresh app (`simt-console-mock`) with operator switcher for multi-operator management.
 
@@ -56,7 +56,7 @@ dev-data/operators/
 
 ## Deployment
 
-Deployed to Fly.io with two process groups (gateway + worker) per Operator app.
+Deployed to Fly.io with two process groups (gateway + agent) per Operator app.
 
 ```bash
 deno task deploy:mgf    # Microgrid Foundry (microgridfoundry org)
@@ -66,7 +66,7 @@ deno task deploy:bec    # Bristol Energy (bristolenergy org)
 Per-operator secrets set via `fly secrets set`:
 - `ANTHROPIC_API_KEY` — Claude API access
 - `OPERATOR_SLUG` / `OPERATOR_NAME` — Operator identity
-- `GATEWAY_URL` — Internal DNS for worker (`http://gateway.process.<app>.internal:3001`)
+- `GATEWAY_URL` — Internal DNS for agent (`http://gateway.process.<app>.internal:3001`)
 - `ONECLI_API_KEY` — OneCLI Cloud vault (optional)
 
 ## Skills and Knowledge
@@ -97,7 +97,7 @@ knowledge/
 src/
   shared/        # Config, logger, env, types, OneCLI client
   gateway/       # HTTP server, work queue, event log, skills loader
-  worker/        # Poll loop, Agent SDK, workspace builder, sessions
+  agent/        # Poll loop, Agent SDK, workspace builder, sessions
 skills/          # SKILL.md files (AI instructions)
 knowledge/       # Reference docs (AI knowledge base)
 dev-data/        # Per-operator config and context

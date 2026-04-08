@@ -46,4 +46,4 @@ USER nexus
 
 EXPOSE 3001
 
-# CMD set per process group in fly.toml
+# CMD set per process group in fly.toml (gateway, agent)

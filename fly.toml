@@ -13,11 +13,11 @@ GATEWAY_PORT = "3001"
 # ONECLI_API_KEY
 # OPERATOR_SLUG
 # OPERATOR_NAME
-# GATEWAY_URL (internal DNS for worker -> gateway)
+# GATEWAY_URL (internal DNS for agent -> gateway)
 
 [processes]
 gateway = "deno run -A src/gateway/index.ts"
-worker = "deno run -A src/worker/index.ts"
+agent = "deno run -A src/agent/index.ts"
 
 [http_service]
 internal_port = 3001
@@ -47,7 +47,7 @@ processes = ["gateway"]
 [[vm]]
 size = "shared-cpu-2x"
 memory = "1gb"
-processes = ["worker"]
+processes = ["agent"]
 
 [[restart]]
 policy = "on-failure"
