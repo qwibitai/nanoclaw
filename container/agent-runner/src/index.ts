@@ -484,6 +484,14 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        'ha-mcp': {
+          command: 'npx',
+          args: ['-y', 'mcp-remote', 'http://host.docker.internal:9583/private_PWWE28FuDIflsITGNI9VDQ', '--allow-http'],
+          env: {
+            NO_PROXY: 'host.docker.internal',
+            no_proxy: 'host.docker.internal',
+          },
+        },
       },
       hooks: {
         PreCompact: [
