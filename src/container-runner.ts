@@ -290,6 +290,12 @@ async function buildContainerArgs(
     const ollamaHost =
       process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
     args.push('-e', `OLLAMA_HOST=${ollamaHost}`);
+    if (process.env.OLLAMA_MAX_TOOL_ROUNDS) {
+      args.push(
+        '-e',
+        `OLLAMA_MAX_TOOL_ROUNDS=${process.env.OLLAMA_MAX_TOOL_ROUNDS}`,
+      );
+    }
     args.push('-e', 'no_proxy=host.docker.internal,localhost,127.0.0.1');
     args.push('-e', 'NO_PROXY=host.docker.internal,localhost,127.0.0.1');
   }

@@ -580,8 +580,16 @@ async function runQuery(
 
     // Stream partial text to user as it arrives from Claude
     if (message.type === 'stream_event') {
-      const event = (message as { event: { type: string; delta?: { type?: string; text?: string } } }).event;
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+      const event = (
+        message as {
+          event: { type: string; delta?: { type?: string; text?: string } };
+        }
+      ).event;
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta?.type === 'text_delta' &&
+        event.delta.text
+      ) {
         streamAccumulated += event.delta.text;
         const now = Date.now();
         if (
@@ -835,7 +843,12 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId, unifiedSessionId: unifiedSession.id });
+      writeOutput({
+        status: 'success',
+        result: null,
+        newSessionId: sessionId,
+        unifiedSessionId: unifiedSession.id,
+      });
 
       log('Query ended, waiting for next IPC message...');
 
