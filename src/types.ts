@@ -62,7 +62,7 @@ export interface ScheduledTask {
   group_folder: string;
   chat_jid: string;
   prompt: string;
-  script?: string | null;
+  script?: string | null; // optional pre-flight bash script; null/undefined = no script
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
@@ -71,7 +71,6 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
-  script?: string | null; // optional pre-flight bash script; null/undefined = no script
   fail_count: number; // consecutive failure count, reset on success
   last_error: string | null; // last error message, null when healthy
 }

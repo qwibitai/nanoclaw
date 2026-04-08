@@ -32,18 +32,21 @@ beforeEach(() => {
 // --- Pure functions ---
 
 describe('readonlyMountArgs', () => {
-  it('returns -v flag with :ro suffix', () => {
+  it('returns --mount args for Apple Container', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
-    expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+    expect(args).toEqual([
+      '--mount',
+      'type=bind,source=/host/path,target=/container/path,readonly',
+    ]);
   });
 });
 
 describe('stopContainer', () => {
-  it('calls docker stop for valid container names', () => {
+  it('calls container stop for valid container names', () => {
     stopContainer('nanoclaw-test-123');
     expect(mockExecSync).toHaveBeenCalledWith(
       `${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-test-123`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 15000 },
     );
   });
 
@@ -68,24 +71,43 @@ describe('ensureContainerRuntimeRunning', () => {
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    });
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} system status`,
+      { stdio: 'pipe' },
+    );
     expect(logger.debug).toHaveBeenCalledWith(
       'Container runtime already running',
     );
   });
 
-  it('throws when docker info fails', () => {
+  it('starts the runtime when status fails, throws if start also fails', () => {
+    // status fails
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('Cannot connect to the Docker daemon');
+      throw new Error('runtime not running');
+    });
+    // start also fails
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('Cannot start container runtime');
     });
 
     expect(() => ensureContainerRuntimeRunning()).toThrow(
       'Container runtime is required but failed to start',
     );
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('starts the runtime when status fails and start succeeds', () => {
+    // status fails
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('runtime not running');
+    });
+    // start succeeds
+    mockExecSync.mockReturnValueOnce('');
+
+    ensureContainerRuntimeRunning(); // should not throw
+
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(logger.info).toHaveBeenCalledWith('Container runtime started');
   });
 });
 
@@ -107,12 +129,12 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
       `${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-group1-111`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 15000 },
     );
     expect(mockExecSync).toHaveBeenNthCalledWith(
       3,
       `${CONTAINER_RUNTIME_BIN} stop -t 1 nanoclaw-group2-222`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 15000 },
     );
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group2-222'] },

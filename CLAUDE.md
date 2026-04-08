@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # NanoClaw
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
@@ -16,14 +20,15 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/group-queue.ts` | Per-group concurrency and retry with backoff |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `src/credential-proxy.ts` | HTTP proxy that injects API credentials for containers |
+| `src/sender-allowlist.ts` | Per-group sender filtering (allowlist/blocklist) |
+| `src/mount-security.ts` | Validates additional container mounts against allowlist |
+| `src/types.ts` | All shared interfaces (Channel, RegisteredGroup, etc.) |
+| `groups/{name}/CLAUDE.md` | Per-group agent memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
-
-## Secrets / Credentials / Proxy (OneCLI)
-
-API keys, secret keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway — which handles secret injection into containers at request time, so no keys or tokens are ever passed to containers directly. Run `onecli --help`.
 
 ## Skills
 
@@ -40,7 +45,6 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials to it |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
@@ -53,10 +57,15 @@ Before creating a PR, adding a skill, or preparing any contribution, you MUST re
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Run with hot reload
+npm run dev          # Run with hot reload (tsx)
 npm run build        # Compile TypeScript
+npm run typecheck    # Type-check without emitting
+npm test             # Run all tests (vitest)
+npx vitest run src/foo.test.ts  # Run a single test file
 ./container/build.sh # Rebuild agent container
 ```
+
+Set `LOG_LEVEL=debug` to enable verbose logging.
 
 Service management:
 ```bash
@@ -70,6 +79,46 @@ systemctl --user start nanoclaw
 systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
+
+## Architecture
+
+### Message Flow
+1. Channel receives inbound message → `storeMessage()` to SQLite
+2. Message loop polls SQLite every 2s → checks for new messages per registered group
+3. Non-main groups require a trigger (`@AssistantName` or custom) before processing
+4. `GroupQueue` serializes container invocations per group; piped messages go to active containers via IPC files
+5. `runContainerAgent()` spawns a container with group folder mounted; output is delimited by sentinel markers (`---NANOCLAW_OUTPUT_START---` / `---NANOCLAW_OUTPUT_END---`)
+6. Agent replies are sent back via the channel's `sendMessage()`
+
+### Groups
+- **Main group** (`isMain: true`): no trigger required, elevated privileges (sees project root read-only + IPC)
+- **Non-main groups**: trigger required by default; isolated filesystem at `groups/{folder}/`
+- Group folders live under `groups/` and are referenced by name (`folder` field). Valid folder names: alphanumeric + hyphens, no path traversal
+- CLAUDE.md is copied from `groups/main/CLAUDE.md` or `groups/global/CLAUDE.md` template on first registration
+
+### Containers
+- Container image: `nanoclaw-agent:latest` (built via `./container/build.sh`)
+- Credential proxy runs at `localhost:3001`; containers use it instead of calling Anthropic API directly — they never see real credentials
+- Additional mounts validated against `~/.config/nanoclaw/mount-allowlist.json` (outside project, not mounted into containers)
+- Sender allowlist config at `~/.config/nanoclaw/sender-allowlist.json`
+
+### IPC
+Containers write commands to `data/ipc/{groupFolder}/` JSON files; the host IPC watcher polls these and dispatches to `sendMessage`, `registerGroup`, task CRUD, etc.
+Follow-up messages from the message loop are delivered to active containers via `data/ipc/{groupFolder}/input/` files.
+
+### Database
+SQLite at `store/messages.db`. Schema migrations are inline in `db.ts` (`ALTER TABLE … ADD COLUMN` with try/catch). Tables: `messages`, `chats`, `sessions`, `registered_groups`, `router_state`, `scheduled_tasks`, `task_run_logs`.
+
+## Skills
+
+| Skill | When to Use |
+|-------|-------------|
+| `/setup` | First-time installation, authentication, service configuration |
+| `/customize` | Adding channels, integrations, changing behavior |
+| `/debug` | Container issues, logs, troubleshooting |
+| `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
+| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
+| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
 ## Troubleshooting
 
