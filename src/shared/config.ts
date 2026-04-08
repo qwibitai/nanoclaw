@@ -26,10 +26,10 @@ export const GATEWAY_URL =
   Deno.env.get('GATEWAY_URL') || envConfig.GATEWAY_URL || 'http://localhost:3001';
 
 export const OPERATOR_SLUG =
-  Deno.env.get('OPERATOR_SLUG') || envConfig.OPERATOR_SLUG || 'foundry';
+  Deno.env.get('OPERATOR_SLUG') || envConfig.OPERATOR_SLUG || 'ymir';
 
 export const OPERATOR_NAME =
-  Deno.env.get('OPERATOR_NAME') || envConfig.OPERATOR_NAME || 'Microgrid Foundry';
+  Deno.env.get('OPERATOR_NAME') || envConfig.OPERATOR_NAME || 'Ymir';
 
 export const ANTHROPIC_API_KEY =
   Deno.env.get('ANTHROPIC_API_KEY') || envConfig.ANTHROPIC_API_KEY || '';

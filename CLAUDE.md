@@ -31,7 +31,9 @@ Console UI is a separate project: `simt-console-mock` (Deno Fresh 2.0).
 | `skills/` | SKILL.md files (baked into Docker image) |
 | `knowledge/` | Knowledge markdown files (baked into Docker image) |
 
-## Running Locally
+## Running Locally (Ymir)
+
+The local dev instance is called **Ymir** (slug: `ymir`). It runs on localhost and has its own operator context, sessions, and conversations in `../nexus-data/operators/ymir/`.
 
 ```bash
 # Set ANTHROPIC_API_KEY in .env (copy from .env.example)
