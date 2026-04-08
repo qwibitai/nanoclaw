@@ -996,7 +996,7 @@ describe('Telegram topic routing', () => {
         targetJid: 'telegram:pm-agent:241',
         senderName: 'Craig',
         messageText: 'hello',
-        threadId: 241,
+        threadId: '241',
       },
       'telegram_pm-agent_241', // sourceGroup — topic-scoped IPC dir
       false,
@@ -1049,7 +1049,7 @@ describe('Telegram topic routing', () => {
         targetJid: 'telegram:pm-agent:241',
         senderName: 'Craig',
         messageText: 'base jid test',
-        threadId: 241,
+        threadId: '241',
       },
       'telegram_pm-agent_241',
       false,
@@ -1108,6 +1108,7 @@ describe('Telegram topic task ownership (ISO-08, ISO-09)', () => {
       schedule_value: new Date().toISOString(),
       status: 'active',
       next_run: new Date().toISOString(),
+      context_mode: 'isolated',
       created_at: new Date().toISOString(),
     });
 
@@ -1137,6 +1138,7 @@ describe('Telegram topic task ownership (ISO-08, ISO-09)', () => {
       schedule_value: new Date().toISOString(),
       status: 'active',
       next_run: new Date().toISOString(),
+      context_mode: 'isolated',
       created_at: new Date().toISOString(),
     });
 
@@ -1166,6 +1168,7 @@ describe('Telegram topic task ownership (ISO-08, ISO-09)', () => {
       schedule_value: new Date().toISOString(),
       status: 'active',
       next_run: new Date().toISOString(),
+      context_mode: 'isolated',
       created_at: new Date().toISOString(),
     });
 

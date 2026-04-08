@@ -274,7 +274,7 @@ export async function processTaskIpc(
         const targetJid = data.targetJid as string;
         let targetGroupEntry = registeredGroups[targetJid];
 
-        // Topic-aware fallback: "telegram:pm-agent:241" -> try "telegram:pm-agent"
+        // Topic-aware fallback: "telegram:mygroup:241" -> try "telegram:mygroup"
         if (!targetGroupEntry && targetJid.startsWith('telegram:')) {
           const baseJid = targetJid.split(':').slice(0, 2).join(':');
           targetGroupEntry = registeredGroups[baseJid];
@@ -307,7 +307,7 @@ export async function processTaskIpc(
             : targetGroupEntry.folder;
 
         // Authorization: non-main groups can only schedule for themselves.
-        // Topic IPC dirs (e.g. telegram_pm-agent_241) belong to their parent group.
+        // Topic IPC dirs (e.g. telegram_mygroup_241) belong to their parent group.
         if (
           !isMain &&
           targetFolder !== sourceGroup &&
@@ -501,7 +501,11 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              taskGroupFolder: task?.group_folder,
+            },
             'Unauthorized task pause attempt blocked — (group, topicId) mismatch',
           );
         }
@@ -520,7 +524,11 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              taskGroupFolder: task?.group_folder,
+            },
             'Unauthorized task resume attempt blocked — (group, topicId) mismatch',
           );
         }
@@ -539,7 +547,11 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              taskGroupFolder: task?.group_folder,
+            },
             'Unauthorized task cancel attempt blocked — (group, topicId) mismatch',
           );
         }
@@ -558,7 +570,11 @@ export async function processTaskIpc(
         }
         if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
-            { taskId: data.taskId, sourceGroup, taskGroupFolder: task.group_folder },
+            {
+              taskId: data.taskId,
+              sourceGroup,
+              taskGroupFolder: task.group_folder,
+            },
             'Unauthorized task update attempt blocked — (group, topicId) mismatch',
           );
           break;
