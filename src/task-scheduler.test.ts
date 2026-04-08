@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _initTestDatabase, AgentDb } from './db.js';
-import {
-  computeNextRun,
-  startSchedulerLoop,
-} from './task-scheduler.js';
+import { computeNextRun, startSchedulerLoop } from './task-scheduler.js';
 
 describe('task scheduler', () => {
   let db: AgentDb;

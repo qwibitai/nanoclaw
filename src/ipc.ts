@@ -149,7 +149,11 @@ export function startIpcWatcher(deps: IpcDeps): { stop(): void } {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
-  return { stop() { stopped = true; } };
+  return {
+    stop() {
+      stopped = true;
+    },
+  };
 }
 
 export async function processTaskIpc(

@@ -235,7 +235,8 @@ export function validateMount(
   if (allowlist === null) {
     return {
       allowed: false,
-      reason: 'No mount allowlist configured — pass mountAllowlist in AgentLiteOptions or set a file path',
+      reason:
+        'No mount allowlist configured — pass mountAllowlist in AgentLiteOptions or set a file path',
     };
   }
 

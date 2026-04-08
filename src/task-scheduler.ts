@@ -89,10 +89,7 @@ async function runTask(
   const startTime = Date.now();
   let groupDir: string;
   try {
-    groupDir = resolveGroupFolderPath(
-      task.group_folder,
-      deps.groupsDir,
-    );
+    groupDir = resolveGroupFolderPath(task.group_folder, deps.groupsDir);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
@@ -260,7 +257,9 @@ async function runTask(
   deps.db.updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
-export function startSchedulerLoop(deps: SchedulerDependencies): { stop(): void } {
+export function startSchedulerLoop(deps: SchedulerDependencies): {
+  stop(): void;
+} {
   let stopped = false;
   logger.info('Scheduler loop started');
 
@@ -291,5 +290,9 @@ export function startSchedulerLoop(deps: SchedulerDependencies): { stop(): void 
   };
 
   loop();
-  return { stop() { stopped = true; } };
+  return {
+    stop() {
+      stopped = true;
+    },
+  };
 }

@@ -452,9 +452,7 @@ export class AgentDb {
 
     values.push(id);
     this.db
-      .prepare(
-        `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
-      )
+      .prepare(`UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`)
       .run(...values);
   }
 
@@ -522,9 +520,7 @@ export class AgentDb {
 
   setRouterState(key: string, value: string): void {
     this.db
-      .prepare(
-        'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
-      )
+      .prepare('INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)')
       .run(key, value);
   }
 
@@ -593,9 +589,7 @@ export class AgentDb {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger:
-        row.requires_trigger === null
-          ? undefined
-          : row.requires_trigger === 1,
+        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
     };
   }
@@ -616,11 +610,7 @@ export class AgentDb {
         group.trigger,
         group.added_at,
         group.containerConfig ? JSON.stringify(group.containerConfig) : null,
-        group.requiresTrigger === undefined
-          ? 1
-          : group.requiresTrigger
-            ? 1
-            : 0,
+        group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
         group.isMain ? 1 : 0,
       );
   }

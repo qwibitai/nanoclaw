@@ -307,7 +307,11 @@ describe('storeChatMetadata', () => {
 
   it('updates name on subsequent call with name', () => {
     db.storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
-    db.storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z', 'Updated Name');
+    db.storeChatMetadata(
+      'group@g.us',
+      '2024-01-01T00:00:01.000Z',
+      'Updated Name',
+    );
     const chats = db.getAllChats();
     expect(chats).toHaveLength(1);
     expect(chats[0].name).toBe('Updated Name');
