@@ -5,6 +5,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
@@ -403,6 +404,63 @@ async function runAgent(
       setSession(group.folder, output.newSessionId);
     }
 
+    // Hallucinated-outage guard: a single bad turn (real error or model
+    // confabulation) gets persisted to the session JSONL and then every
+    // resumed turn doubles down on the lie. If the agent's final reply
+    // contains infra-blame phrases, purge the session so the next turn
+    // starts fresh. One false-positive cold start is far cheaper than
+    // Brenda getting "Sheets is offline" on every message.
+    // Keep the list narrow — only phrases a well-behaved agent would
+    // never produce. See `groups/global/CLAUDE.md` "Don't cry wolf".
+    const POISONED_RESPONSE_PATTERNS = [
+      /no such tool available/i,
+      /tools? (are|is) offline/i,
+      /mcp.*(dropped|disconnected|reconnected)/i,
+      /sheets.*(offline|disconnected|flaky|dropped|down)/i,
+      /hard[- ]?refresh/i,
+      /restart the (bot|session)/i,
+      /api just disconnected/i,
+      /hasn.?t reconnected/i,
+    ];
+    if (output.status === 'success' && output.result) {
+      const hit = POISONED_RESPONSE_PATTERNS.find((re) =>
+        re.test(output.result ?? ''),
+      );
+      if (hit) {
+        const poisonedId = output.newSessionId || sessionId;
+        logger.warn(
+          {
+            group: group.name,
+            pattern: hit.source,
+            poisonedSessionId: poisonedId,
+            snippet: output.result.slice(0, 160),
+          },
+          'Detected hallucinated-outage reply — purging session so next turn starts fresh',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+        if (poisonedId) {
+          const jsonlPath = path.join(
+            DATA_DIR,
+            'sessions',
+            group.folder,
+            '.claude',
+            'projects',
+            '-workspace-group',
+            `${poisonedId}.jsonl`,
+          );
+          try {
+            if (fs.existsSync(jsonlPath)) fs.unlinkSync(jsonlPath);
+          } catch (err) {
+            logger.warn(
+              { group: group.name, jsonlPath, err },
+              'Failed to unlink poisoned JSONL',
+            );
+          }
+        }
+      }
+    }
+
     if (output.status === 'error') {
       // Detect stale/corrupt session — clear it so the next retry starts fresh.
       // The session .jsonl can go missing after a crash mid-write, manual
@@ -717,6 +775,27 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendMessageWithId: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel || !channel.sendMessageWithId) return undefined;
+      return channel.sendMessageWithId(jid, text);
+    },
+    editMessage: async (jid, messageId, text) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.editMessage) await channel.editMessage(jid, messageId, text);
+    },
+    deleteMessage: async (jid, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.deleteMessage) await channel.deleteMessage(jid, messageId);
+    },
+    pinMessage: async (jid, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.pinMessage) await channel.pinMessage(jid, messageId);
+    },
+    unpinMessage: async (jid, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (channel?.unpinMessage) await channel.unpinMessage(jid, messageId);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
