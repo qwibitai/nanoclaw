@@ -83,11 +83,38 @@ function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res: { created: boolean }) => {
+    async (res: { created: boolean }) => {
       logger.info(
         { jid, identifier, created: res.created },
         'OneCLI agent ensured',
       );
+      if (res.created) {
+        // New agent: set secret mode to "all" so it gets API credentials.
+        try {
+          const listRes = await fetch(`${ONECLI_URL}/api/agents`);
+          const agents = (await listRes.json()) as Array<{
+            id: string;
+            identifier: string | null;
+          }>;
+          const agent = agents.find((a) => a.identifier === identifier);
+          if (agent) {
+            await fetch(`${ONECLI_URL}/api/agents/${agent.id}/secret-mode`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode: 'all' }),
+            });
+            logger.info(
+              { jid, identifier },
+              'OneCLI agent secret mode set to all',
+            );
+          }
+        } catch (err) {
+          logger.warn(
+            { jid, identifier, err: String(err) },
+            'Failed to set OneCLI agent secret mode',
+          );
+        }
+      }
     },
     (err: unknown) => {
       logger.debug(
