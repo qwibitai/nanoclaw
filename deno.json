@@ -12,7 +12,8 @@
   },
   "imports": {
     "@anthropic-ai/claude-agent-sdk": "npm:@anthropic-ai/claude-agent-sdk@^0.2.92",
-    "@std/path": "jsr:@std/path@^1.0.0"
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "discord.js": "npm:discord.js@^14.18.0"
   },
   "compilerOptions": {
     "strict": true,

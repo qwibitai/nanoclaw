@@ -32,20 +32,27 @@ async function submitResult(result: WorkResult): Promise<void> {
 }
 
 async function processWork(item: WorkItem): Promise<void> {
-  logger.info({ id: item.id, groupId: item.groupId }, 'Processing work item');
+  logger.info(
+    { id: item.id, session: item.sessionId, channel: item.channel },
+    'Processing work item',
+  );
 
-  const sessionId = item.sessionId || getSessionId(item.groupId);
-  const { cwd, systemPrompt } = buildWorkspace(item.groupId);
+  // Use Agent SDK session ID from the gateway session, or from local persistence
+  const agentSessionId =
+    item.agentSessionId || getSessionId(item.sessionId);
+
+  const { cwd, systemPrompt } = buildWorkspace(item.sessionId);
 
   const agentResult = await runAgent({
     prompt: item.prompt,
     cwd,
-    sessionId,
+    sessionId: agentSessionId,
     systemPrompt,
   });
 
+  // Persist Agent SDK session ID locally for resume across restarts
   if (agentResult.sessionId) {
-    saveSessionId(item.groupId, agentResult.sessionId);
+    saveSessionId(item.sessionId, agentResult.sessionId);
   }
 
   const result: WorkResult = {
@@ -58,7 +65,10 @@ async function processWork(item: WorkItem): Promise<void> {
   };
 
   await submitResult(result);
-  logger.info({ id: item.id, status: agentResult.status }, 'Work item completed');
+  logger.info(
+    { id: item.id, session: item.sessionId, status: agentResult.status },
+    'Work item completed',
+  );
 }
 
 async function pollLoop(): Promise<void> {

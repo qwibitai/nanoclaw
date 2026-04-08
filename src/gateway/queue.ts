@@ -1,21 +1,32 @@
-import type { WorkItem, WorkResult } from '../shared/types.ts';
+import type { ChannelType, WorkItem, WorkResult } from '../shared/types.ts';
+import { updateSessionAgent, touchSession } from './sessions.ts';
 
 const pending: WorkItem[] = [];
 const processing = new Map<string, WorkItem>();
 const results = new Map<string, WorkResult>();
-const sessions = new Map<string, string>();
+
+type CompletionCallback = (item: WorkItem, result: WorkResult) => void;
+const completionCallbacks: CompletionCallback[] = [];
+
+export function onComplete(cb: CompletionCallback): void {
+  completionCallbacks.push(cb);
+}
 
 export function enqueue(
-  groupId: string,
-  channel: string,
+  sessionId: string,
+  channel: ChannelType,
+  channelId: string,
   prompt: string,
+  agentSessionId?: string,
 ): WorkItem {
+  touchSession(sessionId);
   const item: WorkItem = {
     id: crypto.randomUUID(),
-    groupId,
+    sessionId,
     channel,
+    channelId,
     prompt,
-    sessionId: sessions.get(groupId),
+    agentSessionId,
     createdAt: new Date().toISOString(),
     status: 'pending',
   };
@@ -36,16 +47,24 @@ export function complete(result: WorkResult): void {
   if (item) {
     processing.delete(result.id);
     if (result.sessionId) {
-      sessions.set(item.groupId, result.sessionId);
+      updateSessionAgent(item.sessionId, result.sessionId);
     }
-    results.set(item.groupId, result);
+    results.set(item.sessionId, result);
+
+    for (const cb of completionCallbacks) {
+      try {
+        cb(item, result);
+      } catch {
+        // Don't let callback errors break the queue
+      }
+    }
   }
 }
 
-export function consumeResult(groupId: string): WorkResult | null {
-  const result = results.get(groupId);
+export function consumeResult(sessionId: string): WorkResult | null {
+  const result = results.get(sessionId);
   if (result) {
-    results.delete(groupId);
+    results.delete(sessionId);
   }
   return result ?? null;
 }

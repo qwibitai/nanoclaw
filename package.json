@@ -4,6 +4,7 @@
   "description": "Simtricity Nexus — AI agent platform for energy community Operators",
   "type": "module",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.92"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.92",
+    "discord.js": "^14.18.0"
   }
 }

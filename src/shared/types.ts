@@ -1,9 +1,32 @@
+// --- Channels & Sessions ---
+
+export type ChannelType = 'web-chat' | 'discord' | 'whatsapp' | 'resend';
+
+export interface ChannelInfo {
+  id: string;
+  type: ChannelType;
+  connected: boolean;
+  metadata?: Record<string, string>;
+}
+
+export interface Session {
+  id: string;
+  channelType: ChannelType;
+  channelId: string;
+  agentSessionId?: string;
+  lastActivity: string;
+  messageCount: number;
+}
+
+// --- Work Queue ---
+
 export interface WorkItem {
   id: string;
-  groupId: string;
-  channel: string;
+  sessionId: string;
+  channel: ChannelType;
+  channelId: string;
   prompt: string;
-  sessionId?: string;
+  agentSessionId?: string;
   createdAt: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
 }
@@ -16,6 +39,8 @@ export interface WorkResult {
   error?: string;
   completedAt: string;
 }
+
+// --- Activity ---
 
 export interface ActivityEvent {
   id: string;
@@ -31,6 +56,8 @@ export interface ActivityEvent {
   groupId: string;
   summary: string;
 }
+
+// --- Operator ---
 
 export interface OperatorConfig {
   name: string;

@@ -1,5 +1,8 @@
 import { logger } from '../shared/logger.ts';
 import type { WorkResult } from '../shared/types.ts';
+import { getChannels } from './channels.ts';
+import { getOrCreateSession, getSessions, getSessionCount } from './sessions.ts';
+import { getDiscordStatus, getInviteUrl } from './discord.ts';
 import {
   APP_VERSION,
   ASSISTANT_NAME,
@@ -139,6 +142,8 @@ async function handler(req: Request): Promise<Response> {
         uptime: formatUptime(Date.now() - startTime),
         operator: { name: OPERATOR_NAME, slug: OPERATOR_SLUG },
         skills: loadSkills(),
+        channels: getChannels(),
+        sessions: getSessionCount(),
         onecli: getOneCLIStatus(),
         pendingWork: queue.getPendingCount(),
         processingWork: queue.getProcessingCount(),
@@ -156,29 +161,37 @@ async function handler(req: Request): Promise<Response> {
         groupId?: string;
       };
       const message = body.message;
-      const groupId = body.groupId || 'web-chat';
+      const channelId = body.groupId || 'default';
 
       if (!message) {
         return json({ error: 'message is required' }, 400);
       }
 
-      const item = queue.enqueue(groupId, 'web-chat', message);
+      const session = getOrCreateSession('web-chat', channelId);
+      const item = queue.enqueue(
+        session.id,
+        'web-chat',
+        channelId,
+        message,
+        session.agentSessionId,
+      );
 
       logEvent({
         type: 'message_in',
         channel: 'web-chat',
-        groupId,
+        groupId: session.id,
         summary:
           message.length > 80 ? message.slice(0, 80) + '...' : message,
       });
 
-      logger.info({ id: item.id, groupId }, 'Chat message queued');
-      return json({ id: item.id, status: 'queued' });
+      logger.info({ id: item.id, session: session.id }, 'Chat message queued');
+      return json({ id: item.id, session: session.id, status: 'queued' });
     }
 
     if (path === '/api/chat/response' && req.method === 'GET') {
-      const groupId = url.searchParams.get('groupId') || 'web-chat';
-      const result = queue.consumeResult(groupId);
+      const channelId = url.searchParams.get('groupId') || 'default';
+      const sessionId = `web-chat-${channelId}`;
+      const result = queue.consumeResult(sessionId);
 
       if (!result) {
         return json({ status: 'pending' });
@@ -206,16 +219,16 @@ async function handler(req: Request): Promise<Response> {
       logEvent({
         type: 'agent_start',
         channel: item.channel,
-        groupId: item.groupId,
+        groupId: item.sessionId,
         summary: `Processing: ${item.prompt.slice(0, 60)}...`,
       });
 
-      logger.info({ id: item.id, groupId: item.groupId }, 'Work dequeued');
+      logger.info({ id: item.id, session: item.sessionId }, 'Work dequeued');
       return json({ status: 'work', item });
     }
 
     if (path === '/work/complete' && req.method === 'POST') {
-      const result = (await req.json()) as WorkResult & { groupId?: string };
+      const result = (await req.json()) as WorkResult;
       queue.complete(result);
 
       const eventType =
@@ -228,13 +241,30 @@ async function handler(req: Request): Promise<Response> {
 
       logEvent({
         type: eventType,
-        channel: 'web-chat',
-        groupId: result.groupId ?? 'web-chat',
+        channel: 'agent',
+        groupId: result.id,
         summary,
       });
 
       logger.info({ id: result.id, status: result.status }, 'Work completed');
       return json({ status: 'ok' });
+    }
+
+    // --- Channels & Sessions API ---
+    if (path === '/api/channels' && req.method === 'GET') {
+      return json(getChannels());
+    }
+
+    if (path === '/api/sessions' && req.method === 'GET') {
+      return json(getSessions());
+    }
+
+    if (path === '/api/discord/status' && req.method === 'GET') {
+      return json(getDiscordStatus());
+    }
+
+    if (path === '/api/discord/invite-url' && req.method === 'GET') {
+      return json({ url: getInviteUrl() });
     }
 
     // --- 404 ---

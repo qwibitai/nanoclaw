@@ -4,6 +4,7 @@ import { readEnvFile } from './env.ts';
 const envConfig = readEnvFile([
   'ANTHROPIC_API_KEY',
   'ASSISTANT_NAME',
+  'DISCORD_BOT_TOKEN',
   'GATEWAY_PORT',
   'GATEWAY_URL',
   'ONECLI_API_KEY',
@@ -38,6 +39,9 @@ const onecliKey = Deno.env.get('ONECLI_API_KEY') || envConfig.ONECLI_API_KEY;
 if (onecliKey) {
   Deno.env.set('ONECLI_API_KEY', onecliKey);
 }
+
+export const DISCORD_BOT_TOKEN =
+  Deno.env.get('DISCORD_BOT_TOKEN') || envConfig.DISCORD_BOT_TOKEN || '';
 
 export const DEV_DATA_DIR = resolve(PROJECT_ROOT, 'dev-data');
 export const SKILLS_DIR = resolve(PROJECT_ROOT, 'skills');
