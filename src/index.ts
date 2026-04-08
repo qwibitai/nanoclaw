@@ -77,6 +77,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { createStreamEditLoop } from './stream-edit-loop.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { startWebhookServer, stopWebhookServer } from './webhook.js';
@@ -302,18 +303,62 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
-  // Keep typing indicator alive (Telegram clears it after ~5s)
+  // Keep typing indicator alive (Telegram clears it after ~5s).
+  // Use a flag instead of clearInterval so the keepalive survives across
+  // multiple IPC queries within the same agent process (#26).
+  let typingActive = true;
   const typingKeepalive = setInterval(() => {
-    channel.setTyping?.(chatJid, true).catch(() => {});
+    if (typingActive) channel.setTyping?.(chatJid, true).catch(() => {});
   }, 2000);
 
   let hadError = false;
   let outputSentToUser = false;
   let lastSentText: string | null = null;
   let streamMessageId: number | null = null;
-  let lastEditTime = 0;
   let streamingFailed = false;
-  const EDIT_THROTTLE_MS = 1500;
+
+  // Buffered streaming loop — update() is synchronous and non-blocking,
+  // so it never stalls the outputChain in host-runner/container-runner.
+  const streamLoop = createStreamEditLoop({
+    throttleMs: 500,
+    async sendOrEdit(text) {
+      // Conversation moved on — stop editing the old message
+      if (queue.hasPendingMessages(chatJid)) {
+        streamMessageId = null;
+        streamingFailed = true;
+        throw new Error('pending messages');
+      }
+      if (streamMessageId === null) {
+        // First send — create the streaming message
+        const msgId = await channel.sendStreamMessage!(chatJid, text);
+        if (!msgId || typeof msgId !== 'number') {
+          streamingFailed = true;
+          throw new Error('sendStreamMessage failed');
+        }
+        streamMessageId = msgId;
+        lastSentText = text;
+        // Telegram clears typing indicator on sendMessage — re-enable it
+        await channel.setTyping?.(chatJid, true).catch(() => {});
+      } else {
+        // Subsequent edit
+        if (text.length > 4000) {
+          streamingFailed = true;
+          throw new Error('text too long for streaming edit');
+        }
+        try {
+          await channel.editMessage!(chatJid, streamMessageId, text);
+          lastSentText = text;
+        } catch (err) {
+          logger.warn(
+            { group: group.name, error: err },
+            'Stream edit failed, falling back to final send',
+          );
+          streamingFailed = true;
+          throw err;
+        }
+      }
+    },
+  });
 
   let output: 'success' | 'error';
   try {
@@ -329,70 +374,39 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
         if (result.partial) {
           // --- Streaming partial chunk ---
+          // Re-enable typing if it was paused after a previous query's final result (#26)
+          if (!typingActive) {
+            typingActive = true;
+            await channel.setTyping?.(chatJid, true).catch(() => {});
+          }
           if (!text || streamingFailed || !channel.sendStreamMessage) {
             resetIdleTimer();
             return;
           }
-
-          if (streamMessageId === null) {
-            // First partial: send initial streaming message
-            const msgId = await channel.sendStreamMessage(chatJid, text);
-            if (!msgId || typeof msgId !== 'number') {
-              streamingFailed = true;
-              resetIdleTimer();
-              return;
-            }
-            streamMessageId = msgId;
-            lastEditTime = Date.now();
-            lastSentText = text;
-            // Telegram clears typing indicator on sendMessage — re-enable it
-            await channel.setTyping?.(chatJid, true).catch(() => {});
-          } else {
-            // Subsequent partial: throttle + edit
-            const now = Date.now();
-            if (now - lastEditTime < EDIT_THROTTLE_MS) return;
-            if (text === lastSentText) return;
-            // Conversation moved on — stop editing the old message, deliver final as new
-            if (queue.hasPendingMessages(chatJid)) {
-              streamMessageId = null;
-              streamingFailed = true;
-              resetIdleTimer();
-              return;
-            }
-            if (text.length > 4000) {
-              // Too long for streaming edits — let final sendMessage handle it
-              streamingFailed = true;
-              resetIdleTimer();
-              return;
-            }
-            try {
-              await channel.editMessage!(chatJid, streamMessageId, text);
-              lastEditTime = now;
-              lastSentText = text;
-              // eslint-disable-next-line no-catch-all/no-catch-all
-            } catch (err) {
-              logger.warn(
-                { group: group.name, error: err },
-                'Stream edit failed, falling back to final send',
-              );
-              streamingFailed = true;
-            }
-          }
+          streamLoop.update(text);
           resetIdleTimer();
           return;
         }
 
         // --- Final result ---
+        // Flush any buffered streaming text before handling the final result
+        await streamLoop.flush();
+        await streamLoop.waitForInFlight();
+
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
 
         const { cleanText, images } = extractImages(text);
 
         if (streamMessageId !== null) {
           // Streaming was active — accumulated text already displayed.
-          clearInterval(typingKeepalive);
+          typingActive = false;
           if (cleanText && cleanText !== lastSentText) {
             try {
-              if (!streamingFailed && cleanText.length <= 4096 && !queue.hasPendingMessages(chatJid)) {
+              if (
+                !streamingFailed &&
+                cleanText.length <= 4096 &&
+                !queue.hasPendingMessages(chatJid)
+              ) {
                 await channel.editMessage!(chatJid, streamMessageId, cleanText);
               } else {
                 await channel.sendMessage(chatJid, cleanText);
@@ -412,7 +426,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           lastSentText = cleanText;
         } else if (cleanText && cleanText !== lastSentText) {
           // No streaming — use normal send
-          clearInterval(typingKeepalive);
+          typingActive = false;
           try {
             await channel.sendMessage(chatJid, cleanText);
             // eslint-disable-next-line no-catch-all/no-catch-all
@@ -432,8 +446,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
         // Reset streaming state for next IPC query — the onOutput callback
         // persists across multiple queries within the same agent process.
+        streamLoop.resetForNextQuery();
         streamMessageId = null;
-        lastEditTime = 0;
         streamingFailed = false;
         lastSentText = null;
         // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -449,6 +463,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
     });
   } finally {
+    streamLoop.stop();
     clearInterval(typingKeepalive);
     await channel.setTyping?.(chatJid, false).catch(() => {});
     if (idleTimer) clearTimeout(idleTimer);
@@ -959,9 +974,10 @@ async function main(): Promise<void> {
       }
       return sent;
     },
-    clearSession: (groupFolder: string) => {
+    clearSession: (groupFolder: string, chatJid: string) => {
       delete sessions[groupFolder];
       deleteSession(groupFolder);
+      queue.closeStdin(chatJid);
     },
   };
 

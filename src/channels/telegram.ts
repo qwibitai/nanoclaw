@@ -313,10 +313,7 @@ export class TelegramChannel implements Channel {
         const tasks = getTasksForGroup(group.folder);
         if (tasks.length === 0) {
           ctx.editMessageText('No tasks for this group.', {
-            reply_markup: new InlineKeyboard().text(
-              'Back',
-              'effort:back',
-            ),
+            reply_markup: new InlineKeyboard().text('Back', 'effort:back'),
           });
           ctx.answerCallbackQuery();
           return;
@@ -476,7 +473,7 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      this.opts.clearSession(group.folder);
+      this.opts.clearSession(group.folder, chatJid);
       ctx.reply('Session cleared.');
     });
 
@@ -914,23 +911,36 @@ export class TelegramChannel implements Channel {
   ): Promise<void> {
     if (!this.bot) return;
     const numericId = jid.replace(/^tg:/, '');
-    try {
-      await this.bot.api.editMessageText(numericId, messageId, text, {
-        parse_mode: 'Markdown',
-      });
-      // eslint-disable-next-line no-catch-all/no-catch-all
-    } catch (err) {
-      // Telegram throws 400 when content is unchanged — that's fine
-      if (String(err).includes('message is not modified')) return;
-      // Markdown failed — retry plain text
+
+    const MAX_RETRIES = 2;
+    const INITIAL_BACKOFF_MS = 1000;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        await this.bot.api.editMessageText(numericId, messageId, text);
+        await this.bot.api.editMessageText(numericId, messageId, text, {
+          parse_mode: 'Markdown',
+        });
+        return;
         // eslint-disable-next-line no-catch-all/no-catch-all
-      } catch (err2) {
-        logger.debug(
-          { jid, messageId, err2 },
-          'Failed to edit streaming message',
-        );
+      } catch (err) {
+        // Telegram throws 400 when content is unchanged — that's fine
+        if (String(err).includes('message is not modified')) return;
+
+        // 429 rate limit — retry with exponential backoff (#27)
+        if (String(err).includes('429') && attempt < MAX_RETRIES) {
+          const delay = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+          logger.debug(
+            { jid, messageId, attempt, delay },
+            'Rate limited on edit, retrying',
+          );
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        // Non-429 error or retries exhausted — try plain text once.
+        // If this also throws, the error propagates to the caller (#27).
+        await this.bot.api.editMessageText(numericId, messageId, text);
+        return;
       }
     }
   }

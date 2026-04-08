@@ -115,7 +115,10 @@ vi.mock('grammy', () => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     buttons: any[][] = [[]];
     text(label: string, data: string) {
-      this.buttons[this.buttons.length - 1].push({ text: label, callback_data: data });
+      this.buttons[this.buttons.length - 1].push({
+        text: label,
+        callback_data: data,
+      });
       return this;
     }
     row() {
@@ -126,7 +129,10 @@ vi.mock('grammy', () => ({
   Bot: class MockBot {
     token: string;
     commandHandlers = new Map<string, Handler>();
-    callbackQueryHandlers: Array<{ pattern: RegExp | string; handler: Handler }> = [];
+    callbackQueryHandlers: Array<{
+      pattern: RegExp | string;
+      handler: Handler;
+    }> = [];
     filterHandlers = new Map<string, Handler[]>();
     errorHandler: Handler | null = null;
 
@@ -134,6 +140,7 @@ vi.mock('grammy', () => ({
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendPhoto: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      editMessageText: vi.fn().mockResolvedValue(undefined),
       getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
       setMyCommands: vi.fn().mockResolvedValue(undefined),
       deleteMyCommands: vi.fn().mockResolvedValue(undefined),
@@ -172,7 +179,12 @@ vi.mock('grammy', () => ({
 }));
 
 import fs from 'fs';
-import { setGroupModel, setGroupEffort, deleteSession, updateTask } from '../db.js';
+import {
+  setGroupModel,
+  setGroupEffort,
+  deleteSession,
+  updateTask,
+} from '../db.js';
 import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
 
 // --- Test helpers ---
@@ -1720,7 +1732,10 @@ describe('TelegramChannel', () => {
 
       await handler(ctx);
 
-      expect(opts.clearSession).toHaveBeenCalledWith('test-group');
+      expect(opts.clearSession).toHaveBeenCalledWith(
+        'test-group',
+        'tg:100200300',
+      );
       expect(ctx.reply).toHaveBeenCalledWith('Session cleared.');
     });
 
@@ -1953,7 +1968,16 @@ describe('TelegramChannel', () => {
     });
 
     it('effort:group:high sets group effort', async () => {
-      const groups: Record<string, { name: string; folder: string; trigger: string; added_at: string; effort?: string }> = {
+      const groups: Record<
+        string,
+        {
+          name: string;
+          folder: string;
+          trigger: string;
+          added_at: string;
+          effort?: string;
+        }
+      > = {
         'tg:100200300': {
           name: 'Test Group',
           folder: 'test-group',
@@ -2103,6 +2127,94 @@ describe('TelegramChannel', () => {
     it('has name "telegram"', () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.name).toBe('telegram');
+    });
+  });
+
+  // --- editMessage retry logic (#27) ---
+
+  describe('editMessage', () => {
+    let channel: TelegramChannel;
+
+    beforeEach(async () => {
+      channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+    });
+
+    it('edits message with Markdown parse_mode', async () => {
+      await channel.editMessage!('tg:100200300', 1, 'hello');
+
+      expect(currentBot().api.editMessageText).toHaveBeenCalledWith(
+        '100200300',
+        1,
+        'hello',
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    it('silently ignores "message is not modified" error', async () => {
+      currentBot().api.editMessageText.mockRejectedValue(
+        new Error('Bad Request: message is not modified'),
+      );
+
+      // Should not throw
+      await channel.editMessage!('tg:100200300', 1, 'same text');
+    });
+
+    it('retries on 429 with exponential backoff', async () => {
+      vi.useFakeTimers();
+      const editMock = currentBot().api.editMessageText;
+      editMock
+        .mockRejectedValueOnce(new Error('429: Too Many Requests'))
+        .mockRejectedValueOnce(new Error('429: Too Many Requests'))
+        .mockResolvedValueOnce(undefined);
+
+      const promise = channel.editMessage!('tg:100200300', 1, 'text');
+
+      // First retry after 1000ms
+      await vi.advanceTimersByTimeAsync(1000);
+      // Second retry after 2000ms
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await promise;
+
+      expect(editMock).toHaveBeenCalledTimes(3);
+      vi.useRealTimers();
+    });
+
+    it('falls back to plain text on non-429 error', async () => {
+      const editMock = currentBot().api.editMessageText;
+      editMock
+        .mockRejectedValueOnce(new Error('Bad Request: cannot parse Markdown'))
+        .mockResolvedValueOnce(undefined); // plain text succeeds
+
+      await channel.editMessage!('tg:100200300', 1, 'text');
+
+      // Second call should be without parse_mode
+      expect(editMock).toHaveBeenCalledTimes(2);
+      expect(editMock.mock.calls[1]).toEqual(['100200300', 1, 'text']);
+    });
+
+    it('throws after exhausting all retries', async () => {
+      vi.useFakeTimers();
+      const editMock = currentBot().api.editMessageText;
+      // All Markdown attempts get 429, plain text fallback also fails
+      editMock.mockRejectedValue(new Error('429: Too Many Requests'));
+
+      const promise = channel.editMessage!('tg:100200300', 1, 'text').catch(
+        (e: Error) => e,
+      );
+
+      // First retry after 1000ms
+      await vi.advanceTimersByTimeAsync(1000);
+      // Second retry after 2000ms
+      await vi.advanceTimersByTimeAsync(2000);
+      // Let microtasks flush
+      await vi.advanceTimersByTimeAsync(0);
+
+      const result = await promise;
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toContain('429');
+      vi.useRealTimers();
     });
   });
 });
