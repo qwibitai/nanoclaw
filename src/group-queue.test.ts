@@ -528,4 +528,43 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  it('preempts when idle arrives with queued user messages', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('queued');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    queue.notifyIdle('group1@g.us');
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });

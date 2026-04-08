@@ -148,12 +148,13 @@ export class GroupQueue {
 
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks are pending, preempt the idle container immediately.
+   * If tasks or queued user messages are pending, preempt the idle container
+   * immediately so the next run can start without waiting for the idle timeout.
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
-    if (state.pendingTasks.length > 0) {
+    if (state.pendingTasks.length > 0 || state.pendingMessages) {
       this.closeStdin(groupJid);
     }
   }
