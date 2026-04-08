@@ -17,8 +17,8 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
-/** How often to poll signal-cli for new messages (ms). */
-const SIGNAL_POLL_INTERVAL = 2000;
+/** Delay before reconnecting SSE after disconnect (ms). */
+const SSE_RECONNECT_DELAY = 3000;
 
 /** Signal has no hard limit, but keep chunks reasonable. */
 const SIGNAL_MAX_MESSAGE_LENGTH = 4000;
@@ -213,7 +213,8 @@ export class SignalChannel implements Channel {
   private baseUrl: string;
   private account: string;
   private connected = false;
-  private pollTimer: NodeJS.Timeout | null = null;
+  private sseAbort: AbortController | null = null;
+  private sseReconnectTimer: NodeJS.Timeout | null = null;
   private rpcId = 0;
   private opts: {
     onMessage: OnInboundMessage;
@@ -281,7 +282,7 @@ export class SignalChannel implements Channel {
       console.log(`\n  Signal: ${this.account}`);
       console.log(`  Daemon: ${this.baseUrl}\n`);
 
-      this.startPolling();
+      this.startSSE();
     } catch (err) {
       // Don't throw — let NanoClaw start without Signal if daemon isn't running.
       // This mirrors Telegram's pattern: disabled if creds missing.
@@ -366,9 +367,13 @@ export class SignalChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
+    if (this.sseAbort) {
+      this.sseAbort.abort();
+      this.sseAbort = null;
+    }
+    if (this.sseReconnectTimer) {
+      clearTimeout(this.sseReconnectTimer);
+      this.sseReconnectTimer = null;
     }
     this.connected = false;
     logger.info('Signal channel disconnected');
@@ -396,33 +401,104 @@ export class SignalChannel implements Channel {
 
   // ---- internals ----
 
-  private startPolling(): void {
-    if (this.pollTimer) return;
-    this.pollTimer = setInterval(
-      () => this.pollMessages(),
-      SIGNAL_POLL_INTERVAL,
-    );
-    // Also poll immediately on connect
-    this.pollMessages();
+  /**
+   * Connect to the signal-cli SSE endpoint (GET /api/v1/events).
+   * The daemon pushes incoming messages as Server-Sent Events.
+   * On disconnect, automatically reconnect after a short delay.
+   */
+  private startSSE(): void {
+    if (this.sseAbort) return;
+
+    const controller = new AbortController();
+    this.sseAbort = controller;
+    const url = `${this.baseUrl}/api/v1/events`;
+
+    logger.info({ url }, 'Signal SSE: connecting');
+
+    fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/event-stream' },
+    })
+      .then(async (resp) => {
+        if (!resp.ok || !resp.body) {
+          throw new Error(`SSE connect failed: ${resp.status}`);
+        }
+
+        logger.info('Signal SSE: stream connected');
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE format: "data: <json>\n\n"
+          const parts = buffer.split('\n\n');
+          // Keep the last (possibly incomplete) chunk in the buffer
+          buffer = parts.pop() || '';
+
+          for (const part of parts) {
+            const lines = part.split('\n');
+            let data = '';
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                data += line.slice(5).trimStart();
+              }
+            }
+            if (data) {
+              this.handleSSEData(data);
+            }
+          }
+        }
+
+        // Stream ended normally — reconnect
+        logger.info('Signal SSE: stream ended, reconnecting');
+        this.scheduleSSEReconnect();
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return; // Intentional disconnect
+        logger.warn({ err }, 'Signal SSE: connection error, reconnecting');
+        this.scheduleSSEReconnect();
+      });
   }
 
-  private async pollMessages(): Promise<void> {
-    if (!this.connected) return;
+  private handleSSEData(data: string): void {
     try {
-      const messages = await this.rpc('receive', {});
-      if (!Array.isArray(messages)) return;
+      const parsed = JSON.parse(data);
 
-      for (const msg of messages) {
-        try {
-          this.handleEnvelope(msg.envelope || msg);
-        } catch (err) {
-          logger.debug({ err }, 'Error processing Signal envelope');
-        }
+      // signal-cli sends JSON-RPC notifications with method "receive"
+      // Format: { "jsonrpc":"2.0", "method":"receive", "params": { "envelope": {...}, "account": "..." } }
+      const envelope =
+        parsed?.params?.envelope ||
+        parsed?.params?.result?.envelope ||
+        parsed?.envelope;
+
+      if (envelope) {
+        this.handleEnvelope(envelope);
       }
     } catch (err) {
-      logger.debug({ err }, 'Signal receive poll error');
-      // Don't disconnect on transient errors — just skip this cycle
+      logger.debug(
+        { err, data: data.slice(0, 200) },
+        'Signal SSE: failed to parse event',
+      );
     }
+  }
+
+  private scheduleSSEReconnect(): void {
+    this.sseAbort = null;
+    if (!this.connected) return;
+    if (this.sseReconnectTimer) return;
+
+    this.sseReconnectTimer = setTimeout(() => {
+      this.sseReconnectTimer = null;
+      if (this.connected) {
+        this.startSSE();
+      }
+    }, SSE_RECONNECT_DELAY);
   }
 
   private handleEnvelope(envelope: SignalEnvelope): void {
