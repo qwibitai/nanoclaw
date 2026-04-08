@@ -481,7 +481,10 @@ export class SignalChannel implements Channel {
         this.handleEnvelope(envelope);
       }
     } catch (err) {
-      logger.debug({ err, data: data.slice(0, 200) }, 'Signal SSE: failed to parse event');
+      logger.debug(
+        { err, data: data.slice(0, 200) },
+        'Signal SSE: failed to parse event',
+      );
     }
   }
 
