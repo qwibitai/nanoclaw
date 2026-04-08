@@ -27,6 +27,16 @@ The ONLY exceptions where Mermaid is acceptable:
 - The user explicitly says "quick", "simple", or "mermaid"
 - Sequence diagrams or Gantt charts (Mermaid handles these well)
 
+## IMPORTANT: Default to a light theme
+
+**Diagrams default to a LIGHT background unless the user explicitly asks for dark.** Every template below already uses light backgrounds (`#ffffff`, `#fafafa`, `#f8fafc`). Adapt them as-is — do not override the background, text, or accent colors to a dark palette by default.
+
+Use a dark theme ONLY when:
+- The user explicitly asks for "dark mode", "dark theme", or "dark background"
+- The user provides a specific dark color value (e.g., "use #0a0e27 as the background")
+
+When dark IS requested, invert the *entire* color scheme — background, text, borders, and muted accents — so contrast and hierarchy still read correctly. Don't just swap the background.
+
 For everything else — architecture, flowcharts, dashboards, timelines, comparisons, org charts — use `type: "html"` and adapt the matching template below:
 
 | Request | Template to adapt |
