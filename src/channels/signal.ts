@@ -7,6 +7,8 @@
  *   - Optional:    SIGNAL_CLI_URL  (default: http://127.0.0.1:8581)
  */
 
+import http from 'node:http';
+import https from 'node:https';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -213,7 +215,7 @@ export class SignalChannel implements Channel {
   private baseUrl: string;
   private account: string;
   private connected = false;
-  private sseAbort: AbortController | null = null;
+  private sseRequest: http.ClientRequest | null = null;
   private sseReconnectTimer: NodeJS.Timeout | null = null;
   private rpcId = 0;
   private opts: {
@@ -391,9 +393,9 @@ export class SignalChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    if (this.sseAbort) {
-      this.sseAbort.abort();
-      this.sseAbort = null;
+    if (this.sseRequest) {
+      this.sseRequest.destroy();
+      this.sseRequest = null;
     }
     if (this.sseReconnectTimer) {
       clearTimeout(this.sseReconnectTimer);
@@ -431,38 +433,38 @@ export class SignalChannel implements Channel {
    * On disconnect, automatically reconnect after a short delay.
    */
   private startSSE(): void {
-    if (this.sseAbort) return;
+    if (this.sseRequest) return;
 
-    const controller = new AbortController();
-    this.sseAbort = controller;
     const url = `${this.baseUrl}/api/v1/events`;
+    const parsed = new URL(url);
+    const transport = parsed.protocol === 'https:' ? https : http;
 
     logger.info({ url }, 'Signal SSE: connecting');
 
-    fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'text/event-stream' },
-    })
-      .then(async (resp) => {
-        if (!resp.ok || !resp.body) {
-          throw new Error(`SSE connect failed: ${resp.status}`);
+    const req = transport.get(
+      url,
+      { headers: { Accept: 'text/event-stream' } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          logger.warn(
+            { statusCode: res.statusCode },
+            'Signal SSE: unexpected status',
+          );
+          res.resume(); // drain
+          this.sseRequest = null;
+          this.scheduleSSEReconnect();
+          return;
         }
 
         logger.info('Signal SSE: stream connected');
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
+        res.setEncoding('utf8');
         let buffer = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        res.on('data', (chunk: string) => {
+          buffer += chunk;
 
-          buffer += decoder.decode(value, { stream: true });
-
-          // SSE format: "data: <json>\n\n"
+          // SSE format: "event:name\ndata:<json>\n\n"
           const parts = buffer.split('\n\n');
-          // Keep the last (possibly incomplete) chunk in the buffer
           buffer = parts.pop() || '';
 
           for (const part of parts) {
@@ -481,17 +483,29 @@ export class SignalChannel implements Channel {
               this.handleSSEData(data);
             }
           }
-        }
+        });
 
-        // Stream ended normally — reconnect
-        logger.info('Signal SSE: stream ended, reconnecting');
-        this.scheduleSSEReconnect();
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return; // Intentional disconnect
-        logger.warn({ err }, 'Signal SSE: connection error, reconnecting');
-        this.scheduleSSEReconnect();
-      });
+        res.on('end', () => {
+          logger.info('Signal SSE: stream ended, reconnecting');
+          this.sseRequest = null;
+          this.scheduleSSEReconnect();
+        });
+
+        res.on('error', (err) => {
+          logger.warn({ err }, 'Signal SSE: stream error, reconnecting');
+          this.sseRequest = null;
+          this.scheduleSSEReconnect();
+        });
+      },
+    );
+
+    req.on('error', (err) => {
+      logger.warn({ err }, 'Signal SSE: connection error, reconnecting');
+      this.sseRequest = null;
+      this.scheduleSSEReconnect();
+    });
+
+    this.sseRequest = req;
   }
 
   private handleSSEData(data: string): void {
@@ -517,7 +531,7 @@ export class SignalChannel implements Channel {
   }
 
   private scheduleSSEReconnect(): void {
-    this.sseAbort = null;
+    this.sseRequest = null;
     if (!this.connected) return;
     if (this.sseReconnectTimer) return;
 
