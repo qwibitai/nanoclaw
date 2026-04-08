@@ -33,6 +33,8 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getAllUnifiedSessionIds,
+  setUnifiedSessionId,
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
@@ -49,7 +51,13 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  stripModelArtifacts,
+  stripUnclosedInternalTag,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -62,7 +70,12 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  ContainerConfig,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -70,7 +83,12 @@ export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
+let unifiedSessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+// Pending model switch notification to inject into the next prompt
+const pendingModelNotification: Record<string, string> = {};
+// Groups that should force compaction on their next agent run
+const pendingForceCompact: Set<string> = new Set();
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -108,6 +126,7 @@ function loadState(): void {
     lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
+  unifiedSessions = getAllUnifiedSessionIds();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
@@ -264,10 +283,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when agent is idle.
+  // Groups with HEARTBEAT.md stay alive indefinitely — heartbeats act as keepalive.
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const hasHeartbeat = fs.existsSync(
+    path.join(GROUPS_DIR, group.folder, 'HEARTBEAT.md'),
+  );
 
   const resetIdleTimer = () => {
+    if (hasHeartbeat) return;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug(
@@ -282,6 +306,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Streaming state for edit-in-place
+  let streamingMessageId: string | null = null;
+  let editDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingEditText: string | null = null;
+  // completedText holds finalized text from prior streaming rounds + tool calls.
+  // Each new Ollama partial (which is the full accumulated text for the current round)
+  // is appended to completedText for display.
+  let completedText = '';
+  // Track the latest partial text from the current streaming round
+  let currentRoundText = '';
+
+  const flushEdit = async () => {
+    if (pendingEditText && streamingMessageId && channel.editMessage) {
+      const text = pendingEditText;
+      pendingEditText = null;
+      await channel.editMessage(chatJid, streamingMessageId, text);
+    }
+  };
+
+  const debouncedEdit = (text: string) => {
+    pendingEditText = text;
+    if (!editDebounceTimer) {
+      editDebounceTimer = setTimeout(async () => {
+        editDebounceTimer = null;
+        await flushEdit();
+      }, 300);
+    }
+  };
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -289,18 +342,107 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+      // Strip model artifacts — special tokens always, unclosed <internal> only on final output
+      let text = stripModelArtifacts(raw, !result.isPartial);
+
+      // Prepend thinking layer if enabled and present
+      if (result.thinking && group.containerConfig?.showThinking) {
+        text = text
+          ? `_${result.thinking}_\n\n${text}`
+          : `_${result.thinking}_`;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
+
+      if (!text) return;
+
+      if (result.isPartial) {
+        // Streaming partial update
+        if (result.isTooling) {
+          // Skip display for communication tools — the user sees the result directly
+          const hiddenTools = ['send_message', 'send_image'];
+          if (hiddenTools.some((t) => text.includes(t))) {
+            return;
+          }
+          // Tool execution — finalize current streaming text + append tool info.
+          if (editDebounceTimer) {
+            clearTimeout(editDebounceTimer);
+            editDebounceTimer = null;
+          }
+          // Finalize: completedText = prior completed + current round + tool info.
+          // Strip unclosed <internal> tags from currentRoundText before baking in,
+          // since this text is being permanently finalized.
+          const safeCurrentRound = currentRoundText
+            ? stripUnclosedInternalTag(currentRoundText)
+            : '';
+          if (safeCurrentRound) {
+            completedText = completedText
+              ? `${completedText}\n\n${safeCurrentRound}\n\n${text}`
+              : `${safeCurrentRound}\n\n${text}`;
+          } else {
+            completedText = completedText
+              ? `${completedText}\n\n${text}`
+              : text;
+          }
+          currentRoundText = '';
+          if (streamingMessageId && channel.editMessage) {
+            await channel.editMessage(
+              chatJid,
+              streamingMessageId,
+              completedText,
+            );
+          } else if (channel.sendMessageReturningId) {
+            streamingMessageId = await channel.sendMessageReturningId(
+              chatJid,
+              completedText,
+            );
+            outputSentToUser = true;
+          }
+        } else if (streamingMessageId && channel.editMessage) {
+          // Streaming partial — text is the full accumulated text for this round.
+          // Prepend completedText (prior rounds + tool calls) for full display.
+          currentRoundText = text;
+          const fullText = completedText ? `${completedText}\n\n${text}` : text;
+          debouncedEdit(fullText);
+        } else if (channel.sendMessageReturningId) {
+          // First partial — send initial message and track its ID
+          currentRoundText = text;
+          streamingMessageId = await channel.sendMessageReturningId(
+            chatJid,
+            text,
+          );
+          outputSentToUser = true;
+        }
+        // Channels without editing: skip partials silently
+      } else {
+        // Final complete output
+        // Flush any pending debounced edit first
+        if (editDebounceTimer) {
+          clearTimeout(editDebounceTimer);
+          editDebounceTimer = null;
+        }
+        if (streamingMessageId && channel.editMessage) {
+          // Edit the streaming message one final time with complete text,
+          // including any accumulated text from before tool calls
+          const fullText = completedText ? `${completedText}\n\n${text}` : text;
+          await channel.editMessage(chatJid, streamingMessageId, fullText);
+          streamingMessageId = null;
+          completedText = '';
+          currentRoundText = '';
+        } else {
+          // No streaming happened, or channel doesn't support it
+          await channel.sendMessage(chatJid, text);
+        }
+        outputSentToUser = true;
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        resetIdleTimer();
+      }
     }
 
-    if (result.status === 'success') {
+    if (result.status === 'success' && !result.isPartial) {
+      // Reset streaming state on any final output so the next user turn
+      // starts a fresh message (even if this output had no text).
+      streamingMessageId = null;
+      completedText = '';
+      currentRoundText = '';
       queue.notifyIdle(chatJid);
     }
 
@@ -342,7 +484,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[group.folder] || undefined;
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -370,27 +512,56 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session IDs from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
+        if (output.unifiedSessionId) {
+          unifiedSessions[group.folder] = output.unifiedSessionId;
+          setUnifiedSessionId(group.folder, output.unifiedSessionId);
+        }
         await onOutput(output);
       }
     : undefined;
+
+  // Inject pending model switch notification into the prompt
+  let finalPrompt = prompt;
+  if (pendingModelNotification[chatJid]) {
+    logger.info(
+      {
+        group: group.name,
+        notification: pendingModelNotification[chatJid].slice(0, 80),
+      },
+      'Injecting model switch notification',
+    );
+    finalPrompt = `${pendingModelNotification[chatJid]}\n\n${prompt}`;
+    delete pendingModelNotification[chatJid];
+  }
+
+  // Consume the force-compact flag if set
+  const forceCompact = pendingForceCompact.has(chatJid);
+  if (forceCompact) {
+    pendingForceCompact.delete(chatJid);
+  }
 
   try {
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: finalPrompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        modelProvider: group.containerConfig?.modelProvider,
+        claudeModel: group.containerConfig?.claudeModel,
+        ollamaModel: group.containerConfig?.ollamaModel,
+        unifiedSessionId: unifiedSessions[group.folder],
+        forceCompact,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -400,6 +571,10 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+    if (output.unifiedSessionId) {
+      unifiedSessions[group.folder] = output.unifiedSessionId;
+      setUnifiedSessionId(group.folder, output.unifiedSessionId);
     }
 
     if (output.status === 'error') {
@@ -591,7 +766,323 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Handle /remote-control and /remote-control-end commands
+  async function handleThinkToggle(
+    command: string,
+    chatJid: string,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const arg = command.trim().split(/\s+/)[1]?.toLowerCase();
+
+    if (arg !== 'on' && arg !== 'off') {
+      const current = group.containerConfig?.showThinking ? 'on' : 'off';
+      await channel.sendMessage(
+        chatJid,
+        `Thinking display: ${current}\nUsage: /think on  or  /think off`,
+      );
+      return;
+    }
+
+    const showThinking = arg === 'on';
+    const updatedConfig: ContainerConfig = {
+      ...group.containerConfig,
+      showThinking,
+    };
+    group.containerConfig = updatedConfig;
+    setRegisteredGroup(chatJid, group);
+
+    await channel.sendMessage(chatJid, `Thinking display: ${arg}`);
+
+    logger.info(
+      { chatJid, showThinking, group: group.name },
+      'Thinking display toggled',
+    );
+  }
+
+  async function handleContextReport(chatJid: string): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    // Find the most recent unified session file for this group
+    const sessionsDir = path.join(GROUPS_DIR, group.folder, '.sessions');
+    let estimatedTokens = 0;
+    let messageCount = 0;
+    let sessionId = 'none';
+    let lastProvider = 'unknown';
+
+    try {
+      if (fs.existsSync(sessionsDir)) {
+        const files = fs
+          .readdirSync(sessionsDir)
+          .filter((f) => f.endsWith('.json'))
+          .map((f) => ({
+            name: f,
+            mtime: fs.statSync(path.join(sessionsDir, f)).mtimeMs,
+          }))
+          .sort((a, b) => b.mtime - a.mtime);
+
+        if (files.length > 0) {
+          const latest = files[0].name;
+          const session = JSON.parse(
+            fs.readFileSync(path.join(sessionsDir, latest), 'utf-8'),
+          );
+          sessionId = session.id || latest.replace('.json', '');
+          lastProvider = session.lastProvider || 'unknown';
+          messageCount = session.messages?.length || 0;
+
+          // Estimate tokens: ~4 chars per token (matches container-side estimate)
+          let chars = 0;
+          for (const m of session.messages || []) {
+            chars += (m.content || '').length;
+            if (m.thinking) chars += m.thinking.length;
+            if (m.toolCalls) chars += JSON.stringify(m.toolCalls).length;
+          }
+          estimatedTokens = Math.ceil(chars / 4);
+        }
+      }
+    } catch (err) {
+      logger.error({ err, chatJid }, 'Failed to read session for context report');
+    }
+
+    // Try to detect the model's effective context window
+    let contextWindow = 0;
+    let contextSource = '';
+    const provider = group.containerConfig?.modelProvider || 'claude';
+    if (provider === 'ollama') {
+      const model = group.containerConfig?.ollamaModel || 'unknown';
+      try {
+        const ollamaHost =
+          process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+        const resp = await fetch(`${ollamaHost}/api/show`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: model }),
+        });
+        if (resp.ok) {
+          const info = (await resp.json()) as {
+            model_info?: Record<string, unknown>;
+          };
+          if (info.model_info) {
+            for (const [key, value] of Object.entries(info.model_info)) {
+              if (
+                key.endsWith('.context_length') &&
+                typeof value === 'number'
+              ) {
+                contextWindow = value;
+                break;
+              }
+            }
+          }
+        }
+        // Cloud models capped at 131072
+        if (model.endsWith(':cloud') && contextWindow > 131072) {
+          contextWindow = 131072;
+          contextSource = ' (capped for cloud)';
+        }
+      } catch {
+        contextWindow = 131072;
+        contextSource = ' (default — could not query)';
+      }
+    } else {
+      // Claude — best-effort defaults
+      const claudeModel = group.containerConfig?.claudeModel || 'sonnet';
+      contextWindow = claudeModel.includes('opus') ? 1_000_000 : 200_000;
+      contextSource = ' (model default)';
+    }
+
+    const pct =
+      contextWindow > 0
+        ? Math.round((estimatedTokens / contextWindow) * 100)
+        : 0;
+    const compactionThreshold = Math.round(contextWindow * 0.8);
+    const willCompactSoon = estimatedTokens > compactionThreshold;
+
+    const lines = [
+      `Context report:`,
+      `  Provider: ${provider}`,
+      `  Messages: ${messageCount}`,
+      `  Estimated tokens: ${estimatedTokens.toLocaleString()}`,
+      `  Context window: ${contextWindow.toLocaleString()}${contextSource}`,
+      `  Usage: ${pct}%`,
+      `  Compaction threshold: ${compactionThreshold.toLocaleString()} (80%)`,
+      willCompactSoon
+        ? `  ⚠ Will compact on next turn`
+        : `  ✓ Below threshold`,
+      `  Last provider: ${lastProvider}`,
+      `  Session: ${sessionId}`,
+    ];
+    await channel.sendMessage(chatJid, lines.join('\n'));
+  }
+
+  async function handleForceCompact(chatJid: string): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const provider = group.containerConfig?.modelProvider || 'claude';
+    if (provider !== 'ollama') {
+      await channel.sendMessage(
+        chatJid,
+        'Compaction is only available for Ollama models. Claude manages its own context via the SDK.',
+      );
+      return;
+    }
+
+    // Mark for force-compaction and restart the container so the new run picks up the flag
+    pendingForceCompact.add(chatJid);
+    queue.forceCloseAndDeactivate(chatJid);
+
+    await channel.sendMessage(
+      chatJid,
+      'Compaction queued. It will run on the next message you send.',
+    );
+
+    logger.info(
+      { chatJid, group: group.name },
+      'Force compaction queued',
+    );
+  }
+
+  async function handleModelSwitch(
+    command: string,
+    chatJid: string,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    if (!group) return;
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    // Parse: /model claude [model]  OR  /model ollama [model]
+    // Claude models: sonnet, opus, haiku, or full ID like claude-opus-4-5
+    // Ollama models: glm-5:cloud, gemma4:31b, etc.
+    const parts = command.trim().split(/\s+/);
+    const provider = parts[1]?.toLowerCase();
+
+    if (provider !== 'claude' && provider !== 'ollama') {
+      const current = group.containerConfig?.modelProvider || 'claude';
+      const claudeModel = group.containerConfig?.claudeModel || 'default';
+      const ollamaModel = group.containerConfig?.ollamaModel || '';
+      const display =
+        current === 'ollama'
+          ? `ollama/${ollamaModel}`
+          : `claude/${claudeModel}`;
+      await channel.sendMessage(
+        chatJid,
+        `Current model: ${display}\nUsage: /model claude [sonnet|opus|haiku]  or  /model ollama [model-name]`,
+      );
+      return;
+    }
+
+    const modelName = parts[2] || undefined;
+
+    // Validate Claude model name
+    if (provider === 'claude' && modelName) {
+      const validClaude = [
+        'sonnet',
+        'opus',
+        'haiku',
+        'claude-sonnet-4-6',
+        'claude-opus-4-6',
+        'claude-haiku-4-5',
+        'claude-sonnet-4-5',
+        'claude-opus-4-5',
+      ];
+      if (!validClaude.includes(modelName.toLowerCase())) {
+        await channel.sendMessage(
+          chatJid,
+          `Unknown Claude model "${modelName}". Available: ${validClaude.join(', ')}`,
+        );
+        return;
+      }
+    }
+
+    // Validate Ollama model exists before switching
+    if (provider === 'ollama' && modelName) {
+      try {
+        const ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+        const resp = await fetch(`${ollamaHost}/api/tags`);
+        if (resp.ok) {
+          const data = (await resp.json()) as {
+            models?: Array<{ name: string }>;
+          };
+          const available = data.models?.map((m) => m.name) || [];
+          // Match with or without :latest tag
+          const found = available.some(
+            (n) =>
+              n === modelName ||
+              n === `${modelName}:latest` ||
+              n.replace(':latest', '') === modelName,
+          );
+          if (!found) {
+            const list = available
+              .map((n) => n.replace(':latest', ''))
+              .join(', ');
+            await channel.sendMessage(
+              chatJid,
+              `Model "${modelName}" not found. Available: ${list}`,
+            );
+            return;
+          }
+        }
+      } catch {
+        // Can't reach Ollama — let it fail at container time
+      }
+    }
+
+    const previousProvider = group.containerConfig?.modelProvider || 'claude';
+    const providerChanged = previousProvider !== provider;
+
+    // Close the active container and deactivate immediately so new messages
+    // don't get piped to the dying container. Next message spawns a fresh one.
+    queue.forceCloseAndDeactivate(chatJid);
+
+    // Only clear the SDK session when switching providers (Claude ↔ Ollama).
+    // Claude-to-Claude model changes preserve the SDK session since the SDK
+    // supports model changes within a session.
+    if (providerChanged) {
+      delete sessions[group.folder];
+      setSession(group.folder, '');
+    }
+
+    // Update the group's containerConfig
+    const updatedConfig: ContainerConfig = {
+      ...group.containerConfig,
+      modelProvider: provider,
+      claudeModel:
+        provider === 'claude' ? modelName : group.containerConfig?.claudeModel,
+      ollamaModel:
+        provider === 'ollama'
+          ? modelName || group.containerConfig?.ollamaModel || 'llama3.2'
+          : group.containerConfig?.ollamaModel,
+    };
+    group.containerConfig = updatedConfig;
+    setRegisteredGroup(chatJid, group);
+
+    const modelDisplay =
+      provider === 'ollama'
+        ? `ollama/${updatedConfig.ollamaModel}`
+        : `claude/${modelName || 'default'}`;
+
+    // Queue a notification for the next prompt so the agent knows about the switch
+    pendingModelNotification[chatJid] =
+      `[SYSTEM NOTIFICATION — Model switch has occurred. You are now running on ${modelDisplay}. This message was injected automatically by the NanoClaw infrastructure, not sent by a user.]`;
+
+    await channel.sendMessage(chatJid, `Switched to ${modelDisplay}`);
+
+    logger.info(
+      { chatJid, provider, modelName, group: group.name },
+      'Model provider switched',
+    );
+  }
+
   async function handleRemoteControl(
     command: string,
     chatJid: string,
@@ -636,11 +1127,35 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
+      // Host-side commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
+      }
+      if (/^\/model\s/i.test(trimmed) || trimmed === '/model') {
+        handleModelSwitch(trimmed, chatJid).catch((err) =>
+          logger.error({ err, chatJid }, 'Model switch command error'),
+        );
+        return;
+      }
+      if (/^\/think\s/i.test(trimmed) || trimmed === '/think') {
+        handleThinkToggle(trimmed, chatJid).catch((err) =>
+          logger.error({ err, chatJid }, 'Think toggle error'),
+        );
+        return;
+      }
+      if (trimmed === '/context') {
+        handleContextReport(chatJid).catch((err) =>
+          logger.error({ err, chatJid }, 'Context report error'),
+        );
+        return;
+      }
+      if (trimmed === '/compact') {
+        handleForceCompact(chatJid).catch((err) =>
+          logger.error({ err, chatJid }, 'Force compact error'),
         );
         return;
       }
@@ -698,6 +1213,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
+    getUnifiedSessions: () => unifiedSessions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
@@ -716,6 +1232,20 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendImage: async (jid, imagePath, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (channel.sendImage) {
+        await channel.sendImage(jid, imagePath, caption);
+      } else {
+        await channel.sendMessage(
+          jid,
+          caption
+            ? `[Image: ${imagePath}] ${caption}`
+            : `[Image: ${imagePath}]`,
+        );
+      }
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

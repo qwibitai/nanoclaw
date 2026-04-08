@@ -2,7 +2,14 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import path from 'path';
+import {
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  HEARTBEAT_INTERVAL,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -11,8 +18,10 @@ import {
 import {
   getAllTasks,
   getDueTasks,
+  getLastMessageTimestamp,
   getTaskById,
   logTaskRun,
+  storeMessage,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -65,6 +74,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
+  getUnifiedSessions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
@@ -154,6 +164,11 @@ async function runTask(
   const sessions = deps.getSessions();
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const unifiedSessions = deps.getUnifiedSessions();
+  const unifiedSessionId =
+    task.context_mode === 'group'
+      ? unifiedSessions[task.group_folder]
+      : undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -181,6 +196,10 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
+        modelProvider: group.containerConfig?.modelProvider,
+        claudeModel: group.containerConfig?.claudeModel,
+        ollamaModel: group.containerConfig?.ollamaModel,
+        unifiedSessionId,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
@@ -250,6 +269,74 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   schedulerRunning = true;
   logger.info('Scheduler loop started');
 
+  // Track last heartbeat time per group (init to now so we don't fire on startup)
+  const lastHeartbeat: Record<string, number> = {};
+  const startupTime = Date.now();
+  const HEARTBEAT_QUIET_PERIOD_MS = 300_000; // 5 minutes
+
+  const checkHeartbeats = async () => {
+    const groups = deps.registeredGroups();
+    for (const [jid, group] of Object.entries(groups)) {
+      const heartbeatPath = path.join(GROUPS_DIR, group.folder, 'HEARTBEAT.md');
+      if (!fs.existsSync(heartbeatPath)) continue;
+
+      const now = Date.now();
+      const lastBeat = lastHeartbeat[group.folder] || startupTime;
+      if (now - lastBeat < HEARTBEAT_INTERVAL) continue;
+
+      // Skip if there has been recent direct interaction
+      const lastMsg = getLastMessageTimestamp(jid);
+      if (lastMsg) {
+        const lastMsgAge = now - new Date(lastMsg).getTime();
+        if (lastMsgAge < HEARTBEAT_QUIET_PERIOD_MS) {
+          logger.debug(
+            { group: group.name, lastMsgAge },
+            'Skipping heartbeat — recent interaction',
+          );
+          continue;
+        }
+      }
+
+      lastHeartbeat[group.folder] = now;
+
+      try {
+        const heartbeatContent = fs.readFileSync(heartbeatPath, 'utf-8').trim();
+        if (!heartbeatContent) continue;
+
+        const prompt = `[HEARTBEAT — This is an automated periodic check-in, not a user message.]\n\n${heartbeatContent}`;
+
+        // Try to pipe into the active container first
+        if (deps.queue.sendMessage(jid, prompt)) {
+          logger.info(
+            { group: group.name, folder: group.folder },
+            'Heartbeat piped to active container',
+          );
+          continue;
+        }
+
+        // No active container — store as a synthetic message so the normal
+        // message processing loop picks it up and spawns a container.
+        logger.info(
+          { group: group.name, folder: group.folder },
+          'Heartbeat spawning new container',
+        );
+        storeMessage({
+          id: `heartbeat-${Date.now()}`,
+          chat_jid: jid,
+          sender: '[System]',
+          sender_name: '[System]',
+          content: prompt,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        });
+        deps.queue.enqueueMessageCheck(jid);
+      } catch (err) {
+        logger.error({ err, group: group.name }, 'Error processing heartbeat');
+      }
+    }
+  };
+
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
@@ -268,6 +355,9 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           runTask(currentTask, deps),
         );
       }
+
+      // Check heartbeats
+      await checkHeartbeats();
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
     }

@@ -193,6 +193,18 @@ export class GroupQueue {
     }
   }
 
+  /**
+   * Close the active container AND mark inactive immediately.
+   * Use for model switching — prevents new messages from being piped to
+   * the dying container. The next enqueueMessageCheck spawns a fresh one.
+   */
+  forceCloseAndDeactivate(groupJid: string): void {
+    this.closeStdin(groupJid);
+    const state = this.getGroup(groupJid);
+    state.active = false;
+    state.idleWaiting = false;
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',

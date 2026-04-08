@@ -41,6 +41,7 @@ describe('task scheduler', () => {
     startSchedulerLoop({
       registeredGroups: () => ({}),
       getSessions: () => ({}),
+      getUnifiedSessions: () => ({}),
       queue: { enqueueTask } as any,
       onProcess: () => {},
       sendMessage: async () => {},

@@ -30,6 +30,10 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  modelProvider?: 'claude' | 'ollama'; // Default: 'claude'
+  claudeModel?: string; // e.g. 'sonnet', 'opus', 'haiku', 'claude-opus-4-5'
+  ollamaModel?: string; // e.g. 'glm-5:cloud', 'gemma4:31b'
+  showThinking?: boolean; // Show model thinking/reasoning layer (default: false)
 }
 
 export interface RegisteredGroup {
@@ -40,6 +44,12 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+}
+
+export interface MessageAttachment {
+  type: 'image' | 'video' | 'audio' | 'document';
+  path: string; // Container-relative path (e.g. /workspace/group/attachments/photo.jpg)
+  mimeType?: string;
 }
 
 export interface NewMessage {
@@ -55,6 +65,7 @@ export interface NewMessage {
   reply_to_message_id?: string;
   reply_to_message_content?: string;
   reply_to_sender_name?: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface ScheduledTask {
@@ -88,11 +99,17 @@ export interface Channel {
   name: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
+  // Optional: send an image file with optional caption.
+  sendImage?(jid: string, imagePath: string, caption?: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: send a message and return its platform ID for later editing (streaming).
+  sendMessageReturningId?(jid: string, text: string): Promise<string | null>;
+  // Optional: edit an existing message by platform ID (streaming).
+  editMessage?(jid: string, messageId: string, text: string): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

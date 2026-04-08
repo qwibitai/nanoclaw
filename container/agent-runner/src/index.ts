@@ -23,8 +23,17 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  UnifiedSession,
+  createSession,
+  loadSession,
+  appendMessage,
+  saveSession,
+  getRawTranscript,
+  extractUserText,
+} from './unified-session.js';
 
-interface ContainerInput {
+export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
@@ -33,13 +42,22 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  modelProvider?: 'claude' | 'ollama';
+  claudeModel?: string;
+  ollamaModel?: string;
+  unifiedSessionId?: string;
+  forceCompact?: boolean;
 }
 
-interface ContainerOutput {
+export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  unifiedSessionId?: string;
   error?: string;
+  isPartial?: boolean;
+  isTooling?: boolean;
+  thinking?: string;
 }
 
 interface SessionEntry {
@@ -60,9 +78,9 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const IPC_POLL_MS = 500;
+export const IPC_INPUT_DIR = '/workspace/ipc/input';
+export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+export const IPC_POLL_MS = 500;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -102,7 +120,7 @@ class MessageStream {
   }
 }
 
-async function readStdin(): Promise<string> {
+export async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
@@ -117,13 +135,13 @@ async function readStdin(): Promise<string> {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-function writeOutput(output: ContainerOutput): void {
+export function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
 }
 
-function log(message: string): void {
+export function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
@@ -292,7 +310,7 @@ function formatTranscriptMarkdown(
 /**
  * Check for _close sentinel.
  */
-function shouldClose(): boolean {
+export function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
     try {
       fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
@@ -308,7 +326,7 @@ function shouldClose(): boolean {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+export function drainIpcInput(): string[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -347,7 +365,7 @@ function drainIpcInput(): string[] {
  * Wait for a new IPC message or _close sentinel.
  * Returns the messages as a single string, or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+export function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -377,6 +395,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  unifiedSession: UnifiedSession,
   resumeAt?: string,
 ): Promise<{
   newSessionId?: string;
@@ -385,6 +404,13 @@ async function runQuery(
 }> {
   const stream = new MessageStream();
   stream.push(prompt);
+
+  // Write user message to unified session (extract plain text from XML wrapper)
+  appendMessage(unifiedSession, {
+    role: 'user',
+    content: extractUserText(prompt),
+    provider: 'claude',
+  });
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -402,6 +428,12 @@ async function runQuery(
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
+      // Also write piped IPC messages to unified session
+      appendMessage(unifiedSession, {
+        role: 'user',
+        content: extractUserText(text),
+        provider: 'claude',
+      });
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -409,6 +441,9 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let streamAccumulated = '';
+  let streamLastEmitTime = 0;
+  let streamLastEmitLen = 0;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -439,6 +474,7 @@ async function runQuery(
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model: containerInput.claudeModel || undefined,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -470,6 +506,7 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
       ],
+      includePartialMessages: true,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -493,14 +530,76 @@ async function runQuery(
     },
   })) {
     messageCount++;
-    const msgType =
-      message.type === 'system'
-        ? `system/${(message as { subtype?: string }).subtype}`
-        : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    // Don't log stream_event messages — too noisy (one per token)
+    if (message.type !== 'stream_event') {
+      const msgType =
+        message.type === 'system'
+          ? `system/${(message as { subtype?: string }).subtype}`
+          : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
+    }
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Reset streaming accumulator for each new assistant turn
+      streamAccumulated = '';
+
+      // Emit tool_use blocks as tooling signals so the user sees what Claude is doing
+      const assistantContent = (
+        message as {
+          message?: {
+            content?: Array<{
+              type: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            }>;
+          };
+        }
+      ).message?.content;
+      if (assistantContent) {
+        for (const block of assistantContent) {
+          if (block.type === 'tool_use' && block.name) {
+            const argSummary = block.input?.command
+              ? String(block.input.command).slice(0, 100)
+              : block.input?.file_path || block.input?.path
+                ? String(block.input.file_path || block.input.path)
+                : block.input?.pattern
+                  ? String(block.input.pattern)
+                  : JSON.stringify(block.input || {}).slice(0, 100);
+            writeOutput({
+              status: 'success',
+              result: `⚙️ ${block.name}: ${argSummary}`,
+              isPartial: true,
+              isTooling: true,
+              unifiedSessionId: unifiedSession.id,
+            });
+          }
+        }
+      }
+    }
+
+    // Stream partial text to user as it arrives from Claude
+    if (message.type === 'stream_event') {
+      const event = (message as { event: { type: string; delta?: { type?: string; text?: string } } }).event;
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+        streamAccumulated += event.delta.text;
+        const now = Date.now();
+        if (
+          now - streamLastEmitTime >= 500 ||
+          streamAccumulated.length - streamLastEmitLen >= 50
+        ) {
+          if (streamAccumulated.length > streamLastEmitLen) {
+            writeOutput({
+              status: 'success',
+              result: streamAccumulated,
+              isPartial: true,
+              unifiedSessionId: unifiedSession.id,
+            });
+            streamLastEmitTime = now;
+            streamLastEmitLen = streamAccumulated.length;
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -529,13 +628,29 @@ async function runQuery(
       log(
         `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
       );
+
+      // Capture the final result text in the unified session — this is the
+      // actual response sent to the user, not the intermediate assistant messages.
+      if (textResult) {
+        appendMessage(unifiedSession, {
+          role: 'assistant',
+          content: textResult,
+          provider: 'claude',
+        });
+        saveSession(unifiedSession);
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId,
+        unifiedSessionId: unifiedSession.id,
       });
     }
   }
+
+  // Save unified session after each query
+  saveSession(unifiedSession);
 
   ipcPolling = false;
   log(
@@ -600,6 +715,154 @@ async function runScript(script: string): Promise<ScriptResult | null> {
   });
 }
 
+/** Prepare prompt from container input (handles scheduled tasks, pending IPC, scripts). */
+export async function preparePrompt(
+  containerInput: ContainerInput,
+): Promise<{ prompt: string; shouldRun: boolean }> {
+  let prompt = containerInput.prompt;
+  if (containerInput.isScheduledTask) {
+    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+  }
+  const pending = drainIpcInput();
+  if (pending.length > 0) {
+    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+    prompt += '\n' + pending.join('\n');
+  }
+
+  // Script phase: run script before waking agent
+  if (containerInput.script && containerInput.isScheduledTask) {
+    log('Running task script...');
+    const scriptResult = await runScript(containerInput.script);
+
+    if (!scriptResult || !scriptResult.wakeAgent) {
+      const reason = scriptResult
+        ? 'wakeAgent=false'
+        : 'script error/no output';
+      log(`Script decided not to wake agent: ${reason}`);
+      writeOutput({ status: 'success', result: null });
+      return { prompt, shouldRun: false };
+    }
+
+    log(`Script wakeAgent=true, enriching prompt with data`);
+    prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+  }
+
+  return { prompt, shouldRun: true };
+}
+
+async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
+  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
+  // No real secrets exist in the container environment.
+  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+
+  let sessionId = containerInput.sessionId;
+  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // Clean up stale _close sentinel from previous container runs
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
+
+  const { prompt: initialPrompt, shouldRun } =
+    await preparePrompt(containerInput);
+  if (!shouldRun) return;
+  let prompt = initialPrompt;
+
+  // Load or create unified session for cross-provider history
+  const unifiedSession =
+    (containerInput.unifiedSessionId
+      ? loadSession(containerInput.unifiedSessionId)
+      : null) || createSession('claude');
+  const previousProvider = unifiedSession.lastProvider;
+  unifiedSession.lastProvider = 'claude';
+
+  // If resuming from an Ollama session (no SDK session but unified history exists),
+  // inject conversation context so Claude has continuity.
+  if (
+    !sessionId &&
+    unifiedSession.messages.length > 0 &&
+    previousProvider !== 'claude'
+  ) {
+    const transcript = getRawTranscript(unifiedSession);
+    if (transcript) {
+      log(
+        `Injecting raw conversation transcript from ${previousProvider} session (${unifiedSession.messages.length} messages)`,
+      );
+      prompt =
+        '[CONVERSATION CONTINUITY — Recent messages from your previous session. ' +
+        'These are the actual words exchanged. Rehydrate from them — continue naturally as yourself.]\n\n' +
+        transcript +
+        '\n\n[END CONTINUITY]\n\n[New message follows]\n' +
+        prompt;
+    }
+  }
+
+  // Query loop: run query → wait for IPC message → run new query → repeat
+  let resumeAt: string | undefined;
+  try {
+    while (true) {
+      log(
+        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
+      );
+
+      const queryResult = await runQuery(
+        prompt,
+        sessionId,
+        mcpServerPath,
+        containerInput,
+        sdkEnv,
+        unifiedSession,
+        resumeAt,
+      );
+      if (queryResult.newSessionId) {
+        sessionId = queryResult.newSessionId;
+      }
+      if (queryResult.lastAssistantUuid) {
+        resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // If _close was consumed during the query, exit immediately.
+      // Don't emit a session-update marker (it would reset the host's
+      // idle timer and cause a 30-min delay before the next _close).
+      if (queryResult.closedDuringQuery) {
+        log('Close sentinel consumed during query, exiting');
+        break;
+      }
+
+      // Emit session update so host can track it
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, unifiedSessionId: unifiedSession.id });
+
+      log('Query ended, waiting for next IPC message...');
+
+      // Wait for the next message or _close sentinel
+      const nextMessage = await waitForIpcMessage();
+      if (nextMessage === null) {
+        log('Close sentinel received, exiting');
+        break;
+      }
+
+      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      prompt = nextMessage;
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    log(`Agent error: ${errorMessage}`);
+    writeOutput({
+      status: 'error',
+      result: null,
+      newSessionId: sessionId,
+      unifiedSessionId: unifiedSession.id,
+      error: errorMessage,
+    });
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -621,112 +884,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
-
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
-
-  let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-
-  // Clean up stale _close sentinel from previous container runs
-  try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
-  } catch {
-    /* ignore */
-  }
-
-  // Build initial prompt (drain any pending IPC messages too)
-  let prompt = containerInput.prompt;
-  if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
-  }
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
-  }
-
-  // Script phase: run script before waking agent
-  if (containerInput.script && containerInput.isScheduledTask) {
-    log('Running task script...');
-    const scriptResult = await runScript(containerInput.script);
-
-    if (!scriptResult || !scriptResult.wakeAgent) {
-      const reason = scriptResult
-        ? 'wakeAgent=false'
-        : 'script error/no output';
-      log(`Script decided not to wake agent: ${reason}`);
-      writeOutput({
-        status: 'success',
-        result: null,
-      });
-      return;
-    }
-
-    // Script says wake agent — enrich prompt with script data
-    log(`Script wakeAgent=true, enriching prompt with data`);
-    prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
-  }
-
-  // Query loop: run query → wait for IPC message → run new query → repeat
-  let resumeAt: string | undefined;
-  try {
-    while (true) {
-      log(
-        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
-      );
-
-      const queryResult = await runQuery(
-        prompt,
-        sessionId,
-        mcpServerPath,
-        containerInput,
-        sdkEnv,
-        resumeAt,
-      );
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
-      }
-
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
-        break;
-      }
-
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
-
-      log('Query ended, waiting for next IPC message...');
-
-      // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
-      if (nextMessage === null) {
-        log('Close sentinel received, exiting');
-        break;
-      }
-
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
-      prompt = nextMessage;
-    }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    log(`Agent error: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      newSessionId: sessionId,
-      error: errorMessage,
-    });
-    process.exit(1);
+  if (containerInput.modelProvider === 'ollama') {
+    const { runOllamaAgent } = await import('./ollama-runner.js');
+    await runOllamaAgent(containerInput);
+  } else {
+    await runClaudeAgent(containerInput);
   }
 }
 

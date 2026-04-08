@@ -16,8 +16,13 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+
+// Read GitHub token from .env once at startup. Used by the agent to clone
+// the repo and open PRs from inside her container.
+const GH_TOKEN = readEnvFile(['GH_TOKEN']).GH_TOKEN || '';
 import {
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
@@ -43,13 +48,22 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  modelProvider?: 'claude' | 'ollama';
+  claudeModel?: string;
+  ollamaModel?: string;
+  unifiedSessionId?: string;
+  forceCompact?: boolean;
 }
 
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  unifiedSessionId?: string;
   error?: string;
+  isPartial?: boolean;
+  isTooling?: boolean;
+  thinking?: string;
 }
 
 interface VolumeMount {
@@ -202,13 +216,18 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
+    // Check if any source file is newer than the cached copy
     const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    let newestSrcMtime = 0;
+    for (const file of fs.readdirSync(agentRunnerSrc)) {
+      const mtime = fs.statSync(path.join(agentRunnerSrc, file)).mtimeMs;
+      if (mtime > newestSrcMtime) newestSrcMtime = mtime;
+    }
+    const cachedMtime = fs.existsSync(cachedIndex)
+      ? fs.statSync(cachedIndex).mtimeMs
+      : 0;
     const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      !fs.existsSync(groupAgentRunnerDir) || newestSrcMtime > cachedMtime;
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
@@ -236,6 +255,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  modelProvider?: 'claude' | 'ollama',
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -259,6 +279,35 @@ async function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Disable SELinux label confinement so bind-mounted host paths are readable.
+  // Without this, enforcing SELinux (e.g. Fedora) blocks container access to mounts.
+  args.push('--security-opt', 'label:disable');
+
+  // Ollama host URL for groups using Ollama as their model provider.
+  // Also set NO_PROXY so that Ollama traffic bypasses the OneCLI HTTPS proxy.
+  if (modelProvider === 'ollama') {
+    const ollamaHost =
+      process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
+    args.push('-e', `OLLAMA_HOST=${ollamaHost}`);
+    args.push('-e', 'no_proxy=host.docker.internal,localhost,127.0.0.1');
+    args.push('-e', 'NO_PROXY=host.docker.internal,localhost,127.0.0.1');
+  }
+
+  // GPU passthrough for image generation and local inference
+  args.push('--gpus', 'all');
+
+  // GitHub credentials and git identity for the agent. The agent uses these
+  // to clone the NanoClaw repo, push branches, and open PRs from inside the
+  // container. Token is scoped to a single repo (dwalthour/nanoclaw).
+  if (GH_TOKEN) {
+    args.push('-e', `GH_TOKEN=${GH_TOKEN}`);
+    args.push('-e', `GITHUB_TOKEN=${GH_TOKEN}`);
+  }
+  args.push('-e', 'GIT_AUTHOR_NAME=NanoElara');
+  args.push('-e', 'GIT_AUTHOR_EMAIL=nanoelara@users.noreply.github.com');
+  args.push('-e', 'GIT_COMMITTER_NAME=NanoElara');
+  args.push('-e', 'GIT_COMMITTER_EMAIL=nanoelara@users.noreply.github.com');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -305,6 +354,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    input.modelProvider,
   );
 
   logger.debug(
