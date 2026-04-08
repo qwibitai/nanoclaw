@@ -85,7 +85,10 @@ server.tool(
     if (!fs.existsSync(args.path)) {
       return {
         content: [
-          { type: 'text' as const, text: `Error: file not found: ${args.path}` },
+          {
+            type: 'text' as const,
+            text: `Error: file not found: ${args.path}`,
+          },
         ],
       };
     }

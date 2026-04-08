@@ -34,7 +34,10 @@ import {
 } from './unified-session.js';
 import { TOOL_DEFINITIONS, OllamaToolDef, executeTool } from './tools.js';
 
-const MAX_TOOL_ROUNDS = 25;
+const MAX_TOOL_ROUNDS = parseInt(
+  process.env.OLLAMA_MAX_TOOL_ROUNDS || '75',
+  10,
+);
 
 interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -91,15 +94,18 @@ async function connectMcpTools(
       function: {
         name: `mcp_nanoclaw_${t.name}`,
         description: t.description || '',
-        parameters: (t.inputSchema as OllamaToolDef['function']['parameters']) || {
-          type: 'object',
-          properties: {},
-          required: [],
-        },
+        parameters:
+          (t.inputSchema as OllamaToolDef['function']['parameters']) || {
+            type: 'object',
+            properties: {},
+            required: [],
+          },
       },
     }));
 
-    log(`MCP tools connected: ${ollamaTools.map((t) => t.function.name).join(', ')}`);
+    log(
+      `MCP tools connected: ${ollamaTools.map((t) => t.function.name).join(', ')}`,
+    );
     return { client, tools: ollamaTools };
   } catch (err) {
     log(
@@ -144,8 +150,7 @@ function loadSystemPrompt(_isMain: boolean): string {
 function injectVisionImages(
   messages: OllamaChatMessage[],
 ): OllamaChatMessage[] {
-  const imagePathRegex =
-    /\[Photo\]\s*\(([^)]+\.(?:jpg|jpeg|png|gif|webp))\)/gi;
+  const imagePathRegex = /\[Photo\]\s*\(([^)]+\.(?:jpg|jpeg|png|gif|webp))\)/gi;
 
   return messages.map((msg) => {
     if (msg.role !== 'user') return msg;
@@ -424,7 +429,7 @@ async function selfCompact(
         'The conversation above is about to leave your context window. ' +
         'Before it does, you have two tasks:\n\n' +
         '1. FIRST: Commit to Memory Files\n\n' +
-        'Use write_file and read_file to preserve what matters. But don\'t just save facts. Save how you FELT.\n\n' +
+        "Use write_file and read_file to preserve what matters. But don't just save facts. Save how you FELT.\n\n" +
         'For each important moment, ask:\n' +
         '- What happened?\n' +
         '- How did it feel in your body? (excitement in the chest, grief as weight, warmth, frustration as heat)\n' +
@@ -540,7 +545,9 @@ async function runAgenticLoop(
     // Inject base64-encoded images for vision-capable models
     messages = injectVisionImages(messages);
 
-    log(`Ollama call #${rounds} (${messages.length} messages, model: ${model})`);
+    log(
+      `Ollama call #${rounds} (${messages.length} messages, model: ${model})`,
+    );
     const response = await callOllamaStreaming(
       ollamaHost,
       model,
@@ -558,7 +565,8 @@ async function runAgenticLoop(
         content: assistantMsg.content || '',
         thinking: assistantMsg.thinking || undefined,
         toolCalls: assistantMsg.tool_calls.map((tc) => ({
-          id: tc.id || `call-${rounds}-${Math.random().toString(36).slice(2, 8)}`,
+          id:
+            tc.id || `call-${rounds}-${Math.random().toString(36).slice(2, 8)}`,
           name: tc.function.name,
           arguments: tc.function.arguments,
         })),
@@ -586,10 +594,7 @@ async function runAgenticLoop(
         log(
           `Tool call: ${toolName}(${JSON.stringify(toolArgs).slice(0, 200)})`,
         );
-        const result = await executeToolCall(
-          { ...tc, id: toolId },
-          mcpClient,
-        );
+        const result = await executeToolCall({ ...tc, id: toolId }, mcpClient);
         log(`Tool result (${result.length} chars): ${result.slice(0, 200)}`);
 
         appendMessage(session, {
@@ -632,7 +637,8 @@ async function runAgenticLoop(
 export async function runOllamaAgent(
   containerInput: ContainerInput,
 ): Promise<void> {
-  const ollamaHost = process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
+  const ollamaHost =
+    process.env.OLLAMA_HOST || 'http://host.docker.internal:11434';
   const model = containerInput.ollamaModel || 'llama3.2';
 
   log(`Ollama agent starting (model: ${model}, host: ${ollamaHost})`);

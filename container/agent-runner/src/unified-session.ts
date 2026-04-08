@@ -87,9 +87,7 @@ export function appendMessage(
  * This extracts just the message content for clean session history.
  */
 export function extractUserText(prompt: string): string {
-  const messageMatches = prompt.match(
-    /<message[^>]*>([\s\S]*?)<\/message>/g,
-  );
+  const messageMatches = prompt.match(/<message[^>]*>([\s\S]*?)<\/message>/g);
   if (messageMatches && messageMatches.length > 0) {
     const texts = messageMatches
       .map((m) => {
@@ -102,11 +100,8 @@ export function extractUserText(prompt: string): string {
     if (texts.length > 0) {
       // Preserve any prefix text before the XML (e.g., system notifications)
       const xmlStart = prompt.indexOf('<context');
-      const prefix =
-        xmlStart > 0 ? prompt.slice(0, xmlStart).trim() : '';
-      return prefix
-        ? `${prefix}\n\n${texts.join('\n')}`
-        : texts.join('\n');
+      const prefix = xmlStart > 0 ? prompt.slice(0, xmlStart).trim() : '';
+      return prefix ? `${prefix}\n\n${texts.join('\n')}` : texts.join('\n');
     }
   }
   // If no XML found, return as-is (plain text prompt)
@@ -135,9 +130,7 @@ export function getRawTranscript(
     let text = msg.content;
 
     // Extract actual content from XML wrapper if present
-    const messageMatches = text.match(
-      /<message[^>]*>([\s\S]*?)<\/message>/g,
-    );
+    const messageMatches = text.match(/<message[^>]*>([\s\S]*?)<\/message>/g);
     if (messageMatches) {
       const extracted = messageMatches
         .map((m) => m.replace(/<\/?message[^>]*>/g, '').trim())
@@ -163,9 +156,7 @@ export function getRawTranscript(
 }
 
 /** Convert unified session messages to Ollama /api/chat format. */
-export function getMessagesForOllama(
-  session: UnifiedSession,
-): Array<{
+export function getMessagesForOllama(session: UnifiedSession): Array<{
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_calls?: Array<{
@@ -225,9 +216,7 @@ export function getContextSummary(
 
     // Extract actual message content from XML-formatted chat context
     // Format: <message sender="Name" time="...">actual content</message>
-    const messageMatches = text.match(
-      /<message[^>]*>([\s\S]*?)<\/message>/g,
-    );
+    const messageMatches = text.match(/<message[^>]*>([\s\S]*?)<\/message>/g);
     if (messageMatches) {
       const extracted = messageMatches
         .map((m) => {

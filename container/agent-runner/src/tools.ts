@@ -382,7 +382,9 @@ function executeGrep(args: Record<string, unknown>): string {
   }
 }
 
-async function executeWebSearch(args: Record<string, unknown>): Promise<string> {
+async function executeWebSearch(
+  args: Record<string, unknown>,
+): Promise<string> {
   const query = args.query as string;
   if (!query) return 'Error: query is required';
 
@@ -409,9 +411,7 @@ async function executeWebSearch(args: Record<string, unknown>): Promise<string> 
 
     // Main abstract
     if (data.AbstractText) {
-      results.push(
-        `${data.AbstractSource || 'Summary'}: ${data.AbstractText}`,
-      );
+      results.push(`${data.AbstractSource || 'Summary'}: ${data.AbstractText}`);
       if (data.AbstractURL) results.push(`Source: ${data.AbstractURL}`);
       results.push('');
     }
