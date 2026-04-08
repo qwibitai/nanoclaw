@@ -90,7 +90,10 @@ export class TelegramChannel implements Channel {
       const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
       const resp = await fetch(fileUrl);
       if (!resp.ok) {
-        logger.warn({ fileId, status: resp.status }, 'Telegram file download failed');
+        logger.warn(
+          { fileId, status: resp.status },
+          'Telegram file download failed',
+        );
         return null;
       }
 
@@ -295,7 +298,11 @@ export class TelegramChannel implements Channel {
         isGroup,
       );
 
-      const containerPath = await this.downloadFile(fileId, group.folder, filename);
+      const containerPath = await this.downloadFile(
+        fileId,
+        group.folder,
+        filename,
+      );
       const pathSuffix = containerPath ? ` (${containerPath})` : '';
 
       this.opts.onMessage(chatJid, {
@@ -316,7 +323,12 @@ export class TelegramChannel implements Channel {
         null,
       );
       if (largest) {
-        storeMedia(ctx, '[Photo]', largest.file_id, `photo_${ctx.message.message_id}`);
+        storeMedia(
+          ctx,
+          '[Photo]',
+          largest.file_id,
+          `photo_${ctx.message.message_id}`,
+        );
       } else {
         storeNonText(ctx, '[Photo]');
       }
@@ -350,10 +362,20 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       const filename = `voice_${ctx.message.message_id}`;
-      const containerPath = await this.downloadFile(fileId, group.folder, filename);
+      const containerPath = await this.downloadFile(
+        fileId,
+        group.folder,
+        filename,
+      );
 
       let content: string;
       if (containerPath) {
@@ -362,12 +384,22 @@ export class TelegramChannel implements Channel {
           const { default: fs2 } = await import('fs');
           const groupDir = resolveGroupFolderPath(group.folder);
           const ext = path.extname(containerPath);
-          const localPath = path.join(groupDir, 'attachments', `${filename}${ext}`);
+          const localPath = path.join(
+            groupDir,
+            'attachments',
+            `${filename}${ext}`,
+          );
           const buffer = fs2.readFileSync(localPath);
-          const transcript = await transcribeAudioBuffer(buffer, `${filename}${ext}`);
+          const transcript = await transcribeAudioBuffer(
+            buffer,
+            `${filename}${ext}`,
+          );
           if (transcript) {
             content = `[Voice: ${transcript}]`;
-            logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+            logger.info(
+              { chatJid, length: transcript.length },
+              'Transcribed voice message',
+            );
           } else {
             content = `[Voice message] (${containerPath})`;
           }
@@ -392,7 +424,8 @@ export class TelegramChannel implements Channel {
 
     this.bot.on('message:audio', (ctx) => {
       const fileId = ctx.message.audio?.file_id;
-      const filename = ctx.message.audio?.file_name || `audio_${ctx.message.message_id}`;
+      const filename =
+        ctx.message.audio?.file_name || `audio_${ctx.message.message_id}`;
       if (fileId) {
         storeMedia(ctx, '[Audio]', fileId, filename);
       } else {
