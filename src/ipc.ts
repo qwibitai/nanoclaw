@@ -501,8 +501,8 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task pause attempt',
+            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            'Unauthorized task pause attempt blocked — (group, topicId) mismatch',
           );
         }
       }
@@ -520,8 +520,8 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task resume attempt',
+            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            'Unauthorized task resume attempt blocked — (group, topicId) mismatch',
           );
         }
       }
@@ -539,8 +539,8 @@ export async function processTaskIpc(
           deps.onTasksChanged();
         } else {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task cancel attempt',
+            { taskId: data.taskId, sourceGroup, taskGroupFolder: task?.group_folder },
+            'Unauthorized task cancel attempt blocked — (group, topicId) mismatch',
           );
         }
       }
@@ -558,8 +558,8 @@ export async function processTaskIpc(
         }
         if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
-            { taskId: data.taskId, sourceGroup },
-            'Unauthorized task update attempt',
+            { taskId: data.taskId, sourceGroup, taskGroupFolder: task.group_folder },
+            'Unauthorized task update attempt blocked — (group, topicId) mismatch',
           );
           break;
         }
