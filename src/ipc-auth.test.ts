@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -12,6 +12,7 @@ import {
   storeMessage,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
+import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -1058,5 +1059,133 @@ describe('Telegram topic routing', () => {
     const tasks = getAllTasks();
     expect(tasks).toHaveLength(1); // task created — lookup succeeded via base JID
     expect(tasks[0].group_folder).toBe('telegram_pm-agent_241'); // ISO-01
+  });
+});
+
+describe('Telegram topic task ownership (ISO-08, ISO-09)', () => {
+  const TELEGRAM_GROUP: RegisteredGroup = {
+    name: 'PM Agent (Telegram)',
+    folder: 'telegram_pm-agent',
+    trigger: 'always',
+    added_at: '2024-01-01T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    groups['telegram:pm-agent'] = TELEGRAM_GROUP;
+    setRegisteredGroup('telegram:pm-agent', TELEGRAM_GROUP);
+    storeChatMetadata(
+      'telegram:pm-agent',
+      '2024-01-01T00:00:00.000Z',
+      undefined,
+      'telegram',
+      true,
+    );
+    storeChatMetadata(
+      'telegram:pm-agent:241',
+      '2024-01-01T00:00:00.000Z',
+      undefined,
+      'telegram',
+      true,
+    );
+    storeChatMetadata(
+      'telegram:pm-agent:999',
+      '2024-01-01T00:00:00.000Z',
+      undefined,
+      'telegram',
+      true,
+    );
+  });
+
+  it('topic A container cannot cancel topic B task (ISO-08)', async () => {
+    // Seed a task owned by topic 241
+    createTask({
+      id: 'task-topic-241',
+      group_folder: 'telegram_pm-agent_241',
+      chat_jid: 'telegram:pm-agent:241',
+      thread_id: '241',
+      prompt: 'task for topic 241',
+      schedule_type: 'once',
+      schedule_value: new Date().toISOString(),
+      status: 'active',
+      next_run: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    // Topic 999 attempts to cancel topic 241's task
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-topic-241' },
+      'telegram_pm-agent_999', // sourceGroup — topic 999
+      false,
+      deps,
+    );
+
+    // Task must NOT be cancelled
+    const task = getTaskById('task-topic-241');
+    expect(task).toBeDefined();
+    expect(task!.status).not.toBe('cancelled');
+  });
+
+  it('topic A container can cancel its own task (ISO-08)', async () => {
+    // Seed a task owned by topic 241
+    createTask({
+      id: 'task-topic-241-own',
+      group_folder: 'telegram_pm-agent_241',
+      chat_jid: 'telegram:pm-agent:241',
+      thread_id: '241',
+      prompt: 'task for topic 241 — own cancel',
+      schedule_type: 'once',
+      schedule_value: new Date().toISOString(),
+      status: 'active',
+      next_run: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    // Topic 241 cancels its own task
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-topic-241-own' },
+      'telegram_pm-agent_241', // sourceGroup matches task.group_folder
+      false,
+      deps,
+    );
+
+    // Task must be deleted (cancelled)
+    const task = getTaskById('task-topic-241-own');
+    expect(task).toBeUndefined();
+  });
+
+  it('unauthorized cancel warn includes taskGroupFolder field (ISO-09)', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    createTask({
+      id: 'task-topic-241-warn',
+      group_folder: 'telegram_pm-agent_241',
+      chat_jid: 'telegram:pm-agent:241',
+      thread_id: '241',
+      prompt: 'task for warn test',
+      schedule_type: 'once',
+      schedule_value: new Date().toISOString(),
+      status: 'active',
+      next_run: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    // Topic 999 attempts unauthorized cancel
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-topic-241-warn' },
+      'telegram_pm-agent_999',
+      false,
+      deps,
+    );
+
+    // Warn must include both sourceGroup and taskGroupFolder (ISO-09)
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceGroup: 'telegram_pm-agent_999',
+        taskGroupFolder: 'telegram_pm-agent_241',
+      }),
+      expect.stringContaining('Unauthorized'),
+    );
+
+    warnSpy.mockRestore();
   });
 });
