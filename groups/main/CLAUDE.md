@@ -98,6 +98,16 @@ Key paths inside the container:
 
 ---
 
+## Coworker Creation Rules
+
+When creating a new coworker:
+1. ALWAYS check `coworker-types.json` for matching role types first
+2. If one or more role templates match the request, compose the CLAUDE.md by combining ALL relevant templates — do not write custom instructions for areas already covered by existing templates
+3. Only write custom CLAUDE.md sections for aspects not covered by any template
+4. In your response, list which templates were applied and which sections (if any) were custom-written
+
+---
+
 ## Managing Groups
 
 ### Finding Available Groups
