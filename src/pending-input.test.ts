@@ -20,7 +20,9 @@ function makeMessage(
 
 describe('classifyPendingInput', () => {
   it('classifies explicit commands as command input', () => {
-    expect(classifyPendingInput([makeMessage('pipeline status')], 'Idea Maze')).toEqual({
+    expect(
+      classifyPendingInput([makeMessage('pipeline status')], 'Idea Maze'),
+    ).toEqual({
       source: 'user',
       kind: 'command',
     });
@@ -36,11 +38,15 @@ describe('classifyPendingInput', () => {
   });
 
   it('classifies review decisions as workflow replies', () => {
-    expect(classifyPendingInput([makeMessage('approve 9 11')], 'Idea Maze')).toEqual({
+    expect(
+      classifyPendingInput([makeMessage('approve 9 11')], 'Idea Maze'),
+    ).toEqual({
       source: 'user',
       kind: 'workflow_reply',
     });
-    expect(classifyPendingInput([makeMessage('reject run 10')], 'Idea Maze')).toEqual({
+    expect(
+      classifyPendingInput([makeMessage('reject run 10')], 'Idea Maze'),
+    ).toEqual({
       source: 'user',
       kind: 'workflow_reply',
     });
@@ -64,7 +70,9 @@ describe('classifyPendingInput', () => {
   });
 
   it('treats ordinary chat as chat input', () => {
-    expect(classifyPendingInput([makeMessage('thanks, looks good')], 'Idea Maze')).toEqual({
+    expect(
+      classifyPendingInput([makeMessage('thanks, looks good')], 'Idea Maze'),
+    ).toEqual({
       source: 'user',
       kind: 'chat',
     });
@@ -73,10 +81,7 @@ describe('classifyPendingInput', () => {
   it('keeps the highest-priority actionable kind across a batch', () => {
     expect(
       classifyPendingInput(
-        [
-          makeMessage('thanks'),
-          makeMessage('approve 9', { id: 'msg-2' }),
-        ],
+        [makeMessage('thanks'), makeMessage('approve 9', { id: 'msg-2' })],
         'Idea Maze',
       ),
     ).toEqual({

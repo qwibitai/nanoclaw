@@ -111,8 +111,15 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
 
     if (state.active) {
-      if (!state.isTaskContainer && input.source === 'user' && input.kind === 'chat') {
-        logger.debug({ groupJid }, 'Ignored non-actionable follow-up while container busy');
+      if (
+        !state.isTaskContainer &&
+        input.source === 'user' &&
+        input.kind === 'chat'
+      ) {
+        logger.debug(
+          { groupJid },
+          'Ignored non-actionable follow-up while container busy',
+        );
         return 'ignored';
       }
       return this.queuePendingInput(
