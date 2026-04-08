@@ -25,6 +25,11 @@ import {
   SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  renderSystemPrompt,
+  buildReplacements,
+  createDefaultDeps,
+} from './system-prompt.js';
 
 interface McpServerConfig {
   command: string;
@@ -487,24 +492,29 @@ async function runQuery(
   let streamingTextBuffer = '';
   let completedTurnsText = '';
 
-  // Load custom system prompt (falls back to claude_code preset if file missing)
+  // Build dynamic system prompt from template + identity/memory/warm context
   const systemPromptPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '..',
     'system-prompt.md',
   );
-  const customSystemPrompt = fs.existsSync(systemPromptPath)
+  const template = fs.existsSync(systemPromptPath)
     ? fs.readFileSync(systemPromptPath, 'utf-8')
     : undefined;
-  if (customSystemPrompt) {
-    log(`Loaded custom system prompt (${customSystemPrompt.length} chars)`);
-  }
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  let dynamicSystemPrompt: string | undefined;
+  if (template) {
+    const deps = createDefaultDeps(log);
+    const replacements = await buildReplacements(
+      deps,
+      containerInput,
+      WORKSPACE_GROUP,
+      WORKSPACE_GLOBAL,
+    );
+    dynamicSystemPrompt = renderSystemPrompt(template, replacements);
+    log(
+      `Dynamic system prompt built (${dynamicSystemPrompt.length} chars, ${Object.keys(replacements).length} placeholders filled)`,
+    );
   }
 
   // Discover additional directories mounted at extra/*
@@ -549,17 +559,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: customSystemPrompt
-        ? globalClaudeMd
-          ? customSystemPrompt + '\n\n---\n\n' + globalClaudeMd
-          : customSystemPrompt
-        : globalClaudeMd
-          ? {
-              type: 'preset' as const,
-              preset: 'claude_code' as const,
-              append: globalClaudeMd,
-            }
-          : undefined,
+      systemPrompt: dynamicSystemPrompt ?? undefined,
       allowedTools: [
         'Bash',
         'Read',
