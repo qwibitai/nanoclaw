@@ -220,15 +220,24 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
+
+  // Try exact folder match first (base groups and any future registered topic groups)
+  let group = Object.values(groups).find(
     (g) => g.folder === task.group_folder,
   );
+
+  // Fallback: topic-scoped folder — find the base group by stripping numeric suffix
+  if (!group) {
+    const baseFolder = task.group_folder.replace(/_\d+$/, '');
+    group = Object.values(groups).find((g) => g.folder === baseFolder);
+  }
 
   if (!group) {
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder },
       'Group not found for task',
     );
+    updateTask(task.id, { status: 'paused' });
     logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
@@ -239,6 +248,10 @@ async function runTask(
     });
     return;
   }
+
+  // Override folder on a shallow clone so mounts and config come from the base group
+  // but the session directory and IPC path are topic-scoped (ISO-04, ISO-05)
+  const effectiveGroup = { ...group, folder: task.group_folder };
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
@@ -311,7 +324,7 @@ async function runTask(
 
   try {
     const output = await runContainerAgent(
-      group,
+      effectiveGroup,
       {
         prompt: task.prompt,
         sessionId,
