@@ -72,7 +72,9 @@ export function buildTriggerPattern(trigger: string): RegExp {
   const t = trigger.trim();
   // @-prefixed triggers (e.g. @vbotpi) must appear at the start of the message.
   // Plain-word triggers (e.g. vbotpi) match anywhere in the message.
-  const pattern = t.startsWith('@') ? `^${escapeRegex(t)}\\b` : `\\b${escapeRegex(t)}\\b`;
+  const pattern = t.startsWith('@')
+    ? `^${escapeRegex(t)}\\b`
+    : `\\b${escapeRegex(t)}\\b`;
   return new RegExp(pattern, 'i');
 }
 
