@@ -1,0 +1,1 @@
+Select * from public.itinerary_prices ORDER BY created_at DESC LIMIT 10;

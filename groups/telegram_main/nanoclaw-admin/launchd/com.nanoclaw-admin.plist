@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw-admin</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>node_modules/next/dist/bin/next</string>
+        <string>start</string>
+        <string>--port</string>
+        <string>3002</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/broseph/dev/nanoclaw/groups/telegram_main/nanoclaw-admin</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/broseph</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>NODE_NO_WARNINGS</key>
+        <string>1</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/broseph/dev/nanoclaw/groups/telegram_main/nanoclaw-admin/logs/nanoclaw-admin.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/broseph/dev/nanoclaw/groups/telegram_main/nanoclaw-admin/logs/nanoclaw-admin.error.log</string>
+</dict>
+</plist>
