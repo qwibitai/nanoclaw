@@ -25,6 +25,7 @@
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
     "fake-indexeddb": "^6.2.5",
+    "grammy": "^1.42.0",
     "matrix-js-sdk": "^41.2.0"
   },
   "devDependencies": {
