@@ -569,8 +569,8 @@ describe('message query LIMIT', () => {
       store({
         id: `lim-${i}`,
         chat_jid: 'group@g.us',
-        sender: 'user@s.whatsapp.net',
-        sender_name: 'User',
+        sender: `user${i}@s.whatsapp.net`,
+        sender_name: `User ${i}`,
         content: `message ${i}`,
         timestamp: `2024-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
       });
