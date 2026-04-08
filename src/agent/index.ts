@@ -1,6 +1,7 @@
-import { GATEWAY_URL, WORKER_POLL_INTERVAL } from '../shared/config.ts';
+import { resolve } from '@std/path';
+import { GATEWAY_URL, WORKER_POLL_INTERVAL, WORKSPACE_DIR } from '../shared/config.ts';
 import { logger } from '../shared/logger.ts';
-import type { WorkItem, WorkResult } from '../shared/types.ts';
+import type { Attachment, WorkItem, WorkResult } from '../shared/types.ts';
 import { runAgent } from './agent.ts';
 import { getSessionId, saveSessionId } from './sessions.ts';
 import { buildWorkspace } from './workspace.ts';
@@ -31,6 +32,29 @@ async function submitResult(result: WorkResult): Promise<void> {
   }
 }
 
+async function downloadAttachments(
+  sessionId: string,
+  attachments: Attachment[],
+): Promise<string[]> {
+  const attachDir = resolve(WORKSPACE_DIR, sessionId, 'attachments');
+  Deno.mkdirSync(attachDir, { recursive: true });
+
+  const paths: string[] = [];
+  for (const att of attachments) {
+    try {
+      const response = await fetch(att.url);
+      const data = new Uint8Array(await response.arrayBuffer());
+      const filepath = resolve(attachDir, att.filename);
+      Deno.writeFileSync(filepath, data);
+      paths.push(`attachments/${att.filename}`);
+      logger.info({ filename: att.filename, size: data.length }, 'Attachment downloaded');
+    } catch (err) {
+      logger.error({ err, filename: att.filename }, 'Failed to download attachment');
+    }
+  }
+  return paths;
+}
+
 async function processWork(item: WorkItem): Promise<void> {
   logger.info(
     { id: item.id, session: item.sessionId, channel: item.channel },
@@ -43,8 +67,20 @@ async function processWork(item: WorkItem): Promise<void> {
 
   const { cwd, systemPrompt } = buildWorkspace(item.sessionId);
 
+  // Download attachments to workspace before running agent
+  let prompt = item.prompt;
+  if (item.attachments && item.attachments.length > 0) {
+    const imagePaths = await downloadAttachments(item.sessionId, item.attachments);
+    if (imagePaths.length > 0) {
+      const refs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
+      prompt = prompt
+        ? `${prompt}\n\n${refs}`
+        : `The user sent ${imagePaths.length} image(s). Please examine them.\n\n${refs}`;
+    }
+  }
+
   const agentResult = await runAgent({
-    prompt: item.prompt,
+    prompt,
     cwd,
     sessionId: agentSessionId,
     systemPrompt,

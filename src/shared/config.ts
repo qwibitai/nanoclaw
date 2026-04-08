@@ -71,4 +71,10 @@ function readVersion(): string {
 export const APP_VERSION = readVersion();
 
 export const WORKER_POLL_INTERVAL = 2000;
-export const WORKSPACE_DIR = '/tmp/nexus-workspace';
+
+// Process isolation: gateway and agent use separate /tmp namespaces.
+// They must NOT share filesystem state — all data flows through WorkItems.
+// This mirrors Fly.io where they run on separate machines.
+export const GATEWAY_TMP_DIR = '/tmp/nexus-gateway';
+export const AGENT_TMP_DIR = '/tmp/nexus-agent';
+export const WORKSPACE_DIR = resolve(AGENT_TMP_DIR, 'workspaces');

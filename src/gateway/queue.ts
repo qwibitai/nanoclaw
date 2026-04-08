@@ -1,4 +1,4 @@
-import type { ChannelType, WorkItem, WorkResult } from '../shared/types.ts';
+import type { Attachment, ChannelType, WorkItem, WorkResult } from '../shared/types.ts';
 import { updateSessionAgent, touchSession } from './sessions.ts';
 
 const pending: WorkItem[] = [];
@@ -18,6 +18,7 @@ export function enqueue(
   channelId: string,
   prompt: string,
   agentSessionId?: string,
+  attachments?: Attachment[],
 ): WorkItem {
   touchSession(sessionId);
   const item: WorkItem = {
@@ -26,6 +27,7 @@ export function enqueue(
     channel,
     channelId,
     prompt,
+    attachments,
     agentSessionId,
     createdAt: new Date().toISOString(),
     status: 'pending',

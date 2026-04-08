@@ -78,6 +78,14 @@ Agent connects to gateway via Fly internal DNS: `http://gateway.process.<app>.in
 | Microgrid Foundry | `simt-nexus-mgf` | `microgridfoundry` | `foundry` |
 | Bristol Energy | `simt-nexus-bec` | `bristolenergy` | `bec` |
 
+## Process Isolation
+
+Gateway and agent use separate `/tmp` namespaces to mirror Fly.io's separate-machine model:
+- **Gateway**: `/tmp/nexus-gateway/` (currently unused — gateway holds state in memory only)
+- **Agent**: `/tmp/nexus-agent/workspaces/<sessionId>/` (Agent SDK workspaces, downloaded attachments)
+
+**Rule: gateway and agent must NOT share filesystem state.** All data flows through WorkItems (serialisable over HTTP). This ensures features work identically on localhost (shared machine) and Fly.io (separate machines). If you need to pass data from gateway to agent, put it in the WorkItem (e.g., attachment URLs, not file paths).
+
 ## Deployment Issues Solved
 
 - **IPv6 binding**: Gateway must bind to `::` not `0.0.0.0` for Fly 6PN internal networking

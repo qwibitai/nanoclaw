@@ -20,12 +20,19 @@ export interface Session {
 
 // --- Work Queue ---
 
+export interface Attachment {
+  url: string;
+  filename: string;
+  contentType: string;
+}
+
 export interface WorkItem {
   id: string;
   sessionId: string;
   channel: ChannelType;
   channelId: string;
   prompt: string;
+  attachments?: Attachment[];
   agentSessionId?: string;
   createdAt: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';

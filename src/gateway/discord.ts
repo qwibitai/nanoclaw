@@ -10,6 +10,7 @@
 
 import { logger } from '../shared/logger.ts';
 import { DISCORD_BOT_TOKEN } from '../shared/config.ts';
+import type { Attachment } from '../shared/types.ts';
 import { registerChannel } from './channels.ts';
 import { getOrCreateSession } from './sessions.ts';
 import * as queue from './queue.ts';
@@ -51,10 +52,12 @@ export async function initDiscord(): Promise<void> {
       ],
     });
 
-    client.on(Events.MessageCreate, (message: {
+    client.on(Events.MessageCreate, async (message: {
       author: { bot: boolean; username: string };
       content: string;
       channelId: string;
+      // deno-lint-ignore no-explicit-any
+      attachments: { size: number; values: () => IterableIterator<any> };
       channel: { send: (text: string) => Promise<void>; sendTyping: () => Promise<void> };
       guild?: { name: string };
     }) => {
@@ -66,23 +69,49 @@ export async function initDiscord(): Promise<void> {
       // Show typing while processing
       message.channel.sendTyping().catch(() => {});
 
+      // Collect attachments as URLs (agent process downloads them)
+      let prompt = message.content || '';
+      const attachments: Attachment[] = [];
+
+      if (message.attachments.size > 0) {
+        for (const attachment of message.attachments.values()) {
+          const contentType: string = attachment.contentType ?? '';
+          const filename: string = attachment.name ?? `attachment-${Date.now()}`;
+
+          if (contentType.startsWith('image/')) {
+            attachments.push({
+              url: attachment.url,
+              filename,
+              contentType,
+            });
+          } else {
+            prompt += `\n\n[Attached file: ${filename} (${contentType || 'unknown type'})]`;
+          }
+        }
+      }
+
+      if (!prompt.trim() && attachments.length === 0) {
+        prompt = 'The user sent an empty message.';
+      }
+
       const item = queue.enqueue(
         session.id,
         'discord',
         channelId,
-        message.content,
+        prompt,
         session.agentSessionId,
+        attachments.length > 0 ? attachments : undefined,
       );
 
       logEvent({
         type: 'message_in',
         channel: 'discord',
         groupId: session.id,
-        summary: `${message.author.username}: ${message.content.slice(0, 60)}`,
+        summary: `${message.author.username}: ${message.content.slice(0, 60)}${attachments.length > 0 ? ` [+${attachments.length} image(s)]` : ''}`,
       });
 
       logger.info(
-        { id: item.id, session: session.id, author: message.author.username },
+        { id: item.id, session: session.id, author: message.author.username, images: attachments.length },
         'Discord message queued',
       );
     });
