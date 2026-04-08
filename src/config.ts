@@ -8,7 +8,11 @@ import { isValidTimezone } from './timezone.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TZ']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'TZ',
+]);
 
 export const DEFAULT_ASSISTANT_NAME = 'LearnClaw';
 
@@ -64,6 +68,20 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
+
+// AI provider selection:
+//   anthropic   — direct Anthropic API (default, uses Claude Agent SDK)
+//   openrouter  — OpenRouter gateway (Claude or other models via Anthropic-compat API)
+//   openai      — OpenAI-compatible endpoint (Ollama, Grok, Groq, Together, etc.)
+export type AgentProvider = 'anthropic' | 'openrouter' | 'openai';
+export const AGENT_PROVIDER: AgentProvider = (() => {
+  const v = (process.env.AGENT_PROVIDER || 'anthropic').toLowerCase();
+  if (v === 'openrouter' || v === 'openai') return v;
+  return 'anthropic';
+})();
+// Model to use. For openrouter/openai providers this is required.
+// e.g. "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b", "ollama/llama3.1"
+export const AGENT_MODEL = process.env.AGENT_MODEL || '';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

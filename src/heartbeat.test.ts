@@ -25,9 +25,13 @@ describe('heartbeat task sync', () => {
     groupDir = path.join(tempRoot, 'groups', 'learner_one');
     fs.mkdirSync(groupDir, { recursive: true });
     fs.mkdirSync(path.join(tempRoot, 'exams'), { recursive: true });
-    fs.cpSync(path.join(process.cwd(), 'exams', 'upsc'), path.join(tempRoot, 'exams', 'upsc'), {
-      recursive: true,
-    });
+    fs.cpSync(
+      path.join(process.cwd(), 'exams', 'upsc'),
+      path.join(tempRoot, 'exams', 'upsc'),
+      {
+        recursive: true,
+      },
+    );
 
     group = {
       name: 'Learner One',
@@ -105,7 +109,9 @@ describe('heartbeat task sync', () => {
     expect(quizTask?.prompt).toContain(
       '/workspace/project/exams/upsc/quizzes/foundation/indian-polity-federalism.json',
     );
-    expect(weeklyReportTask?.prompt).toContain('Create the weekly learning report');
+    expect(weeklyReportTask?.prompt).toContain(
+      'Create the weekly learning report',
+    );
 
     const heartbeat = fs.readFileSync(
       path.join(groupDir, 'HEARTBEAT.md'),

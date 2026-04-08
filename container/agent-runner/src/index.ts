@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { runGenericAgent } from './generic-runner.js';
 
 interface ContainerInput {
   prompt: string;
@@ -63,6 +64,12 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+/** Returns true if the model name identifies a Claude model (use Anthropic SDK). */
+function isClaudeModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return lower.includes('claude') || lower === '';
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -671,7 +678,41 @@ async function main(): Promise<void> {
     prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Determine provider and dispatch to the appropriate runner
+  const agentProvider = process.env.AGENT_PROVIDER || 'anthropic';
+
+  // Generic runner: use for openrouter (non-Claude) or openai-compatible providers
+  // when AGENT_MODEL is set and is not a Claude model.
+  const isGenericProvider = agentProvider === 'openai' ||
+    (agentProvider === 'openrouter' && !isClaudeModel(process.env.AGENT_MODEL || ''));
+
+  if (isGenericProvider) {
+    log(`Using generic OpenAI-compatible runner (provider=${agentProvider}, model=${process.env.AGENT_MODEL || 'default'})`);
+    try {
+      const baseUrl = process.env.ANTHROPIC_BASE_URL || 'http://127.0.0.1:3001';
+      const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || 'placeholder';
+      const model = process.env.AGENT_MODEL || 'gpt-3.5-turbo';
+
+      const result = await runGenericAgent(prompt, {
+        baseUrl,
+        apiKey,
+        model,
+        cwd: '/workspace/group',
+        chatJid: containerInput.chatJid,
+        assistantName: containerInput.assistantName,
+      });
+
+      writeOutput({ status: 'success', result: result.text });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log(`Generic agent error: ${errorMessage}`);
+      writeOutput({ status: 'error', result: null, error: errorMessage });
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Query loop: run query → wait for IPC message → run new query → repeat (Anthropic SDK)
   let resumeAt: string | undefined;
   try {
     while (true) {

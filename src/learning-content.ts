@@ -79,7 +79,11 @@ export interface LearningContentValidationIssue {
 interface LearningProgressSnapshot {
   weakTopics?: Array<{ topic?: string }>;
   nextRevisionTargets?: string[];
-  recentQuizOutcomes?: Array<{ score?: number; total?: number; topic?: string }>;
+  recentQuizOutcomes?: Array<{
+    score?: number;
+    total?: number;
+    topic?: string;
+  }>;
 }
 
 function readTextFile(filePath: string): string {
@@ -111,7 +115,10 @@ function parseBulletLines(sectionBody: string): string[] {
     .filter((line) => line.startsWith('- '))
     .map((line) => line.slice(2).trim())
     .filter(
-      (line) => line.length > 0 && !PENDING_MARKERS.has(line) && !line.startsWith('Pending '),
+      (line) =>
+        line.length > 0 &&
+        !PENDING_MARKERS.has(line) &&
+        !line.startsWith('Pending '),
     );
 }
 
@@ -169,7 +176,9 @@ function readJsonFile<T>(filePath: string): T | null {
   }
 }
 
-function ensureLearningProgressFile(groupDir: string): LearningProgressSnapshot {
+function ensureLearningProgressFile(
+  groupDir: string,
+): LearningProgressSnapshot {
   const filePath = path.join(groupDir, LEARNING_PROGRESS_FILE);
   const initial = {
     version: 1,
@@ -186,15 +195,18 @@ function ensureLearningProgressFile(groupDir: string): LearningProgressSnapshot 
   return initial;
 }
 
-function findFirstFile(directory: string, extensions: Set<string>): string | undefined {
+function findFirstFile(
+  directory: string,
+  extensions: Set<string>,
+): string | undefined {
   if (!fs.existsSync(directory)) return undefined;
 
   const matches: string[] = [];
 
   const walk = (currentDir: string): void => {
-    const entries = fs.readdirSync(currentDir).sort((left, right) =>
-      left.localeCompare(right),
-    );
+    const entries = fs
+      .readdirSync(currentDir)
+      .sort((left, right) => left.localeCompare(right));
 
     for (const entry of entries) {
       const entryPath = path.join(currentDir, entry);
@@ -237,15 +249,21 @@ function parseLessonTopic(filePath: string): string {
   return path.basename(filePath, path.extname(filePath)).replace(/[-_]+/g, ' ');
 }
 
-function isValidIndexEntry(entry: SeededContentIndexEntry | null | undefined): entry is Required<Pick<SeededContentIndexEntry, 'path' | 'topic' | 'keywords'>> {
+function isValidIndexEntry(
+  entry: SeededContentIndexEntry | null | undefined,
+): entry is Required<
+  Pick<SeededContentIndexEntry, 'path' | 'topic' | 'keywords'>
+> {
   return Boolean(
     entry &&
-      typeof entry.path === 'string' &&
-      entry.path.trim().length > 0 &&
-      typeof entry.topic === 'string' &&
-      entry.topic.trim().length > 0 &&
-      Array.isArray(entry.keywords) &&
-      entry.keywords.every((keyword) => typeof keyword === 'string' && keyword.trim().length > 0),
+    typeof entry.path === 'string' &&
+    entry.path.trim().length > 0 &&
+    typeof entry.topic === 'string' &&
+    entry.topic.trim().length > 0 &&
+    Array.isArray(entry.keywords) &&
+    entry.keywords.every(
+      (keyword) => typeof keyword === 'string' && keyword.trim().length > 0,
+    ),
   );
 }
 
@@ -277,7 +295,10 @@ function buildMatchTargets(context: {
   }));
 }
 
-function scoreTopicMatch(candidateTokens: string[], targets: WeightedMatchTarget[]): number {
+function scoreTopicMatch(
+  candidateTokens: string[],
+  targets: WeightedMatchTarget[],
+): number {
   if (targets.length === 0 || candidateTokens.length === 0) return 0;
 
   let score = 0;
@@ -333,14 +354,17 @@ function findIndexedContentFile(
   return bestMatch?.score && bestMatch.score > 0 ? bestMatch.path : undefined;
 }
 
-function collectCandidateFiles(directory: string, extensions: Set<string>): string[] {
+function collectCandidateFiles(
+  directory: string,
+  extensions: Set<string>,
+): string[] {
   if (!fs.existsSync(directory)) return [];
 
   const matches: string[] = [];
   const walk = (currentDir: string): void => {
-    const entries = fs.readdirSync(currentDir).sort((left, right) =>
-      left.localeCompare(right),
-    );
+    const entries = fs
+      .readdirSync(currentDir)
+      .sort((left, right) => left.localeCompare(right));
 
     for (const entry of entries) {
       const entryPath = path.join(currentDir, entry);
@@ -368,12 +392,18 @@ function isValidPlanDocument(plan: ExamPlanDocument | null): boolean {
   return plan.phases.some(
     (phase) =>
       Array.isArray(phase.focus) &&
-      phase.focus.some((item) => typeof item === 'string' && item.trim().length > 0),
+      phase.focus.some(
+        (item) => typeof item === 'string' && item.trim().length > 0,
+      ),
   );
 }
 
 function isValidQuizDocument(quiz: QuizDocument | null): boolean {
-  if (!quiz || typeof quiz.topic !== 'string' || quiz.topic.trim().length === 0) {
+  if (
+    !quiz ||
+    typeof quiz.topic !== 'string' ||
+    quiz.topic.trim().length === 0
+  ) {
     return false;
   }
   if (!Array.isArray(quiz.questions) || quiz.questions.length === 0) {
@@ -516,7 +546,10 @@ export function validateGroupLearningContent(
     }
   }
 
-  for (const filePath of collectCandidateFiles(quizzesDir, new Set(['.json']))) {
+  for (const filePath of collectCandidateFiles(
+    quizzesDir,
+    new Set(['.json']),
+  )) {
     const reason = validateQuizFile(filePath);
     if (reason) {
       issues.push({ filePath, kind: 'quiz', reason });
@@ -524,10 +557,18 @@ export function validateGroupLearningContent(
   }
 
   issues.push(
-    ...validateIndexFile(contentRoot, path.join(contentRoot, 'lessons.index.json'), 'lessons'),
+    ...validateIndexFile(
+      contentRoot,
+      path.join(contentRoot, 'lessons.index.json'),
+      'lessons',
+    ),
   );
   issues.push(
-    ...validateIndexFile(contentRoot, path.join(contentRoot, 'quizzes.index.json'), 'quizzes'),
+    ...validateIndexFile(
+      contentRoot,
+      path.join(contentRoot, 'quizzes.index.json'),
+      'quizzes',
+    ),
   );
 
   return issues;
@@ -589,7 +630,10 @@ function findBestLessonFile(
   let bestMatch: { filePath: string; score: number } | undefined;
   for (const filePath of collectCandidateFiles(directory, new Set(['.md']))) {
     if (!isValidLessonFile(filePath)) continue;
-    const score = scoreTopicMatch(normalizeTopicTokens(parseLessonTopic(filePath)), targets);
+    const score = scoreTopicMatch(
+      normalizeTopicTokens(parseLessonTopic(filePath)),
+      targets,
+    );
     if (!bestMatch || score > bestMatch.score) {
       bestMatch = { filePath, score };
     }
@@ -615,7 +659,10 @@ function findBestQuizFile(
   for (const filePath of collectCandidateFiles(directory, new Set(['.json']))) {
     if (!isValidQuizFile(filePath)) continue;
     const quiz = readJsonFile<QuizDocument>(filePath);
-    const score = scoreTopicMatch(normalizeTopicTokens(quiz?.topic || ''), targets);
+    const score = scoreTopicMatch(
+      normalizeTopicTokens(quiz?.topic || ''),
+      targets,
+    );
     if (!bestMatch || score > bestMatch.score) {
       bestMatch = { filePath, score };
     }
@@ -826,7 +873,7 @@ export function buildScheduledLearningPrompt(
       return [
         'Create the weekly learning report.',
         ...contextLines,
-        'Use LEARNING_PROGRESS.json first, then learner files plus recent conversation context, to summarize adherence, strong areas, fading areas, blockers, and the next week\'s first priorities.',
+        "Use LEARNING_PROGRESS.json first, then learner files plus recent conversation context, to summarize adherence, strong areas, fading areas, blockers, and the next week's first priorities.",
         'If progress data is thin, say so directly and keep the report honest rather than over-claiming.',
       ].join(' ');
   }

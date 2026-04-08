@@ -106,11 +106,15 @@ describe('learning progress tracking', () => {
   });
 
   it('ignores non-quiz replies without corrupting the progress artifact', () => {
-    const result = recordQuizProgress('learner_one', 'I think the answer is B', {
-      groupDir,
-      projectRoot: tempRoot,
-      submittedAt: '2026-03-29T10:00:00.000Z',
-    });
+    const result = recordQuizProgress(
+      'learner_one',
+      'I think the answer is B',
+      {
+        groupDir,
+        projectRoot: tempRoot,
+        submittedAt: '2026-03-29T10:00:00.000Z',
+      },
+    );
 
     expect(result.status).toBe('noop');
 

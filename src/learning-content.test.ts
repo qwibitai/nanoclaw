@@ -134,7 +134,9 @@ describe('learning content resolution', () => {
       projectRoot: tempRoot,
     });
 
-    expect(context.packagePlanPath).toContain('/workspace/group/content/plans/');
+    expect(context.packagePlanPath).toContain(
+      '/workspace/group/content/plans/',
+    );
     expect(context.starterLessonPath).toBe(
       '/workspace/group/content/lessons/dynamic-lesson.md',
     );
@@ -149,8 +151,12 @@ describe('learning content resolution', () => {
 
   it('selects the best matching local lesson and quiz for the learner focus', () => {
     const contentDir = path.join(groupDir, 'content');
-    fs.mkdirSync(path.join(contentDir, 'lessons', 'foundation'), { recursive: true });
-    fs.mkdirSync(path.join(contentDir, 'quizzes', 'foundation'), { recursive: true });
+    fs.mkdirSync(path.join(contentDir, 'lessons', 'foundation'), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(contentDir, 'quizzes', 'foundation'), {
+      recursive: true,
+    });
 
     fs.writeFileSync(
       path.join(groupDir, 'STUDY_PLAN.md'),
@@ -258,8 +264,12 @@ describe('learning content resolution', () => {
     expect(context.packagePlanPath).toContain(
       '/workspace/project/exams/upsc/plans/6-month-prelims.json',
     );
-    expect(context.starterLessonPath).toContain('/workspace/project/exams/upsc/lessons/');
-    expect(context.starterQuizPath).toContain('/workspace/project/exams/upsc/quizzes/');
+    expect(context.starterLessonPath).toContain(
+      '/workspace/project/exams/upsc/lessons/',
+    );
+    expect(context.starterQuizPath).toContain(
+      '/workspace/project/exams/upsc/quizzes/',
+    );
     expect(context.starterQuizFilePath).toContain(
       path.join(tempRoot, 'exams', 'upsc', 'quizzes'),
     );
@@ -299,7 +309,13 @@ describe('learning content resolution', () => {
           version: 1,
           updatedAt: '2026-04-03T00:00:00.000Z',
           recentQuizOutcomes: [],
-          weakTopics: [{ topic: 'Monsoon', misses: 2, lastReviewedAt: '2026-04-03T00:00:00.000Z' }],
+          weakTopics: [
+            {
+              topic: 'Monsoon',
+              misses: 2,
+              lastReviewedAt: '2026-04-03T00:00:00.000Z',
+            },
+          ],
           nextRevisionTargets: ['Indian monsoon basics'],
         },
         null,
@@ -329,19 +345,32 @@ describe('learning content resolution', () => {
       path.join(contentDir, 'plans', 'broken-plan.json'),
       JSON.stringify({ phases: [] }, null, 2),
     );
-    fs.writeFileSync(path.join(contentDir, 'lessons', 'empty-lesson.md'), '\n\n');
+    fs.writeFileSync(
+      path.join(contentDir, 'lessons', 'empty-lesson.md'),
+      '\n\n',
+    );
     fs.writeFileSync(
       path.join(contentDir, 'quizzes', 'broken-quiz.json'),
-      JSON.stringify({ topic: 'Broken', questions: [{ id: 'q1', answerIndex: 9 }] }, null, 2),
+      JSON.stringify(
+        { topic: 'Broken', questions: [{ id: 'q1', answerIndex: 9 }] },
+        null,
+        2,
+      ),
     );
 
     const context = resolveLearningTaskContext(groupDir, {
       projectRoot: tempRoot,
     });
 
-    expect(context.packagePlanPath).toContain('/workspace/project/exams/upsc/plans/');
-    expect(context.starterLessonPath).toContain('/workspace/project/exams/upsc/lessons/');
-    expect(context.starterQuizPath).toContain('/workspace/project/exams/upsc/quizzes/');
+    expect(context.packagePlanPath).toContain(
+      '/workspace/project/exams/upsc/plans/',
+    );
+    expect(context.starterLessonPath).toContain(
+      '/workspace/project/exams/upsc/lessons/',
+    );
+    expect(context.starterQuizPath).toContain(
+      '/workspace/project/exams/upsc/quizzes/',
+    );
   });
 
   it('ignores malformed index files and keeps runtime-safe fallback behavior', () => {
@@ -366,7 +395,11 @@ describe('learning content resolution', () => {
     );
     fs.writeFileSync(
       path.join(contentDir, 'lessons.index.json'),
-      JSON.stringify({ entries: [{ path: 42, topic: '', keywords: [] }] }, null, 2),
+      JSON.stringify(
+        { entries: [{ path: 42, topic: '', keywords: [] }] },
+        null,
+        2,
+      ),
     );
     fs.writeFileSync(
       path.join(contentDir, 'quizzes.index.json'),

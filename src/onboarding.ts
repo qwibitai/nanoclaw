@@ -205,14 +205,23 @@ function resolveSourceContext(
   pkg?: ExamPackageSummary,
 ): string[] {
   const lines: string[] = [];
-  const globalRegistryPath = path.join(projectRoot, 'exams', 'source-registry.json');
+  const globalRegistryPath = path.join(
+    projectRoot,
+    'exams',
+    'source-registry.json',
+  );
   if (fs.existsSync(globalRegistryPath)) {
     lines.push('Global source registry: exams/source-registry.json');
   }
 
   if (!pkg) return lines;
 
-  const packageSourcesPath = path.join(projectRoot, 'exams', pkg.directory, 'sources.json');
+  const packageSourcesPath = path.join(
+    projectRoot,
+    'exams',
+    pkg.directory,
+    'sources.json',
+  );
   if (fs.existsSync(packageSourcesPath)) {
     lines.push(`Exam source registry: exams/${pkg.directory}/sources.json`);
   }
@@ -235,14 +244,17 @@ function getSectionBody(content: string, heading: string): string {
   return bodyLines.join('\n').trim();
 }
 
-function findFirstFile(directory: string, extensions: Set<string>): string | undefined {
+function findFirstFile(
+  directory: string,
+  extensions: Set<string>,
+): string | undefined {
   if (!fs.existsSync(directory)) return undefined;
 
   const matches: string[] = [];
   const walk = (currentDir: string): void => {
-    const entries = fs.readdirSync(currentDir).sort((left, right) =>
-      left.localeCompare(right),
-    );
+    const entries = fs
+      .readdirSync(currentDir)
+      .sort((left, right) => left.localeCompare(right));
 
     for (const entry of entries) {
       const entryPath = path.join(currentDir, entry);
@@ -311,7 +323,10 @@ function buildSeededIndexEntry(
   sourcePath: string,
   topic: string,
 ): SeededContentIndexEntry {
-  const relativeTarget = path.relative(contentRoot, targetPath).split(path.sep).join('/');
+  const relativeTarget = path
+    .relative(contentRoot, targetPath)
+    .split(path.sep)
+    .join('/');
   const normalizedTopic = topic.trim();
 
   return {
@@ -320,7 +335,9 @@ function buildSeededIndexEntry(
     topic: normalizedTopic,
     keywords: uniqueTokens([
       ...normalizeTopicTokens(normalizedTopic),
-      ...normalizeTopicTokens(path.basename(relativeTarget, path.extname(relativeTarget))),
+      ...normalizeTopicTokens(
+        path.basename(relativeTarget, path.extname(relativeTarget)),
+      ),
       ...normalizeTopicTokens(relativeTarget),
     ]),
   };
@@ -346,9 +363,9 @@ function seedIndexedContentFiles(
   const seeded: string[] = [];
   const indexEntries: SeededContentIndexEntry[] = [];
   const walk = (currentDir: string): void => {
-    const entries = fs.readdirSync(currentDir).sort((left, right) =>
-      left.localeCompare(right),
-    );
+    const entries = fs
+      .readdirSync(currentDir)
+      .sort((left, right) => left.localeCompare(right));
 
     for (const entry of entries) {
       const sourcePath = path.join(currentDir, entry);
@@ -365,13 +382,21 @@ function seedIndexedContentFiles(
       const seededNow = seedContentFile(sourcePath, targetPath);
       if (seededNow) {
         seeded.push(
-          path.join('content', sourceSubdir, relativeSource).split(path.sep).join('/'),
+          path
+            .join('content', sourceSubdir, relativeSource)
+            .split(path.sep)
+            .join('/'),
         );
       }
 
       if (fs.existsSync(targetPath)) {
         indexEntries.push(
-          buildSeededIndexEntry(contentRoot, targetPath, sourcePath, topicReader(targetPath)),
+          buildSeededIndexEntry(
+            contentRoot,
+            targetPath,
+            sourcePath,
+            topicReader(targetPath),
+          ),
         );
       }
     }
@@ -404,12 +429,11 @@ function ensureLearnerContentWorkspace(
   const packageRoot = path.join(projectRoot, 'exams', pkg.directory);
   const seeded: string[] = [];
 
-  const planSource =
-    ((): string | undefined => {
-      const preferred = path.join(packageRoot, 'plans', '6-month-prelims.json');
-      if (fs.existsSync(preferred)) return preferred;
-      return findFirstFile(path.join(packageRoot, 'plans'), new Set(['.json']));
-    })();
+  const planSource = ((): string | undefined => {
+    const preferred = path.join(packageRoot, 'plans', '6-month-prelims.json');
+    if (fs.existsSync(preferred)) return preferred;
+    return findFirstFile(path.join(packageRoot, 'plans'), new Set(['.json']));
+  })();
   if (seedContentFile(planSource, path.join(plansDir, 'starter-plan.json'))) {
     seeded.push('content/plans/starter-plan.json');
   }

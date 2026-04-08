@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { AGENT_PROVIDER, AGENT_MODEL } from './config.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -241,6 +242,12 @@ function buildContainerArgs(
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
   // OAuth mode:   SDK exchanges placeholder token for temp API key,
   //               proxy injects real OAuth token on that exchange request.
+  // Pass provider selection to container agent runner
+  args.push('-e', `AGENT_PROVIDER=${AGENT_PROVIDER}`);
+  if (AGENT_MODEL) {
+    args.push('-e', `AGENT_MODEL=${AGENT_MODEL}`);
+  }
+
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');

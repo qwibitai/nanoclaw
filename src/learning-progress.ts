@@ -60,7 +60,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function defaultLearningProgress(timestamp: string = nowIso()): LearningProgress {
+function defaultLearningProgress(
+  timestamp: string = nowIso(),
+): LearningProgress {
   return {
     version: 1,
     updatedAt: timestamp,

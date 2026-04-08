@@ -81,15 +81,29 @@ describe('learner onboarding', () => {
     expect(heartbeat).toContain('quiz: 21:00');
     expect(heartbeat).toContain('weeklyReport: Sunday 08:00');
     expect(resources).toContain('exams/upsc/resources.json');
-    expect(state.seededContentFiles).toContain('content/plans/starter-plan.json');
-    expect(state.seededContentFiles).toContain('content/lessons/foundation/ancient-india.md');
-    expect(state.seededContentFiles).toContain('content/quizzes/foundation/ancient-india.json');
+    expect(state.seededContentFiles).toContain(
+      'content/plans/starter-plan.json',
+    );
+    expect(state.seededContentFiles).toContain(
+      'content/lessons/foundation/ancient-india.md',
+    );
+    expect(state.seededContentFiles).toContain(
+      'content/quizzes/foundation/ancient-india.json',
+    );
     expect(state.seededContentFiles).toContain('content/lessons.index.json');
     expect(state.seededContentFiles).toContain('content/quizzes.index.json');
     expect(state.seededContentFiles).toContain('content/sources.global.json');
     expect(state.seededContentFiles).toContain('content/sources.package.json');
     expect(
-      fs.existsSync(path.join(groupDir, 'content', 'quizzes', 'foundation', 'ancient-india.json')),
+      fs.existsSync(
+        path.join(
+          groupDir,
+          'content',
+          'quizzes',
+          'foundation',
+          'ancient-india.json',
+        ),
+      ),
     ).toBe(true);
     expect(
       fs.existsSync(path.join(groupDir, 'content', 'lessons.index.json')),
@@ -123,7 +137,9 @@ describe('learner onboarding', () => {
     expect(prompt).toContain('LEARNER ONBOARDING MODE');
     expect(prompt).toContain('WHO_I_AM.md');
     expect(prompt).toContain('Onboarding status: active');
-    expect(prompt).toContain('Seeded reusable content files in /workspace/group');
+    expect(prompt).toContain(
+      'Seeded reusable content files in /workspace/group',
+    );
     expect(prompt).toContain('exams/upsc/plans/6-month-prelims.json');
     expect(prompt).toContain('exams/upsc/sources.json');
     expect(prompt).toContain('exams/source-registry.json');
