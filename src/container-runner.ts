@@ -184,17 +184,6 @@ function buildVolumeMounts(
                 ],
               },
             ],
-            Stop: [
-              {
-                hooks: [
-                  {
-                    type: 'command',
-                    command:
-                      'echo \'Session ending. If you learned anything important this session (user preferences, facts, decisions), store it now: mnemon remember "content" --cat <category> --imp <1-5>\'',
-                  },
-                ],
-              },
-            ],
           },
         },
         null,

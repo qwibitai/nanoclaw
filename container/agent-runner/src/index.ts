@@ -359,6 +359,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  silent?: boolean,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -517,11 +518,13 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      if (!silent) {
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+      }
     }
   }
 
@@ -687,6 +690,27 @@ async function main(): Promise<void> {
       error: errorMessage
     });
     process.exit(1);
+  }
+
+  // Memory consolidation: after the main loop, ask Claude to save anything
+  // important from the session. Runs silently — no output sent to the user.
+  // Skip for scheduled tasks (automated, no user interaction to remember).
+  if (sessionId && !containerInput.isScheduledTask) {
+    log('Running memory consolidation...');
+    try {
+      await runQuery(
+        'Session ending. Review this conversation and store any important facts, preferences, decisions, or insights using `mnemon remember "content" --cat <category> --imp <1-5>`. Call it once per distinct item. If nothing notable, just respond "done".',
+        sessionId,
+        mcpServerPath,
+        containerInput,
+        sdkEnv,
+        resumeAt,
+        true, // silent — suppress writeOutput so nothing is sent to the user
+      );
+      log('Memory consolidation complete');
+    } catch (err) {
+      log(`Memory consolidation error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
