@@ -52,8 +52,10 @@ export const NEXUS_DATA_DIR =
 
 export const SKILLS_DIR = resolve(PROJECT_ROOT, 'skills');
 export const KNOWLEDGE_DIR = resolve(PROJECT_ROOT, 'knowledge');
-export const SESSIONS_DIR = resolve(NEXUS_DATA_DIR, 'sessions');
 export const OPERATORS_DIR = resolve(NEXUS_DATA_DIR, 'operators');
+export const OPERATOR_DATA_DIR = resolve(OPERATORS_DIR, OPERATOR_SLUG);
+export const SESSIONS_DIR = resolve(OPERATOR_DATA_DIR, 'sessions');
+export const CONVERSATIONS_DIR = resolve(OPERATOR_DATA_DIR, 'conversations');
 
 function readVersion(): string {
   try {
