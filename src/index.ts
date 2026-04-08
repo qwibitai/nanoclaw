@@ -30,6 +30,7 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
+import { classifyPendingInput } from './pending-input.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -559,7 +560,10 @@ async function startMessageLoop(): Promise<void> {
           } else {
             // No idle follow-up window — enqueue for a new run and acknowledge
             // only on the first transition into the queued state.
-            const enqueueResult = queue.enqueueMessageCheck(chatJid);
+            const enqueueResult = queue.enqueueIncomingInput(
+              chatJid,
+              classifyPendingInput(groupMessages, ASSISTANT_NAME),
+            );
             if (enqueueResult === 'queued') {
               await channel.sendMessage(
                 chatJid,

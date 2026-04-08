@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+import { PendingInput, createSystemPendingInput } from './pending-input.js';
 
 interface QueuedTask {
   id: string;
@@ -11,7 +12,11 @@ interface QueuedTask {
   fn: () => Promise<void>;
 }
 
-export type MessageEnqueueResult = 'started' | 'queued' | 'already-queued';
+export type MessageEnqueueResult =
+  | 'started'
+  | 'queued'
+  | 'already-queued'
+  | 'ignored';
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
@@ -21,7 +26,7 @@ interface GroupState {
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
-  pendingMessages: boolean;
+  pendingInput: PendingInput | null;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   containerName: string | null;
@@ -45,7 +50,7 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskContainer: false,
         runningTaskId: null,
-        pendingMessages: false,
+        pendingInput: null,
         pendingTasks: [],
         process: null,
         containerName: null,
@@ -61,29 +66,102 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
-  enqueueMessageCheck(groupJid: string): MessageEnqueueResult {
+  private pendingInputPriority(input: PendingInput): number {
+    if (input.source === 'user') {
+      return input.kind === 'chat' ? 2 : 3;
+    }
+    return 1;
+  }
+
+  private queuePendingInput(
+    groupJid: string,
+    state: GroupState,
+    input: PendingInput,
+    logMessage: string,
+    waitingLogMessage?: string,
+  ): MessageEnqueueResult {
+    const existing = state.pendingInput;
+    if (
+      !existing ||
+      this.pendingInputPriority(input) > this.pendingInputPriority(existing)
+    ) {
+      state.pendingInput = input;
+    }
+    if (waitingLogMessage && !this.waitingGroups.includes(groupJid)) {
+      this.waitingGroups.push(groupJid);
+    }
+    logger.debug(
+      {
+        groupJid,
+        source: state.pendingInput?.source,
+        kind: state.pendingInput?.kind,
+        activeCount: this.activeCount,
+      },
+      waitingLogMessage ?? logMessage,
+    );
+    return existing ? 'already-queued' : 'queued';
+  }
+
+  enqueueIncomingInput(
+    groupJid: string,
+    input: PendingInput,
+  ): MessageEnqueueResult {
     if (this.shuttingDown) return 'already-queued';
 
     const state = this.getGroup(groupJid);
 
     if (state.active) {
-      const wasQueued = state.pendingMessages;
-      state.pendingMessages = true;
-      logger.debug({ groupJid }, 'Container active, message queued');
-      return wasQueued ? 'already-queued' : 'queued';
+      if (!state.isTaskContainer && input.source === 'user' && input.kind === 'chat') {
+        logger.debug({ groupJid }, 'Ignored non-actionable follow-up while container busy');
+        return 'ignored';
+      }
+      return this.queuePendingInput(
+        groupJid,
+        state,
+        input,
+        'Container active, pending input queued',
+      );
     }
 
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      const wasQueued = state.pendingMessages;
-      state.pendingMessages = true;
-      if (!this.waitingGroups.includes(groupJid)) {
-        this.waitingGroups.push(groupJid);
-      }
-      logger.debug(
-        { groupJid, activeCount: this.activeCount },
-        'At concurrency limit, message queued',
+      return this.queuePendingInput(
+        groupJid,
+        state,
+        input,
+        'At concurrency limit, pending input queued',
+        'At concurrency limit, pending input queued',
       );
-      return wasQueued ? 'already-queued' : 'queued';
+    }
+
+    this.runForGroup(groupJid, 'messages').catch((err) =>
+      logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
+    );
+    return 'started';
+  }
+
+  enqueueMessageCheck(groupJid: string): MessageEnqueueResult {
+    if (this.shuttingDown) return 'already-queued';
+
+    const state = this.getGroup(groupJid);
+    const input = createSystemPendingInput();
+
+    if (state.active) {
+      return this.queuePendingInput(
+        groupJid,
+        state,
+        input,
+        'Container active, system message queued',
+      );
+    }
+
+    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+      return this.queuePendingInput(
+        groupJid,
+        state,
+        input,
+        'At concurrency limit, system message queued',
+        'At concurrency limit, system message queued',
+      );
     }
 
     this.runForGroup(groupJid, 'messages').catch((err) =>
@@ -154,7 +232,7 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
-    if (state.pendingTasks.length > 0 || state.pendingMessages) {
+    if (state.pendingTasks.length > 0 || state.pendingInput) {
       this.closeStdin(groupJid);
     }
   }
@@ -214,7 +292,7 @@ export class GroupQueue {
     state.active = true;
     state.idleWaiting = false;
     state.isTaskContainer = false;
-    state.pendingMessages = false;
+    state.pendingInput = null;
     this.activeCount++;
 
     logger.debug(
@@ -301,7 +379,16 @@ export class GroupQueue {
 
     const state = this.getGroup(groupJid);
 
-    // Tasks first (they won't be re-discovered from SQLite like messages)
+    if (state.pendingInput?.source === 'user') {
+      this.runForGroup(groupJid, 'drain').catch((err) =>
+        logger.error(
+          { groupJid, err },
+          'Unhandled error in runForGroup (drain)',
+        ),
+      );
+      return;
+    }
+
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
       this.runTask(groupJid, task).catch((err) =>
@@ -313,8 +400,7 @@ export class GroupQueue {
       return;
     }
 
-    // Then pending messages
-    if (state.pendingMessages) {
+    if (state.pendingInput) {
       this.runForGroup(groupJid, 'drain').catch((err) =>
         logger.error(
           { groupJid, err },
@@ -336,8 +422,14 @@ export class GroupQueue {
       const nextJid = this.waitingGroups.shift()!;
       const state = this.getGroup(nextJid);
 
-      // Prioritize tasks over messages
-      if (state.pendingTasks.length > 0) {
+      if (state.pendingInput?.source === 'user') {
+        this.runForGroup(nextJid, 'drain').catch((err) =>
+          logger.error(
+            { groupJid: nextJid, err },
+            'Unhandled error in runForGroup (waiting)',
+          ),
+        );
+      } else if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
         this.runTask(nextJid, task).catch((err) =>
           logger.error(
@@ -345,7 +437,7 @@ export class GroupQueue {
             'Unhandled error in runTask (waiting)',
           ),
         );
-      } else if (state.pendingMessages) {
+      } else if (state.pendingInput) {
         this.runForGroup(nextJid, 'drain').catch((err) =>
           logger.error(
             { groupJid: nextJid, err },

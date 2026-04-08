@@ -98,9 +98,38 @@ describe('GroupQueue', () => {
     expect(processMessages).toHaveBeenCalledTimes(3);
   });
 
-  // --- Tasks prioritized over messages ---
+  it('queues fresh user chat when only the global concurrency limit is blocking it', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
 
-  it('drains tasks before messages for same group', async () => {
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(
+      queue.enqueueIncomingInput('group3@g.us', {
+        source: 'user',
+        kind: 'chat',
+      }),
+    ).toBe('queued');
+
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toContain('group3@g.us');
+  });
+
+  // --- User inputs vs tasks ---
+
+  it('prioritizes queued user commands over tasks for same group', async () => {
     const executionOrder: string[] = [];
     let resolveFirst: () => void;
 
@@ -126,16 +155,19 @@ describe('GroupQueue', () => {
       executionOrder.push('task');
     });
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
-    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueIncomingInput('group1@g.us', {
+      source: 'user',
+      kind: 'command',
+    });
 
     // Release the first processing
     resolveFirst!();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Task should have run before the second message check
+    // Queued user input should run before the background task.
     expect(executionOrder[0]).toBe('messages'); // first call
-    expect(executionOrder[1]).toBe('task'); // task runs first in drain
-    // Messages would run after task completes
+    expect(executionOrder[1]).toBe('messages'); // user command runs next
+    expect(executionOrder[2]).toBe('task');
   });
 
   // --- Retry with backoff on failure ---
@@ -453,6 +485,74 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('ignores non-actionable follow-ups while an interactive container is busy', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('started');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    expect(
+      queue.enqueueIncomingInput('group1@g.us', {
+        source: 'user',
+        kind: 'chat',
+      }),
+    ).toBe('ignored');
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('queues fresh user input behind task containers even when it is plain chat', async () => {
+    let resolveTask: () => void;
+
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    const taskFn = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+
+    expect(
+      queue.enqueueIncomingInput('group1@g.us', {
+        source: 'user',
+        kind: 'chat',
+      }),
+    ).toBe('queued');
+
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+  });
+
   it('sendMessage returns false for task containers so user messages queue up', async () => {
     let resolveTask: () => void;
 
@@ -552,7 +652,12 @@ describe('GroupQueue', () => {
       'test-group',
     );
 
-    expect(queue.enqueueMessageCheck('group1@g.us')).toBe('queued');
+    expect(
+      queue.enqueueIncomingInput('group1@g.us', {
+        source: 'user',
+        kind: 'command',
+      }),
+    ).toBe('queued');
 
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     writeFileSync.mockClear();
