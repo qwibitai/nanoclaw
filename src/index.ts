@@ -755,9 +755,10 @@ async function main(): Promise<void> {
   // Proactively refresh the OAuth token every 30 minutes so it doesn't expire
   // during periods of inactivity (container-runner only refreshes on demand).
   const refreshOAuth = () =>
-    ensureFreshOAuthToken({ secretId: ONECLI_OAUTH_SECRET_ID, onecliPath: ONECLI_BIN }).catch(
-      (err) => logger.warn({ err }, 'Background OAuth refresh failed'),
-    );
+    ensureFreshOAuthToken({
+      secretId: ONECLI_OAUTH_SECRET_ID,
+      onecliPath: ONECLI_BIN,
+    }).catch((err) => logger.warn({ err }, 'Background OAuth refresh failed'));
   refreshOAuth();
   setInterval(refreshOAuth, 30 * 60 * 1000);
 

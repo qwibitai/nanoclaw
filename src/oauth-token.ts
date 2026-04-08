@@ -16,7 +16,11 @@ import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
-const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
+const CREDENTIALS_FILE = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
 const BUFFER_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
 
 interface ClaudeCredentials {
@@ -70,8 +74,7 @@ async function callRefreshEndpoint(
             resolve({
               accessToken: response.access_token,
               expiresAt:
-                response.expires_at ??
-                Date.now() + response.expires_in * 1000,
+                response.expires_at ?? Date.now() + response.expires_in * 1000,
             });
           } catch (err) {
             reject(new Error(`Failed to parse OAuth response: ${err}`));
