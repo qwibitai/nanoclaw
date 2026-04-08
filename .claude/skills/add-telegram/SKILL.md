@@ -13,47 +13,38 @@ This skill adds Telegram support to NanoClaw, then walks through interactive set
 
 Check if `src/channels/telegram.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
-### Ask the user
-
-Use `AskUserQuestion` to collect configuration:
-
-AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
-
-If they have one, collect it now. If not, we'll create one in Phase 3.
-
 ## Phase 2: Apply Code Changes
 
-### Ensure channel remote
+### Clone the Telegram channel repo
 
 ```bash
-git remote -v
+git clone https://github.com/qwibitai/nanoclaw-telegram.git /tmp/nanoclaw-telegram
 ```
 
-If `telegram` is missing, add it:
+### Copy the required files
 
 ```bash
-git remote add telegram https://github.com/qwibitai/nanoclaw-telegram.git
+cp /tmp/nanoclaw-telegram/src/channels/telegram.ts src/channels/telegram.ts
+cp /tmp/nanoclaw-telegram/src/channels/telegram.test.ts src/channels/telegram.test.ts
 ```
 
-### Merge the skill branch
+### Add the grammy dependency
+
+Add `grammy` to `package.json` dependencies. Read the cloned repo's `package.json` to get the exact version pinned there, then add it to the local `package.json` with that same version.
+
+### Update the channel barrel file
+
+Append the Telegram import to `src/channels/index.ts`:
+
+```typescript
+import './telegram.js';
+```
+
+### Clean up the clone
 
 ```bash
-git fetch telegram main
-git merge telegram/main || {
-  git checkout --theirs package-lock.json
-  git add package-lock.json
-  git merge --continue
-}
+rm -rf /tmp/nanoclaw-telegram
 ```
-
-This merges in:
-- `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
-- `src/channels/telegram.test.ts` (unit tests with grammy mock)
-- `import './telegram.js'` appended to the channel barrel file `src/channels/index.ts`
-- `grammy` npm dependency in `package.json`
-- `TELEGRAM_BOT_TOKEN` in `.env.example`
-
-If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
@@ -69,9 +60,9 @@ All tests must pass (including the new Telegram tests) and build must be clean b
 
 ### Create Telegram Bot (if needed)
 
-If the user doesn't have a bot token, tell them:
+Tell the user:
 
-> I need you to create a Telegram bot:
+> If you do not already have a Telegram bot token, create one now:
 >
 > 1. Open Telegram and search for `@BotFather`
 > 2. Send `/newbot` and follow prompts:
@@ -79,19 +70,19 @@ If the user doesn't have a bot token, tell them:
 >    - Bot username: Must end with "bot" (e.g., "andy_ai_bot")
 > 3. Copy the bot token (looks like `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`)
 
-Wait for the user to provide the token.
-
 ### Configure environment
 
-Add to `.env`:
+Ensure `.env` contains the `TELEGRAM_BOT_TOKEN` variable. If it is not already present, append it:
 
 ```bash
-TELEGRAM_BOT_TOKEN=<their-token>
+echo 'TELEGRAM_BOT_TOKEN=' >> .env
 ```
 
-Channels auto-enable when their credentials are present — no extra configuration needed.
+Tell the user:
 
-Sync to container environment:
+> Open `.env` and fill in your bot token next to `TELEGRAM_BOT_TOKEN=`. Channels auto-enable when their credentials are present — no extra configuration needed.
+
+Once the user confirms the token is set, sync to the container environment:
 
 ```bash
 mkdir -p data/env && cp .env data/env/env
