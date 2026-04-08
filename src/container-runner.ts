@@ -1038,10 +1038,7 @@ function mergeBackNonRepoEntries(scratchDir: string, dstDir: string): void {
     if (ISOLATED_THREAD_FILES.includes(entry.name)) continue;
 
     const srcEntry = path.join(scratchDir, entry.name);
-    if (
-      entry.isDirectory() &&
-      fs.existsSync(path.join(srcEntry, '.git'))
-    ) {
+    if (entry.isDirectory() && fs.existsSync(path.join(srcEntry, '.git'))) {
       continue;
     }
 
@@ -3549,7 +3546,10 @@ export async function runContainerAgent(
   if (process.getuid?.() === 0) {
     for (const m of mounts) {
       if (m.readonly || !fs.existsSync(m.hostPath)) continue;
-      if (m.hostPath === GROUPS_DIR || m.hostPath.startsWith(GROUPS_DIR + path.sep)) {
+      if (
+        m.hostPath === GROUPS_DIR ||
+        m.hostPath.startsWith(GROUPS_DIR + path.sep)
+      ) {
         continue;
       }
       try {
