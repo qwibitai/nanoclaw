@@ -42,7 +42,7 @@ afterEach(() => {
 describe('Agent path isolation', () => {
   it('every agent uses workdir/agents/{name}/ subdirectory', () => {
     const agent = createAgent('alice', tmpDir);
-    expect(agent.config.workdir).toBe(path.join(tmpDir, 'agents', 'alice'));
+    expect(agent.config.workDir).toBe(path.join(tmpDir, 'agents', 'alice'));
     expect(agent.config.storeDir).toBe(
       path.join(tmpDir, 'agents', 'alice', 'store'),
     );
@@ -61,7 +61,7 @@ describe('Agent path isolation', () => {
     expect(alice.config.storeDir).not.toBe(bob.config.storeDir);
     expect(alice.config.groupsDir).not.toBe(bob.config.groupsDir);
     expect(alice.config.dataDir).not.toBe(bob.config.dataDir);
-    expect(alice.config.workdir).not.toBe(bob.config.workdir);
+    expect(alice.config.workDir).not.toBe(bob.config.workDir);
   });
 
   it('agent.name propagates from constructor', () => {

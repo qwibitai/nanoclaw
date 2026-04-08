@@ -1,25 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { _initTestDatabase, createTask, getTaskById } from './db.js';
+import { _initTestDatabase, AgentDb } from './db.js';
 import {
-  _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
 } from './task-scheduler.js';
 
 describe('task scheduler', () => {
+  let db: AgentDb;
+  let schedulerHandle: { stop(): void } | undefined;
+
   beforeEach(() => {
-    _initTestDatabase();
-    _resetSchedulerLoopForTests();
+    db = _initTestDatabase();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    schedulerHandle?.stop();
+    schedulerHandle = undefined;
     vi.useRealTimers();
   });
 
   it('pauses due tasks with invalid group folders to prevent retry churn', async () => {
-    createTask({
+    db.createTask({
       id: 'task-invalid-folder',
       group_folder: '../../outside',
       chat_jid: 'bad@g.us',
@@ -38,10 +41,14 @@ describe('task scheduler', () => {
       },
     );
 
-    startSchedulerLoop({
+    schedulerHandle = startSchedulerLoop({
+      db,
       assistantName: 'Andy',
       schedulerPollInterval: 60000,
       timezone: 'UTC',
+      workDir: '/tmp/agentlite-test',
+      groupsDir: '/tmp/agentlite-test/groups',
+      dataDir: '/tmp/agentlite-test/data',
       runtimeConfig: {
         packageRoot: '/tmp/agentlite-test-pkg',
         workdir: '/tmp/agentlite-test',
@@ -68,7 +75,7 @@ describe('task scheduler', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    const task = getTaskById('task-invalid-folder');
+    const task = db.getTaskById('task-invalid-folder');
     expect(task?.status).toBe('paused');
   });
 

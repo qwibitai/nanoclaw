@@ -4,7 +4,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import type { AgentDb } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -13,6 +13,7 @@ export interface IpcDeps {
   dataDir: string;
   ipcPollInterval: number;
   timezone: string;
+  db: AgentDb;
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
@@ -27,19 +28,13 @@ export interface IpcDeps {
   onTasksChanged: () => void;
 }
 
-let ipcWatcherRunning = false;
-
-export function startIpcWatcher(deps: IpcDeps): void {
-  if (ipcWatcherRunning) {
-    logger.debug('IPC watcher already running, skipping duplicate start');
-    return;
-  }
-  ipcWatcherRunning = true;
-
+export function startIpcWatcher(deps: IpcDeps): { stop(): void } {
+  let stopped = false;
   const ipcBaseDir = path.join(deps.dataDir, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
+    if (stopped) return;
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -149,11 +144,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
-    setTimeout(processIpcFiles, deps.ipcPollInterval);
+    if (!stopped) setTimeout(processIpcFiles, deps.ipcPollInterval);
   };
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
+  return { stop() { stopped = true; } };
 }
 
 export async function processTaskIpc(
@@ -257,7 +253,7 @@ export async function processTaskIpc(
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
             : 'isolated';
-        createTask({
+        deps.db.createTask({
           id: taskId,
           group_folder: targetFolder,
           chat_jid: targetJid,
@@ -279,9 +275,9 @@ export async function processTaskIpc(
 
     case 'pause_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = deps.db.getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
+          deps.db.updateTask(data.taskId, { status: 'paused' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
@@ -298,9 +294,9 @@ export async function processTaskIpc(
 
     case 'resume_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = deps.db.getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
+          deps.db.updateTask(data.taskId, { status: 'active' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
@@ -317,9 +313,9 @@ export async function processTaskIpc(
 
     case 'cancel_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = deps.db.getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
+          deps.db.deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
@@ -336,7 +332,7 @@ export async function processTaskIpc(
 
     case 'update_task':
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = deps.db.getTaskById(data.taskId);
         if (!task) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -352,7 +348,7 @@ export async function processTaskIpc(
           break;
         }
 
-        const updates: Parameters<typeof updateTask>[1] = {};
+        const updates: Parameters<AgentDb['updateTask']>[1] = {};
         if (data.prompt !== undefined) updates.prompt = data.prompt;
         if (data.schedule_type !== undefined)
           updates.schedule_type = data.schedule_type as
@@ -390,7 +386,7 @@ export async function processTaskIpc(
           }
         }
 
-        updateTask(data.taskId, updates);
+        deps.db.updateTask(data.taskId, updates);
         logger.info(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',

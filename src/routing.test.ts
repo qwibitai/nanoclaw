@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { _initTestDatabase, storeChatMetadata } from './db.js';
+import { _initTestDatabase, AgentDb } from './db.js';
 import { AgentImpl } from './agent-impl.js';
 import { buildAgentConfig } from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
@@ -9,8 +9,11 @@ const agentConfig = buildAgentConfig('test', undefined, '/tmp/agentlite-test');
 const runtimeConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
 const testInstance = new AgentImpl(agentConfig, runtimeConfig);
 
+let db: AgentDb;
+
 beforeEach(() => {
-  _initTestDatabase();
+  db = _initTestDatabase();
+  testInstance._setDbForTests(db);
   testInstance._setRegisteredGroups({});
   (testInstance as unknown as { _started: boolean })._started = true;
 });
@@ -35,21 +38,21 @@ describe('JID ownership patterns', () => {
 
 describe('getAvailableGroups', () => {
   it('returns only groups, excludes DMs', () => {
-    storeChatMetadata(
+    db.storeChatMetadata(
       'group1@g.us',
       '2024-01-01T00:00:01.000Z',
       'Group 1',
       'whatsapp',
       true,
     );
-    storeChatMetadata(
+    db.storeChatMetadata(
       'user@s.whatsapp.net',
       '2024-01-01T00:00:02.000Z',
       'User DM',
       'whatsapp',
       false,
     );
-    storeChatMetadata(
+    db.storeChatMetadata(
       'group2@g.us',
       '2024-01-01T00:00:03.000Z',
       'Group 2',
@@ -65,8 +68,8 @@ describe('getAvailableGroups', () => {
   });
 
   it('excludes __group_sync__ sentinel', () => {
-    storeChatMetadata('__group_sync__', '2024-01-01T00:00:00.000Z');
-    storeChatMetadata(
+    db.storeChatMetadata('__group_sync__', '2024-01-01T00:00:00.000Z');
+    db.storeChatMetadata(
       'group@g.us',
       '2024-01-01T00:00:01.000Z',
       'Group',
@@ -80,14 +83,14 @@ describe('getAvailableGroups', () => {
   });
 
   it('marks registered groups correctly', () => {
-    storeChatMetadata(
+    db.storeChatMetadata(
       'reg@g.us',
       '2024-01-01T00:00:01.000Z',
       'Registered',
       'whatsapp',
       true,
     );
-    storeChatMetadata(
+    db.storeChatMetadata(
       'unreg@g.us',
       '2024-01-01T00:00:02.000Z',
       'Unregistered',
@@ -113,21 +116,21 @@ describe('getAvailableGroups', () => {
   });
 
   it('returns groups ordered by most recent activity', () => {
-    storeChatMetadata(
+    db.storeChatMetadata(
       'old@g.us',
       '2024-01-01T00:00:01.000Z',
       'Old',
       'whatsapp',
       true,
     );
-    storeChatMetadata(
+    db.storeChatMetadata(
       'new@g.us',
       '2024-01-01T00:00:05.000Z',
       'New',
       'whatsapp',
       true,
     );
-    storeChatMetadata(
+    db.storeChatMetadata(
       'mid@g.us',
       '2024-01-01T00:00:03.000Z',
       'Mid',
@@ -143,13 +146,13 @@ describe('getAvailableGroups', () => {
 
   it('excludes non-group chats regardless of JID format', () => {
     // Unknown JID format stored without is_group should not appear
-    storeChatMetadata(
+    db.storeChatMetadata(
       'unknown-format-123',
       '2024-01-01T00:00:01.000Z',
       'Unknown',
     );
     // Explicitly non-group with unusual JID
-    storeChatMetadata(
+    db.storeChatMetadata(
       'custom:abc',
       '2024-01-01T00:00:02.000Z',
       'Custom DM',
@@ -157,7 +160,7 @@ describe('getAvailableGroups', () => {
       false,
     );
     // A real group for contrast
-    storeChatMetadata(
+    db.storeChatMetadata(
       'group@g.us',
       '2024-01-01T00:00:03.000Z',
       'Group',

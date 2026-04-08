@@ -290,7 +290,7 @@ describe('remote-control', () => {
       expect(result).toEqual({ ok: true });
       expect(killSpy).toHaveBeenCalledWith(55555, 'SIGTERM');
       expect(unlinkSyncSpy).toHaveBeenCalledWith(STATE_FILE);
-      expect(getActiveSession()).toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).toBeNull();
     });
 
     it('returns error when no session is active', () => {
@@ -321,7 +321,7 @@ describe('remote-control', () => {
 
       restoreRemoteControl(TEST_DATA_DIR);
 
-      const active = getActiveSession();
+      const active = getActiveSession(TEST_DATA_DIR);
       expect(active).not.toBeNull();
       expect(active!.pid).toBe(77777);
       expect(active!.url).toBe('https://claude.ai/code?bridge=env_restored');
@@ -345,14 +345,14 @@ describe('remote-control', () => {
 
       restoreRemoteControl(TEST_DATA_DIR);
 
-      expect(getActiveSession()).toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).toBeNull();
       expect(unlinkSyncSpy).toHaveBeenCalled();
     });
 
     it('does nothing if no state file exists', () => {
       // readFileSyncSpy default throws ENOENT for .json
       restoreRemoteControl(TEST_DATA_DIR);
-      expect(getActiveSession()).toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).toBeNull();
     });
 
     it('clears state on corrupted JSON', () => {
@@ -363,7 +363,7 @@ describe('remote-control', () => {
 
       restoreRemoteControl(TEST_DATA_DIR);
 
-      expect(getActiveSession()).toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).toBeNull();
       expect(unlinkSyncSpy).toHaveBeenCalled();
     });
 
@@ -385,13 +385,13 @@ describe('remote-control', () => {
         .mockImplementation((() => true) as any);
 
       restoreRemoteControl(TEST_DATA_DIR);
-      expect(getActiveSession()).not.toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).not.toBeNull();
 
       const result = stopRemoteControl(TEST_DATA_DIR);
       expect(result).toEqual({ ok: true });
       expect(killSpy).toHaveBeenCalledWith(77777, 'SIGTERM');
       expect(unlinkSyncSpy).toHaveBeenCalled();
-      expect(getActiveSession()).toBeNull();
+      expect(getActiveSession(TEST_DATA_DIR)).toBeNull();
     });
 
     it('startRemoteControl returns restored URL without spawning', () => {

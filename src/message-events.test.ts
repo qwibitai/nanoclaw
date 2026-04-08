@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentImpl } from './agent-impl.js';
 import { buildAgentConfig } from './agent-config.js';
 import { buildRuntimeConfig } from './runtime-config.js';
-import { _initTestDatabase, storeChatMetadata } from './db.js';
+import { _initTestDatabase, AgentDb } from './db.js';
 
 let tmpDir: string;
 const rtConfig = buildRuntimeConfig({}, '/tmp/agentlite-test-pkg');
@@ -21,18 +21,22 @@ function createAgent(name: string): AgentImpl {
     { workdir: path.join(tmpDir, 'agents', name) },
     tmpDir,
   );
-  return new AgentImpl(config, rtConfig);
+  const agent = new AgentImpl(config, rtConfig);
+  agent._setDbForTests(db);
+  return agent;
 }
+
+let db: AgentDb;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlite-msg-'));
-  _initTestDatabase();
+  db = _initTestDatabase();
   // Ensure chat rows exist for FK constraints
-  storeChatMetadata('tg:12345', '2026-04-07T00:00:00Z', 'Test Chat');
-  storeChatMetadata('tg:1', '2026-04-07T00:00:00Z', 'Chat 1');
-  storeChatMetadata('tg:2', '2026-04-07T00:00:00Z', 'Chat 2');
-  storeChatMetadata('tg:99999', '2026-04-07T00:00:00Z', 'E2E Chat');
-  storeChatMetadata('dune:agent-1', '2026-04-07T00:00:00Z', 'Dune Agent');
+  db.storeChatMetadata('tg:12345', '2026-04-07T00:00:00Z', 'Test Chat');
+  db.storeChatMetadata('tg:1', '2026-04-07T00:00:00Z', 'Chat 1');
+  db.storeChatMetadata('tg:2', '2026-04-07T00:00:00Z', 'Chat 2');
+  db.storeChatMetadata('tg:99999', '2026-04-07T00:00:00Z', 'E2E Chat');
+  db.storeChatMetadata('dune:agent-1', '2026-04-07T00:00:00Z', 'Dune Agent');
 });
 
 afterEach(() => {
