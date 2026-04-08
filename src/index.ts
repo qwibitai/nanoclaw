@@ -742,22 +742,84 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+
+          // Intercept /stop and /stop! interrupt commands. These never go to
+          // the agent — they signal the container directly and an ack is sent
+          // back via the channel that received the command.
+          const interruptMessages = messagesToSend.filter((m) => {
+            const t = m.content.trim();
+            return t === '/stop' || t === '/stop!';
+          });
+          const normalMessages = messagesToSend.filter((m) => {
+            const t = m.content.trim();
+            return t !== '/stop' && t !== '/stop!';
+          });
+
+          if (interruptMessages.length > 0) {
+            const lastInterrupt =
+              interruptMessages[interruptMessages.length - 1];
+            const isHardKill = interruptMessages.some(
+              (m) => m.content.trim() === '/stop!',
+            );
+            const ackChannel = findChannel(channels, lastInterrupt.chat_jid);
+
+            if (isHardKill) {
+              const killed = queue.killContainer(groupFolder);
+              logger.info(
+                { groupFolder, killed },
+                'Hard-kill requested via /stop!',
+              );
+              await ackChannel?.sendMessage(
+                lastInterrupt.chat_jid,
+                killed
+                  ? 'Container killed. Next message spawns a fresh one.'
+                  : 'No active container to kill.',
+              );
+            } else {
+              const sent = queue.sendInterrupt(groupFolder);
+              logger.info(
+                { groupFolder, sent },
+                'Cooperative interrupt requested via /stop',
+              );
+              await ackChannel?.sendMessage(
+                lastInterrupt.chat_jid,
+                sent ? 'Interrupting...' : 'No active container to interrupt.',
+              );
+            }
+          }
+
+          // If the bundle was nothing but interrupt commands, advance cursors
+          // past them and skip the agent send entirely.
+          if (normalMessages.length === 0) {
+            if (interruptMessages.length > 0) {
+              const lastTs =
+                messagesToSend[messagesToSend.length - 1].timestamp;
+              for (const jid of jids) {
+                lastAgentTimestamp[jid] = lastTs;
+              }
+              saveState();
+            }
+            continue;
+          }
+
+          const formatted = formatMessages(normalMessages, TIMEZONE);
 
           if (queue.sendMessage(groupFolder, formatted)) {
             logger.debug(
-              { groupFolder, count: messagesToSend.length },
+              { groupFolder, count: normalMessages.length },
               'Piped messages to active container',
             );
-            // Update cursors for all jids
+            // Update cursors for all jids — advance past the WHOLE bundle
+            // (including any interrupt commands we filtered out) so we don't
+            // re-process them next poll cycle.
             const lastTs = messagesToSend[messagesToSend.length - 1].timestamp;
             for (const jid of jids) {
               lastAgentTimestamp[jid] = lastTs;
             }
             saveState();
-            // Show typing indicator on the channel of the last message
+            // Show typing indicator on the channel of the last normal message
             const lastMsgJid =
-              messagesToSend[messagesToSend.length - 1].chat_jid;
+              normalMessages[normalMessages.length - 1].chat_jid;
             const lastChannel = findChannel(channels, lastMsgJid);
             lastChannel
               ?.setTyping?.(lastMsgJid, true)

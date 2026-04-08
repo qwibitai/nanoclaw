@@ -16,9 +16,11 @@ import {
   drainIpcInput,
   waitForIpcMessage,
   shouldClose,
+  shouldInterrupt,
   preparePrompt,
   IPC_INPUT_DIR,
   IPC_INPUT_CLOSE_SENTINEL,
+  IPC_INPUT_INTERRUPT_SENTINEL,
 } from './index.js';
 import {
   UnifiedSession,
@@ -485,6 +487,25 @@ async function runAgenticLoop(
   let rounds = 0;
 
   while (rounds < MAX_TOOL_ROUNDS) {
+    // Cooperative interrupt check — runs once per tool round, before any
+    // network or compute work. If the host wrote _interrupt to the IPC dir,
+    // abort the current turn cleanly and return control to the user.
+    if (shouldInterrupt()) {
+      log('Interrupt requested, aborting current turn');
+      appendMessage(session, {
+        role: 'system',
+        content:
+          '[INTERRUPT — User requested to stop the current task. Awaiting next instruction.]',
+        provider: 'ollama',
+        model,
+      });
+      saveSession(session);
+      return {
+        text: 'Interrupted. What do you need?',
+        thinking: undefined,
+      };
+    }
+
     rounds++;
 
     // Check if context window is approaching limit and self-compact if needed
@@ -689,9 +710,14 @@ export async function runOllamaAgent(
   }
 
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-  // Clean up stale _close sentinel
+  // Clean up stale sentinels from previous container runs
   try {
     fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.unlinkSync(IPC_INPUT_INTERRUPT_SENTINEL);
   } catch {
     /* ignore */
   }

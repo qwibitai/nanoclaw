@@ -80,6 +80,10 @@ interface SDKUserMessage {
 
 export const IPC_INPUT_DIR = '/workspace/ipc/input';
 export const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+export const IPC_INPUT_INTERRUPT_SENTINEL = path.join(
+  IPC_INPUT_DIR,
+  '_interrupt',
+);
 export const IPC_POLL_MS = 500;
 
 /**
@@ -314,6 +318,22 @@ export function shouldClose(): boolean {
   if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
     try {
       fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check for _interrupt sentinel. Consumes the sentinel on read so the
+ * caller sees a single edge per write, even if it's polled in a tight loop.
+ */
+export function shouldInterrupt(): boolean {
+  if (fs.existsSync(IPC_INPUT_INTERRUPT_SENTINEL)) {
+    try {
+      fs.unlinkSync(IPC_INPUT_INTERRUPT_SENTINEL);
     } catch {
       /* ignore */
     }
@@ -769,9 +789,14 @@ async function runClaudeAgent(containerInput: ContainerInput): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
+  // Clean up stale sentinels from previous container runs
   try {
     fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.unlinkSync(IPC_INPUT_INTERRUPT_SENTINEL);
   } catch {
     /* ignore */
   }
