@@ -64,6 +64,7 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '600000', 10); // 10min default — inactivity window before idle container is closed
+export const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '800', 10);
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
