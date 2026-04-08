@@ -10,12 +10,15 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
+  CODEX_HOME,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  ONECLI_URL,
+  OPENAI_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -24,11 +27,9 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { OneCLI } from '@onecli-sh/sdk';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
-const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -42,7 +43,9 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  engine?: 'claude' | 'codex';
   script?: string;
+  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -50,6 +53,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  providerFailureClass?: string;
 }
 
 interface VolumeMount {
@@ -61,6 +65,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  engine: 'claude' | 'codex' = 'claude',
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -68,7 +73,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (store, group folder, IPC, .claude/) are mounted separately below.
+    // (group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -79,7 +84,7 @@ function buildVolumeMounts(
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
+    // Credentials are injected by the credential proxy, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -89,31 +94,12 @@ function buildVolumeMounts(
       });
     }
 
-    // Main gets writable access to the store (SQLite DB) so it can
-    // query and write to the database directly.
-    const storeDir = path.join(projectRoot, 'store');
-    mounts.push({
-      hostPath: storeDir,
-      containerPath: '/workspace/project/store',
-      readonly: false,
-    });
-
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
-
-    // Global memory directory — writable for main so it can update shared context
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: false,
-      });
-    }
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -211,23 +197,27 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
+  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Codex engine: mount host's ~/.codex so the SDK can find session credentials.
+  // The SDK reads auth.json and may write refreshed tokens back.
+  if (engine === 'codex') {
+    const hostCodexHome = CODEX_HOME;
+    if (fs.existsSync(hostCodexHome)) {
+      mounts.push({
+        hostPath: hostCodexHome,
+        containerPath: hostCodexHome,
+        readonly: false,
+      });
+    }
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -242,29 +232,91 @@ function buildVolumeMounts(
   return mounts;
 }
 
-async function buildContainerArgs(
+function parseContainerOutput(stdout: string): ContainerOutput | null {
+  const parsedOutputs: ContainerOutput[] = [];
+  let searchStart = 0;
+
+  while (true) {
+    const startIdx = stdout.indexOf(OUTPUT_START_MARKER, searchStart);
+    if (startIdx === -1) break;
+
+    const endIdx = stdout.indexOf(OUTPUT_END_MARKER, startIdx);
+    if (endIdx === -1) break;
+
+    const jsonLine = stdout
+      .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+      .trim();
+
+    try {
+      parsedOutputs.push(JSON.parse(jsonLine) as ContainerOutput);
+    } catch {
+      // Ignore malformed payloads and continue scanning for later markers.
+    }
+
+    searchStart = endIdx + OUTPUT_END_MARKER.length;
+  }
+
+  if (parsedOutputs.length > 0) {
+    return parsedOutputs[parsedOutputs.length - 1];
+  }
+
+  const lines = stdout.trim().split('\n');
+  const jsonLine = lines[lines.length - 1];
+
+  try {
+    return JSON.parse(jsonLine) as ContainerOutput;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decide whether Codex should use the API-key proxy path or the mounted
+ * session-auth path.
+ */
+function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-  agentIdentifier?: string,
-): Promise<string[]> {
+  engine: 'claude' | 'codex' = 'claude',
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  if (engine === 'codex') {
+    const codexSecrets = readEnvFile(['OPENAI_API_KEY']);
+    args.push('-e', `NANOCLAW_CODEX_HOME=${CODEX_HOME}`);
+
+    // Only enable the OpenAI proxy path when an API key is actually configured.
+    // If no key is present, the container must use the mounted ~/.codex session
+    // auth path instead, so we deliberately do not inject any OpenAI env vars.
+    if (codexSecrets.OPENAI_API_KEY) {
+      // No /v1 suffix here: the OpenAI SDK appends /v1 to OPENAI_BASE_URL itself.
+      // Adding /v1 here would produce a double prefix when the SDK resolves it.
+      args.push(
+        '-e',
+        `OPENAI_BASE_URL=http://host.docker.internal:${OPENAI_PROXY_PORT}`,
+      );
+      args.push('-e', 'OPENAI_API_KEY=placeholder');
+    }
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+    // Claude engine: route Anthropic SDK requests through the Claude credential proxy.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://host.docker.internal:${CREDENTIAL_PROXY_PORT}`,
     );
+
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -304,18 +356,12 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const engine: 'claude' | 'codex' =
+    input.engine || (process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude');
+  const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Main group uses the default OneCLI agent; others use their own agent.
-  const agentIdentifier = input.isMain
-    ? undefined
-    : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
-    mounts,
-    containerName,
-    agentIdentifier,
-  );
+  const containerArgs = buildContainerArgs(mounts, containerName, engine);
 
   logger.debug(
     {
@@ -355,8 +401,12 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    // Pass engine via stdin so the agent-runner selects the correct runtime.
+    // Credentials are injected by the host-side proxy — never via stdin or env.
+    input.engine = engine;
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    delete input.engine;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -540,20 +590,10 @@ export async function runContainerAgent(
       const isError = code !== 0;
 
       if (isVerbose || isError) {
-        // On error, log input metadata only — not the full prompt.
-        // Full input is only included at verbose level to avoid
-        // persisting user conversation content on every non-zero exit.
-        if (isVerbose) {
-          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
-        } else {
-          logLines.push(
-            `=== Input Summary ===`,
-            `Prompt length: ${input.prompt.length} chars`,
-            `Session ID: ${input.sessionId || 'new'}`,
-            ``,
-          );
-        }
         logLines.push(
+          `=== Input ===`,
+          JSON.stringify(input, null, 2),
+          ``,
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
@@ -588,6 +628,8 @@ export async function runContainerAgent(
       fs.writeFileSync(logFile, logLines.join('\n'));
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
+      const parsedOutput = parseContainerOutput(stdout);
+
       if (code !== 0) {
         logger.error(
           {
@@ -600,6 +642,21 @@ export async function runContainerAgent(
           },
           'Container exited with error',
         );
+
+        if (parsedOutput) {
+          logger.info(
+            {
+              group: group.name,
+              duration,
+              status: parsedOutput.status,
+              hasResult: !!parsedOutput.result,
+              providerFailureClass: parsedOutput.providerFailureClass,
+            },
+            'Container returned structured output despite nonzero exit',
+          );
+          resolve(parsedOutput);
+          return;
+        }
 
         resolve({
           status: 'error',
@@ -625,53 +682,36 @@ export async function runContainerAgent(
         return;
       }
 
-      // Legacy mode: parse the last output marker pair from accumulated stdout
-      try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
-        }
-
-        const output: ContainerOutput = JSON.parse(jsonLine);
-
+      if (parsedOutput) {
         logger.info(
           {
             group: group.name,
             duration,
-            status: output.status,
-            hasResult: !!output.result,
+            status: parsedOutput.status,
+            hasResult: !!parsedOutput.result,
           },
           'Container completed',
         );
 
-        resolve(output);
-      } catch (err) {
-        logger.error(
-          {
-            group: group.name,
-            stdout,
-            stderr,
-            error: err,
-          },
-          'Failed to parse container output',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        resolve(parsedOutput);
+        return;
       }
+
+      logger.error(
+        {
+          group: group.name,
+          stdout,
+          stderr,
+        },
+        'Failed to parse container output',
+      );
+
+      resolve({
+        status: 'error',
+        result: null,
+        error:
+          'Failed to parse container output: missing or invalid sentinel JSON',
+      });
     });
 
     container.on('error', (err) => {
@@ -696,7 +736,6 @@ export function writeTasksSnapshot(
     id: string;
     groupFolder: string;
     prompt: string;
-    script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;
@@ -732,7 +771,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  _registeredJids: Set<string>,
+  registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });

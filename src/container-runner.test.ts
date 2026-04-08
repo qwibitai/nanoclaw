@@ -5,17 +5,41 @@ import { PassThrough } from 'stream';
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const mockHome = '/Users/alice';
 
 // Mock config
 vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
+  CREDENTIAL_PROXY_PORT: 3001,
+  CODEX_HOME: `${mockHome}/.codex`,
+  OPENAI_PROXY_PORT: 3002,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
-  ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
+}));
+
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return {
+    ...actual,
+    homedir: vi.fn(() => mockHome),
+  };
+});
+
+const mockEnv: Record<string, string> = {};
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn((keys: string[]) => {
+    const out: Record<string, string> = {};
+    for (const key of keys) {
+      if (mockEnv[key] !== undefined) {
+        out[key] = mockEnv[key];
+      }
+    }
+    return out;
+  }),
 }));
 
 // Mock logger
@@ -49,25 +73,6 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
-}));
-
-// Mock container-runtime
-vi.mock('./container-runtime.js', () => ({
-  CONTAINER_RUNTIME_BIN: 'docker',
-  hostGatewayArgs: () => [],
-  readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
-  stopContainer: vi.fn(),
-}));
-
-// Mock OneCLI SDK
-vi.mock('@onecli-sh/sdk', () => ({
-  OneCLI: class {
-    applyContainerConfig = vi.fn().mockResolvedValue(true);
-    createAgent = vi.fn().mockResolvedValue({ id: 'test' });
-    ensureAgent = vi
-      .fn()
-      .mockResolvedValue({ name: 'test', identifier: 'test', created: true });
-  },
 }));
 
 // Create a controllable fake ChildProcess
@@ -106,6 +111,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { logger } from './logger.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -134,10 +140,14 @@ describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    delete process.env.AGENT_ENGINE;
+    vi.mocked(logger.debug).mockClear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    delete process.env.AGENT_ENGINE;
   });
 
   it('timeout after output resolves as success', async () => {
@@ -225,5 +235,176 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+
+  it('codex session auth does not inject OpenAI proxy env vars when no key exists', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).not.toContain('OPENAI_API_KEY=placeholder');
+    expect(containerArgs).not.toContain(
+      'OPENAI_BASE_URL=http://host.docker.internal:3002',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('codex session auth mounts CODEX_HOME at a portable path', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).toContain(`NANOCLAW_CODEX_HOME=${mockHome}/.codex`);
+    expect(containerArgs).toContain(`${mockHome}/.codex:${mockHome}/.codex`);
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('uses the last structured output block when multiple markers are emitted', async () => {
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify({
+        status: 'success',
+        result: null,
+        newSessionId: 'session-early',
+      })}\n${OUTPUT_END_MARKER}\n`,
+    );
+    fakeProc.stdout.push(
+      `${OUTPUT_START_MARKER}\n${JSON.stringify({
+        status: 'error',
+        result: null,
+        error: 'late terminal failure',
+        providerFailureClass: 'transport',
+      })}\n${OUTPUT_END_MARKER}\n`,
+    );
+
+    fakeProc.emit('close', 1);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'error',
+      error: expect.stringContaining('late terminal failure'),
+      providerFailureClass: 'transport',
+    });
+  });
+
+  it('codex API-key mode injects OpenAI proxy env vars when a key exists', async () => {
+    process.env.AGENT_ENGINE = 'codex';
+    mockEnv.OPENAI_API_KEY = 'sk-openai-real-key';
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+
+    expect(containerArgs).toContain('OPENAI_API_KEY=placeholder');
+    expect(containerArgs).toContain(
+      'OPENAI_BASE_URL=http://host.docker.internal:3002',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('explicit engine input overrides the ambient engine selection', async () => {
+    process.env.AGENT_ENGINE = 'claude';
+    fakeProc.stdin.write = vi.fn();
+
+    const onOutput = vi.fn(async () => {});
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, engine: 'codex' },
+      () => {},
+      onOutput,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    const debugCall = vi
+      .mocked(logger.debug)
+      .mock.calls.find(
+        (call) =>
+          typeof call[1] === 'string' &&
+          call[1].includes('Container mount configuration'),
+      );
+    const containerArgs = (
+      debugCall?.[0] as { containerArgs?: string } | undefined
+    )?.containerArgs;
+    const stdinWrite = fakeProc.stdin.write as unknown as {
+      mock: { calls: unknown[][] };
+    };
+
+    expect(containerArgs).toContain('HOME=/home/node');
+    expect(String(stdinWrite.mock.calls[0]?.[0] ?? '')).toContain(
+      '"engine":"codex"',
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
   });
 });
