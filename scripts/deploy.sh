@@ -25,10 +25,14 @@ echo "  Operator data: $OPERATOR_DIR"
 # Stage only this operator's data for the Docker build
 rm -rf .build-data
 mkdir -p ".build-data/operators/$SLUG"
-cp "$OPERATOR_DIR"/* ".build-data/operators/$SLUG/"
+# Copy operator config files only (not sessions/conversations — those are runtime data)
+cp "$OPERATOR_DIR"/config.json ".build-data/operators/$SLUG/" 2>/dev/null || true
+cp "$OPERATOR_DIR"/context.md ".build-data/operators/$SLUG/" 2>/dev/null || true
+cp "$OPERATOR_DIR"/team.json ".build-data/operators/$SLUG/" 2>/dev/null || true
 
-# Create empty sessions dir (will be writable at runtime)
-mkdir -p .build-data/sessions
+# Create empty runtime dirs
+mkdir -p ".build-data/operators/$SLUG/sessions"
+mkdir -p ".build-data/operators/$SLUG/conversations"
 
 echo "  Staged: .build-data/operators/$SLUG/"
 ls -la ".build-data/operators/$SLUG/"
