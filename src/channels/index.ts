@@ -11,5 +11,6 @@ import './matrix.js';
 // slack
 
 // telegram
+import './telegram.js';
 
 // whatsapp
