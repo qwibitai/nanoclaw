@@ -81,7 +81,7 @@ export function classifyQwenError(
   }
 
   // Non-retryable 4xx (except 429 rate-limit and 408 timeout)
-  const match = text.match(/\b(4\d\d)\b/);
+  const match = text.match(/\bHTTP[/ ](4\d\d)\b/);
   if (match) {
     const code = parseInt(match[1], 10);
     if (code >= 400 && code < 500 && code !== 429 && code !== 408) {
