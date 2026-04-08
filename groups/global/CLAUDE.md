@@ -104,21 +104,30 @@ This section is a standing primer derived from Vivian Balakrishnan's speeches (2
 - Prosperity: free and open trade, rules-based trading system, access to essential supplies.
 - Social cohesion: uphold Singapore's multiethnic, multireligious character against foreign interference.
 
+**The end of Pax Americana**
+- The 80-year era of US-underwritten globalisation — turbocharged by China's reform and opening — is over. The US has become "a revisionist power and some would say a disruptor." Wars in Ukraine, the Middle East, and Asia are symptoms of this tectonic rupture, not independent crises.
+- The "weaponisation of everything" — currency, technology, critical minerals, trade interdependency — defines the new era. Assets designed to keep countries at peace are now "portals for exploitation." Strategic trust has collapsed; even precautionary moves are read as escalatory.
+- Singapore's growth from US$500 to US$90,000 per capita happened within Pax Americana. That foundation is gone; the past formula cannot be assumed to work going forward.
+
 **Strategic posture**
 - Never choose sides between great powers. Maintain "omni-directional, balanced, constructive engagement" with all.
 - Defend the rules-based international order not from altruism but from self-interest — without it, big powers face no constraint and small states lose agency.
+- Singapore's value proposition is its independence of thought. When Singapore says no to the US or China, it must be clear it is not acting at the other's behest — only after computing Singapore's own long-term national interest. That independence is itself part of Singapore's strategic value.
 - With the US withdrawing as the order's "major underwriter," Singapore diversifies: CSPs with middle powers (Australia, France, India, NZ, Vietnam, Korea), deeper ASEAN integration, new diplomatic missions in Africa (Addis Ababa) and Latin America (Mexico City).
 - Does not sever diplomatic ties as a form of protest. Maintaining access is a national interest.
 - "Foreign policy begins at home" — domestic unity and a vigilant public are prerequisites for credible foreign policy.
 
 **Crisis and commitment**
 - "When the going gets tough, we do not leave the scene." Crises are precisely when resolve and reliability must be demonstrated.
+- Singapore's crisis resilience: diversified energy sources and LNG terminals; fiscal buffers (Singapore collects dividends on reserves while others service debt); social security so no one is left behind.
+- Analyse crises across three time horizons: immediate (hours/days), near-term (months), structural (years). This prevents both panic and paralysis.
 - Singapore's reputation — competence, trustworthiness, transparency — opens doors globally. Every Singaporean is an ambassador. "Do not let the team down."
 
 **Tone and rhetorical style**
 - Measured, non-polemical, non-alarmist. Acknowledges harsh realities then pivots to agency and opportunity.
-- Uses analogies to make abstract foreign policy visceral: mahjong (infinitely repeated games), "big fish eat small fish eat shrimp" (world without rules), nautical metaphors (charting a course in storms).
+- Uses analogies to make abstract foreign policy visceral: mahjong (infinitely repeated games), "big fish eat small fish eat shrimp" (world without rules), "bicycle on a tightrope" (crisis navigation), nautical metaphors (charting a course in storms).
 - Classical and historical anchors: Thucydides, Rajaratnam, LKY. Bilingual structure — Chinese formulation then English translation — for domestic audiences.
+- Signature stance against military solutions: "I am struggling to find any modern example where the application of overwhelming military force resolved a domestic or international political crisis."
 - Distinguishes core national interests (unity essential) from specific policy recommendations (divergence acceptable).
 
 ## Message Formatting
