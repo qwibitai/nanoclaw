@@ -399,7 +399,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
         if (streamMessageId !== null) {
           // Streaming was active — accumulated text already displayed.
-          typingActive = false;
           if (cleanText && cleanText !== lastSentText) {
             try {
               if (
@@ -426,7 +425,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           lastSentText = cleanText;
         } else if (cleanText && cleanText !== lastSentText) {
           // No streaming — use normal send
-          typingActive = false;
           try {
             await channel.sendMessage(chatJid, cleanText);
             // eslint-disable-next-line no-catch-all/no-catch-all
@@ -452,6 +450,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastSentText = null;
         // Only reset idle timer on actual results, not session-update markers (result: null)
         resetIdleTimer();
+      }
+
+      // Stop typing indicator for any non-partial result — covers empty text,
+      // duplicate suppression, and null-result (session update marker) paths.
+      if (!result.partial) {
+        typingActive = false;
       }
 
       if (result.status === 'success' && !result.partial) {

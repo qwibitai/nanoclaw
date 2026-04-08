@@ -154,6 +154,115 @@ describe('typing keepalive cleanup', () => {
   });
 });
 
+/**
+ * Tests for typing indicator stuck-on bug.
+ *
+ * processGroupMessages has code paths where typingActive is never set to false
+ * on a non-partial (final) result. The keepalive interval (2s) keeps refreshing
+ * Telegram's typing indicator indefinitely because setTyping(false) is a no-op
+ * for Telegram — only stopping the keepalive actually clears the indicator.
+ *
+ * The simulation below mirrors the onOutput callback logic in index.ts.
+ */
+describe('typingActive on final result edge cases', () => {
+  /**
+   * Simulate the onOutput callback's typingActive logic from processGroupMessages.
+   * Returns final typingActive value after processing all results.
+   */
+  function simulateOnOutputTyping(
+    results: Array<{
+      result: string | null;
+      partial?: boolean;
+      status?: 'success' | 'error';
+    }>,
+    opts?: { initialLastSentText?: string },
+  ): { typingActive: boolean } {
+    // Mirrors index.ts state
+    let typingActive = true;
+    let streamMessageId: number | null = null;
+    let lastSentText: string | null = opts?.initialLastSentText ?? null;
+
+    // Inline stripInternalTags (same as router.ts)
+    const strip = (text: string): string =>
+      text
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .replace(/<internal>[\s\S]*$/g, '')
+        .replace(/<int(?:e(?:r(?:n(?:a(?:l)?)?)?)?)?$/g, '')
+        .trim();
+
+    for (const r of results) {
+      if (r.result) {
+        const text = strip(r.result);
+
+        if (r.partial) {
+          if (!typingActive) {
+            typingActive = true;
+          }
+          continue;
+        }
+
+        // Final result
+        if (streamMessageId !== null) {
+          lastSentText = text;
+        } else if (text && text !== lastSentText) {
+          lastSentText = text;
+        }
+
+        streamMessageId = null;
+        lastSentText = null;
+      }
+
+      // FIX: unconditionally set typingActive = false for all non-partial results
+      if (!r.partial) {
+        typingActive = false;
+      }
+    }
+
+    return { typingActive };
+  }
+
+  it('typingActive becomes false when final result has empty text (no streaming)', () => {
+    // Agent produces only <internal> content — stripInternalTags returns empty
+    const { typingActive } = simulateOnOutputTyping([
+      { result: '<internal>tool reasoning</internal>', partial: true },
+      { result: '<internal>tool output processed</internal>' },
+    ]);
+    expect(typingActive).toBe(false);
+  });
+
+  it('typingActive becomes false on duplicate suppression without streaming', () => {
+    // cleanText === lastSentText with no streaming active
+    const { typingActive } = simulateOnOutputTyping(
+      [
+        { result: 'Hello', partial: true },
+        { result: 'Hello' }, // duplicate
+      ],
+      { initialLastSentText: 'Hello' },
+    );
+    expect(typingActive).toBe(false);
+  });
+
+  it('typingActive becomes false when result.result is null (session update marker)', () => {
+    // Session update marker: { status: 'success', result: null }
+    // Emitted between IPC queries — typingActive should become false
+    const { typingActive } = simulateOnOutputTyping([
+      { result: 'Answer', partial: true },
+      { result: 'Answer' }, // final → typingActive = false
+      { result: null, status: 'success' }, // session update marker
+    ]);
+    expect(typingActive).toBe(false);
+  });
+
+  it('typingActive becomes false for null result even when previously set by partial', () => {
+    // Partial sets typingActive = true, then null result should clear it
+    const { typingActive } = simulateOnOutputTyping([
+      { result: 'thinking...', partial: true }, // typingActive = true
+      { result: null, status: 'success' }, // should set typingActive = false
+    ]);
+    expect(typingActive).toBe(false);
+  });
+});
+
 describe('message loop typing suppression', () => {
   beforeEach(() => {
     vi.useFakeTimers();
