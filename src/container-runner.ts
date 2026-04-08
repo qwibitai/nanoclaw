@@ -13,9 +13,12 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_BIN,
+  ONECLI_OAUTH_SECRET_ID,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { ensureFreshOAuthToken } from './oauth-token.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -251,6 +254,15 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Ensure the OAuth token is fresh before asking OneCLI to apply credentials.
+  // This refreshes ~/.claude/.credentials.json and syncs the OneCLI secret
+  // on-demand, replacing the old cron-based approach that just copied a
+  // potentially-expired token.
+  await ensureFreshOAuthToken({
+    secretId: ONECLI_OAUTH_SECRET_ID,
+    onecliPath: ONECLI_BIN,
+  });
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
