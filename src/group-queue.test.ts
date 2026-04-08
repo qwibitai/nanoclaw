@@ -22,6 +22,16 @@ vi.mock('fs', async () => {
   };
 });
 
+// Mock child_process so killContainer doesn't actually exec docker
+vi.mock('child_process', async () => {
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    execFileSync: vi.fn(),
+  };
+});
+
 describe('GroupQueue', () => {
   let queue: GroupQueue;
 
@@ -455,5 +465,85 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Cooperative interrupt ---
+
+  it('sendInterrupt writes _interrupt sentinel for active container', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    const result = queue.sendInterrupt('group1@g.us');
+
+    expect(result).toBe(true);
+    const interruptWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_interrupt'),
+    );
+    expect(interruptWrites).toHaveLength(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('sendInterrupt returns false when no active container', () => {
+    const result = queue.sendInterrupt('group-with-no-container');
+    expect(result).toBe(false);
+  });
+
+  // --- Hard kill ---
+
+  it('killContainer execs docker kill and clears state', async () => {
+    const childProcess = await import('child_process');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-xyz');
+
+    const execFileSync = vi.mocked(childProcess.execFileSync);
+    execFileSync.mockClear();
+
+    const result = queue.killContainer('group1@g.us');
+
+    expect(result).toBe(true);
+    expect(execFileSync).toHaveBeenCalledWith(
+      'docker',
+      ['kill', 'container-xyz'],
+      expect.any(Object),
+    );
+
+    // A subsequent sendInterrupt should fail because state was cleared
+    expect(queue.sendInterrupt('group1@g.us')).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('killContainer returns false when no container is registered', () => {
+    const result = queue.killContainer('group-with-no-container');
+    expect(result).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -197,6 +197,59 @@ export class GroupQueue {
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * Cooperative interrupt — drop a sentinel that the container's tool loop
+   * checks between rounds. The current agent turn aborts cleanly, session
+   * state is preserved, and the container returns to idle waiting for the
+   * next user message.
+   */
+  sendInterrupt(groupFolder: string): boolean {
+    const state = this.getGroup(groupFolder);
+    if (!state.active) return false;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_interrupt'), '');
+      return true;
+    } catch (err) {
+      logger.error(
+        { groupFolder, err },
+        'Failed to write interrupt sentinel',
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Hard kill — terminate the container immediately via docker kill. Use
+   * when sendInterrupt isn't enough (e.g. agent is stuck inside a single
+   * Ollama call and the cooperative check between rounds never fires).
+   * The next inbound message spawns a fresh container with the same session.
+   */
+  killContainer(groupFolder: string): boolean {
+    const state = this.getGroup(groupFolder);
+    if (!state.containerName) return false;
+
+    const containerName = state.containerName;
+    try {
+      execFileSync('docker', ['kill', containerName], { stdio: 'ignore' });
+    } catch (err) {
+      logger.error(
+        { groupFolder, containerName, err },
+        'docker kill failed',
+      );
+      return false;
+    }
+
+    // Reset state immediately so the next enqueueMessageCheck spawns fresh.
+    state.active = false;
+    state.idleWaiting = false;
+    state.process = null;
+    state.containerName = null;
+    return true;
   }
 
   /**
