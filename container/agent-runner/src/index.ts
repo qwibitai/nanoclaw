@@ -474,6 +474,32 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Network env that MUST pass through to every spawned MCP server.
+  // The SDK replaces (not merges) child env, so without these the MCP
+  // child has no proxy/CA config and its first outbound OAuth call hangs
+  // past the SDK's MCP init timeout — tools then get marked unavailable
+  // for the whole session and the agent hallucinates an outage. Learned
+  // the hard way with mcp-google-sheets in #emilio-care.
+  const networkEnv = (): Record<string, string> => {
+    const keys = [
+      'HTTPS_PROXY',
+      'HTTP_PROXY',
+      'https_proxy',
+      'http_proxy',
+      'NO_PROXY',
+      'no_proxy',
+      'NODE_EXTRA_CA_CERTS',
+      'SSL_CERT_FILE',
+      'NODE_USE_ENV_PROXY',
+    ];
+    const out: Record<string, string> = {};
+    for (const k of keys) {
+      const v = process.env[k];
+      if (v) out[k] = v;
+    }
+    return out;
+  };
+
   const allowedTools = [
     'Bash',
     'Read',
@@ -513,7 +539,10 @@ async function runQuery(
           airtable: {
             command: 'airtable-mcp-server',
             args: [],
-            env: { AIRTABLE_API_KEY: process.env.AIRTABLE_API_KEY },
+            env: {
+              ...networkEnv(),
+              AIRTABLE_API_KEY: process.env.AIRTABLE_API_KEY,
+            },
           },
         }
       : {}),
@@ -523,6 +552,7 @@ async function runQuery(
             command: 'google-calendar-mcp',
             args: [],
             env: {
+              ...networkEnv(),
               GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS,
               GOOGLE_CALENDAR_MCP_TOKEN_PATH:
                 process.env.GOOGLE_CALENDAR_MCP_TOKEN_PATH || '',
@@ -536,6 +566,7 @@ async function runQuery(
             command: 'mcp-google-sheets',
             args: [],
             env: {
+              ...networkEnv(),
               GOOGLE_APPLICATION_CREDENTIALS:
                 process.env.GOOGLE_APPLICATION_CREDENTIALS || '',
             },
