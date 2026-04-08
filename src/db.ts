@@ -129,18 +129,15 @@ function createSchema(database: Database.Database): void {
   // Remove UNIQUE constraint from folder column (migration for unified sessions)
   // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table
   try {
-    // Check if folder still has UNIQUE constraint
-    const tableInfo = database
-      .prepare(`PRAGMA table_info(registered_groups)`)
-      .all() as Array<{ name: string; pk: number }>;
-    const indexList = database
-      .prepare(`PRAGMA index_list(registered_groups)`)
-      .all() as Array<{ name: string; unique: number }>;
+    // Check if folder still has UNIQUE constraint by examining the schema
+    const schemaResult = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`,
+      )
+      .get() as { sql: string } | undefined;
 
-    // If there's a unique index on folder, we need to rebuild
-    const hasUniqueFolder = indexList.some(
-      (idx) => idx.unique === 1 && idx.name.includes('folder'),
-    );
+    const hasUniqueFolder =
+      schemaResult?.sql?.includes('folder TEXT NOT NULL UNIQUE') ?? false;
 
     if (hasUniqueFolder) {
       logger.info('Migrating registered_groups: removing UNIQUE from folder');
