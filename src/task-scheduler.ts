@@ -250,6 +250,15 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   schedulerRunning = true;
   logger.info('Scheduler loop started');
 
+  // Clean up orphaned once tasks: if active with null next_run, was mid-execution during crash
+  const allTasks = getAllTasks();
+  for (const task of allTasks) {
+    if (task.schedule_type === 'once' && task.status === 'active' && !task.next_run) {
+      updateTaskAfterRun(task.id, null, 'Cleaned up: orphaned after crash');
+      logger.info({ taskId: task.id }, 'Cleaned up orphaned once task');
+    }
+  }
+
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
@@ -262,6 +271,15 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
+        }
+
+        // Pre-advance next_run so the task won't be re-picked on the next poll
+        // if execution takes longer than the scheduler interval.
+        if (currentTask.schedule_type !== 'once') {
+          const advancedNextRun = computeNextRun(currentTask);
+          if (advancedNextRun) {
+            updateTask(currentTask.id, { next_run: advancedNextRun });
+          }
         }
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>

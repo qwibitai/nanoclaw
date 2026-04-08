@@ -4,6 +4,9 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+
+const MAX_IPC_FILE_SIZE = 1 * 1024 * 1024; // 1MB
+const MAX_OUTBOUND_MESSAGE_LENGTH = 50_000;
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -73,15 +76,29 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_SIZE) {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+                logger.warn({ filePath, size: stat.size }, 'IPC file exceeds size limit, moved to errors');
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
+                // Truncate oversized outbound messages
+                let text = data.text as string;
+                if (text.length > MAX_OUTBOUND_MESSAGE_LENGTH) {
+                  logger.warn({ length: text.length, chatJid: data.chatJid }, 'Truncating outbound IPC message');
+                  text = text.slice(0, MAX_OUTBOUND_MESSAGE_LENGTH) + '\n[truncated]';
+                }
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  await deps.sendMessage(data.chatJid, text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -124,6 +141,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_SIZE) {
+                const errorDir = path.join(ipcBaseDir, 'errors');
+                fs.mkdirSync(errorDir, { recursive: true });
+                fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+                logger.warn({ filePath, size: stat.size }, 'IPC file exceeds size limit, moved to errors');
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
