@@ -112,6 +112,25 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 ## Phase 4: Registration
 
+### Ensure service is running
+
+The bot must be running to respond to `/chatid`. Build and start the service if it is not already running:
+
+```bash
+pnpm run build
+```
+
+Then either start the service or run in the foreground:
+
+```bash
+# Foreground (for testing):
+pnpm run dev
+
+# Or load the service (macOS):
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+# Linux: systemctl --user start nanoclaw
+```
+
 ### Get Chat ID
 
 Tell the user:
