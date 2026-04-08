@@ -117,6 +117,23 @@ Instructions here...
 
 Test your contribution on a fresh clone before submitting. For skills, run the skill end-to-end and verify it works.
 
+## Commit Messages
+
+This repo enforces [Conventional Commits](https://www.conventionalcommits.org/) via a `commit-msg` husky hook running commitlint. Every commit message must match:
+
+```
+<type>(<scope>): <subject>
+```
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+**Examples:**
+- `feat(discord): add emoji reactions (inbound + outbound)`
+- `fix(scheduler): prevent sub-daily tasks from over-waking`
+- `chore(tests): strengthen pre-commit and extend coverage`
+
+**Keep commits atomic.** One logical change per commit. If you catch yourself writing "and" in the subject, split the commit. Use `git add -p` to stage hunks selectively when a single edit session produced multiple concerns.
+
 ## Pull Requests
 
 ### Before opening
