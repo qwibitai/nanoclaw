@@ -8,13 +8,14 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to **Qwen Code CLI** (`qwen`) running directly on the host. Each group has an isolated filesystem under `groups/{folder}/`.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/qwen-runner.ts` | Spawns Qwen CLI agent, parses stream-json output |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
@@ -86,8 +87,8 @@ systemctl --user restart nanoclaw
 1. Channel receives inbound message → `storeMessage()` to SQLite
 2. Message loop polls SQLite every 2s → checks for new messages per registered group
 3. Non-main groups require a trigger (`@AssistantName` or custom) before processing
-4. `GroupQueue` serializes container invocations per group; piped messages go to active containers via IPC files
-5. `runContainerAgent()` spawns a container with group folder mounted; output is delimited by sentinel markers (`---NANOCLAW_OUTPUT_START---` / `---NANOCLAW_OUTPUT_END---`)
+4. `GroupQueue` serializes agent invocations per group; piped messages go to active processes via IPC files
+5. `runContainerAgent()` in `qwen-runner.ts` spawns `qwen --output-format stream-json --approval-mode yolo --cwd groups/{folder}/`; result parsed from `{"type":"result",...}` stream-json event
 6. Agent replies are sent back via the channel's `sendMessage()`
 
 ### Groups
@@ -96,10 +97,11 @@ systemctl --user restart nanoclaw
 - Group folders live under `groups/` and are referenced by name (`folder` field). Valid folder names: alphanumeric + hyphens, no path traversal
 - CLAUDE.md is copied from `groups/main/CLAUDE.md` or `groups/global/CLAUDE.md` template on first registration
 
-### Containers
-- Container image: `nanoclaw-agent:latest` (built via `./container/build.sh`)
-- Credential proxy runs at `localhost:3001`; containers use it instead of calling Anthropic API directly — they never see real credentials
-- Additional mounts validated against `~/.config/nanoclaw/mount-allowlist.json` (outside project, not mounted into containers)
+### Agent Backend (Qwen)
+- Qwen Code CLI (`/opt/homebrew/bin/qwen`) is the agent — no containers or credential proxy needed
+- Sessions resumed via `--resume <sessionId>`; `session_id` comes from the `{"type":"result",...}` stream-json event
+- Qwen auth managed by `~/.qwen/oauth_creds.json`; settings at `.qwen/settings.json`
+- IPC MCP server (schedule_task, registerGroup, etc.) is **not yet wired** for qwen — agents respond but can't call back to the host
 - Sender allowlist config at `~/.config/nanoclaw/sender-allowlist.json`
 
 ### IPC
@@ -119,6 +121,10 @@ SQLite at `store/messages.db`. Schema migrations are inline in `db.ts` (`ALTER T
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+
+## Gotcha: Channel Barrel File
+
+`src/channels/index.ts` has **all channel imports commented out** by default. If a channel skill is installed, its import line must be explicitly present (e.g. `import './telegram.js'`). A missing import causes `FATAL: No channels connected` at startup — this can happen silently after an upstream merge if the merge resets the file.
 
 ## Troubleshooting
 
