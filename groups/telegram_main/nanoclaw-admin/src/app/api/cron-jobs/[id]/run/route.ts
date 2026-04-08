@@ -5,9 +5,7 @@ import path from "path";
 const execAsync = promisify(exec);
 
 // Maps task IDs to the npm script that runs them
-const TASK_SCRIPT_MAP: Record<string, string> = {
-  "task-1774220446934-tx55zc": "job:price-drops",
-};
+const TASK_SCRIPT_MAP: Record<string, string> = {};
 
 export async function POST(
   _req: Request,
