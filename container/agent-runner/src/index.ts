@@ -727,6 +727,13 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
     'Read', 'Write', 'Edit', 'Glob', 'Grep',
     'WebSearch', 'WebFetch',
     'Task', 'TaskOutput', 'TaskStop',
+    // TaskCreate / TaskList / TaskUpdate / TaskGet are required by the
+    // bootstrap workflow plugin (team-build skill registers tasks per
+    // builder group, then polls TaskList for spawn verification). Without
+    // these, the lead agent in /team-build silently fails to register
+    // tasks and the spawn-verification poll cannot run. Confirmed root
+    // cause of the illie 2026-04-08 build stall.
+    'TaskCreate', 'TaskList', 'TaskUpdate', 'TaskGet',
     'TeamCreate', 'TeamDelete', 'SendMessage',
     'TodoWrite', 'ToolSearch', 'Skill',
     'NotebookEdit',
