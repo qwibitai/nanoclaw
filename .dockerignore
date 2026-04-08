@@ -7,4 +7,3 @@ container/
 *.md
 !skills/**/*.md
 !knowledge/**/*.md
-!dev-data/**/*.md

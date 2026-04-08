@@ -7,8 +7,8 @@
     "check": "deno check src/shared/ src/gateway/ src/worker/",
     "fmt": "deno fmt src/ skills/ knowledge/",
     "lint": "deno lint src/",
-    "deploy:mgf": "fly deploy --app simt-nexus-mgf",
-    "deploy:bec": "fly deploy --app simt-nexus-bec"
+    "deploy:mgf": "bash scripts/deploy.sh foundry simt-nexus-mgf",
+    "deploy:bec": "bash scripts/deploy.sh bec simt-nexus-bec"
   },
   "imports": {
     "@anthropic-ai/claude-agent-sdk": "npm:@anthropic-ai/claude-agent-sdk@^0.2.92",

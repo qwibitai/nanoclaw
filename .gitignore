@@ -10,9 +10,11 @@ _fresh/
 .env
 *.keys.json
 
-# Dev data (ephemeral)
-dev-data/sessions/
-dev-data/conversations/
+# Operator data (lives in ../nexus-data/, not in repo)
+dev-data/
+
+# Build staging (per-operator deploy)
+.build-data/
 
 # OS
 .DS_Store

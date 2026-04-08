@@ -25,9 +25,11 @@ Console UI is a separate project: `simt-console-mock` (Deno Fresh 2.0).
 | `src/shared/config.ts` | All env vars, path constants |
 | `src/shared/onecli.ts` | OneCLI Cloud vault integration |
 | `src/shared/logger.ts` | Structured coloured logging |
+| `src/gateway/channels.ts` | Channel registry (web-chat, discord) |
+| `src/gateway/sessions.ts` | Session manager (conversation state) |
+| `src/gateway/discord.ts` | Discord bot (discord.js) |
 | `skills/` | SKILL.md files (baked into Docker image) |
 | `knowledge/` | Knowledge markdown files (baked into Docker image) |
-| `dev-data/operators/<slug>/` | Per-operator context, config, team |
 
 ## Running Locally
 
@@ -39,12 +41,28 @@ deno task worker    # Terminal 2
 
 Gateway: http://localhost:3001, Console: http://localhost:8000 (separate project)
 
+## Operator Data
+
+Operator-specific data (context, config, team) lives in `../nexus-data/` (workspace sibling), NOT in this git repo. This ensures operator data is never pushed to GitHub and each deployed image contains only its target operator's data.
+
+```
+../nexus-data/
+  operators/
+    foundry/   config.json, context.md, team.json
+    bec/       config.json, context.md, team.json
+  sessions/    Agent SDK session persistence
+```
+
+Config resolves via `NEXUS_DATA_DIR` env var, defaulting to `../nexus-data`.
+
 ## Deploying to Fly.io
 
 ```bash
-deno task deploy:mgf   # Microgrid Foundry
-deno task deploy:bec   # Bristol Energy
+deno task deploy:mgf   # builds with foundry data only
+deno task deploy:bec   # builds with bec data only
 ```
+
+The deploy script (`scripts/deploy.sh`) stages only the target operator's data into `.build-data/` before `fly deploy`. Each image contains only one operator's data.
 
 Operator identity set via Fly secrets: `OPERATOR_SLUG`, `OPERATOR_NAME`, `ANTHROPIC_API_KEY`, `ONECLI_API_KEY`, `GATEWAY_URL`.
 

@@ -26,14 +26,18 @@ COPY src/ src/
 COPY skills/ skills/
 COPY knowledge/ knowledge/
 
-# Operator data (selected at runtime via OPERATOR_SLUG env var)
-COPY dev-data/ dev-data/
+# Per-operator data (staged by deploy script — contains only target operator)
+COPY .build-data/ dev-data/
+
+# Tell the app where operator data lives inside the container
+ENV NEXUS_DATA_DIR=/app/dev-data
 
 # Workspace and Claude settings for non-root user
 RUN mkdir -p /tmp/nexus-workspace && chown -R nexus:nexus /tmp/nexus-workspace
 RUN mkdir -p /home/nexus/.claude && \
     echo '{"hasCompletedOnboarding":true}' > /home/nexus/.claude/settings.json && \
     chown -R nexus:nexus /home/nexus/.claude
+RUN mkdir -p /app/dev-data/sessions && chown -R nexus:nexus /app/dev-data
 
 # Ensure app is readable by nexus user
 RUN chown -R nexus:nexus /app

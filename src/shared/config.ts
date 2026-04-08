@@ -43,11 +43,17 @@ if (onecliKey) {
 export const DISCORD_BOT_TOKEN =
   Deno.env.get('DISCORD_BOT_TOKEN') || envConfig.DISCORD_BOT_TOKEN || '';
 
-export const DEV_DATA_DIR = resolve(PROJECT_ROOT, 'dev-data');
+// Operator data directory:
+// - Local dev: ../nexus-data (workspace sibling)
+// - Docker/Fly: /app/dev-data (baked into image by deploy script)
+export const NEXUS_DATA_DIR =
+  Deno.env.get('NEXUS_DATA_DIR') ||
+  resolve(PROJECT_ROOT, '..', 'nexus-data');
+
 export const SKILLS_DIR = resolve(PROJECT_ROOT, 'skills');
 export const KNOWLEDGE_DIR = resolve(PROJECT_ROOT, 'knowledge');
-export const SESSIONS_DIR = resolve(DEV_DATA_DIR, 'sessions');
-export const OPERATORS_DIR = resolve(DEV_DATA_DIR, 'operators');
+export const SESSIONS_DIR = resolve(NEXUS_DATA_DIR, 'sessions');
+export const OPERATORS_DIR = resolve(NEXUS_DATA_DIR, 'operators');
 
 function readVersion(): string {
   try {
