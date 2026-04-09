@@ -79,7 +79,10 @@ export function syncEnvFromProcess(envPath?: string): void {
 
   // Ensure file ends with a newline
   const output = existingLines.join(os.EOL);
-  fs.writeFileSync(filePath, output.endsWith(os.EOL) ? output : output + os.EOL);
+  fs.writeFileSync(
+    filePath,
+    output.endsWith(os.EOL) ? output : output + os.EOL,
+  );
 
   const writtenKeys = Object.keys(toWrite);
   logger.info(

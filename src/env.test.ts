@@ -82,7 +82,10 @@ describe('syncEnvFromProcess', () => {
   });
 
   it('preserves existing keys not present in process.env', () => {
-    fs.writeFileSync(envPath, 'TELEGRAM_BOT_TOKEN=bot123\nUNRAIDCLAW_URL=https://unraid:9876\n');
+    fs.writeFileSync(
+      envPath,
+      'TELEGRAM_BOT_TOKEN=bot123\nUNRAIDCLAW_URL=https://unraid:9876\n',
+    );
 
     process.env.ANTHROPIC_API_KEY = 'sk-ant-new';
 
@@ -95,7 +98,10 @@ describe('syncEnvFromProcess', () => {
   });
 
   it('updates existing keys when present in process.env', () => {
-    fs.writeFileSync(envPath, 'ANTHROPIC_API_KEY=old-key\nHA_URL=http://old:8123\n');
+    fs.writeFileSync(
+      envPath,
+      'ANTHROPIC_API_KEY=old-key\nHA_URL=http://old:8123\n',
+    );
 
     process.env.ANTHROPIC_API_KEY = 'new-key';
 
@@ -109,7 +115,10 @@ describe('syncEnvFromProcess', () => {
   });
 
   it('preserves comments and blank lines', () => {
-    fs.writeFileSync(envPath, '# Credentials\nANTHROPIC_API_KEY=old\n\n# Other\nFOO=bar\n');
+    fs.writeFileSync(
+      envPath,
+      '# Credentials\nANTHROPIC_API_KEY=old\n\n# Other\nFOO=bar\n',
+    );
 
     process.env.ANTHROPIC_API_KEY = 'updated';
 
