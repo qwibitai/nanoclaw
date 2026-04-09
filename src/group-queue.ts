@@ -200,10 +200,42 @@ export class GroupQueue {
   }
 
   /**
+   * Drain any queued user-message JSON files from the IPC input dir.
+   * Used by sendInterrupt and killContainer to ensure that interrupting
+   * the current agent turn also clears any backed-up work — otherwise
+   * the next turn would start immediately on the queued messages, making
+   * the interrupt feel like a no-op from the user's perspective.
+   * Sentinel files (_close, _interrupt) are NOT touched.
+   */
+  private drainQueuedMessages(groupFolder: string): number {
+    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+    let drained = 0;
+    try {
+      const entries = fs.readdirSync(inputDir);
+      for (const entry of entries) {
+        if (!entry.endsWith('.json')) continue;
+        try {
+          fs.unlinkSync(path.join(inputDir, entry));
+          drained++;
+        } catch {
+          /* ignore individual file errors */
+        }
+      }
+    } catch {
+      /* dir doesn't exist or unreadable — nothing to drain */
+    }
+    return drained;
+  }
+
+  /**
    * Cooperative interrupt — drop a sentinel that the container's tool loop
    * checks between rounds. The current agent turn aborts cleanly, session
    * state is preserved, and the container returns to idle waiting for the
    * next user message.
+   *
+   * Also drains any queued user-message files in the IPC input dir so the
+   * agent doesn't immediately start a new turn on backed-up work after the
+   * current turn aborts.
    */
   sendInterrupt(groupFolder: string): boolean {
     const state = this.getGroup(groupFolder);
@@ -212,6 +244,13 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
+      const drained = this.drainQueuedMessages(groupFolder);
+      if (drained > 0) {
+        logger.info(
+          { groupFolder, drained },
+          'Drained queued IPC messages on interrupt',
+        );
+      }
       fs.writeFileSync(path.join(inputDir, '_interrupt'), '');
       return true;
     } catch (err) {
@@ -225,6 +264,10 @@ export class GroupQueue {
    * when sendInterrupt isn't enough (e.g. agent is stuck inside a single
    * Ollama call and the cooperative check between rounds never fires).
    * The next inbound message spawns a fresh container with the same session.
+   *
+   * Also drains any queued user-message files so the freshly-spawned
+   * container starts on a clean slate instead of immediately processing
+   * the backlog that triggered the kill in the first place.
    */
   killContainer(groupFolder: string): boolean {
     const state = this.getGroup(groupFolder);
@@ -236,6 +279,14 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupFolder, containerName, err }, 'docker kill failed');
       return false;
+    }
+
+    const drained = this.drainQueuedMessages(groupFolder);
+    if (drained > 0) {
+      logger.info(
+        { groupFolder, drained },
+        'Drained queued IPC messages on hard kill',
+      );
     }
 
     // Reset state immediately so the next enqueueMessageCheck spawns fresh.

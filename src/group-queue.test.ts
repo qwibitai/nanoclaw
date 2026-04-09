@@ -546,4 +546,146 @@ describe('GroupQueue', () => {
     const result = queue.killContainer('group-with-no-container');
     expect(result).toBe(false);
   });
+
+  // --- Drain queued messages on interrupt/kill ---
+
+  it('sendInterrupt drains queued .json messages but leaves non-JSON files alone', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1');
+
+    // Spy in fake queued files plus a non-JSON file that should NOT be drained
+    const readdirSyncSpy = vi
+      .spyOn(fs.default, 'readdirSync')
+      .mockReturnValue([
+        'msg1.json',
+        'msg2.json',
+        'msg3.json',
+        '_close',
+        'README.txt',
+      ] as any);
+    const unlinkSyncSpy = vi
+      .spyOn(fs.default, 'unlinkSync')
+      .mockImplementation(() => {});
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    const result = queue.sendInterrupt('group1@g.us');
+
+    expect(result).toBe(true);
+
+    // The 3 .json files were unlinked
+    const jsonUnlinks = unlinkSyncSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('.json'),
+    );
+    expect(jsonUnlinks).toHaveLength(3);
+
+    // _close and README.txt were NOT touched
+    const nonJsonUnlinks = unlinkSyncSpy.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        (call[0].endsWith('_close') || call[0].endsWith('README.txt')),
+    );
+    expect(nonJsonUnlinks).toHaveLength(0);
+
+    // _interrupt sentinel was still written
+    const interruptWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_interrupt'),
+    );
+    expect(interruptWrites).toHaveLength(1);
+
+    readdirSyncSpy.mockRestore();
+    unlinkSyncSpy.mockRestore();
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('sendInterrupt still succeeds when input dir does not exist (drain is best-effort)', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1');
+
+    // readdirSync throws — simulating non-existent input dir
+    const readdirSyncSpy = vi
+      .spyOn(fs.default, 'readdirSync')
+      .mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    const result = queue.sendInterrupt('group1@g.us');
+
+    expect(result).toBe(true);
+    // _interrupt sentinel was still written despite the drain error
+    const interruptWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_interrupt'),
+    );
+    expect(interruptWrites).toHaveLength(1);
+
+    readdirSyncSpy.mockRestore();
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('killContainer drains queued .json messages so the next container starts clean', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-xyz');
+
+    const readdirSyncSpy = vi
+      .spyOn(fs.default, 'readdirSync')
+      .mockReturnValue(['queued1.json', 'queued2.json'] as any);
+    const unlinkSyncSpy = vi
+      .spyOn(fs.default, 'unlinkSync')
+      .mockImplementation(() => {});
+
+    const result = queue.killContainer('group1@g.us');
+
+    expect(result).toBe(true);
+    const jsonUnlinks = unlinkSyncSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('.json'),
+    );
+    expect(jsonUnlinks).toHaveLength(2);
+
+    readdirSyncSpy.mockRestore();
+    unlinkSyncSpy.mockRestore();
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });
