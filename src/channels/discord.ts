@@ -235,9 +235,13 @@ export class DiscordChannel implements Channel {
             repliedTo.member?.displayName ||
             repliedTo.author.displayName ||
             repliedTo.author.username;
-          const repliedText = (repliedTo.content ?? '').replace(/\s+/g, ' ').trim();
+          const repliedText = (repliedTo.content ?? '')
+            .replace(/\s+/g, ' ')
+            .trim();
           const snippet =
-            repliedText.length > 200 ? `${repliedText.slice(0, 200)}…` : repliedText;
+            repliedText.length > 200
+              ? `${repliedText.slice(0, 200)}…`
+              : repliedText;
           const quoted = snippet ? ` "${snippet}"` : '';
           content = `[Reply to ${replyAuthor}${quoted}] ${content}`;
         } catch {
