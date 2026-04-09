@@ -458,6 +458,30 @@ export async function processTaskIpc(
           nextRun = date.toISOString();
         }
 
+        // Enforce gate scripts on sub-daily recurring tasks to prevent
+        // unnecessary container spawns. Once-a-day or slower is fine ungated.
+        const hasScript = !!(data.script && data.script.trim());
+        let isSubDaily = scheduleType === 'interval';
+        if (scheduleType === 'cron' && nextRun) {
+          try {
+            const interval = CronExpressionParser.parse(data.schedule_value, {
+              tz: TIMEZONE,
+            });
+            const first = interval.next().getTime();
+            const second = interval.next().getTime();
+            isSubDaily = second - first < 24 * 60 * 60 * 1000;
+          } catch {
+            // Already validated above — shouldn't happen
+          }
+        }
+        if (isSubDaily && !hasScript) {
+          logger.warn(
+            { sourceGroup, scheduleValue: data.schedule_value },
+            'Rejected sub-daily task without gate script',
+          );
+          break;
+        }
+
         const taskId =
           data.taskId ||
           `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

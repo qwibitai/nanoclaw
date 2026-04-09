@@ -480,7 +480,7 @@ describe('schedule_task schedule types', () => {
     expect(getAllTasks()).toHaveLength(0);
   });
 
-  it('creates task with interval schedule', async () => {
+  it('creates task with interval schedule (with gate script)', async () => {
     const before = Date.now();
 
     await processTaskIpc(
@@ -490,6 +490,7 @@ describe('schedule_task schedule types', () => {
         schedule_type: 'interval',
         schedule_value: '3600000', // 1 hour
         targetJid: 'other@g.us',
+        script: 'echo \'{"wakeAgent":true}\'',
       },
       'whatsapp_main',
       true,
@@ -503,6 +504,57 @@ describe('schedule_task schedule types', () => {
     const nextRun = new Date(tasks[0].next_run!).getTime();
     expect(nextRun).toBeGreaterThanOrEqual(before + 3600000 - 1000);
     expect(nextRun).toBeLessThanOrEqual(Date.now() + 3600000 + 1000);
+  });
+
+  it('rejects sub-daily interval without gate script', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'ungated interval',
+        schedule_type: 'interval',
+        schedule_value: '3600000',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
+
+  it('rejects sub-daily cron without gate script', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'ungated cron',
+        schedule_type: 'cron',
+        schedule_value: '*/30 * * * *',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
+
+  it('allows daily cron without gate script', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'daily task',
+        schedule_type: 'cron',
+        schedule_value: '0 9 * * *',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(1);
   });
 
   it('rejects invalid interval (non-numeric)', async () => {

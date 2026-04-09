@@ -435,9 +435,19 @@ export function lintScheduledTasks(): void {
     // Recurring tasks that fire more than once per day MUST be script-gated.
     // If schedule_type is interval or cron with a sub-daily cadence, script
     // is required.
-    const isSubDaily =
-      t.schedule_type === 'interval' ||
-      (t.schedule_type === 'cron' && /\*|\/\d/.test(t.schedule_value));
+    let isSubDaily = t.schedule_type === 'interval';
+    if (t.schedule_type === 'cron') {
+      try {
+        const interval = CronExpressionParser.parse(t.schedule_value, {
+          tz: TIMEZONE,
+        });
+        const first = interval.next().getTime();
+        const second = interval.next().getTime();
+        isSubDaily = second - first < 24 * 60 * 60 * 1000;
+      } catch {
+        /* malformed — handled elsewhere */
+      }
+    }
     if (isSubDaily && !t.script) {
       logger.warn(
         { taskId: t.id, schedule: t.schedule_value },
