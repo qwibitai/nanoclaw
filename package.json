@@ -22,10 +22,14 @@
   },
   "dependencies": {
     "@onecli-sh/sdk": "^0.2.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
+    "discord.js": "^14.26.2",
     "google-auth-library": "^9.15.1",
-    "googleapis": "^146.0.0"
+    "googleapis": "^146.0.0",
+    "grammy": "^1.42.0",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

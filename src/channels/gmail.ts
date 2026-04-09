@@ -21,6 +21,12 @@ export interface GmailChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/** Multi-account Gmail configuration */
+interface GmailAccountConfig {
+  alias: string; // e.g. 'personal', 'whoisxml', 'attaxion'
+  credDir: string; // e.g. '~/.gmail-mcp', '~/.gmail-mcp-attaxion'
+}
+
 interface ThreadMeta {
   sender: string;
   senderName: string;
@@ -29,7 +35,7 @@ interface ThreadMeta {
 }
 
 export class GmailChannel implements Channel {
-  name = 'gmail';
+  name: string;
 
   private oauth2Client: OAuth2Client | null = null;
   private gmail: gmail_v1.Gmail | null = null;
@@ -40,20 +46,30 @@ export class GmailChannel implements Channel {
   private threadMeta = new Map<string, ThreadMeta>();
   private consecutiveErrors = 0;
   private userEmail = '';
+  private accountAlias: string;
+  private credDir: string;
 
-  constructor(opts: GmailChannelOpts, pollIntervalMs = 60000) {
+  constructor(
+    opts: GmailChannelOpts,
+    accountAlias = 'default',
+    credDir?: string,
+    pollIntervalMs = 60000,
+  ) {
     this.opts = opts;
+    this.accountAlias = accountAlias;
+    this.credDir = credDir || path.join(os.homedir(), '.gmail-mcp');
+    this.name = accountAlias === 'default' ? 'gmail' : `gmail-${accountAlias}`;
     this.pollIntervalMs = pollIntervalMs;
   }
 
   async connect(): Promise<void> {
-    const credDir = path.join(os.homedir(), '.gmail-mcp');
-    const keysPath = path.join(credDir, 'gcp-oauth.keys.json');
-    const tokensPath = path.join(credDir, 'credentials.json');
+    const keysPath = path.join(this.credDir, 'gcp-oauth.keys.json');
+    const tokensPath = path.join(this.credDir, 'credentials.json');
 
     if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
       logger.warn(
-        'Gmail credentials not found in ~/.gmail-mcp/. Skipping Gmail channel. Run /add-gmail to set up.',
+        { alias: this.accountAlias, credDir: this.credDir },
+        'Gmail credentials not found. Skipping Gmail channel.',
       );
       return;
     }
@@ -91,9 +107,13 @@ export class GmailChannel implements Channel {
 
     // Start polling with error backoff
     const schedulePoll = () => {
-      const backoffMs = this.consecutiveErrors > 0
-        ? Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000)
-        : this.pollIntervalMs;
+      const backoffMs =
+        this.consecutiveErrors > 0
+          ? Math.min(
+              this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+              30 * 60 * 1000,
+            )
+          : this.pollIntervalMs;
       this.pollTimer = setTimeout(() => {
         this.pollForMessages()
           .catch((err) => logger.error({ err }, 'Gmail poll error'))
@@ -114,7 +134,7 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const threadId = jid.replace(/^gmail:/, '');
+    const threadId = jid.replace(/^gmail(-\w+)?:/, '');
     const meta = this.threadMeta.get(threadId);
 
     if (!meta) {
@@ -162,7 +182,11 @@ export class GmailChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('gmail:');
+    const prefix =
+      this.accountAlias !== 'default'
+        ? `gmail-${this.accountAlias}:`
+        : 'gmail:';
+    return jid.startsWith(prefix);
   }
 
   async disconnect(): Promise<void> {
@@ -210,8 +234,18 @@ export class GmailChannel implements Channel {
       this.consecutiveErrors = 0;
     } catch (err) {
       this.consecutiveErrors++;
-      const backoffMs = Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000);
-      logger.error({ err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs }, 'Gmail poll failed');
+      const backoffMs = Math.min(
+        this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+        30 * 60 * 1000,
+      );
+      logger.error(
+        {
+          err,
+          consecutiveErrors: this.consecutiveErrors,
+          nextPollMs: backoffMs,
+        },
+        'Gmail poll failed',
+      );
     }
   }
 
@@ -253,7 +287,11 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const chatJid = `gmail:${threadId}`;
+    const jidPrefix =
+      this.accountAlias !== 'default'
+        ? `gmail-${this.accountAlias}`
+        : 'gmail';
+    const chatJid = `${jidPrefix}:${threadId}`;
 
     // Cache thread metadata for replies
     this.threadMeta.set(threadId, {
@@ -268,9 +306,7 @@ export class GmailChannel implements Channel {
 
     // Find the main group to deliver the email notification
     const groups = this.opts.registeredGroups();
-    const mainEntry = Object.entries(groups).find(
-      ([, g]) => g.isMain === true,
-    );
+    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
 
     if (!mainEntry) {
       logger.debug(
@@ -281,7 +317,9 @@ export class GmailChannel implements Channel {
     }
 
     const mainJid = mainEntry[0];
-    const content = `[Email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
+    const accountTag =
+      this.accountAlias !== 'default' ? ` [${this.accountAlias}]` : '';
+    const content = `[Email${accountTag} from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
 
     this.opts.onMessage(mainJid, {
       id: messageId,
@@ -339,14 +377,34 @@ export class GmailChannel implements Channel {
   }
 }
 
-registerChannel('gmail', (opts: ChannelOpts) => {
-  const credDir = path.join(os.homedir(), '.gmail-mcp');
-  if (
-    !fs.existsSync(path.join(credDir, 'gcp-oauth.keys.json')) ||
-    !fs.existsSync(path.join(credDir, 'credentials.json'))
-  ) {
-    logger.warn('Gmail: credentials not found in ~/.gmail-mcp/');
-    return null;
-  }
-  return new GmailChannel(opts);
-});
+// Multi-account Gmail registration
+// Each account gets its own channel instance with isolated credentials.
+// Add/remove accounts by editing this array.
+const GMAIL_ACCOUNTS: GmailAccountConfig[] = [
+  { alias: 'personal', credDir: path.join(os.homedir(), '.gmail-mcp') },
+  {
+    alias: 'whoisxml',
+    credDir: path.join(os.homedir(), '.gmail-mcp-jonathan'),
+  },
+  {
+    alias: 'attaxion',
+    credDir: path.join(os.homedir(), '.gmail-mcp-attaxion'),
+  },
+];
+
+for (const account of GMAIL_ACCOUNTS) {
+  const channelName = `gmail-${account.alias}`;
+  registerChannel(channelName, (opts: ChannelOpts) => {
+    if (
+      !fs.existsSync(path.join(account.credDir, 'gcp-oauth.keys.json')) ||
+      !fs.existsSync(path.join(account.credDir, 'credentials.json'))
+    ) {
+      logger.warn(
+        { alias: account.alias, credDir: account.credDir },
+        'Gmail: credentials not found',
+      );
+      return null;
+    }
+    return new GmailChannel(opts, account.alias, account.credDir);
+  });
+}

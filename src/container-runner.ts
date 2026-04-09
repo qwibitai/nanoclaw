@@ -166,15 +166,22 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
+  // Gmail credentials directories (multi-account: personal, whoisxml, attaxion)
   const homeDir = os.homedir();
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
+  const gmailDirs = [
+    { hostDir: '.gmail-mcp', containerDir: '.gmail-mcp' },
+    { hostDir: '.gmail-mcp-jonathan', containerDir: '.gmail-mcp-jonathan' },
+    { hostDir: '.gmail-mcp-attaxion', containerDir: '.gmail-mcp-attaxion' },
+  ];
+  for (const gd of gmailDirs) {
+    const gmailDir = path.join(homeDir, gd.hostDir);
+    if (fs.existsSync(gmailDir)) {
+      mounts.push({
+        hostPath: gmailDir,
+        containerPath: `/home/node/${gd.containerDir}`,
+        readonly: false, // MCP may need to refresh OAuth tokens
+      });
+    }
   }
 
   // Per-group IPC namespace: each group gets its own IPC directory
