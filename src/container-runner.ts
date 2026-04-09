@@ -30,6 +30,17 @@ import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
+function chownRecursive(dir: string, uid: number, gid: number): void {
+  fs.chownSync(dir, uid, gid);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    fs.chownSync(fullPath, uid, gid);
+    if (entry.isDirectory()) {
+      chownRecursive(fullPath, uid, gid);
+    }
+  }
+}
+
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -176,6 +187,15 @@ function buildVolumeMounts(
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
       fs.cpSync(srcDir, dstDir, { recursive: true });
+    }
+  }
+  const sessionUid = process.getuid?.() ?? 1000;
+  const sessionGid = process.getgid?.() ?? 1000;
+  if (sessionUid !== 0) {
+    try {
+      chownRecursive(groupSessionsDir, sessionUid, sessionGid);
+    } catch (err: unknown) {
+      logger.warn({ err, groupSessionsDir }, 'Failed to chown .claude session dir');
     }
   }
   mounts.push({

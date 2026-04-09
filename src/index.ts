@@ -30,15 +30,18 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  createTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
+  getMessageById,
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getTaskById,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -68,6 +71,16 @@ import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+/** Check if a message is a reply to or quote of a bot message. */
+function isReplyToBot(msg: NewMessage): boolean {
+  if (msg.content.startsWith(`[Replying to ${ASSISTANT_NAME}:`)) return true;
+  if (msg.reply_to_message_id) {
+    const original = getMessageById(msg.reply_to_message_id, msg.chat_jid);
+    if (original?.is_from_me) return true;
+  }
+  return false;
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -187,6 +200,25 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+
+  if (group.requiresTrigger !== false && !group.isMain) {
+    const heartbeatId = `heartbeat-${group.folder}`;
+    if (!getTaskById(heartbeatId)) {
+      createTask({
+        id: heartbeatId,
+        group_folder: group.folder,
+        chat_jid: jid,
+        prompt: 'Run the check-unanswered script only: python3 /home/node/.claude/skills/tessl__check-unanswered/scripts/check-unanswered.py — then react and reply to each unanswered message. Do NOT query the database directly. Do NOT check email, calendar, or system health.',
+        schedule_type: 'cron',
+        schedule_value: '*/15 * * * *',
+        context_mode: 'group',
+        next_run: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        status: 'active',
+        created_at: new Date().toISOString(),
+      });
+      logger.info({ jid, folder: group.folder }, 'Auto-created heartbeat for trigger-required group');
+    }
+  }
 }
 
 /**
@@ -245,7 +277,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
+        (triggerPattern.test(m.content.trim()) || isReplyToBot(m)) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -495,7 +527,7 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
+                (triggerPattern.test(m.content.trim()) || isReplyToBot(m)) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
