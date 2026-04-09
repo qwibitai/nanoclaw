@@ -145,13 +145,33 @@ export class SlackChannel implements Channel {
         // Use channel ID as fallback
       }
 
-      const assistantName = resolveAssistantName(template.containerConfig);
+      // Use a live sibling's config rather than the stored template snapshot, so
+      // tool changes take effect for newly-added channels. Prefer the sibling
+      // marked isAutoRegisterTemplate; fall back to the first sibling in the
+      // folder, then to the stored snapshot.
+      const siblings = Object.values(groups).filter(
+        (g) => g.folder === template.folder,
+      );
+      const canonical = siblings.find(
+        (g) => g.containerConfig?.isAutoRegisterTemplate,
+      );
+      const sibling = canonical ?? siblings[0];
+
+      // Deep clone so array fields (tools, additionalMounts, plugins) are not
+      // shared with the sibling. Strip notifyJid (per-jid routing; operator clears
+      // target only the source jid and silently fail if clones carry the value) and
+      // isAutoRegisterTemplate (must not propagate — see ContainerConfig JSDoc).
+      const source = sibling?.containerConfig ?? template.containerConfig;
+      const { notifyJid: _n, isAutoRegisterTemplate: _t, ...rest } = source;
+      const containerConfig: ContainerConfig = JSON.parse(JSON.stringify(rest));
+
+      const assistantName = resolveAssistantName(containerConfig);
       this.opts.registerGroup(jid, {
         name: channelName,
         folder: template.folder,
         trigger: `@${assistantName}`,
         added_at: new Date().toISOString(),
-        containerConfig: { ...template.containerConfig },
+        containerConfig,
         requiresTrigger: template.requiresTrigger,
       });
 
@@ -1289,7 +1309,7 @@ export class SlackChannel implements Channel {
       }
       existingConfig[this.teamId] = {
         folder: group.folder,
-        containerConfig: { ...group.containerConfig },
+        containerConfig: JSON.parse(JSON.stringify(group.containerConfig)),
         requiresTrigger: group.requiresTrigger !== false,
       };
       this.autoRegisterConfig = existingConfig;

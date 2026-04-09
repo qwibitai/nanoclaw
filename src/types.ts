@@ -78,6 +78,17 @@ export interface ContainerConfig {
    * (required for in-container skill wiring) — both intentional and accepted.
    */
   gitnexusInjectAgentsMd?: boolean;
+  /**
+   * Marks this channel as the canonical auto-register template for its group folder.
+   * When a new channel is auto-added to the same folder (e.g. bot invited to a new
+   * Slack channel), it inherits this channel's containerConfig. Without this flag,
+   * the sibling lookup falls back to the first matching channel, which may have a
+   * customized (non-representative) config.
+   *
+   * This flag is intentionally stripped from auto-registered clones — it must not
+   * propagate, or the canonical identity lookup breaks after the first auto-register.
+   */
+  isAutoRegisterTemplate?: boolean;
 }
 
 export interface RegisteredGroup {
