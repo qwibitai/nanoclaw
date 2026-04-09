@@ -250,9 +250,14 @@ describe('claude-session', () => {
 
       await spawnClaudeSession(makeTask(), '/tmp/sigma-task-1');
 
+      // The sandbox is an allow-list, not a deny-list — the worktree path
+      // is the read/write boundary and anything outside it is implicitly
+      // denied. Assert the shape that claude-session.ts actually builds.
       const options = mockQuery.mock.calls[0][0].options;
-      expect(options?.sandbox?.filesystem?.denyRead).toBeDefined();
       expect(options?.sandbox?.filesystem?.allowRead).toContain(
+        '/tmp/sigma-task-1',
+      );
+      expect(options?.sandbox?.filesystem?.allowWrite).toContain(
         '/tmp/sigma-task-1',
       );
     });

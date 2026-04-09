@@ -502,11 +502,15 @@ describe('dispatch and worktree', () => {
   let gitRepoDir: string;
 
   beforeEach(() => {
-    // Create a temp git repo for worktree operations
+    // Create a temp git repo for worktree operations. The `-c` flags inline
+    // a commit identity so this works on CI runners with no global git config
+    // (GitHub Actions doesn't set user.email / user.name by default, which
+    // would otherwise fail with exit code 128 "Author identity unknown").
     gitRepoDir = fs.mkdtempSync(path.join('/tmp', 'dev-tasks-git-'));
-    execSync('git init && git commit --allow-empty -m "init"', {
-      cwd: gitRepoDir,
-    });
+    execSync(
+      'git init && git -c user.email=ci@local -c user.name=ci commit --allow-empty -m "init"',
+      { cwd: gitRepoDir },
+    );
 
     // Tasks dir inside the git repo
     testDir = path.join(gitRepoDir, 'tasks');
