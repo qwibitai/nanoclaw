@@ -53,6 +53,8 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  /** Track processed update IDs to prevent duplicate handling during instance overlap */
+  private processedUpdateIds = new Set<number>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -60,10 +62,40 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    // Stop any previously running bot instance to prevent orphaned polling loops
+    // (e.g. if connect() is called again after a reconnect)
+    if (this.bot) {
+      this.bot.stop();
+      this.bot = null;
+    }
+
     this.bot = new Bot(this.botToken, {
       client: {
         baseFetchConfig: { agent: https.globalAgent, compress: true },
       },
+    });
+
+    // Delete any existing webhook before starting long polling.
+    // Stale webhooks from prior deployments cause Telegram to deliver
+    // updates via BOTH webhook and polling, producing duplicate messages.
+    await this.bot.api.deleteWebhook();
+
+    // Deduplicate updates: during Railway rolling deployments, the old and new
+    // instances briefly overlap and both poll the same bot token. Telegram can
+    // deliver the same update_id to both. This middleware skips already-seen updates.
+    this.bot.use((ctx, next) => {
+      const updateId = ctx.update.update_id;
+      if (this.processedUpdateIds.has(updateId)) {
+        logger.debug({ updateId }, 'Skipping duplicate Telegram update');
+        return;
+      }
+      this.processedUpdateIds.add(updateId);
+      // Prune old entries to prevent memory growth
+      if (this.processedUpdateIds.size > 10000) {
+        const ids = [...this.processedUpdateIds];
+        this.processedUpdateIds = new Set(ids.slice(ids.length - 5000));
+      }
+      return next();
     });
 
     // Command to get chat ID (useful for registration)
@@ -306,9 +338,7 @@ export class TelegramChannel implements Channel {
             const caption = ctx.message.caption
               ? ` ${ctx.message.caption}`
               : '';
-            const timestamp = new Date(
-              ctx.message.date * 1000,
-            ).toISOString();
+            const timestamp = new Date(ctx.message.date * 1000).toISOString();
             const senderName =
               ctx.from?.first_name || ctx.from?.username || 'Unknown';
             const isGroup =

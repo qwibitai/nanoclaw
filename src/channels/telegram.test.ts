@@ -35,16 +35,22 @@ vi.mock('grammy', () => ({
     token: string;
     commandHandlers = new Map<string, Handler>();
     filterHandlers = new Map<string, Handler[]>();
+    middlewares: Handler[] = [];
     errorHandler: Handler | null = null;
 
     api = {
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      deleteWebhook: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
       this.token = token;
       botRef.current = this;
+    }
+
+    use(handler: Handler) {
+      this.middlewares.push(handler);
     }
 
     command(name: string, handler: Handler) {
