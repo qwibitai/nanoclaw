@@ -184,6 +184,13 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Add created_at to sessions for TTL support (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT`);
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -684,8 +691,16 @@ export function getSession(groupFolder: string): string | undefined {
 
 export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_folder, session_id, created_at) VALUES (?, ?, ?)',
+  ).run(groupFolder, sessionId, new Date().toISOString());
+}
+
+export function getSessionAge(groupFolder: string): number | null {
+  const row = db
+    .prepare('SELECT created_at FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { created_at: string } | undefined;
+  if (!row?.created_at) return null;
+  return Date.now() - new Date(row.created_at).getTime();
 }
 
 export function deleteSession(groupFolder: string): void {

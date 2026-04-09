@@ -9,6 +9,7 @@ import {
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
+  DM_SESSION_TTL,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
@@ -37,6 +38,7 @@ import {
   getAllSessions,
   deleteSession,
   getAllTasks,
+  getSessionAge,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
@@ -347,6 +349,20 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // TTL check: rotate DM sessions that have been alive too long
+  if (group.folder.startsWith('dms_') && sessions[group.folder]) {
+    const age = getSessionAge(group.folder);
+    if (age !== null && age > DM_SESSION_TTL) {
+      logger.info(
+        { group: group.folder, ageHours: Math.round(age / 3600000) },
+        'DM session TTL expired, starting fresh',
+      );
+      deleteSession(group.folder);
+      delete sessions[group.folder];
+    }
+  }
+
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
