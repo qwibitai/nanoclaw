@@ -2,6 +2,7 @@
  * Credential proxy for container isolation.
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
+ * In OAuth mode, auto-refreshes tokens before expiry.
  *
  * Two auth modes:
  *   API key:  Proxy injects x-api-key on every request.
@@ -13,14 +14,79 @@
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { readEnvFile } from './env.js';
+import { readCredentials, writeCredentials } from './credential-store.js';
 import { logger } from './logger.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
 export interface ProxyConfig {
   authMode: AuthMode;
+}
+
+const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const TOKEN_ENDPOINT = 'https://platform.claude.com/v1/oauth/token';
+const MIN_REFRESH_DELAY_MS = 30_000;     // 30 seconds
+const REFRESH_MARGIN_MS = 5 * 60_000;    // 5 minutes before expiry
+const RETRY_DELAY_MS = 60_000;           // 1 minute on failure
+
+/** Simple HTTPS POST that returns parsed JSON. */
+function fetchJson(url: string, body: Record<string, string>): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const payload = JSON.stringify(body);
+    const req = httpsRequest(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+          } catch (err) {
+            reject(new Error(`Failed to parse token response: ${err}`));
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+/** Update CLAUDE_CODE_OAUTH_TOKEN in the .env file. */
+function updateEnvToken(token: string): void {
+  const envPath = path.join(process.cwd(), '.env');
+  let content = '';
+  try {
+    content = fs.readFileSync(envPath, 'utf-8');
+  } catch {
+    // File doesn't exist yet — we'll create it
+  }
+
+  const line = `CLAUDE_CODE_OAUTH_TOKEN=${token}`;
+  const regex = /^CLAUDE_CODE_OAUTH_TOKEN=.*/m;
+
+  if (regex.test(content)) {
+    content = content.replace(regex, line);
+  } else {
+    content = content.trimEnd() + (content ? '\n' : '') + line + '\n';
+  }
+
+  fs.writeFileSync(envPath, content, 'utf-8');
 }
 
 export function startCredentialProxy(
@@ -35,7 +101,7 @@ export function startCredentialProxy(
   ]);
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
+  let oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   const upstreamUrl = new URL(
@@ -43,6 +109,61 @@ export function startCredentialProxy(
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
+
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // --- Auto-refresh (OAuth only) ---
+  if (authMode === 'oauth') {
+    const creds = readCredentials();
+    if (creds) {
+      // Use credential store token if fresher
+      if (creds.accessToken && creds.accessToken !== oauthToken) {
+        oauthToken = creds.accessToken;
+        logger.info('Using fresher token from credential store');
+      }
+      scheduleRefresh(creds.expiresAt, creds.refreshToken);
+    }
+  }
+
+  function scheduleRefresh(expiresAt: number, refreshToken: string): void {
+    const delay = Math.max(expiresAt - Date.now() - REFRESH_MARGIN_MS, MIN_REFRESH_DELAY_MS);
+    logger.info({ delayMs: delay }, 'Scheduling OAuth token refresh');
+    refreshTimer = setTimeout(() => doRefresh(refreshToken), delay);
+  }
+
+  async function doRefresh(refreshToken: string): Promise<void> {
+    try {
+      const data = await fetchJson(TOKEN_ENDPOINT, {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: OAUTH_CLIENT_ID,
+      });
+
+      if (typeof data.access_token !== 'string') {
+        throw new Error(`Token response missing access_token: ${JSON.stringify(data)}`);
+      }
+
+      oauthToken = data.access_token as string;
+      const newRefresh = (data.refresh_token as string) || refreshToken;
+      const expiresIn = (data.expires_in as number) || 3600;
+      const expiresAt = Date.now() + expiresIn * 1000;
+
+      // Persist
+      writeCredentials({
+        accessToken: oauthToken,
+        refreshToken: newRefresh,
+        expiresAt,
+        scopes: [],
+      });
+      updateEnvToken(oauthToken);
+
+      logger.info('OAuth token refreshed successfully');
+      scheduleRefresh(expiresAt, newRefresh);
+    } catch (err) {
+      logger.error({ err }, 'OAuth token refresh failed, retrying in 60s');
+      refreshTimer = setTimeout(() => doRefresh(refreshToken), RETRY_DELAY_MS);
+    }
+  }
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -108,6 +229,16 @@ export function startCredentialProxy(
         upstream.end();
       });
     });
+
+    // Clean up timer on server close
+    const origClose = server.close.bind(server);
+    server.close = function (cb?: (err?: Error) => void) {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+      return origClose(cb);
+    } as typeof server.close;
 
     server.listen(port, host, () => {
       logger.info({ port, host, authMode }, 'Credential proxy started');

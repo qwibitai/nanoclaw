@@ -61,6 +61,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { ensureWatcherTasks } from './watcher-registration.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { emitMessageIn, emitMessageOut, emitError, emitHeartbeat, emitChannelStatus } from './telemetry.js';
 import { shouldRespondToGroup } from './smart-trigger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -215,6 +216,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
+  // Telemetry: inbound messages
+  const channelType = channel.constructor.name.replace('Channel', '').toLowerCase();
+  emitMessageIn(channelType, group.name, missedMessages.length);
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -246,6 +251,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        emitMessageOut(channelType, group.name, text.length);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -376,9 +382,18 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  const HEARTBEAT_INTERVAL = 30;
+  let heartbeatCounter = 0;
+
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
+
+      // Periodic heartbeat
+      if (++heartbeatCounter >= HEARTBEAT_INTERVAL) {
+        heartbeatCounter = 0;
+        emitHeartbeat(jids.length, 0);
+      }
       const allowBotsJids = Object.entries(registeredGroups)
         .filter(([, g]) => g.allowBots)
         .map(([jid]) => jid);
@@ -639,6 +654,7 @@ async function main(): Promise<void> {
     }
     channels.push(channel);
     await channel.connect();
+    emitChannelStatus(channelName, 'connected');
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');

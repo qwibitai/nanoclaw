@@ -28,16 +28,16 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-import { createTask } from './db.js';
-import { CROSS_CHANNEL_DIGEST_PROMPT } from './watcher-registration.js';
+// [DISABLED 2026-04-09] import { createTask } from './db.js';
+// [DISABLED 2026-04-09] import { CROSS_CHANNEL_DIGEST_PROMPT } from './watcher-registration.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-// Session-end digest refresh deduplication
-let lastDigestRefreshAt = 0;
-const DIGEST_REFRESH_DEBOUNCE_MS = 30_000;
+// [DISABLED 2026-04-09] Session-end digest refresh deduplication
+// let lastDigestRefreshAt = 0;
+// const DIGEST_REFRESH_DEBOUNCE_MS = 30_000;
 
 export interface ContainerInput {
   prompt: string;
@@ -314,11 +314,16 @@ function buildContainerArgs(
   // Notice Board: telemetry API credentials for read_notices / acknowledge_notice / post_notice
   const telemetryUrl = process.env.TELEMETRY_URL || '';
   const telemetryToken = process.env.TELEMETRY_REGISTRATION_TOKEN || '';
+  const telemetryBotId = process.env.TELEMETRY_BOT_ID || '';
   if (telemetryUrl) {
+    args.push('-e', 'TELEMETRY_API_URL=' + telemetryUrl);
     args.push('-e', 'TELEMETRY_URL=' + telemetryUrl);
   }
   if (telemetryToken) {
     args.push('-e', 'TELEMETRY_REGISTRATION_TOKEN=' + telemetryToken);
+  }
+  if (telemetryBotId) {
+    args.push('-e', 'TELEMETRY_BOT_ID=' + telemetryBotId);
   }
 
   // Audio transcription: Groq Whisper API key
@@ -687,6 +692,8 @@ export async function runContainerAgent(
         return;
       }
 
+      // [DISABLED 2026-04-09] Cross-channel digest refresh on session end — wasteful LLM calls
+      /*
       // Session-end digest refresh: enqueue a one-shot task to refresh the
       // cross-channel digest when a real conversation ends (not scheduled tasks).
       if (hadStreamingOutput && !input.isScheduledTask) {
@@ -723,6 +730,7 @@ export async function runContainerAgent(
           );
         }
       }
+      */
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {

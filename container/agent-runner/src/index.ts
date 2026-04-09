@@ -17,7 +17,13 @@
 import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { emitTokenUsage, emitToolCall } from './telemetry.js';
 import { fileURLToPath } from 'url';
+// Session call cap — prevent runaway sessions
+const CALL_CAP_WARN = 50;
+const CALL_CAP_HARD = 100;
+let sessionCallCount = 0;
+
 
 interface ContainerInput {
   prompt: string;
@@ -493,6 +499,18 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
+    // Telemetry: emit tool_call for each tool_use block in assistant messages
+    if (message.type === 'assistant' && 'content' in message) {
+      const msg = message as any;
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'tool_use') {
+            emitToolCall({ toolName: block.name, toolUseId: block.id });
+          }
+        }
+      }
+    }
+
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
@@ -508,6 +526,20 @@ async function runQuery(
     }
 
     if (message.type === 'result') {
+      // Telemetry: emit token_usage from result
+      const res = message as any;
+      if (res.usage) {
+        emitTokenUsage({
+          inputTokens: res.usage.input_tokens || 0,
+          outputTokens: res.usage.output_tokens || 0,
+          cacheReadInputTokens: res.usage.cache_read_input_tokens || 0,
+          cacheCreationInputTokens: res.usage.cache_creation_input_tokens || 0,
+          totalCostUsd: res.total_cost_usd || 0,
+          durationMs: res.duration_ms || 0,
+          numTurns: res.num_turns || 0,
+          model,
+        });
+      }
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
@@ -569,6 +601,17 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
+      // Session call cap check
+      sessionCallCount++;
+      if (sessionCallCount > CALL_CAP_HARD) {
+        log(`CALL CAP REACHED (${sessionCallCount}/${CALL_CAP_HARD}). Ending session to prevent runaway.`);
+        writeOutput({ status: 'success', result: 'Session ended: call limit reached. Please start a new conversation.', newSessionId: sessionId });
+        break;
+      }
+      if (sessionCallCount === CALL_CAP_WARN) {
+        log(`CALL CAP WARNING: ${sessionCallCount}/${CALL_CAP_HARD} calls used in this session.`);
+      }
+
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
       const model = pickModel(prompt, containerInput.isScheduledTask);

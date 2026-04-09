@@ -9,7 +9,7 @@ const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://relay:hJnU0YgaH8QnZhfx@cluster0.fo939jr.mongodb.net/relay?appName=Cluster0';
+const MONGODB_URI = process.env.MONGODB_URI || 'MISSING_MONGODB_URI_ENV_VAR';
 const BOT_NAME = 'x';
 const POLL_INTERVAL = 10000; // 10 seconds
 

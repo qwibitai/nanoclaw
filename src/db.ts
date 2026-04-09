@@ -345,7 +345,7 @@ export function getNewMessages(
         FROM messages
         WHERE timestamp > ? AND chat_jid IN (${placeholders})
           AND (
-            (is_bot_message = 0 AND content NOT LIKE ?)
+            (is_from_me = 0 AND content NOT LIKE ?)
             OR (is_from_me = 0 AND is_bot_message = 1 AND chat_jid IN (${abPlaceholders}))
           )
           AND content != '' AND content IS NOT NULL
@@ -366,7 +366,7 @@ export function getNewMessages(
         SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
         FROM messages
         WHERE timestamp > ? AND chat_jid IN (${placeholders})
-          AND is_bot_message = 0 AND content NOT LIKE ?
+          AND is_from_me = 0 AND content NOT LIKE ?
           AND content != '' AND content IS NOT NULL
         ORDER BY timestamp DESC
         LIMIT ?
@@ -412,7 +412,7 @@ export function getMessagesSince(
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND is_from_me = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ?

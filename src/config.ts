@@ -13,6 +13,7 @@ const envConfig = readEnvFile([
   'REGISTRY_URL',
   'TELEMETRY_URL',
   'TELEMETRY_REGISTRATION_TOKEN',
+  'TELEMETRY_BOT_ID',
   'GROQ_API_KEY',
   'TELEGRAM_BOT_TOKEN',
 ]);
@@ -37,6 +38,10 @@ if (
 ) {
   process.env.TELEMETRY_REGISTRATION_TOKEN =
     envConfig.TELEMETRY_REGISTRATION_TOKEN;
+}
+
+if (envConfig.TELEMETRY_BOT_ID && !process.env.TELEMETRY_BOT_ID) {
+  process.env.TELEMETRY_BOT_ID = envConfig.TELEMETRY_BOT_ID;
 }
 
 // Service Bot: expose GROQ_API_KEY for audio transcription

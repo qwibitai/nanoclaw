@@ -1,22 +1,23 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM
-# Service Bot mode: SSH-based tools, no browser
+# Service Bot mode: SSH-based tools + Playwright MCP for headless browsing
 
 FROM node:22-slim
 
 # Install system dependencies
 # - openssh-client: Service Bot tools SSH to managed hosts
 # - curl/git: needed for git ops and API calls
-# - No Chromium: browser disabled (Level 0) to reduce attack surface
 RUN apt-get update && apt-get install -y \
     openssh-client \
     curl \
     git \
-    python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install claude-code globally (no agent-browser — browser disabled)
-RUN npm install -g @anthropic-ai/claude-code @aisuite/chub
+# Install claude-code and Playwright MCP globally
+RUN npm install -g @anthropic-ai/claude-code @playwright/mcp
+
+# Install Playwright Chromium with system deps (headless browsing)
+RUN npx playwright install --with-deps chromium
 
 # Create app directory
 WORKDIR /app
