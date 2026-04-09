@@ -9,14 +9,13 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - track CLAUDE.md files; everything else is local runtime state
 groups/*
-!groups/main/
-!groups/global/
-groups/main/*
-groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+!groups/*/
+groups/*/*
+!groups/*/CLAUDE.md
+!groups/*/*.md
+!groups/*/scripts/
 !groups/global/skills/
 
 # Secrets
