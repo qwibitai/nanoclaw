@@ -667,11 +667,13 @@ function buildCapabilityManifest(
 
   // PaaS / infra
   if (isToolEnabled(tools, 'render')) {
-    capabilities.push('- **Render** — Render API access via `RENDER_API_KEY`.');
+    capabilities.push(
+      '- **Render** — `render` CLI with configured credentials. Scoped PG/Redis connection strings available as env vars.',
+    );
   }
   if (isToolEnabled(tools, 'railway')) {
     capabilities.push(
-      '- **Railway** — Railway API access via `RAILWAY_API_TOKEN`.',
+      '- **Railway** — `railway` CLI with configured credentials.',
     );
   }
 

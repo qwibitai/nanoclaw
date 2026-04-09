@@ -3366,9 +3366,20 @@ function readSecrets(
     // Braintrust API key — proxy doesn't reliably inject auth for MCP/SSE
     // endpoints, so pass directly via secrets for the header config.
     ...(isToolEnabled(tools, 'braintrust') ? ['BRAINTRUST_API_KEY'] : []),
-    // Railway CLI reads RAILWAY_API_TOKEN from env. OneCLI proxy handles
-    // HTTP calls to backboard.railway.app, but the CLI needs the token directly.
+    // Railway CLI reads RAILWAY_API_TOKEN from env directly.
     ...(isToolEnabled(tools, 'railway') ? ['RAILWAY_API_TOKEN'] : []),
+    // Render CLI reads RENDER_API_KEY from env (checks before making HTTP calls,
+    // so the OneCLI proxy can't inject it). Scoped: 'render:illysium' reads
+    // RENDER_API_KEY_ILLYSIUM and normalizes to RENDER_API_KEY below.
+    ...(() => {
+      if (!isToolEnabled(tools, 'render')) return [];
+      const { scopes: rScopes, isScoped: rScoped } = extractToolScopes(
+        tools,
+        'render',
+      );
+      const rScope = rScoped ? rScopes[0].toUpperCase() : scope;
+      return [`RENDER_API_KEY_${rScope}`];
+    })(),
     // Browser auth credentials for Playwright login automation.
     // Scoped: 'browser-auth:illyse' reads BROWSER_AUTH_{URL,EMAIL,PASSWORD}_ILLYSE.
     // Unscoped: 'browser-auth' reads BROWSER_AUTH_{URL,EMAIL,PASSWORD}.
@@ -3399,6 +3410,20 @@ function readSecrets(
   if (githubTokenKey !== 'GITHUB_TOKEN' && secrets[githubTokenKey]) {
     secrets.GITHUB_TOKEN = secrets[githubTokenKey];
     delete secrets[githubTokenKey];
+  }
+
+  // Normalize scoped Render API key to RENDER_API_KEY so the CLI finds it
+  if (isToolEnabled(tools, 'render')) {
+    const { scopes: rScopes, isScoped: rScoped } = extractToolScopes(
+      tools,
+      'render',
+    );
+    const rScope = rScoped ? rScopes[0].toUpperCase() : scope;
+    const renderScopedKey = `RENDER_API_KEY_${rScope}`;
+    if (secrets[renderScopedKey]) {
+      secrets.RENDER_API_KEY = secrets[renderScopedKey];
+      delete secrets[renderScopedKey];
+    }
   }
 
   // GitHub org restriction: when tools includes 'github-orgs:OrgName', pass
@@ -3521,7 +3546,7 @@ function readSecrets(
   }
 
   // Render PG/Redis connection strings (TCP, not HTTP — OneCLI can't proxy these).
-  // API key is handled by OneCLI; only connection strings remain here.
+  // API key is injected above via envKeys; connection strings are matched here.
   if (isToolEnabled(tools, 'render')) {
     const { scopes: renderScopes, isScoped: renderScoped } = extractToolScopes(
       tools,

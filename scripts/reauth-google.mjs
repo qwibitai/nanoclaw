@@ -50,6 +50,7 @@ const ACCOUNTS = {
   sunday: 'david.kim@getsunday.com',
   illysium: 'dave@illysium.ai',
   numberdrinks: 'dave@numberdrinks.com',
+  'madison-reed': 'dave.kim@madison-reed.com',
 };
 
 function readOAuthKeys() {

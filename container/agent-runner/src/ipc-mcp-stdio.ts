@@ -80,7 +80,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. When sender is set, the message appears from a distinct identity (agent swarm mode).",
+  "Send a message to the user or group immediately. Use this ONLY for standalone deliverables: a final answer, a completed analysis, or an agent-swarm reply with a distinct sender identity. Do NOT use this for status updates, progress narration, or intermediate reasoning — the user sees your final result automatically when you finish. Flooding the chat with \"still waiting…\" or step-by-step commentary is disruptive. When sender is set, the message appears from a distinct identity (agent swarm mode).",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a distinct identity in Discord (via webhook) and Slack (via username override). Channels without identity support show the name as a prefix.'),

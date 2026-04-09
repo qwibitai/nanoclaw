@@ -2832,9 +2832,12 @@ async function main(): Promise<void> {
       // Use threadId as triggerMessageId to create the thread on first IPC
       // message. Only when the resolved JID is still a parent (thread not
       // yet created). Once the thread exists, resolveIpcJid returns the
-      // thread JID and triggerMsgId stays null (send directly to thread).
+      // thread JID and triggerMsgId stays undefined (send directly to thread).
+      // IMPORTANT: use undefined (not null) as fallback — null explicitly
+      // suppresses thread routing in Slack's sendMessage, while undefined
+      // allows the replyThreadTs fallback to find the correct thread.
       const isAlreadyThread = !!parseThreadJid(resolvedJid);
-      const triggerMsgId = !isAlreadyThread && threadId ? threadId : null;
+      const triggerMsgId = !isAlreadyThread && threadId ? threadId : undefined;
 
       // Stop typing indicator — the response is being delivered. Without
       // this, typing persists until the agent's streaming output fires
@@ -2888,7 +2891,7 @@ async function main(): Promise<void> {
       if (resolvedJid !== jid) ipcOutputSentJids.add(resolvedJid);
 
       const isAlreadyThread = !!parseThreadJid(resolvedJid);
-      const triggerMsgId = !isAlreadyThread && threadId ? threadId : null;
+      const triggerMsgId = !isAlreadyThread && threadId ? threadId : undefined;
 
       // Channels throw on failure; success → return true so the ipc.ts
       // caller skips the text fallback.
@@ -2902,7 +2905,7 @@ async function main(): Promise<void> {
       ipcOutputSentJids.add(jid);
       if (resolvedJid !== jid) ipcOutputSentJids.add(resolvedJid);
       const isAlreadyThread = !!parseThreadJid(resolvedJid);
-      const triggerMsgId = !isAlreadyThread && threadId ? threadId : null;
+      const triggerMsgId = !isAlreadyThread && threadId ? threadId : undefined;
 
       // Stop typing indicator
       channel
