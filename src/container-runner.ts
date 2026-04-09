@@ -1795,10 +1795,7 @@ export async function prepareThreadWorkspace(
         const containerPointer = `gitdir: ${containerSourceGitDirPath(
           repoName,
         )}/worktrees/${wtName}\n`;
-        fs.writeFileSync(
-          path.join(overlayDir, repoName),
-          containerPointer,
-        );
+        fs.writeFileSync(path.join(overlayDir, repoName), containerPointer);
 
         createdWorktrees.push({ repoDir: srcPath, wtPath });
 
@@ -1905,10 +1902,10 @@ export async function cleanupThreadWorkspace(
   // live outside the scratch in WORKTREE_GIT_OVERLAY_DIR so rescue
   // doesn't stage them; cleanup is separate from worktreeBase removal.
   try {
-    fs.rmSync(
-      path.join(WORKTREE_GIT_OVERLAY_DIR, groupFolder, threadId),
-      { recursive: true, force: true },
-    );
+    fs.rmSync(path.join(WORKTREE_GIT_OVERLAY_DIR, groupFolder, threadId), {
+      recursive: true,
+      force: true,
+    });
   } catch {
     // best-effort — stale overlay files are harmless, next spawn overwrites
   }
