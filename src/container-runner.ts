@@ -18,6 +18,7 @@ import {
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { readEnvFile } from './env.js';
 import {
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
@@ -58,9 +59,14 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+export function sanitizeJid(jid: string): string {
+  return jid.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  chatJid?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -134,12 +140,14 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
+  // Per-group per-user Claude sessions directory (isolated from other groups AND users)
+  // Each (group, user) pair gets their own .claude/ to prevent cross-session access
+  const jidSlug = chatJid ? sanitizeJid(chatJid) : '__default__';
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
+    jidSlug,
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -189,14 +197,30 @@ function buildVolumeMounts(
   const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+
+  // Per-user IPC input directory (prevents cross-user message injection)
+  const userIpcInputDir = chatJid
+    ? path.join(groupIpcDir, jidSlug, 'input')
+    : path.join(groupIpcDir, 'input');
+  fs.mkdirSync(userIpcInputDir, { recursive: true });
+
+  // Mount the group-level IPC dir (for outbound messages/tasks) and override
+  // the input subdir with the per-user one
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
     readonly: false,
   });
+  if (chatJid) {
+    // Override the input dir mount with per-user path
+    mounts.push({
+      hostPath: userIpcInputDir,
+      containerPath: '/workspace/ipc/input',
+      readonly: false,
+    });
+  }
 
-  // Copy agent-runner source into a per-group writable location so agents
+  // Copy agent-runner source into a per-group per-user writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(
@@ -209,6 +233,7 @@ function buildVolumeMounts(
     DATA_DIR,
     'sessions',
     group.folder,
+    jidSlug,
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
@@ -261,10 +286,18 @@ async function buildContainerArgs(
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    // Fallback: inject API key directly from .env when OneCLI is not available
+    const envVars = readEnvFile(['ANTHROPIC_API_KEY']);
+    if (envVars.ANTHROPIC_API_KEY) {
+      args.push('--add-host', `host.docker.internal:host-gateway`);
+      args.push('-e', `ANTHROPIC_API_KEY=${envVars.ANTHROPIC_API_KEY}`);
+      logger.info({ containerName }, 'OneCLI unavailable — using direct API key from .env');
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable and no ANTHROPIC_API_KEY in .env — container will have no credentials',
+      );
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -304,9 +337,14 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.chatJid);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  const jidSuffix = input.chatJid
+    ? sanitizeJid(input.chatJid).slice(0, 20)
+    : '';
+  const containerName = jidSuffix
+    ? `nanoclaw-${safeName}-${jidSuffix}-${Date.now()}`
+    : `nanoclaw-${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined

@@ -42,6 +42,23 @@ interface ContainerOutput {
   error?: string;
 }
 
+
+function loadGroupMcpServers(): Record<string, any> {
+  const mcpPath = '/workspace/group/.mcp.json';
+  try {
+    if (fs.existsSync(mcpPath)) {
+      const raw = fs.readFileSync(mcpPath, 'utf-8');
+      const config = JSON.parse(raw);
+      const servers = config.mcpServers || {};
+      log('[mcp] Loaded ' + Object.keys(servers).length + ' MCP servers from .mcp.json: ' + Object.keys(servers).join(', '));
+      return servers;
+    }
+  } catch (err) {
+    log('[mcp] Failed to load .mcp.json: ' + err);
+  }
+  return {};
+}
+
 interface SessionEntry {
   sessionId: string;
   fullPath: string;
@@ -469,12 +486,15 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__groundcover__*',
+        'mcp__castai__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
+        ...loadGroupMcpServers(),
         nanoclaw: {
           command: 'node',
           args: [mcpServerPath],
@@ -633,6 +653,14 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // Write context file so CLI tools can read chatJid and groupFolder
+  const contextFile = path.join(path.dirname(IPC_INPUT_DIR), "context.json");
+  fs.writeFileSync(contextFile, JSON.stringify({
+    chatJid: containerInput.chatJid,
+    groupFolder: containerInput.groupFolder,
+    isMain: containerInput.isMain,
+  }));
 
   // Clean up stale _close sentinel from previous container runs
   try {

@@ -70,17 +70,27 @@ function createSchema(database: Database.Database): void {
       value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      PRIMARY KEY (group_folder, chat_jid)
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS session_delegations (
+      jid TEXT PRIMARY KEY,
+      target_folder TEXT NOT NULL,
+      original_folder TEXT NOT NULL,
+      delegated_at TEXT NOT NULL,
+      delegated_by TEXT NOT NULL,
+      last_activity TEXT NOT NULL
     );
   `);
 
@@ -121,6 +131,89 @@ function createSchema(database: Database.Database): void {
     // Backfill: existing rows with folder = 'main' are the main group
     database.exec(
       `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Migrate registered_groups: remove folder UNIQUE constraint (for multi-tenant groups)
+  try {
+    // Autoindexes from UNIQUE columns have null sql — detect by counting them.
+    // PK creates 1 autoindex; PK + UNIQUE creates 2.
+    const autoIndexCount = (
+      database
+        .prepare(
+          `SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='index' AND tbl_name='registered_groups' AND name LIKE 'sqlite_autoindex%'`,
+        )
+        .get() as { cnt: number }
+    ).cnt;
+    if (autoIndexCount > 1) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS registered_groups_new (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1,
+          is_main INTEGER DEFAULT 0
+        );
+        INSERT OR IGNORE INTO registered_groups_new SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, COALESCE(is_main, 0) FROM registered_groups;
+        DROP TABLE registered_groups;
+        ALTER TABLE registered_groups_new RENAME TO registered_groups;
+      `);
+      logger.info('Migrated registered_groups: removed folder UNIQUE constraint');
+    }
+  } catch {
+    /* already migrated or fresh DB */
+  }
+
+  // Migrate sessions: add chat_jid for per-user isolation
+  try {
+    // Check if sessions table has the old schema (group_folder as sole PK)
+    const sessionInfo = database
+      .prepare(`PRAGMA table_info(sessions)`)
+      .all() as Array<{ name: string }>;
+    const hasChatJid = sessionInfo.some((col) => col.name === 'chat_jid');
+    if (!hasChatJid) {
+      // Migrate: create new table, copy data with JID from registered_groups
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS sessions_new (
+          group_folder TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          PRIMARY KEY (group_folder, chat_jid)
+        );
+        INSERT OR IGNORE INTO sessions_new (group_folder, chat_jid, session_id)
+          SELECT s.group_folder, COALESCE(rg.jid, '__unknown__'), s.session_id
+          FROM sessions s
+          LEFT JOIN registered_groups rg ON rg.folder = s.group_folder;
+        DROP TABLE sessions;
+        ALTER TABLE sessions_new RENAME TO sessions;
+      `);
+      logger.info('Migrated sessions: added chat_jid composite key');
+    }
+  } catch {
+    /* already migrated or fresh DB */
+  }
+
+  // Create session_delegations table if it doesn't exist
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS session_delegations (
+      jid TEXT PRIMARY KEY,
+      target_folder TEXT NOT NULL,
+      original_folder TEXT NOT NULL,
+      delegated_at TEXT NOT NULL,
+      delegated_by TEXT NOT NULL,
+      last_activity TEXT NOT NULL
+    );
+  `);
+
+  // Add last_activity column to session_delegations if missing (migration)
+  try {
+    database.exec(
+      `ALTER TABLE session_delegations ADD COLUMN last_activity TEXT NOT NULL DEFAULT ''`,
     );
   } catch {
     /* column already exists */
@@ -562,34 +655,188 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
-// --- Session accessors ---
+// --- Session accessors (composite key: group_folder + chat_jid) ---
 
-export function getSession(groupFolder: string): string | undefined {
+export function sessionKey(groupFolder: string, chatJid: string): string {
+  return `${groupFolder}\t${chatJid}`;
+}
+
+export function getSession(
+  groupFolder: string,
+  chatJid: string,
+): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? AND chat_jid = ?',
+    )
+    .get(groupFolder, chatJid) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
-export function setSession(groupFolder: string, sessionId: string): void {
+export function setSession(
+  groupFolder: string,
+  chatJid: string,
+  sessionId: string,
+): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_folder, chat_jid, session_id) VALUES (?, ?, ?)',
+  ).run(groupFolder, chatJid, sessionId);
 }
 
-export function deleteSession(groupFolder: string): void {
-  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+export function deleteSession(groupFolder: string, chatJid: string): void {
+  db.prepare(
+    'DELETE FROM sessions WHERE group_folder = ? AND chat_jid = ?',
+  ).run(groupFolder, chatJid);
 }
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+    .prepare('SELECT group_folder, chat_jid, session_id FROM sessions')
+    .all() as Array<{
+    group_folder: string;
+    chat_jid: string;
+    session_id: string;
+  }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
-    result[row.group_folder] = row.session_id;
+    result[sessionKey(row.group_folder, row.chat_jid)] = row.session_id;
   }
   return result;
+}
+
+// --- Delegation accessors ---
+
+export interface SessionDelegation {
+  targetFolder: string;
+  originalFolder: string;
+  delegatedAt: string;
+  delegatedBy: string;
+}
+
+export function getDelegation(jid: string): SessionDelegation | undefined {
+  const row = db
+    .prepare('SELECT * FROM session_delegations WHERE jid = ?')
+    .get(jid) as
+    | {
+        jid: string;
+        target_folder: string;
+        original_folder: string;
+        delegated_at: string;
+        delegated_by: string;
+      }
+    | undefined;
+  if (!row) return undefined;
+  return {
+    targetFolder: row.target_folder,
+    originalFolder: row.original_folder,
+    delegatedAt: row.delegated_at,
+    delegatedBy: row.delegated_by,
+  };
+}
+
+export function setDelegation(
+  jid: string,
+  targetFolder: string,
+  originalFolder: string,
+  delegatedBy: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT OR REPLACE INTO session_delegations (jid, target_folder, original_folder, delegated_at, delegated_by, last_activity)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(jid, targetFolder, originalFolder, now, delegatedBy, now);
+}
+
+/**
+ * Update the last_activity timestamp for a delegation (called on each message).
+ * Keeps the delegation alive as long as the user is chatting.
+ */
+export function touchDelegation(jid: string): void {
+  db.prepare(
+    `UPDATE session_delegations SET last_activity = ? WHERE jid = ?`,
+  ).run(new Date().toISOString(), jid);
+}
+
+/**
+ * Remove delegations that have been idle for longer than maxIdleMs.
+ * Returns the JIDs of expired delegations.
+ */
+export function expireStaleDelegations(maxIdleMs: number): string[] {
+  const cutoff = new Date(Date.now() - maxIdleMs).toISOString();
+  const stale = db
+    .prepare(
+      `SELECT jid FROM session_delegations WHERE last_activity < ? AND last_activity != ''`,
+    )
+    .all(cutoff) as Array<{ jid: string }>;
+  if (stale.length > 0) {
+    db.prepare(
+      `DELETE FROM session_delegations WHERE last_activity < ? AND last_activity != ''`,
+    ).run(cutoff);
+  }
+  return stale.map((r) => r.jid);
+}
+
+export function deleteDelegation(jid: string): void {
+  db.prepare('DELETE FROM session_delegations WHERE jid = ?').run(jid);
+}
+
+export function getAllDelegations(): Record<string, SessionDelegation> {
+  const rows = db.prepare('SELECT * FROM session_delegations').all() as Array<{
+    jid: string;
+    target_folder: string;
+    original_folder: string;
+    delegated_at: string;
+    delegated_by: string;
+  }>;
+  const result: Record<string, SessionDelegation> = {};
+  for (const row of rows) {
+    result[row.jid] = {
+      targetFolder: row.target_folder,
+      originalFolder: row.original_folder,
+      delegatedAt: row.delegated_at,
+      delegatedBy: row.delegated_by,
+    };
+  }
+  return result;
+}
+
+/**
+ * Find a registered group by folder name.
+ * Used for delegation resolution — when a JID is delegated to a folder,
+ * we need the group config (containerConfig, etc.) from any registration using that folder.
+ */
+export function getGroupByFolder(
+  folder: string,
+): (RegisteredGroup & { jid: string }) | undefined {
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE folder = ? LIMIT 1')
+    .get(folder) as
+    | {
+        jid: string;
+        name: string;
+        folder: string;
+        trigger_pattern: string;
+        added_at: string;
+        container_config: string | null;
+        requires_trigger: number | null;
+        is_main: number | null;
+      }
+    | undefined;
+  if (!row) return undefined;
+  if (!isValidGroupFolder(row.folder)) return undefined;
+  return {
+    jid: row.jid,
+    name: row.name,
+    folder: row.folder,
+    trigger: row.trigger_pattern,
+    added_at: row.added_at,
+    containerConfig: row.container_config
+      ? JSON.parse(row.container_config)
+      : undefined,
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1 ? true : undefined,
+  };
 }
 
 // --- Registered group accessors ---
@@ -727,8 +974,17 @@ function migrateJsonState(): void {
     string
   > | null;
   if (sessions) {
+    // Legacy format: folder → sessionId. Resolve JID from registered_groups.
+    const allGroups = getAllRegisteredGroups();
+    const folderToJid = new Map<string, string>();
+    for (const [jid, group] of Object.entries(allGroups)) {
+      if (!folderToJid.has(group.folder)) {
+        folderToJid.set(group.folder, jid);
+      }
+    }
     for (const [folder, sessionId] of Object.entries(sessions)) {
-      setSession(folder, sessionId);
+      const jid = folderToJid.get(folder) ?? '__unknown__';
+      setSession(folder, jid, sessionId);
     }
   }
 
